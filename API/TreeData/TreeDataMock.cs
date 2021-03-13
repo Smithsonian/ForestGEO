@@ -96,7 +96,7 @@ namespace TreeData_CLI
         }
 
         [FunctionName("GetTrees")]
-        public static async Task<IActionResult> GetTrees(
+        public static IActionResult GetTrees(
             [HttpTrigger(AuthorizationLevel.Function, "get", Route = "TreeData")] HttpRequest req,
             ILogger log)
         {
