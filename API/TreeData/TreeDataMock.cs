@@ -44,12 +44,14 @@ namespace TreeData_CLI
             //Create fake errors
             var TreeResponse = new ArrayList();
             foreach(var Tree in data){
-                TreeResponse.Add(new TreeResponse{
-                    Tag = Tree.Tag, 
-                    StemTag = Tree.StemTag,
-                    ErrorCode = 1,
-                    Error = "Bad Tree"
+                if(Tree.Codes == "D"){
+                    TreeResponse.Add(new TreeResponse{
+                        Tag = Tree.Tag, 
+                        StemTag = Tree.StemTag,
+                        ErrorCode = 1,
+                        Error = "Bad Tree"
                     });
+                }
             }
 
             return new OkObjectResult(JsonConvert.SerializeObject(TreeResponse));
