@@ -22,10 +22,10 @@ BODY:
   }
 ]
 
-Returns 200
-  - no body, all trees are good
+Returns 200 (with no tree errors)
+  []
 
-Returns 400
+Returns 200 (with tree errors)
 body:
 [
   {
