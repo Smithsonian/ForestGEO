@@ -64,7 +64,7 @@ namespace TreeData_CLI
             //Create fake errors
             var TreeResponse = new ArrayList();
             foreach(var Tree in data){
-                if(Tree.Codes == "D"){
+                if(Tree.Codes == "dt"){
                     TreeResponse.Add(new TreeResponse{
                         Tag = Tree.Tag, 
                         StemTag = Tree.StemTag,
