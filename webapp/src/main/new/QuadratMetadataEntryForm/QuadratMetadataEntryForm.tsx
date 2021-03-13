@@ -1,6 +1,11 @@
+import { Quadrat } from "../../../types";
 import { PlantFormMetadata } from "./plantForm/plantFormMetadata";
 
-export const QuadratMetadataEntryForm = () => (
+interface QuadratMetadataEntryFormProps {
+    quadrats: Quadrat[];
+}
+
+export const QuadratMetadataEntryForm = (props: QuadratMetadataEntryFormProps) => (
     <PlantFormMetadata />
 );
 QuadratMetadataEntryForm.defaultName = 'QuadratMetadataEntryForm';

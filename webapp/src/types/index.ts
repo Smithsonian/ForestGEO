@@ -14,9 +14,11 @@ export type Tree = {
 }
 
 export type Stem = {
-    stemTag: number;
-    spCode: string;
-    dbh: number;
-    codes: string[];
-    comments: string;
+    Subquadrat: string;
+    Tag: number;
+    StemTag: number;
+    SpCode: string;
+    DBH: number;
+    Codes: string;
+    Comments: string;
 }
