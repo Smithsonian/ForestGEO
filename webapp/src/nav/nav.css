@@ -1,0 +1,16 @@
+.topnav{
+    float: left;
+    color: #f2f2f2;
+    text-align: center;
+    text-decoration: none;
+    font-size: 17px;
+    width: 100%;
+    position: static;
+    margin: 5px 5px 5px 5px;
+}
+.topnav .logo {
+    display: block;
+}
+.topnav .li{
+    padding-right: 5px;
+}

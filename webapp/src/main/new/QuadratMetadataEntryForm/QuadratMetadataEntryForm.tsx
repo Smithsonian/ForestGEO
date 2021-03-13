@@ -1,2 +1,6 @@
-export const QuadratMetadataEntryForm = () => <div>QuadratMetadataEntryForm</div>;
+import { PlantFormMetadata } from "./plantForm/plantFormMetadata";
+
+export const QuadratMetadataEntryForm = () => (
+    <PlantFormMetadata />
+);
 QuadratMetadataEntryForm.defaultName = 'QuadratMetadataEntryForm';
