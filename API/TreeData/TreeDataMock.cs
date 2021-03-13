@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
-namespace TreeData
+namespace TreeData_CLI
 {
     public class TreeRequest
     {
@@ -27,10 +27,9 @@ namespace TreeData
         public int ErrorCode { get; set; }
         public int Error { get; set; }
     }
-
-    public static class TreeData
+    public static class TreeDataMock
     {
-        [FunctionName("TreeData")]
+        [FunctionName("TreeDataMock")]
         public static async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = "TreeData")] HttpRequest req,
             ILogger log)
