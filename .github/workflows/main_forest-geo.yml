@@ -36,4 +36,4 @@ jobs:
         app-name: 'forest-geo'
         slot-name: 'production'
         publish-profile: ${{ secrets.AzureAppService_PublishProfile_35a668e76bbb450c8860b420ab38693b }}
-        package: .
+        package: './webapp'
