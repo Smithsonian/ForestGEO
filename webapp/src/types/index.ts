@@ -1,23 +1,24 @@
 export type Subquadrat = {
     id: string;
-    quadratId: string;
+    trees: Tree[];
 };
 
 export type Quadrat = {
     id: string;
-    label: string;
+    subquadrats: Subquadrat[];
 };
 
 export type Tree = {
-    subquadratId: string;
     tag: number;
+    stems: Stem[]
 }
 
 export type Stem = {
-    stemTag: number;
-    tree: Tree;
-    spCode: string;
-    dbh: number;
-    codes: string[];
-    comments: string;
+    Subquadrat: string;
+    Tag: number;
+    StemTag: number;
+    SpCode: string;
+    DBH: number;
+    Codes: string;
+    Comments: string;
 }
