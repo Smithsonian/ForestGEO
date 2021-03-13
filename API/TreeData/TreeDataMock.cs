@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.IO;
 using System.Threading.Tasks;
@@ -7,6 +8,9 @@ using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+
+using MySql.Data;
+using MySql.Data.MySqlClient;
 
 namespace TreeData_CLI
 {
@@ -55,6 +59,32 @@ namespace TreeData_CLI
             }
 
             return new OkObjectResult(JsonConvert.SerializeObject(TreeResponse));
+        }
+
+        [FunctionName("MySQLTest")]
+        public static async Task<IActionResult> MySQLTest(
+            [HttpTrigger(AuthorizationLevel.Function, "get", Route = "MySQLTest")] HttpRequest req,
+            ILogger log)
+        {
+            log.LogInformation("C# HTTP trigger function processed a request.");
+
+            string connStr = System.Environment.GetEnvironmentVariable("MySQLConnection", EnvironmentVariableTarget.Process);
+            
+            MySqlConnection conn = new MySqlConnection(connStr);
+            try
+            {
+                log.LogInformation("Connecting to MySQL...");
+                conn.Open();
+                // Perform database operations
+            }
+            catch (Exception ex)
+            {
+                log.LogInformation(ex.ToString());
+            }
+            conn.Close();
+            log.LogInformation("Done.");
+
+            return new OkObjectResult("Test");
         }
     }
 }
