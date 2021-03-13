@@ -39,6 +39,24 @@ namespace TreeData_CLI
         public string PlotID { get; set; }
         public string CensusID { get; set; }
         public string Errors { get; set; }
+
+        public TreeStorage MapSQL(MySqlDataReader rdr){
+            TempID = rdr["TempID"].ToString();
+            QuadratName = rdr["QuadratName"].ToString();
+            Tag = rdr["Tag"].ToString();
+            StemTag = rdr["StemTag"].ToString();
+            Mnemonic_as_SpCode = rdr[4].ToString();
+            DBH = rdr["DBH"].ToString();
+            Codes = rdr["Codes"].ToString();
+            HOM = rdr["HOM"].ToString();
+            ExactDate = rdr["ExactDate"].ToString();
+            x = rdr["x"].ToString();
+            y = rdr["y"].ToString();
+            PlotID = rdr["PlotID"].ToString();
+            CensusID = rdr["CensusID"].ToString();
+            Errors = rdr["Errors"].ToString();
+            return this;
+        }
     }
     public class TreeResponse
     {
@@ -77,8 +95,8 @@ namespace TreeData_CLI
             return new OkObjectResult(JsonConvert.SerializeObject(TreeResponse));
         }
 
-        [FunctionName("MySQLTest")]
-        public static async Task<IActionResult> MySQLTest(
+        [FunctionName("GetTrees")]
+        public static async Task<IActionResult> GetTrees(
             [HttpTrigger(AuthorizationLevel.Function, "get", Route = "TreeData")] HttpRequest req,
             ILogger log)
         {
@@ -98,24 +116,7 @@ namespace TreeData_CLI
                 MySqlDataReader rdr = cmd.ExecuteReader();
                 
                 while (rdr.Read())
-                {
-                    LoadingResponse.Add(new TreeStorage{
-                        TempID = rdr["TempID"].ToString(),
-                        QuadratName = rdr["QuadratName"].ToString(),
-                        Tag = rdr["Tag"].ToString(),
-                        StemTag = rdr["StemTag"].ToString(),
-                        Mnemonic_as_SpCode = rdr[4].ToString(),
-                        DBH = rdr["DBH"].ToString(),
-                        Codes = rdr["Codes"].ToString(),
-                        HOM = rdr["HOM"].ToString(),
-                        ExactDate = rdr["ExactDate"].ToString(),
-                        x = rdr["x"].ToString(),
-                        y = rdr["y"].ToString(),
-                        PlotID = rdr["PlotID"].ToString(),
-                        CensusID = rdr["CensusID"].ToString(),
-                        Errors = rdr["Errors"].ToString()
-                    });
-                }
+                    LoadingResponse.Add(new TreeStorage().MapSQL(rdr));
                 rdr.Close();
             }
             catch (Exception ex)
