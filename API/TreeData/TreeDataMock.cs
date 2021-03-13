@@ -16,7 +16,7 @@ namespace TreeData_CLI
 {
     public class TreeRequest
     {
-        public int Subquadrant { get; set; }
+        public string Subquadrant { get; set; }
         public int Tag { get; set; }
         public int StemTag { get; set; }
         public string SpCode { get; set; }
@@ -69,11 +69,13 @@ namespace TreeData_CLI
     }
     public class TreeResponse
     {
+        public string Subquadrant { get; set; }
         public int Tag { get; set; }
         public int StemTag { get; set; }
         public int ErrorCode { get; set; }
         public string Error { get; set; }
         public TreeResponse (TreeRequest tree, int ecode, string error){
+            Subquadrant = tree.Subquadrant;
             Tag = tree.Tag;
             StemTag = tree.StemTag;
             ErrorCode = ecode;
@@ -137,7 +139,7 @@ namespace TreeData_CLI
             var TreeResponse = new ArrayList();
             foreach(var Tree in data){
                 if(Tree.Codes =="at" && Tree.WasDead(LoadingResponse)){
-                    TreeResponse.Add(new TreeResponse(Tree, 1, "Bad Tree"));
+                    TreeResponse.Add(new TreeResponse(Tree, 1, "This tree was dead in a previous census."));
                 }
             }
 
