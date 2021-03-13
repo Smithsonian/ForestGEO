@@ -3,7 +3,6 @@ import {
     Route
   } from "react-router-dom";
 
-import { About } from './about';
 import { Home } from './home';
 import { New } from './new';
 
@@ -12,9 +11,6 @@ export const Main = () => (
         <Switch>
           <Route strict={false} exact path="/">
             <Home />
-          </Route>
-          <Route path="/about">
-            <About />
           </Route>
           <Route path="/new">
             <New />
