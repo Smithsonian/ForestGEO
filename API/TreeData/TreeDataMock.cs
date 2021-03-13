@@ -16,17 +16,17 @@ namespace TreeData_CLI
 {
     public class TreeRequest
     {
-        public string Subquadrant { get; set; }
-        public int Tag { get; set; }
-        public int StemTag { get; set; }
+        public string Subquadrat { get; set; }
+        public string Tag { get; set; }
+        public string StemTag { get; set; }
         public string SpCode { get; set; }
-        public int DBH { get; set; }
+        public double DBH { get; set; }
         public string Codes { get; set; }
         public string Comments { get; set; }
         public bool WasDead(ArrayList Trees){
             foreach(TreeStorage tree in Trees){
                 if(tree.Tag == Tag && tree.StemTag == StemTag
-                    && tree.Codes == "dt" ){
+                    && tree.Codes.Contains("dt") ){
                     return true;
                 }
             }
@@ -34,33 +34,33 @@ namespace TreeData_CLI
         }
     }
     public class TreeStorage {
-        public string TempID { get; set; }
+        public int TempID { get; set; }
         public string QuadratName { get; set; }
-        public int Tag { get; set; }
-        public int StemTag { get; set; }
+        public string Tag { get; set; }
+        public string StemTag { get; set; }
         public string SpCode { get; set; }
-        public string DBH { get; set; }
+        public double DBH { get; set; }
         public string Codes { get; set; }
         public string HOM { get; set; }
         public string ExactDate { get; set; }
-        public string x { get; set; }
-        public string y { get; set; }
+        public double x { get; set; }
+        public double y { get; set; }
         public string PlotID { get; set; }
         public string CensusID { get; set; }
         public string Errors { get; set; }
 
         public TreeStorage MapSQL(MySqlDataReader rdr){
-            TempID = rdr["TempID"].ToString();
+            TempID = rdr.GetInt32("TempID");
             QuadratName = rdr["QuadratName"].ToString();
-            Tag = rdr.GetInt32("Tag");
-            StemTag = rdr.GetInt32("StemTag");
+            Tag = rdr["Tag"].ToString();
+            StemTag = rdr["StemTag"].ToString();
             SpCode = rdr["SpCode"].ToString();
-            DBH = rdr["DBH"].ToString();
+            DBH = rdr.GetDouble("DBH");
             Codes = rdr["Codes"].ToString();
             HOM = rdr["HOM"].ToString();
             ExactDate = rdr["ExactDate"].ToString();
-            x = rdr["x"].ToString();
-            y = rdr["y"].ToString();
+            x = rdr.GetDouble("x");
+            y = rdr.GetDouble("y");
             PlotID = rdr["PlotID"].ToString();
             CensusID = rdr["CensusID"].ToString();
             Errors = rdr["Errors"].ToString();
@@ -69,13 +69,13 @@ namespace TreeData_CLI
     }
     public class TreeResponse
     {
-        public string Subquadrant { get; set; }
-        public int Tag { get; set; }
-        public int StemTag { get; set; }
+        public string Subquadrat { get; set; }
+        public string Tag { get; set; }
+        public string StemTag { get; set; }
         public int ErrorCode { get; set; }
         public string Error { get; set; }
         public TreeResponse (TreeRequest tree, int ecode, string error){
-            Subquadrant = tree.Subquadrant;
+            Subquadrat = tree.Subquadrat;
             Tag = tree.Tag;
             StemTag = tree.StemTag;
             ErrorCode = ecode;
@@ -138,7 +138,7 @@ namespace TreeData_CLI
 
             var TreeResponse = new ArrayList();
             foreach(var Tree in data){
-                if(Tree.Codes =="at" && Tree.WasDead(LoadingResponse)){
+                if(Tree.Codes.Contains("at") && Tree.WasDead(LoadingResponse)){
                     TreeResponse.Add(new TreeResponse(Tree, 1, "This tree was dead in a previous census."));
                 }
             }
