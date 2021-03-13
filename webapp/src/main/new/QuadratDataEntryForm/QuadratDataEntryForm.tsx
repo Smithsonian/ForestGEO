@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
-const Stem = () => (
+import { Quadrat, Stem } from '../../../types';
+
+const StemInput = () => (
     <tr>
         <td><input type="text"/></td>
         <td><input type="text"/></td>
@@ -13,7 +15,12 @@ const Stem = () => (
     </tr>
 );
 
-export const QuadratDataEntryForm = () => {
+interface QuadratDataEntryFormProps {
+    quadrat: Quadrat;
+    setFormData: (stems: Stem[]) => void;
+}
+
+export const QuadratDataEntryForm = (props: QuadratDataEntryFormProps) => {
     const [stems, setStems] = useState<JSX.Element[]>([]);
     return (
         <>
@@ -37,7 +44,7 @@ export const QuadratDataEntryForm = () => {
                     <tr>
                         <td>
                             <button onClick={() => {
-                                setStems([...stems, Stem()]);
+                                setStems([...stems, StemInput()]);
                             }}>Add stem</button>
                         </td>
                     </tr>
