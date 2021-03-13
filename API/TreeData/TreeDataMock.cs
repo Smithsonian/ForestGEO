@@ -1,4 +1,4 @@
-using System;
+using System.Collections;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -25,7 +25,7 @@ namespace TreeData_CLI
         public int Tag { get; set; }
         public int StemTag { get; set; }
         public int ErrorCode { get; set; }
-        public int Error { get; set; }
+        public string Error { get; set; }
     }
     public static class TreeDataMock
     {
@@ -41,7 +41,18 @@ namespace TreeData_CLI
 
             string responseMessage = data[0].SpCode;
 
-            return new OkObjectResult(responseMessage);
+            //Create fake errors
+            var TreeResponse = new ArrayList();
+            foreach(var Tree in data){
+                TreeResponse.Add(new TreeResponse{
+                    Tag = Tree.Tag, 
+                    StemTag = Tree.StemTag,
+                    ErrorCode = 1,
+                    Error = "Bad Tree"
+                    });
+            }
+
+            return new OkObjectResult(JsonConvert.SerializeObject(TreeResponse));
         }
     }
 }
