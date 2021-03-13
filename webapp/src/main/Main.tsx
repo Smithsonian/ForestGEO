@@ -5,6 +5,7 @@ import {
 
 import { About } from './about';
 import { Home } from './home';
+import { New } from './new';
 
 export const Main = () => (
     <main>
@@ -14,6 +15,9 @@ export const Main = () => (
           </Route>
           <Route path="/about">
             <About />
+          </Route>
+          <Route path="/new">
+            <New />
           </Route>
         </Switch>
     </main>
