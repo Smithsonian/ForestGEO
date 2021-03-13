@@ -26,7 +26,6 @@ jobs:
         cd webapp
         npm install
         npm install react-scripts@4.0.3 -g --silent
-        npm run test --if-present
 
     - name: 'Deploy to Azure Web App'
       uses: azure/webapps-deploy@v2
