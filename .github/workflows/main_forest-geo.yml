@@ -25,6 +25,7 @@ jobs:
       run: |
         cd webapp
         npm install
+        npm install react-scripts@4.0.3 -g --silent
         npm run build --if-present
         npm run test --if-present
 
