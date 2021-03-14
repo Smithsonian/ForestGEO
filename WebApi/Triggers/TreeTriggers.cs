@@ -12,7 +12,7 @@ using Newtonsoft.Json;
 using MySql.Data;
 using MySql.Data.MySqlClient;
 
-namespace TreeData_CLI
+namespace ForestGEO.WebApi.Triggers.Tree
 {
     public class TreeRequest
     {
