@@ -16,4 +16,9 @@
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Model\Storage\TreeStorage.cs">
+      <Link>Model\Storage\TreeStorage.cs</Link>
+    </Compile>
+  </ItemGroup>
 </Project>
