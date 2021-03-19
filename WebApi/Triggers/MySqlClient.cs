@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ForestGEO.WebApi.Model.Storage;
 using MySql.Data.MySqlClient;
 
 namespace ForestGEO.WebApi.Triggers.Tree
@@ -9,8 +10,8 @@ namespace ForestGEO.WebApi.Triggers.Tree
         private static string connStr = System.Environment.GetEnvironmentVariable("MySQLConnection", EnvironmentVariableTarget.Process);
         private static MySqlConnection conn = new MySqlConnection(connStr);
 
-        public Dictionary<(string,string),TreeStorage> QueryTreeDB(string sql){
-            var LoadingResponse = new Dictionary<(string,string),TreeStorage>();
+        public Dictionary<(string,string),ForestGEO.WebApi.Model.Storage.TreeStorage> QueryTreeDB(string sql){
+            var LoadingResponse = new Dictionary<(string,string),ForestGEO.WebApi.Model.Storage.TreeStorage>();
             try
             {
                 conn.Open();
@@ -20,7 +21,7 @@ namespace ForestGEO.WebApi.Triggers.Tree
                 
                 while (rdr.Read())
                 {
-                    var tempTreeStorage = new TreeStorage().MapSQL(rdr);
+                    var tempTreeStorage = new ForestGEO.WebApi.Model.Storage.TreeStorage().MapSQL(rdr);
                     LoadingResponse.Add((tempTreeStorage.Tag,tempTreeStorage.StemTag), tempTreeStorage);
                 }
                     

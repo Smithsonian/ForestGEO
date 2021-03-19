@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using ForestGEO.WebApi.Model.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
@@ -22,7 +23,7 @@ namespace ForestGEO.WebApi.Triggers.Tree
         {
             log.LogInformation("C# HTTP trigger function processed a request.");
 
-            Dictionary<(string,string),TreeStorage> LoadingResponse = mySql.QueryTreeDB("select TempID, QuadratName, Tag, StemTag, Mnemonic as SpCode, DBH, Codes, HOM, ExactDate, x, y, PlotID, CensusID, Errors from tempnewplants");
+            Dictionary<(string,string),ForestGEO.WebApi.Model.Storage.TreeStorage> LoadingResponse = mySql.QueryTreeDB("select TempID, QuadratName, Tag, StemTag, Mnemonic as SpCode, DBH, Codes, HOM, ExactDate, x, y, PlotID, CensusID, Errors from tempnewplants");
             return new OkObjectResult(JsonConvert.SerializeObject(LoadingResponse.Values));
         }
 
@@ -36,7 +37,7 @@ namespace ForestGEO.WebApi.Triggers.Tree
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             var data = JsonConvert.DeserializeObject<Tree[]>(requestBody);
 
-            Dictionary<(string,string),TreeStorage> TreeRecords = mySql.QueryTreeDB("select TempID, QuadratName, Tag, StemTag, Mnemonic as SpCode, DBH, Codes, HOM, ExactDate, x, y, PlotID, CensusID, Errors from tempnewplants");
+            Dictionary<(string,string),ForestGEO.WebApi.Model.Storage.TreeStorage> TreeRecords = mySql.QueryTreeDB("select TempID, QuadratName, Tag, StemTag, Mnemonic as SpCode, DBH, Codes, HOM, ExactDate, x, y, PlotID, CensusID, Errors from tempnewplants");
 
             var ResponseBuilder = new ArrayList();
             foreach(var Tree in data){

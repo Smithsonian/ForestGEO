@@ -1,6 +1,6 @@
 using MySql.Data.MySqlClient;
 
-namespace ForestGEO.WebApi.Triggers.Tree
+namespace ForestGEO.WebApi.Model.Storage
 {
     public class TreeStorage {
         public int TempID { get; set; }
