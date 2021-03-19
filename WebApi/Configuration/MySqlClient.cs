@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using MySql.Data.MySqlClient;
 
-namespace ForestGEO.WebApi.Triggers.Tree
+namespace ForestGEO.WebApi.Configuration
 {
     public class MySqlClient
     {
