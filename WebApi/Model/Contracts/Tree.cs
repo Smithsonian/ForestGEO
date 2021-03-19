@@ -11,9 +11,5 @@ namespace ForestGEO.WebApi.Model.Contracts
         public double DBH { get; set; }
         public string Codes { get; set; }
         public string Comments { get; set; }
-        public bool IsAlive()
-        {
-            return(Codes.Contains("at"));
-        }
     }
 }

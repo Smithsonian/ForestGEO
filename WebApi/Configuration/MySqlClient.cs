@@ -20,7 +20,7 @@ namespace ForestGEO.WebApi.Configuration
                 
                 while (rdr.Read())
                 {
-                    var tempTreeStorage = new ForestGEO.WebApi.Model.Storage.TreeStorage().MapSQL(rdr);
+                    var tempTreeStorage = new ForestGEO.WebApi.Model.Storage.TreeStorage(rdr);
                     LoadingResponse.Add((tempTreeStorage.Tag,tempTreeStorage.StemTag), tempTreeStorage);
                 }
                     
