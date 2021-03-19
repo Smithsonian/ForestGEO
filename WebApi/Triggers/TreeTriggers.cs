@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -15,8 +16,9 @@ using Newtonsoft.Json;
 namespace ForestGEO.WebApi.Triggers.Tree
 {
     public static class TreeTriggers
-    {
-        private static MySqlClient mySql = new ForestGEO.WebApi.Configuration.MySqlClient();
+    {   
+        private static string connStr = System.Environment.GetEnvironmentVariable("MySQLConnection", EnvironmentVariableTarget.Process);
+        private static MySqlClient mySql = new ForestGEO.WebApi.Configuration.MySqlClient(connStr);
 
         [FunctionName("GetTrees")]
         public static IActionResult GetTrees(

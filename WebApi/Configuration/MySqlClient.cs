@@ -6,8 +6,11 @@ namespace ForestGEO.WebApi.Configuration
 {
     public class MySqlClient
     {
-        private static string connStr = System.Environment.GetEnvironmentVariable("MySQLConnection", EnvironmentVariableTarget.Process);
-        private static MySqlConnection conn = new MySqlConnection(connStr);
+        private static MySqlConnection conn;
+
+        public MySqlClient(string connStr){
+            conn = new MySqlConnection(connStr);
+        }
 
         public Dictionary<(string,string),ForestGEO.WebApi.Model.Storage.TreeStorage> QueryTreeDB(string sql){
             var LoadingResponse = new Dictionary<(string,string),ForestGEO.WebApi.Model.Storage.TreeStorage>();
