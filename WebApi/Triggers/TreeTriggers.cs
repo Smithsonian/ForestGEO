@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using ForestGEO.WebApi.Model.Storage;
 using ForestGEO.WebApi.Model.Contracts;
+using ForestGEO.WebApi.Configuration;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
@@ -15,7 +16,7 @@ namespace ForestGEO.WebApi.Triggers.Tree
 {
     public static class TreeTriggers
     {
-        private static MySqlClient mySql = new MySqlClient();
+        private static MySqlClient mySql = new ForestGEO.WebApi.Configuration.MySqlClient();
 
         [FunctionName("GetTrees")]
         public static IActionResult GetTrees(

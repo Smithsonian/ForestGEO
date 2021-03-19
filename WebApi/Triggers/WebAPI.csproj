@@ -23,5 +23,8 @@
     <Compile Include="..\Model\Contracts\Tree.cs">
       <Link>Model\Contracts\Tree.cs</Link>
     </Compile>
+    <Compile Include="..\Configuration\MySqlClient.cs">
+      <Link>Configuration\MySqlClient.cs</Link>
+    </Compile>
   </ItemGroup>
 </Project>
