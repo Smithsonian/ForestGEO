@@ -13,7 +13,7 @@ using Newtonsoft.Json;
 
 namespace ForestGEO.WebApi.Triggers.Tree
 {
-    public static class ProcessTrees
+    public static class TreeTriggers
     {
         private static MySqlClient mySql = new MySqlClient();
 
