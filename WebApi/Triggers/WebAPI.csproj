@@ -20,5 +20,8 @@
     <Compile Include="..\Model\Storage\TreeStorage.cs">
       <Link>Model\Storage\TreeStorage.cs</Link>
     </Compile>
+    <Compile Include="..\Model\Contracts\Tree.cs">
+      <Link>Model\Contracts\Tree.cs</Link>
+    </Compile>
   </ItemGroup>
 </Project>

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using ForestGEO.WebApi.Model.Storage;
 using MySql.Data.MySqlClient;
 
 namespace ForestGEO.WebApi.Triggers.Tree

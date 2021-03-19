@@ -7,7 +7,7 @@ namespace ForestGEO.WebApi.Triggers.Tree
         public string StemTag { get; set; }
         public int ErrorCode { get; set; }
         public string Error { get; set; }
-        public TreeResponse (Tree tree, int ecode, string error)
+        public TreeResponse (ForestGEO.WebApi.Model.Contracts.Tree tree, int ecode, string error)
         {
             Subquadrat = tree.Subquadrat;
             Tag = tree.Tag;
