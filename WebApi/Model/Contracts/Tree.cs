@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace ForestGEO.WebApi.Triggers.Tree
+namespace ForestGEO.WebApi.Model.Contracts
 {
     public class Tree
     {
