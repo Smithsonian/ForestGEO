@@ -43,13 +43,15 @@ namespace ForestGEO.WebApi.Triggers.Tree
 
             var ResponseBuilder = new ArrayList();
             foreach(var Tree in data){
-                if(TreeRecords.ContainsKey((Tree.Tag, Tree.StemTag)) && 
-                    Tree.IsAlive() && TreeRecords[(Tree.Tag, Tree.StemTag)].IsDead())
+                if(TreeRecords.ContainsKey((Tree.Tag, Tree.StemTag)))
                 {
-                    ResponseBuilder.Add(new TreeResponse(Tree, 1, "This tree was dead in a previous census."));
+                    var newTree = new ForestGEO.WebApi.Model.Storage.TreeStorage(Tree);
+                    if(newTree.IsAlive() && TreeRecords[(Tree.Tag, Tree.StemTag)].IsDead())
+                    {
+                        ResponseBuilder.Add(new TreeResponse(Tree, 1, "This tree was dead in a previous census."));
+                    }
                 }
             }
-
             return new OkObjectResult(JsonConvert.SerializeObject(ResponseBuilder));
         }
     }

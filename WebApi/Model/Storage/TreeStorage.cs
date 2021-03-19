@@ -1,3 +1,4 @@
+using ForestGEO.WebApi.Model.Contracts;
 using MySql.Data.MySqlClient;
 
 namespace ForestGEO.WebApi.Model.Storage
@@ -17,11 +18,18 @@ namespace ForestGEO.WebApi.Model.Storage
         public string PlotID { get; set; }
         public string CensusID { get; set; }
         public string Errors { get; set; }
-        public bool IsDead()
+
+        public TreeStorage(ForestGEO.WebApi.Model.Contracts.Tree Tree)
         {
-          return Codes.Contains("dt");
+            QuadratName = Tree.Subquadrat;
+            Tag = Tree.Tag;
+            StemTag = Tree.StemTag;
+            SpCode = Tree.SpCode;
+            DBH = Tree.DBH;
+            Codes = Tree.Codes;
         }
-        public TreeStorage MapSQL(MySqlDataReader rdr)
+
+        public TreeStorage(MySqlDataReader rdr)
         {
             TempID = rdr.GetInt32("TempID");
             QuadratName = rdr["QuadratName"].ToString();
@@ -37,7 +45,16 @@ namespace ForestGEO.WebApi.Model.Storage
             PlotID = rdr["PlotID"].ToString();
             CensusID = rdr["CensusID"].ToString();
             Errors = rdr["Errors"].ToString();
-            return this;
+        }
+
+        public bool IsAlive()
+        {
+            return Codes.Contains("at");
+        }
+
+        public bool IsDead()
+        {
+          return Codes.Contains("dt");
         }
     }
 }
