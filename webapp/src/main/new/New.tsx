@@ -10,24 +10,22 @@ export const New = () => {
 
   const hardCodedFormData: Stem[] = [
     {
-      siteId: 1,
-      subquadrat: "11",
-      tag: 1,
-      stemTag: 1,
-      spCode: "species",
-      dbh: 10,
-      codes: "at",
-      comments: "",
+      Subquadrat: "11",
+      Tag: 1,
+      SpCode: "species",
+      DBH: 10,
+      Htmeas: 1.5,
+      Codes: "at",
+      Comments: "",
     },
     {
-      siteId: 1,
-      subquadrat: "11",
-      tag: 2,
-      stemTag: 1,
-      spCode: "species",
-      dbh: 10,
-      codes: "at",
-      comments: "",
+      Subquadrat: "11",
+      Tag: 2,
+      SpCode: "species",
+      DBH: 10,
+      Htmeas: 1.5,
+      Codes: "at",
+      Comments: "",
     },
   ];
 
@@ -40,7 +38,7 @@ export const New = () => {
       <button
         type="submit"
         onClick={() => {
-          insertStems(formData).catch(error=>setErrors(error));
+          insertStems(formData).catch((error) => setErrors(error));
         }}
       >
         Submit

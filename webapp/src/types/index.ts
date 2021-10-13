@@ -14,12 +14,11 @@ export type Tree = {
 };
 
 export type Stem = {
-    siteId: number;
-    subquadrat: string;
-    tag: number;
-    stemTag: number;
-    spCode: string;
-    dbh: number;
-    codes: string;
-    comments: string;
-};
+    Tag: number;
+    Subquadrat: string;
+    SpCode: string;
+    DBH: number;
+    Htmeas: number;
+    Codes: string;
+    Comments: string;
+}
