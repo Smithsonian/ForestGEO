@@ -1,85 +1,98 @@
-import { useState } from 'react';
+import { useState, useMemo } from "react";
 
 import { QuadratDataEntryForm } from "./QuadratDataEntryForm";
 import { QuadratMetadataEntryForm } from "./QuadratMetadataEntryForm";
-import { Quadrat, Stem } from '../../types';
+import { Stem } from "../../types";
+import { insertStems } from "./dataService";
+import { columns } from "./QuadratDataEntryForm/columnHeaders";
+import { mockCensusData } from "../../mockData/mockCensusData";
+import {
+  postValidate,
+  PostValidationError,
+} from "../../validation/postValidation";
 
 export const New = () => {
-    const quadrats: Quadrat[] = [
-        {
-            id: 'Quadrat 1',
-            subquadrats: [ {
-                id: 'q1s1',
-                trees: [
-                    {
-                        tag: 1,
-                        stems: []
-                    },
-                    {
-                        tag: 2,
-                        stems: []
-                    }
-                ]
-            }]
-        },
-        {
-            id: 'Quadrat 2',
-            subquadrats: [ {
-                id: 'q2s1',
-                trees: [
-                    {
-                        tag: 1,
-                        stems: []
-                    }
-                ]
-            }]
-        }
-    ];
-    const [errors, setErrors] = useState<any>([]);
-    const [selectedQuadrat, setSelectedQuadrat] = useState(quadrats[0]);
+  const [errors, setErrors] = useState<any>([]);
 
-    const hardCodedFormData: Stem[] = [
-        {
-          "Subquadrat":"11",
-          "Tag":1,
-          "StemTag":1,
-          "SpCode":"species",
-          "DBH":10,
-          "Codes":"at",
-          "Comments":""
-        },
-        {
-          "Subquadrat":"11",
-          "Tag":2,
-          "StemTag":1,
-          "SpCode":"species",
-          "DBH":10,
-          "Codes":"at",
-          "Comments":""
-        }
-      ];
+  const hardCodedFormData: Stem[] = [
+    {
+      Subquadrat: 11,
+      Tag: 1,
+      SpCode: "species",
+      DBH: 10,
+      Htmeas: 1.5,
+      Codes: "at",
+      Comments: "",
+    },
+    {
+      Subquadrat: 11,
+      Tag: 2,
+      SpCode: "species",
+      DBH: 10,
+      Htmeas: 1.5,
+      Codes: "at",
+      Comments: "",
+    },
+  ];
 
-    const [formData, setFormData] = useState(hardCodedFormData);
-    return (
-        <>
-            <h1>New Plant Form</h1>
-            <QuadratMetadataEntryForm quadrats={quadrats} />
-            <QuadratDataEntryForm quadrat={selectedQuadrat} setFormData={setFormData} />
-            <button onClick={() => {
-                // handle form submission
-                fetch('https://treedataapi.azurewebsites.net/api/treedata?code=ruBIe/cx1E6tB6s1Foa4iq7SwDBuXprPzg55d1m786pMjUrB4ePraQ==', { method: 'POST', body: JSON.stringify(formData)})
-                .then(response => response.json())
-                    .then(errorData => {
-                        setErrors(errorData)
-                    });
-            }}>Submit</button>
-            <ul>
-                {errors.map((error: any) => (
-                    <li>There was an error on  the tree branch identified by subquadrat {error.Subquadrat}, tag {error.Tag} and stem {error.StemTag}: {error.Error}</li>
-                ))}
-            </ul>
-        </>
+  const [formData] = useState(hardCodedFormData);
+
+  // Table data has to be memoized for react-table performance
+  const columnHeaders = useMemo(() => columns, []);
+  const [data, setData] = useState(useMemo(() => mockCensusData, []));
+  const [postValidationErrors, setPostValidationErrors] = useState<
+    PostValidationError[]
+  >([]);
+
+  const updateData = (rowIndex: number, columnId: string, value: any) => {
+    console.log(`set data for ${columnId} at row ${rowIndex} to ${value}`);
+
+    setData((old) =>
+      old.map((row, index) => {
+        if (index === rowIndex) {
+          return {
+            ...old[rowIndex],
+            [columnId]: value,
+          };
+        }
+        return row;
+      })
     );
-}
+  };
 
-New.defaultName = 'New';
+  return (
+    <>
+      <h1>Old Trees Form</h1>
+      <QuadratMetadataEntryForm />
+      <QuadratDataEntryForm
+        columns={columnHeaders}
+        data={data}
+        updateHandler={updateData}
+        postValidationErrors={postValidationErrors}
+      />
+      <button
+        type="submit"
+        onClick={() => {
+          const postErrors = postValidate(data);
+          setPostValidationErrors(postErrors);
+          if (postErrors.length === 0) {
+            insertStems(formData).catch((error) => setErrors(error));
+          }
+        }}
+      >
+        Submit
+      </button>
+      <ul>
+        {errors.map((error: any) => (
+          <li>
+            There was an error on the tree branch identified by subquadrat{" "}
+            {error.Subquadrat}, tag {error.Tag} and stem {error.StemTag}:{" "}
+            {error.Error}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+};
+
+New.defaultName = "New";

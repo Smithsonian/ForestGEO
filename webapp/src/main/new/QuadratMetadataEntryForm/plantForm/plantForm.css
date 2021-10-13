@@ -1,11 +1,11 @@
-.plantForm{
-    margin: 10px 15px 10px 20px;
-    font-family: "Segoe UI Web (West European)","Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,"Helvetica Neue",sans-serif;
+.plantForm {
+  margin: 10px 15px 10px 20px;
+  font-family: "Segoe UI Web (West European)", "Segoe UI", -apple-system,
+    BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
 }
 
-.plantFormMetadata{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding:10px;
+.plantFormMetadata {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 10px;
 }
-
