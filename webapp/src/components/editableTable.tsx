@@ -1,5 +1,6 @@
 /* eslint-disable react/jsx-props-no-spreading */
 import { useTable, Column, TableOptions } from "react-table";
+import { PostValidationError } from "../validation/postValidation";
 import { EditableCell } from "./editableCell";
 
 // React Table uses this definition to make all of the columns for the table,
@@ -12,12 +13,14 @@ interface EditableTableProps {
   columns: Column[];
   data: any;
   updateData: Function;
+  postValidationErrors: PostValidationError[];
 }
 
 export function EditableTable({
   columns,
   data,
   updateData,
+  postValidationErrors,
 }: EditableTableProps) {
   const { getTableProps, getTableBodyProps, headerGroups, rows, prepareRow } =
     useTable({
@@ -26,6 +29,7 @@ export function EditableTable({
       data,
       defaultColumn,
       updateData,
+      postValidationErrors,
     } as TableOptions<any>);
   // Typescript won't allow us to pass the updateData function to useTable
   // because it isn't specified in the type definition...
