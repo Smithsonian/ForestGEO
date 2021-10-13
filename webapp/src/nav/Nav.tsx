@@ -4,7 +4,7 @@ import "./nav.css";
 
 export const Nav = () => (
   <nav className="topnav">
-    <img src={logo} alt="logo" width={"150"} className="logo"/>
+    <img src={logo} alt="logo" width="150" className="logo" />
     <ul>
       <li>
         <Link to="/">Home</Link>
@@ -16,4 +16,4 @@ export const Nav = () => (
   </nav>
 );
 
-Nav.defaultName = 'Nav';
+Nav.defaultName = "Nav";
