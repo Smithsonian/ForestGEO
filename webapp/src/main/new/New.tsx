@@ -3,12 +3,14 @@ import { useState } from "react";
 import { QuadratDataEntryForm } from "./QuadratDataEntryForm";
 import { QuadratMetadataEntryForm } from "./QuadratMetadataEntryForm";
 import { Stem } from "../../types";
+import { insertStems } from "./dataService";
 
 export const New = () => {
   const [errors, setErrors] = useState<any>([]);
 
   const hardCodedFormData: Stem[] = [
     {
+      siteId: 1,
       Subquadrat: "11",
       Tag: 1,
       StemTag: 1,
@@ -18,6 +20,7 @@ export const New = () => {
       Comments: "",
     },
     {
+      siteId: 1,
       Subquadrat: "11",
       Tag: 2,
       StemTag: 1,
@@ -37,15 +40,7 @@ export const New = () => {
       <button
         type="submit"
         onClick={() => {
-          // handle form submission
-          fetch(
-            "https://treedataapi.azurewebsites.net/api/treedata?code=ruBIe/cx1E6tB6s1Foa4iq7SwDBuXprPzg55d1m786pMjUrB4ePraQ==",
-            { method: "POST", body: JSON.stringify(formData) }
-          )
-            .then((response) => response.json())
-            .then((errorData) => {
-              setErrors(errorData);
-            });
+          insertStems(formData).catch(error=>setErrors(error));
         }}
       >
         Submit
