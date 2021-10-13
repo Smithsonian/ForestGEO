@@ -15,7 +15,7 @@ export type Tree = {
 
 export type Stem = {
     Tag: number;
-    Subquadrat: string;
+    Subquadrat: number;
     SpCode: string;
     DBH: number;
     Htmeas: number;

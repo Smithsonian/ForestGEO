@@ -2,7 +2,7 @@ import { Stem } from '../types'
 
 export const mockCensusData: Stem[] = [
   {
-    Subquadrat: "11",
+    Subquadrat: 11,
     Tag: 1,
     SpCode: "species",
     DBH: 10,
@@ -11,7 +11,7 @@ export const mockCensusData: Stem[] = [
     Comments: "",
   },
   {
-    Subquadrat: "11",
+    Subquadrat: 11,
     Tag: 2,
     SpCode: "species",
     DBH: 10,
