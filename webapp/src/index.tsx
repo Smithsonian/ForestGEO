@@ -2,12 +2,18 @@ import React from "react";
 import ReactDOM from "react-dom";
 import "./index.css";
 import App from "./App";
+import { StorageProvider } from "./context/storageContext";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
 import reportWebVitals from "./reportWebVitals";
+import { ConnectivityProvider } from "./context/connectivityContext";
 
 ReactDOM.render(
   <React.StrictMode>
-    <App />
+    <ConnectivityProvider>
+      <StorageProvider>
+        <App />
+      </StorageProvider>
+    </ConnectivityProvider>
   </React.StrictMode>,
   document.getElementById("root")
 );
