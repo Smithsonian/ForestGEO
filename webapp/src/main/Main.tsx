@@ -1,61 +1,55 @@
 import { Switch, Route } from "react-router-dom";
 import { useEffect, useState } from "react";
-import localforage from "localforage";
+import { ProgressIndicator } from "@fluentui/react/lib/ProgressIndicator";
 
 import { Home } from "./home";
 import { New } from "./new";
+import { useConnectivityContext } from "../context/connectivityContext";
+import { useStorageContext } from "../context/storageContext";
+import { getAllItems } from "../helpers/storageHelper";
+
+const uploadWorker: Worker = new Worker("./workers/upload-worker.js");
 
 export const Main = () => {
-  const [online, setOnline] = useState(navigator.onLine);
+  const { isOnline } = useConnectivityContext();
+  const { userInputStore } = useStorageContext();
 
-  function handleOnline() {
-    setOnline(true);
-  }
-
-  function handleOffline() {
-    setOnline(false);
-  }
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState(undefined);
 
   useEffect(() => {
-    // Test IndexedDB
-    const userInputStore = localforage.createInstance({
-      name: "ForestGEO App Storage",
-      storeName: "user-input-store",
-      description:
-        "The local storage for user input records that are validated locally.",
-    });
+    // Ask web worker to upload local user data when online
+    if (userInputStore != null && isOnline) {
+      getAllItems(userInputStore).then((data) => {
+        if (data && data.length > 0) {
+          setIsUploading(true);
+          uploadWorker.postMessage(data);
+        }
+      });
+    }
 
-    const latestCensusStore = localforage.createInstance({
-      name: "ForestGEO App Storage",
-      storeName: "latest-census-store",
-      description:
-        "The local storage for latest census data cache from the cloud. Use only for validation.",
-    });
-
-    userInputStore.setItem("1", {
-      Subquadrat: "11",
-      Tag: 1,
-      SpCode: "species",
-      DBH: 10,
-      Htmeas: 1.5,
-      Codes: "at",
-      Comments: "",
-    });
-
-    // Register event listeners for network status change.
-    // Note the initial network status when app load comes from navigator.onLine.
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
+    uploadWorker.onmessage = (event: MessageEvent) => {
+      const { data } = event;
+      setIsUploading(false);
+      if (data.succeeded) {
+        // Clear local data once upload succeeded.
+        userInputStore?.clear();
+      } else {
+        setUploadError(data.error);
+      }
     };
-  }, [setOnline]);
+  }, [uploadWorker, userInputStore, isOnline, setIsUploading]);
 
   return (
     <main>
-      <span>{online ? "Online" : "Offline"}</span>
+      <span>{isOnline ? "Online" : "Offline"}</span>
+      {isUploading ? (
+        <ProgressIndicator
+          label="Uploading data"
+          description="Uploading local data to the cloud"
+        />
+      ) : undefined}
+      {uploadError !== undefined ? <span>{uploadError}</span> : undefined}
       <Switch>
         <Route strict={false} exact path="/">
           <Home />
