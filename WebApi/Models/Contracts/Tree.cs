@@ -11,7 +11,7 @@ namespace ForestGEO.WebApi.Model.Contracts
         public int PlotId { get; set; }
         public int Subquadrat { get; set; }
         public string Tag { get; set; }
-        public int StemTag { get; set; }
+        public string StemTag { get; set; }
         public string SpCode { get; set; }
         public double? DBH { get; set; }
         public double? Htmeas { get; set; }
