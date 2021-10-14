@@ -8,6 +8,8 @@ import { useConnectivityContext } from "../context/connectivityContext";
 import { useStorageContext } from "../context/storageContext";
 import { getAllItems } from "../helpers/storageHelper";
 
+import "./main.css";
+
 const uploadWorker: Worker = new Worker("./workers/upload-worker.js");
 
 export const Main = () => {
@@ -41,8 +43,7 @@ export const Main = () => {
   }, [uploadWorker, userInputStore, isOnline, setIsUploading]);
 
   return (
-    <main>
-      <span>{isOnline ? "Online" : "Offline"}</span>
+    <main className="content">
       {isUploading ? (
         <ProgressIndicator
           label="Uploading data"
