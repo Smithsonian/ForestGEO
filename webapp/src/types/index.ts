@@ -10,15 +10,15 @@ export type Quadrat = {
 
 export type Tree = {
     tag: number;
-    stems: Stem[]
-}
+    stems: Stem[];
+};
 
 export type Stem = {
-    Subquadrat: string;
     Tag: number;
-    StemTag: number;
+    Subquadrat: number;
     SpCode: string;
     DBH: number;
+    Htmeas: number;
     Codes: string;
     Comments: string;
 }

@@ -1,14 +1,12 @@
 import React from "react";
-
-import { Dropdown, IDropdownOption } from "@fluentui/react/lib/Dropdown";
 import {
   DatePicker,
   DayOfWeek,
   IDatePickerStrings,
   mergeStyleSets,
-  Icon,
 } from "@fluentui/react";
 import "./plantForm.css";
+
 const DayPickerStrings: IDatePickerStrings = {
   months: [
     "January",
@@ -73,20 +71,16 @@ export interface PlantDatePickerProps {
   label: string;
 }
 
-export const PlantDatePicker: React.FunctionComponent<PlantDatePickerProps> = (
-  props: PlantDatePickerProps
-) => {
-  const [firstDayOfWeek, setFirstDayOfWeek] = React.useState(DayOfWeek.Sunday);
-
-  const onDropdownChange = (event: any, option: any) => {
-    setFirstDayOfWeek(DayOfWeek.Friday);
-  };
+export const PlantDatePicker: React.FunctionComponent<PlantDatePickerProps> = ({
+  label,
+}: PlantDatePickerProps) => {
+  const [firstDayOfWeek] = React.useState(DayOfWeek.Sunday);
 
   return (
     <div className="plantDataPicker">
       <span>
         <DatePicker
-          label={props.label}
+          label={label}
           className={controlClass.control}
           firstDayOfWeek={firstDayOfWeek}
           strings={DayPickerStrings}
