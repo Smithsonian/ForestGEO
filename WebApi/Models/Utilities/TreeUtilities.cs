@@ -6,7 +6,11 @@ namespace ForestGEO.WebApi.Model.Utilities
 {
     public class TreeUtilities
     {
-        private static readonly string TreeDeadErrorMessage = "This tree was dead in a previous census";
+        private static readonly TreeError TreeDeadError = new TreeError(){
+            ErrorCode = 1,
+            Column = "Tag",
+            Message = "This tree was dead in a previous census"
+        };
 
         public static string TreeSQLQuery(int plotId, int censusId)
         {
@@ -23,12 +27,11 @@ namespace ForestGEO.WebApi.Model.Utilities
                 {
                     if (currentCensus[i].Errors == null)
                     {
-                        currentCensus[i].Errors = new List<string>() 
-                            { TreeDeadErrorMessage };
+                        currentCensus[i].Errors = new List<TreeError>() { TreeDeadError };
                     }
                     else
                     {
-                        currentCensus[i].Errors.Add(TreeDeadErrorMessage);
+                        currentCensus[i].Errors.Add(TreeDeadError);
                     }
                 }
             }

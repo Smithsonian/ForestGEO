@@ -18,6 +18,6 @@ namespace ForestGEO.WebApi.Model.Contracts
         public string Comments { get; set; }
 
         // Errors resulting from cloud-side validation when POST'ing the tree.
-        public IList<string> Errors { get; set; }
+        public IList<TreeError> Errors { get; set; }
     }
 }
