@@ -1,12 +1,12 @@
 import { Column } from "react-table";
 import { EditableTable } from "../../../components/editableTable";
 
-import { Stem } from "../../../types";
 import { ValidationErrorMap } from "../../../validation/validationError";
+import { Tree } from "../../../types";
 
 interface QuadratDataEntryFormProps {
   columns: Column[];
-  data: Stem[];
+  data: Tree[];
   updateHandler: Function;
   validationErrors: ValidationErrorMap;
 }

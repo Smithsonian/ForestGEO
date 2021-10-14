@@ -1,4 +1,24 @@
-import { Stem } from "../../types";
+import { Tree } from "../../types";
+
+function getData<T>(
+  url: string,
+  adtlHeaders?: Headers | string[][] | Record<string, string>
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const headers = new Headers({
+      ...adtlHeaders,
+      "Content-Type": "application/json",
+    });
+
+    fetch(url, {
+      method: "GET",
+      headers,
+    })
+      .then((response: any) => response.json())
+      .then((response: any) => resolve(response))
+      .catch((error) => reject(error));
+  });
+}
 
 function postData(
   url: string,
@@ -21,10 +41,18 @@ function postData(
   });
 }
 
-export function insertStems(stems: Stem[]): Promise<void> {
+export function getCensus(): Promise<Tree[]> {
   // TODO: Remove the access code and generate a new one
   const url =
-    "https://forestgeo-middletier.azurewebsites.net/api/InsertItems?code=D2BT0IK717/vf8YFkdNe2bXTzYMTZkKty4qlTk0FdpxCBJAF146xzw==";
+    "https://forestgeodataapi.azurewebsites.net/api/Census?code=0kOITiOaxOVEYuCNzIc9V6uwhTz41qPvf92RgFF6bBfHQAZcsavyPA==";
+
+  return getData(url);
+}
+
+export function insertCensus(stems: Tree[]): Promise<void> {
+  // TODO: Remove the access code and generate a new one
+  const url =
+    "https://forestgeodataapi.azurewebsites.net/api/Census?code=xqRLaAgGAAQkMuMUwFu//JKC7BCEraubIlmfWOZsSBs4IsdbPDMF8w==";
 
   return postData(url, { payload: stems });
 }

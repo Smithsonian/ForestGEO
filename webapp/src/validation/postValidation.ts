@@ -1,8 +1,9 @@
-import { Stem } from "../types";
 import { ValidationError } from "./validationError";
+import { Tree } from "../types";
 
-export function postValidate(data: Stem[]): Set<ValidationError> {
+export function postValidate(data: Tree[]): Set<ValidationError> {
   const errors = new Set<ValidationError>()
+
   data.forEach(stem => {
     if (stem.DBH.toString() === "9001") {
       errors.add({
