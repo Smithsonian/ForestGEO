@@ -6,10 +6,12 @@ import { Stem } from "../../types";
 import { insertStems } from "./dataService";
 import { columns } from "./QuadratDataEntryForm/columnHeaders";
 import { mockCensusData } from "../../mockData/mockCensusData";
+import { preValidate } from "../../validation/preValidation";
+import { postValidate } from "../../validation/postValidation";
 import {
-  postValidate,
-  PostValidationError,
-} from "../../validation/postValidation";
+  ValidationError,
+  ValidationErrorMap,
+} from "../../validation/validationError";
 
 export const New = () => {
   const [errors, setErrors] = useState<any>([]);
@@ -40,13 +42,11 @@ export const New = () => {
   // Table data has to be memoized for react-table performance
   const columnHeaders = useMemo(() => columns, []);
   const [data, setData] = useState(useMemo(() => mockCensusData, []));
-  const [postValidationErrors, setPostValidationErrors] = useState<
-    PostValidationError[]
-  >([]);
+  const [validationErrors, setValidationErrors] = useState(
+    new ValidationErrorMap()
+  );
 
   const updateData = (rowIndex: number, columnId: string, value: any) => {
-    console.log(`set data for ${columnId} at row ${rowIndex} to ${value}`);
-
     setData((old) =>
       old.map((row, index) => {
         if (index === rowIndex) {
@@ -58,6 +58,18 @@ export const New = () => {
         return row;
       })
     );
+
+    // This is the callback that will do pre-validation (easy stuff e.g. regex)
+    const preValidationErrors = preValidate(rowIndex, columnId, value);
+    if (preValidationErrors.size > 0) {
+      validationErrors.addPreValidationErrors(
+        rowIndex,
+        columnId,
+        preValidationErrors
+      );
+    } else {
+      validationErrors.removePreValidationErrorsForCell(rowIndex, columnId);
+    }
   };
 
   return (
@@ -68,14 +80,15 @@ export const New = () => {
         columns={columnHeaders}
         data={data}
         updateHandler={updateData}
-        postValidationErrors={postValidationErrors}
+        validationErrors={validationErrors}
       />
       <button
         type="submit"
         onClick={() => {
           const postErrors = postValidate(data);
-          setPostValidationErrors(postErrors);
-          if (postErrors.length === 0) {
+          validationErrors.setPostValidationErrors(postErrors);
+          if (validationErrors.size === 0) {
+            // FIXME: revise this conditional to use ValidationErrorMap
             insertStems(formData).catch((error) => setErrors(error));
           }
         }}

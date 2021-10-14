@@ -1,15 +1,13 @@
 import { useState, useEffect } from "react";
 import { Column, Cell, Row } from "react-table";
-import { PostValidationError } from "../validation/postValidation";
-
-import { preValidate } from "../validation/preValidation";
+import { ValidationErrorMap } from "../validation/validationError";
 
 interface EditableCellProps {
   row: Row;
   column: Column;
   updateData: Function;
   cell: Cell;
-  postValidationErrors: PostValidationError[];
+  validationErrors: ValidationErrorMap;
 }
 
 export const EditableCell = ({
@@ -17,9 +15,8 @@ export const EditableCell = ({
   column,
   updateData,
   cell,
-  postValidationErrors,
+  validationErrors,
 }: EditableCellProps) => {
-  const [appliedStyle, setAppliedStyle] = useState({});
   const errorStyle = { border: "1px solid red" };
   const notAnErrorStyle = { border: "1px solid black" };
 
@@ -34,45 +31,35 @@ export const EditableCell = ({
 
   // Wait to actually update the table state when we unfocus the input field
   const onBlur = () => {
+    console.log(row.index, column.Header, value);
     updateData(row.index, column.Header, value);
-
-    // This is the callback that will do in-line validation
-    const errors = preValidate(value);
-
-    if (errors.length > 0) {
-      setAppliedStyle(errorStyle);
-      // Show errors in any other way cuz of pre-validation
-    }
   };
 
-  function applyPostValidationErrors() {
+  function applyValidationErrorStyles(): Object {
     console.log("handlepostvalidate");
-    setAppliedStyle(notAnErrorStyle); // FIXME: This erases regex errors. Maybe we need just one source of errors
 
-    postValidationErrors.forEach((e) => {
-      if (e.index === row.index && e.column === column.Header?.toString()) {
-        console.log("post validation error hit");
-        setAppliedStyle(errorStyle);
-      }
-    });
+    // FIXME: force unwrap
+    const cellErrors = validationErrors.getValidationErrors(
+      row.index,
+      column.Header!.toString()
+    );
+
+    let style = {};
+    if (cellErrors.size > 0) {
+      style = errorStyle;
+    } else {
+      style = notAnErrorStyle;
+    }
+
+    return style;
   }
-
-  // Respond to any external changes in the input field
-  // (I don't know if we actually need this)
-  useEffect(() => {
-    setValue(cell.value);
-  }, [cell.value]);
-
-  useEffect(() => {
-    applyPostValidationErrors();
-  }, [postValidationErrors]);
 
   return (
     <input
       value={value}
       onChange={onChange}
       onBlur={onBlur}
-      style={appliedStyle}
+      style={applyValidationErrorStyles()}
     />
   );
 };
