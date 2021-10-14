@@ -62,7 +62,7 @@ export class ValidationErrorMap extends Map<string, ValidationErrorSets> {
   }
 
   private clearPostValidationErrors() { 
-    Object.keys(this).forEach(key => {
+    this.forEach((value , key) => {
       this.removePostValidationErrorsForCell(key)
     })
   }
