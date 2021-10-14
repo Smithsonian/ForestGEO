@@ -1,4 +1,5 @@
 ﻿using Microsoft.Azure.Cosmos;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -24,6 +25,22 @@ namespace ForestGEO.WebApi.Triggers.Tree
             }
 
             return trees;
+        }
+
+        public static async Task<Dictionary<(string,int),Model.Contracts.Tree>> QueryCosmosToDictionary(string sqlQueryText, Container container)
+        {
+            List<Model.Contracts.Tree> trees = await QueryCosmos(sqlQueryText, container);
+            var result = new Dictionary<(string, int), Model.Contracts.Tree>();
+            foreach(var tree in trees)
+            {
+                if(!result.ContainsKey((tree.Tag, tree.Subquadrat)))
+                {
+                    result.Add (
+                        (tree.Tag, tree.Subquadrat),
+                        tree);
+                }
+            }
+            return result;
         }
     }
 }

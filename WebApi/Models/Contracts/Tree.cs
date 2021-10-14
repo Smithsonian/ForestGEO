@@ -9,12 +9,12 @@ namespace ForestGEO.WebApi.Model.Contracts
         public string Type => "tree";
         public int CensusId { get; set; }
         public int PlotId { get; set; }
-        public string Subquadrat { get; set; }
-        public int Tag { get; set; }
+        public int Subquadrat { get; set; }
+        public string Tag { get; set; }
         public int StemTag { get; set; }
         public string SpCode { get; set; }
-        public double DBH { get; set; }
-        public double Htmeas { get; set; }
+        public double? DBH { get; set; }
+        public double? Htmeas { get; set; }
         public string Codes { get; set; }
         public string Comments { get; set; }
 

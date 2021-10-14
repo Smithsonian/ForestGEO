@@ -10,6 +10,7 @@ using Newtonsoft.Json;
 using Microsoft.Azure.Cosmos;
 using ForestGEO.WebApi.Model.Contracts;
 using System.Collections.Generic;
+using ForestGEO.WebApi.Model.Utilities;
 
 namespace ForestGEO.WebApi.Triggers.Tree
 {
@@ -29,11 +30,13 @@ namespace ForestGEO.WebApi.Triggers.Tree
             [HttpTrigger(AuthorizationLevel.Function, "get", Route = "Census")] HttpRequest req,
             ILogger log)
         {
-            log.LogInformation("C# HTTP trigger function processed a request.");
+            log.LogInformation("C# HTTP trigger function processed a get census request.");
 
-            var sqlQueryText = "SELECT * FROM c";
-
-            List<Model.Contracts.Tree> trees = await CosmosController.QueryCosmos(sqlQueryText, TreeTriggers.container);
+            List<Model.Contracts.Tree> trees = await CosmosController.QueryCosmos(
+                TreeUtilities.TreeSQLQuery(
+                    plotId: 1,
+                    censusId: 3), 
+                TreeTriggers.container);
 
             return new OkObjectResult(JsonConvert.SerializeObject(trees));
         }
@@ -42,19 +45,25 @@ namespace ForestGEO.WebApi.Triggers.Tree
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = "Census")] HttpRequest req,
             ILogger log)
         {
-            log.LogInformation("C# HTTP trigger function processed a request.");
-            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            var data = JsonConvert.DeserializeObject<ForestGEO.WebApi.Model.Contracts.Tree[]>(requestBody);
+            log.LogInformation("C# HTTP trigger function processed a post census request.");
 
-            if(data != null && data.Length > 0)
-            {
-                return new OkObjectResult(JsonConvert.SerializeObject(data));
-            }
-            else
+            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            var currentCensus = JsonConvert.DeserializeObject<Model.Contracts.Tree[]>(requestBody);
+
+            if(currentCensus == null || currentCensus.Length == 0)
             {
                 return new BadRequestObjectResult("Unable to parse input");
             }
+
+            var priorCensus = await CosmosController.QueryCosmosToDictionary(
+                TreeUtilities.TreeSQLQuery(
+                    plotId: 1,
+                    censusId: 2),
+                TreeTriggers.container);
             
+            return new OkObjectResult(
+                JsonConvert.SerializeObject(
+                    TreeUtilities.CheckDeadTrees(currentCensus,priorCensus)));
         }
     }
 }
