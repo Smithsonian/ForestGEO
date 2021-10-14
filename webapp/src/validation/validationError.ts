@@ -50,25 +50,43 @@ export class ValidationErrorMap extends Map<string, ValidationErrorSets> {
   }
 
   setPostValidationErrors(errs: Set<ValidationError>) {
+    this.clearPostValidationErrors()
+
     errs.forEach(e => {
-      
+      this.addPostValidationError(e)  
     })
-    const key = this.makeKey(index, column)
-    const curr = this.get(key)
-    if (curr) {
-      curr.postValidationErrors = errs
-      this.set(key, curr)
-    } else {
-      this.set(key, {
-        preValidationErrors: new Set<ValidationError>(),
-        postValidationErrors: errs
-      })
-    }
   }
 
   private makeKey(index: number, column: string) {
     return [index, column].join(',')
   }
 
-  private 
+  private clearPostValidationErrors() { 
+    Object.keys(this).forEach(key => {
+      this.removePostValidationErrorsForCell(key)
+    })
+  }
+
+  private removePostValidationErrorsForCell(key: string) {
+    const curr = this.get(key)
+    if (curr) {
+      curr.postValidationErrors.clear()
+      this.set(key, curr)
+    }
+  }
+
+  private addPostValidationError(e: ValidationError) {
+    console.log("adding post validation error", e)
+    const key = this.makeKey(e.index, e.column)
+    const curr = this.get(key)
+    if (curr) {
+      curr.preValidationErrors.add(e)
+      this.set(key, curr);
+    } else {
+      this.set(key, {
+        preValidationErrors: new Set<ValidationError>(),
+        postValidationErrors: new Set<ValidationError>([e])
+      })
+    }
+  }
 }
