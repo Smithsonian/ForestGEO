@@ -2,12 +2,12 @@ import { useState, useMemo } from "react";
 import { Column } from "react-table";
 import { EditableTable } from "../../../components/editableTable";
 
-import { Stem } from "../../../types";
+import { Tree } from "../../../types";
 import { PostValidationError } from "../../../validation/postValidation";
 
 interface QuadratDataEntryFormProps {
   columns: Column[];
-  data: Stem[];
+  data: Tree[];
   updateHandler: Function;
   postValidationErrors: PostValidationError[];
 }
