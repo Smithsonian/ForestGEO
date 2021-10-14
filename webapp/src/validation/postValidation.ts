@@ -1,4 +1,4 @@
-import { Stem } from "../types";
+import { Tree } from "../types";
 
 export type PostValidationError = {
   // For now using the index in the data array since there's no PK.
@@ -8,7 +8,7 @@ export type PostValidationError = {
   errorMessage: string
 }
 
-export function postValidate(data: Stem[]): PostValidationError[] {
+export function postValidate(data: Tree[]): PostValidationError[] {
   console.log("postvalidate")
   console.log(data)
   const errors: PostValidationError[] = [];
