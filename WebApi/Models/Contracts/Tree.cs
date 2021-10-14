@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 
 namespace ForestGEO.WebApi.Model.Contracts
 {
@@ -16,5 +17,8 @@ namespace ForestGEO.WebApi.Model.Contracts
         public double Htmeas { get; set; }
         public string Codes { get; set; }
         public string Comments { get; set; }
+
+        // Errors resulting from cloud-side validation when POST'ing the tree.
+        public IList<string> Errors { get; set; }
     }
 }
