@@ -76,11 +76,10 @@ export class ValidationErrorMap extends Map<string, ValidationErrorSets> {
   }
 
   private addPostValidationError(e: ValidationError) {
-    console.log("adding post validation error", e)
     const key = this.makeKey(e.index, e.column)
     const curr = this.get(key)
     if (curr) {
-      curr.preValidationErrors.add(e)
+      curr.postValidationErrors.add(e)
       this.set(key, curr);
     } else {
       this.set(key, {
