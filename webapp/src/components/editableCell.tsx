@@ -29,6 +29,12 @@ export const EditableCell = ({
     }
   };
 
+  // Respond to any external changes in the input field
+  // (I don't know if we actually need this)
+  useEffect(() => {
+    setValue(cell.value);
+  }, [cell.value]);
+
   // Wait to actually update the table state when we unfocus the input field
   const onBlur = () => {
     console.log(row.index, column.Header, value);

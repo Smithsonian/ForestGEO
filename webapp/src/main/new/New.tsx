@@ -41,10 +41,11 @@ export const New = () => {
 
   // Table data has to be memoized for react-table performance
   const columnHeaders = useMemo(() => columns, []);
-  const [data, setData] = useState(useMemo(() => mockCensusData, []));
+  const [data, setData] = useState(mockCensusData);
   const [validationErrors, setValidationErrors] = useState(
     new ValidationErrorMap()
   );
+  const [hackyForceRerender, setHackyForceRerender] = useState(false);
 
   const updateData = (rowIndex: number, columnId: string, value: any) => {
     setData((old) =>
@@ -72,6 +73,15 @@ export const New = () => {
     }
   };
 
+  const applyPostValidation = () => {
+    // HACK to get the cells to rerender
+    // Why doesn't React count changes to an Object as a state change?!
+    setHackyForceRerender(!hackyForceRerender);
+
+    const postErrors = postValidate(data);
+    validationErrors.setPostValidationErrors(postErrors);
+  };
+
   return (
     <>
       <h1>Old Trees Form</h1>
@@ -85,8 +95,7 @@ export const New = () => {
       <button
         type="submit"
         onClick={() => {
-          const postErrors = postValidate(data);
-          validationErrors.setPostValidationErrors(postErrors);
+          applyPostValidation();
           if (validationErrors.size === 0) {
             // FIXME: revise this conditional to use ValidationErrorMap
             insertStems(formData).catch((error) => setErrors(error));
