@@ -4,11 +4,10 @@ import { Shimmer, ShimmerElementType } from "@fluentui/react/lib/Shimmer";
 import { QuadratDataEntryForm } from "./QuadratDataEntryForm";
 import { QuadratMetadataEntryForm } from "./QuadratMetadataEntryForm";
 import { columns } from "./QuadratDataEntryForm/columnHeaders";
+import { preValidate } from "../../validation/preValidation";
+import { postValidate } from "../../validation/postValidation";
+import { ValidationErrorMap } from "../../validation/validationError";
 
-import {
-  postValidate,
-  PostValidationError,
-} from "../../validation/postValidation";
 import { getCensus, insertCensus } from "./dataService";
 import { Tree } from "../../types";
 import { useStorageContext } from "../../context/storageContext";
@@ -24,10 +23,11 @@ export const New = () => {
 
   // Table data has to be memoized for react-table performance
   const columnHeaders = useMemo(() => columns, []);
+  const [validationErrors, setValidationErrors] = useState(
+    new ValidationErrorMap()
+  );
+  const [hackyForceRerender, setHackyForceRerender] = useState(false);
   const [data, setData] = useState<Tree[]>([]);
-  const [postValidationErrors, setPostValidationErrors] = useState<
-    PostValidationError[]
-  >([]);
 
   useEffect(() => {
     if (isOnline) {
@@ -43,10 +43,10 @@ export const New = () => {
             response.forEach((census) =>
               latestCensusStore
                 ?.setItem(census.CensusId.toString(), census)
-                .catch((error) => console.error(error))
+                .catch((error: any) => console.error(error))
             )
           )
-          .catch((error) => console.error(error));
+          .catch((error: any) => console.error(error));
       });
     } else if (latestCensusStore) {
       // Get the latest census from local when offline
@@ -57,8 +57,6 @@ export const New = () => {
   }, [isOnline, latestCensusStore, setIsLoading, setData]);
 
   const updateData = (rowIndex: number, columnId: string, value: any) => {
-    console.log(`set data for ${columnId} at row ${rowIndex} to ${value}`);
-
     setData((old) =>
       old.map((row, index) => {
         if (index === rowIndex) {
@@ -70,6 +68,27 @@ export const New = () => {
         return row;
       })
     );
+
+    // This is the callback that will do pre-validation (easy stuff e.g. regex)
+    const preValidationErrors = preValidate(rowIndex, columnId, value);
+    if (preValidationErrors.size > 0) {
+      validationErrors.addPreValidationErrors(
+        rowIndex,
+        columnId,
+        preValidationErrors
+      );
+    } else {
+      validationErrors.removePreValidationErrorsForCell(rowIndex, columnId);
+    }
+  };
+
+  const applyPostValidation = () => {
+    // HACK to get the cells to rerender
+    // Why doesn't React count changes to an Object as a state change?!
+    setHackyForceRerender(!hackyForceRerender);
+
+    const postErrors = postValidate(data);
+    validationErrors.setPostValidationErrors(postErrors);
   };
 
   return (
@@ -96,14 +115,14 @@ export const New = () => {
             columns={columnHeaders}
             data={data}
             updateHandler={updateData}
-            postValidationErrors={postValidationErrors}
+            validationErrors={validationErrors}
           />
           <button
             type="submit"
             onClick={() => {
-              const postErrors = postValidate(data);
-              setPostValidationErrors(postErrors);
-              if (postErrors.length === 0) {
+              applyPostValidation();
+              if (validationErrors.size === 0) {
+                // FIXME: revise this conditional to use ValidationErrorMap
                 if (isOnline) {
                   // Submit to cloud when online
                   insertCensus(data).catch((error) => setErrors(error));
@@ -112,7 +131,7 @@ export const New = () => {
                   data.forEach((census) =>
                     userInputStore
                       ?.setItem(census.CensusId.toString(), census)
-                      .catch((error) => console.error(error))
+                      .catch((error: any) => console.error(error))
                   );
                 }
               }
