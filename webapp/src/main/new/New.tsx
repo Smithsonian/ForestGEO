@@ -10,7 +10,7 @@ import {
   PostValidationError,
 } from "../../validation/postValidation";
 import { getCensus, insertCensus } from "./dataService";
-import { Stem } from "../../types";
+import { Tree } from "../../types";
 import { useStorageContext } from "../../context/storageContext";
 import { useConnectivityContext } from "../../context/connectivityContext";
 import { getAllItems } from "../../helpers/storageHelper";
@@ -24,7 +24,7 @@ export const New = () => {
 
   // Table data has to be memoized for react-table performance
   const columnHeaders = useMemo(() => columns, []);
-  const [data, setData] = useState<Stem[]>([]);
+  const [data, setData] = useState<Tree[]>([]);
   const [postValidationErrors, setPostValidationErrors] = useState<
     PostValidationError[]
   >([]);
@@ -50,7 +50,7 @@ export const New = () => {
       });
     } else if (latestCensusStore) {
       // Get the latest census from local when offline
-      getAllItems<Stem>(latestCensusStore).then((localCensus) =>
+      getAllItems<Tree>(latestCensusStore).then((localCensus) =>
         setData(localCensus)
       );
     }

@@ -1,4 +1,4 @@
-import { Stem } from "../../types";
+import { Tree } from "../../types";
 
 function getData<T>(
   url: string,
@@ -41,7 +41,7 @@ function postData(
   });
 }
 
-export function getCensus(): Promise<Stem[]> {
+export function getCensus(): Promise<Tree[]> {
   // TODO: Remove the access code and generate a new one
   const url =
     "https://forestgeodataapi.azurewebsites.net/api/Census?code=0kOITiOaxOVEYuCNzIc9V6uwhTz41qPvf92RgFF6bBfHQAZcsavyPA==";
@@ -49,7 +49,7 @@ export function getCensus(): Promise<Stem[]> {
   return getData(url);
 }
 
-export function insertCensus(stems: Stem[]): Promise<void> {
+export function insertCensus(stems: Tree[]): Promise<void> {
   // TODO: Remove the access code and generate a new one
   const url =
     "https://forestgeodataapi.azurewebsites.net/api/Census?code=xqRLaAgGAAQkMuMUwFu//JKC7BCEraubIlmfWOZsSBs4IsdbPDMF8w==";
