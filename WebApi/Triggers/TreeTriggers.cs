@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Microsoft.Azure.Cosmos;
-using ForestGEO.WebApi.Model.Contracts;
 using System.Collections.Generic;
 using ForestGEO.WebApi.Model.Utilities;
 
@@ -32,10 +31,11 @@ namespace ForestGEO.WebApi.Triggers.Tree
         {
             log.LogInformation("C# HTTP trigger function processed a get census request.");
 
+            //The census Id and plot Id are hardcoded for the hackathon demo. These should be query paramaters in a future update.
             List<Model.Contracts.Tree> trees = await CosmosController.QueryCosmos(
                 TreeUtilities.TreeSQLQuery(
                     plotId: 1,
-                    censusId: 3), 
+                    censusId: 2), 
                 TreeTriggers.container);
 
             return new OkObjectResult(JsonConvert.SerializeObject(trees));
@@ -55,12 +55,16 @@ namespace ForestGEO.WebApi.Triggers.Tree
                 return new BadRequestObjectResult("Unable to parse input");
             }
 
+            //The census Id and plot Id are hardcoded for the hackathon demo. These should be query paramaters in a future update.
+            //For the prior census we will need logic to look up the most recent finalized census.
             var priorCensus = await CosmosController.QueryCosmosToDictionary(
                 TreeUtilities.TreeSQLQuery(
                     plotId: 1,
                     censusId: 2),
                 TreeTriggers.container);
             
+            //TODO: Push updated data for the current census to Cosmos
+
             return new OkObjectResult(
                 JsonConvert.SerializeObject(
                     TreeUtilities.CheckDeadTrees(currentCensus,priorCensus)));
