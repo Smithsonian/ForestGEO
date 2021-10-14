@@ -44,7 +44,8 @@ export const EditableCell = ({
   function applyValidationErrorStyles(): Object {
     console.log("handlepostvalidate");
 
-    // FIXME: force unwrap
+    // FIXME: Force unwrapping the header could cause null reference
+    // errors if it is not populated. Should add a safe access operator.
     const cellErrors = validationErrors.getValidationErrors(
       row.index,
       column.Header!.toString()
