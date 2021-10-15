@@ -1,6 +1,14 @@
-# Getting Started with Create React App
+# Getting Started with the web app
 
+## About the app
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+
+It is a Progressive Web App (PWA) to support offline mode.
+
+A web worker is registered to upload user input data while app is online.
+
+For offline storage, we use [localForage](https://github.com/localForage/localForage) for [IndexedDB](https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API).
+
 
 ## Available Scripts
 
@@ -13,6 +21,8 @@ Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
 
 The page will reload if you make edits.\
 You will also see any lint errors in the console.
+
+Note: Service worker offline scenario cannot be tested in hot-reload mode. Please generate production build (`npm run build`) then run  `serve -s build`.
 
 ### `npm test`
 
@@ -27,20 +37,11 @@ It correctly bundles React in production mode and optimizes the build for the be
 The build is minified and the filenames include the hashes.\
 Your app is ready to be deployed!
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+You can leverage serve to serving the production build from local machine.
+To install serve, run `npm install -g serve`
+After the product build succeed, run
+`serve -s build`
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
-
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
-
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+## Deployment
+This project isn't enabled CI/CD. Depolyment is done manually by uploading production build files into web server.
+To be able to register service worker for PWA, the web server has to enabled HTTPS if the domain is not localhost.
