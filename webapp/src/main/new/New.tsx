@@ -91,6 +91,15 @@ export const New = () => {
     validationErrors.setPostValidationErrors(postErrors);
   };
 
+  const applyCloudValidation = (response: Tree[]) => {
+    validationErrors.setCloudValidationErrors(response);
+    console.log(validationErrors);
+
+    // HACK to get the cells to rerender
+    // Why doesn't React count changes to an Object as a state change?!
+    setHackyForceRerender(!hackyForceRerender);
+  };
+
   return (
     <>
       <h1>Old Trees Form</h1>
@@ -119,13 +128,17 @@ export const New = () => {
           />
           <button
             type="submit"
-            onClick={() => {
+            onClick={async () => {
               applyPostValidation();
               if (validationErrors.size === 0) {
                 // FIXME: revise this conditional to use ValidationErrorMap
                 if (isOnline) {
                   // Submit to cloud when online
-                  insertCensus(data).catch((error) => setErrors(error));
+                  await insertCensus(data)
+                    .then((response) =>
+                      applyCloudValidation(response as Tree[])
+                    )
+                    .catch((error) => setErrors(error));
                 } else {
                   // Save locally when offline
                   data.forEach((census) =>

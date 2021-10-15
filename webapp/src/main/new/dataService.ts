@@ -56,5 +56,5 @@ export async function insertCensus(stems: Tree[]): Promise<Tree[]> {
   const url =
     "https://forestgeodataapi.azurewebsites.net/api/Census?code=xqRLaAgGAAQkMuMUwFu//JKC7BCEraubIlmfWOZsSBs4IsdbPDMF8w==";
 
-  return await postData(url, stems);
+  return postData(url, stems);
 }

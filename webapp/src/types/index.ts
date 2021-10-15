@@ -11,5 +11,11 @@ export type Tree = {
   Htmeas: number;
   Codes: string;
   Comments: string;
-  Errors?: string[]; // Errors resulting from cloud-side validation when POST'ing the tree.
+  Errors?: CloudValidationError[]; // Errors resulting from cloud-side validation when POST'ing the tree.
 };
+
+type CloudValidationError = {
+  ErrorCode: number
+  Column: string
+  Message: string
+}
