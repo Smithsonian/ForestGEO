@@ -1,6 +1,6 @@
 import { ValidationError } from "./validationError";
 
-export function preValidate(row: number, columnName: string, value: any): Set<ValidationError> { 
+export function preValidate(row: number, columnName: string, tag: string, subquadrat: number, value: any): Set<ValidationError> { 
   const validationErrors = new Set<ValidationError>()
 
   if (columnName === "DBH"){
@@ -8,6 +8,8 @@ export function preValidate(row: number, columnName: string, value: any): Set<Va
       validationErrors.add({
         index: row,
         column: columnName,
+        tag,
+        subquadrat,
         errorMessage:"DBH value cannot be empty."
       })
     }
@@ -18,6 +20,8 @@ export function preValidate(row: number, columnName: string, value: any): Set<Va
       validationErrors.add({
         index: row,
         column: columnName,
+        tag,
+        subquadrat,
         errorMessage:"DBH value must be between 1 and 200."
       })
     }
@@ -26,6 +30,8 @@ export function preValidate(row: number, columnName: string, value: any): Set<Va
       validationErrors.add({
         index: row,
         column: columnName,
+        tag,
+        subquadrat,
         errorMessage:"DBH value must be between 1 and 200."
       })    }
   }
