@@ -58,19 +58,6 @@ export function EditableTable({
             </tr>
           );
         })}
-        <tr>
-          {validationErrors.size !== 0 ? (
-            validationErrors
-              .getAllValidationErrors()
-              .map((v) => (
-                <div style={{ color: "red" }}>
-                  {`Validation error found in tag ${v.tag}, subquadrat ${v.subquadrat}: ${v.errorMessage}`}
-                </div>
-              ))
-          ) : (
-            <></>
-          )}
-        </tr>
       </tbody>
     </table>
   );
