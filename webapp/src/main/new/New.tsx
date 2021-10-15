@@ -5,7 +5,6 @@ import { QuadratDataEntryForm } from "./QuadratDataEntryForm";
 import { QuadratMetadataEntryForm } from "./QuadratMetadataEntryForm";
 import { columns } from "./QuadratDataEntryForm/columnHeaders";
 import { preValidate } from "../../validation/preValidation";
-import { postValidate } from "../../validation/postValidation";
 import { ValidationErrorMap } from "../../validation/validationError";
 
 import { getCensus, insertCensus } from "./dataService";
@@ -56,7 +55,13 @@ export const New = () => {
     }
   }, [isOnline, latestCensusStore, setIsLoading, setData]);
 
-  const updateData = (rowIndex: number, columnId: string, value: any) => {
+  const updateData = (
+    rowIndex: number,
+    columnId: string,
+    tag: string,
+    subquadrat: number,
+    value: any
+  ) => {
     setData((old) =>
       old.map((row, index) => {
         if (index === rowIndex) {
@@ -70,7 +75,13 @@ export const New = () => {
     );
 
     // This is the callback that will do pre-validation (easy stuff e.g. regex)
-    const preValidationErrors = preValidate(rowIndex, columnId, value);
+    const preValidationErrors = preValidate(
+      rowIndex,
+      columnId,
+      tag,
+      subquadrat,
+      value
+    );
     if (preValidationErrors.size > 0) {
       validationErrors.addPreValidationErrors(
         rowIndex,

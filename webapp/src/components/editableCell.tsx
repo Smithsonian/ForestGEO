@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Column, Cell, Row } from "react-table";
+import { Tree } from "../types";
 import { ValidationErrorMap } from "../validation/validationError";
 
 interface EditableCellProps {
@@ -7,6 +8,7 @@ interface EditableCellProps {
   column: Column;
   updateData: Function;
   cell: Cell;
+  data: Tree[];
   validationErrors: ValidationErrorMap;
 }
 
@@ -15,6 +17,7 @@ export const EditableCell = ({
   column,
   updateData,
   cell,
+  data,
   validationErrors,
 }: EditableCellProps) => {
   const errorStyle = { border: "2px solid red" };
@@ -38,7 +41,8 @@ export const EditableCell = ({
   // Wait to actually update the table state when we unfocus the input field
   const onBlur = () => {
     console.log(row.index, column.Header, value);
-    updateData(row.index, column.Header, value);
+    const tree = data[row.index];
+    updateData(row.index, column.Header, tree.Tag, tree.Subquadrat, value);
   };
 
   function applyValidationErrorStyles(): Object {

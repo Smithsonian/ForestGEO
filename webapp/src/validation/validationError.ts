@@ -1,4 +1,5 @@
-import { Tree } from "../types"
+import { TagItem } from "@fluentui/react"
+import { Tree, CloudValidationError } from "../types"
 
 /* eslint-disable class-methods-use-this */
 export type ValidationError = {
@@ -6,6 +7,8 @@ export type ValidationError = {
   // This must change if we can't guarantee the order of the array (e.g. sorting)
   index: number 
   column: string
+  tag: string
+  subquadrat: number
   errorMessage: string
 }
 
@@ -81,19 +84,21 @@ export class ValidationErrorMap extends Map<string, ValidationErrorSets> {
         tree.Errors.forEach(error => {
           // ASSUMPTION: The array order will remain constant 
           // (this is a bad assumption and should change)
-          this.addCloudValidationError(i, error.Column, error.Message)
+          this.addCloudValidationError(i, tree, error)
         })
       }
     })
   }
 
-  private addCloudValidationError(index: number, column: string, message: string) {
-    const key = this.makeKey(index, column)
+  private addCloudValidationError(index: number, tree: Tree, error: CloudValidationError) {
+    const key = this.makeKey(index, error.Column)
     const curr = this.get(key)
     const newError: ValidationError = {
       index,
-      column,
-      errorMessage: message
+      column: error.Column,
+      errorMessage: error.Message,
+      tag: tree.Tag,
+      subquadrat: tree.Subquadrat
     }
     if (curr) {
       curr.cloudValidationErrors.add(newError)

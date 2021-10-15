@@ -64,7 +64,7 @@ export function EditableTable({
               .getAllValidationErrors()
               .map((v) => (
                 <div style={{ color: "red" }}>
-                  {`Validation error found in ${v.column}: ${v.errorMessage}`}
+                  {`Validation error found in tag ${v.tag}, subquadrat ${v.subquadrat}: ${v.errorMessage}`}
                 </div>
               ))
           ) : (
