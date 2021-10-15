@@ -8,7 +8,7 @@ namespace ForestGEO.WebApi.Model.Utilities
     {
         private static readonly TreeError TreeDeadError = new TreeError(){
             ErrorCode = 1,
-            Column = "Tag",
+            Column = "Codes",
             Message = "This tree was dead in a previous census"
         };
 
