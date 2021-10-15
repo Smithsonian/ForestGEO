@@ -20,12 +20,12 @@ function getData<T>(
   });
 }
 
-function postData(
+async function postData(
   url: string,
   body: any,
   adtlHeaders?: Headers | string[][] | Record<string, string>
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
+): Promise<Tree[]> {
+  return new Promise<Tree[]>((resolve, reject) => {
     const headers = new Headers({
       ...adtlHeaders,
       "Content-Type": "application/json",
@@ -38,7 +38,7 @@ function postData(
     })
       .then(response => response.text())
       .then(text => JSON.parse(text))
-      .then(arr => console.log(arr))
+      .then(arr => resolve(arr))
       .catch((error) => reject(error));
   });
 }
@@ -51,10 +51,10 @@ export function getCensus(): Promise<Tree[]> {
   return getData(url);
 }
 
-export function insertCensus(stems: Tree[]): Promise<void> {
+export async function insertCensus(stems: Tree[]): Promise<Tree[]> {
   // TODO: Remove the access code and generate a new one
   const url =
     "https://forestgeodataapi.azurewebsites.net/api/Census?code=xqRLaAgGAAQkMuMUwFu//JKC7BCEraubIlmfWOZsSBs4IsdbPDMF8w==";
 
-  return postData(url, stems);
+  return await postData(url, stems);
 }
