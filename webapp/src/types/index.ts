@@ -7,8 +7,8 @@ export type Tree = {
   Subquadrat: number;
   SpCode: string;
   StemTag: string;
-  DBH: number;
-  Htmeas: number;
+  DBH: number | undefined; // undefined is for prun N-1 data that is populated in old tree form.
+  Htmeas: number | undefined; // undefined is for prun N-1 data that is populated in old tree form.
   Codes: string;
   Comments: string;
   Errors?: string[]; // Errors resulting from cloud-side validation when POST'ing the tree.

@@ -13,6 +13,7 @@ import { Tree } from "../../types";
 import { useStorageContext } from "../../context/storageContext";
 import { useConnectivityContext } from "../../context/connectivityContext";
 import { getAllItems } from "../../helpers/storageHelper";
+import { getDataForForm } from "../../helpers/formHelper";
 
 export const New = () => {
   const { latestCensusStore, userInputStore } = useStorageContext();
@@ -33,7 +34,8 @@ export const New = () => {
     if (isOnline) {
       setIsLoading(true);
       getCensus().then((response) => {
-        setData(response);
+        const prunData = getDataForForm(response);
+        setData(prunData);
         setIsLoading(false);
 
         // Refresh storage

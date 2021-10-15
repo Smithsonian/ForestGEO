@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Column, Cell, Row } from "react-table";
 import { ValidationErrorMap } from "../validation/validationError";
 
+export const readonlyColumns = ["Tag", "Subquadrat", "SpCode"];
+
 interface EditableCellProps {
   row: Row;
   column: Column;
@@ -67,6 +69,7 @@ export const EditableCell = ({
       onChange={onChange}
       onBlur={onBlur}
       style={applyValidationErrorStyles()}
+      disabled={readonlyColumns.includes(column.Header!.toString())}
     />
   );
 };
