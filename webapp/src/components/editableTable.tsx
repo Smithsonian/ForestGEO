@@ -58,6 +58,19 @@ export function EditableTable({
             </tr>
           );
         })}
+        <tr>
+          {validationErrors.size !== 0 ? (
+            validationErrors
+              .getAllValidationErrors()
+              .map((v) => (
+                <div style={{ color: "red" }}>
+                  {`Validation error found in ${v.column}: ${v.errorMessage}`}
+                </div>
+              ))
+          ) : (
+            <></>
+          )}
+        </tr>
       </tbody>
     </table>
   );

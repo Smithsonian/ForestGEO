@@ -82,14 +82,14 @@ export const New = () => {
     }
   };
 
-  const applyPostValidation = () => {
-    // HACK to get the cells to rerender
-    // Why doesn't React count changes to an Object as a state change?!
-    setHackyForceRerender(!hackyForceRerender);
-
-    const postErrors = postValidate(data);
-    validationErrors.setPostValidationErrors(postErrors);
-  };
+  // FIXME: Post validation is removed for now because it conflicts with cloud validation.
+  // const applyPostValidation = () => {
+  //   // HACK to get the cells to rerender
+  //   // Why doesn't React count changes to an Object as a state change?!
+  //   setHackyForceRerender(!hackyForceRerender);
+  //   const postErrors = postValidate(data);
+  //   validationErrors.setPostValidationErrors(postErrors);
+  // };
 
   const applyCloudValidation = (response: Tree[]) => {
     validationErrors.setCloudValidationErrors(response);
@@ -129,24 +129,20 @@ export const New = () => {
           <button
             type="submit"
             onClick={async () => {
-              applyPostValidation();
-              if (validationErrors.size === 0) {
-                // FIXME: revise this conditional to use ValidationErrorMap
-                if (isOnline) {
-                  // Submit to cloud when online
-                  await insertCensus(data)
-                    .then((response) =>
-                      applyCloudValidation(response as Tree[])
-                    )
-                    .catch((error) => setErrors(error));
-                } else {
-                  // Save locally when offline
-                  data.forEach((census) =>
-                    userInputStore
-                      ?.setItem(census.CensusId.toString(), census)
-                      .catch((error: any) => console.error(error))
-                  );
-                }
+              // FIXME: Post validation is removed for now because it conflicts with cloud validation.
+              // applyPostValidation();
+              if (isOnline) {
+                // Submit to cloud when online
+                await insertCensus(data)
+                  .then((response) => applyCloudValidation(response as Tree[]))
+                  .catch((error) => setErrors(error));
+              } else {
+                // Save locally when offline
+                data.forEach((census) =>
+                  userInputStore
+                    ?.setItem(census.CensusId.toString(), census)
+                    .catch((error: any) => console.error(error))
+                );
               }
             }}
           >

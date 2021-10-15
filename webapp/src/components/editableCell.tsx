@@ -17,7 +17,7 @@ export const EditableCell = ({
   cell,
   validationErrors,
 }: EditableCellProps) => {
-  const errorStyle = { border: "1px solid red" };
+  const errorStyle = { border: "2px solid red" };
   const notAnErrorStyle = { border: "1px solid black" };
 
   const [value, setValue] = useState(cell.value);
