@@ -17,12 +17,27 @@ export function QuadratDataEntryForm({
   validationErrors,
 }: QuadratDataEntryFormProps) {
   return (
-    <EditableTable
-      columns={columns}
-      data={data}
-      updateData={updateHandler}
-      validationErrors={validationErrors}
-    />
+    <>
+      <EditableTable
+        columns={columns}
+        data={data}
+        updateData={updateHandler}
+        validationErrors={validationErrors}
+      />
+      <div>
+        {validationErrors.size !== 0 ? (
+          validationErrors
+            .getAllValidationErrors()
+            .map((v) => (
+              <div style={{ color: "red" }}>
+                {`Validation error found in tag ${v.tag}, subquadrat ${v.subquadrat}: ${v.errorMessage}`}
+              </div>
+            ))
+        ) : (
+          <></>
+        )}
+      </div>
+    </>
   );
 }
 
