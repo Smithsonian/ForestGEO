@@ -77,6 +77,7 @@ export const EditableCell = ({
       onBlur={onBlur}
       style={applyValidationErrorStyles()}
       disabled={readonlyColumns.includes(column.Header!.toString())}
+      aria-labelledby={column.Header!.toString()}
     />
   );
 };
