@@ -1,0 +1,45 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "sites_ForestGEODataApi_name": {
+            "value": null
+        },
+        "sites_hack2021_forestgeo_name": {
+            "value": null
+        },
+        "serverfarms_ASP_ForestGEO_aa4e_name": {
+            "value": null
+        },
+        "serverfarms_ASP_ForestGEO_bb95_name": {
+            "value": null
+        },
+        "components_ForestGEODataApi_name": {
+            "value": null
+        },
+        "components_hack2021_forestgeo_name": {
+            "value": null
+        },
+        "actionGroups_subscription_owner_name": {
+            "value": null
+        },
+        "storageAccounts_forestgeofuncapp_name": {
+            "value": null
+        },
+        "storageAccounts_storageaccountfores8c2e_name": {
+            "value": null
+        },
+        "databaseAccounts_forestgeo_westus_serverless_name": {
+            "value": null
+        },
+        "actionGroups_Application_Insights_Smart_Detection_name": {
+            "value": null
+        },
+        "workspaces_defaultworkspace_9d3c503d_1d8e_41d2_8f43_2717d9fb289b_wus_name": {
+            "value": null
+        },
+        "workspaces_defaultworkspace_9d3c503d_1d8e_41d2_8f43_2717d9fb289b_wus_externalid": {
+            "value": null
+        }
+    }
+}
