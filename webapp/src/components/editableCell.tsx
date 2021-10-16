@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Column, Cell, Row } from "react-table";
+import { useFormIsDirtyDispatch } from "../context/formContext";
 import { Tree } from "../types";
 import { ValidationErrorMap } from "../validation/validationError";
 
@@ -26,11 +27,13 @@ export const EditableCell = ({
   const notAnErrorStyle = { border: "1px solid black" };
 
   const [value, setValue] = useState(cell.value);
+  const setIsDirty = useFormIsDirtyDispatch();
 
   // Make the input field reflect changes as we type
   const onChange = (e: React.FormEvent<HTMLInputElement>) => {
     if (e && e.currentTarget) {
       setValue(e.currentTarget.value);
+      setIsDirty(true);
     }
   };
 

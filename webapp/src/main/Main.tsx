@@ -9,6 +9,7 @@ import { useStorageContext } from "../context/storageContext";
 import { getAllItems } from "../helpers/storageHelper";
 
 import "./main.css";
+import { FormProvider } from "../context/formContext";
 
 const uploadWorker: Worker = new Worker("./workers/upload-worker.js");
 
@@ -56,7 +57,9 @@ export const Main = () => {
           <Home />
         </Route>
         <Route path="/new">
-          <New />
+          <FormProvider>
+            <New />
+          </FormProvider>
         </Route>
       </Switch>
     </main>
