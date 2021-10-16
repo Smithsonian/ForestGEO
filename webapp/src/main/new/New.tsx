@@ -11,12 +11,20 @@ import { getCensus, insertCensus } from "./dataService";
 import { Tree } from "../../types";
 import { useStorageContext } from "../../context/storageContext";
 import { useConnectivityContext } from "../../context/connectivityContext";
-import { getAllItems } from "../../helpers/storageHelper";
+import { getAllItems, getKey } from "../../helpers/storageHelper";
 import { getDataForForm } from "../../helpers/formHelper";
+import {
+  useFormIsDirtyDispatch,
+  useFormIsDirtyState,
+} from "../../context/formContext";
 
 export const New = () => {
   const { latestCensusStore, userInputStore } = useStorageContext();
   const { isOnline } = useConnectivityContext();
+
+  // when a form is dirty, it means the user has updated cell values
+  const isDirty = useFormIsDirtyState();
+  const setIsDirty = useFormIsDirtyDispatch();
 
   const [errors, setErrors] = useState<any>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -30,7 +38,9 @@ export const New = () => {
   const [data, setData] = useState<Tree[]>([]);
 
   useEffect(() => {
-    if (isOnline) {
+    // If the form is dirty, skip updating the data of the form (online or offline).
+    // This can avoid user input data got wipe out due to network instability.
+    if (isOnline && !isDirty) {
       setIsLoading(true);
       getCensus().then((response) => {
         const prunData = getDataForForm(response);
@@ -43,17 +53,18 @@ export const New = () => {
           .then(() =>
             response.forEach((census) =>
               latestCensusStore
-                ?.setItem(census.CensusId.toString(), census)
+                ?.setItem(getKey(census), census)
                 .catch((error: any) => console.error(error))
             )
           )
           .catch((error: any) => console.error(error));
       });
-    } else if (latestCensusStore) {
+    } else if (!isOnline && !isDirty && latestCensusStore) {
       // Get the latest census from local when offline
-      getAllItems<Tree>(latestCensusStore).then((localCensus) =>
-        setData(localCensus)
-      );
+      getAllItems<Tree>(latestCensusStore).then((localCensus) => {
+        const prunData = getDataForForm(localCensus);
+        setData(prunData);
+      });
     }
   }, [isOnline, latestCensusStore, setIsLoading, setData]);
 
@@ -144,16 +155,19 @@ export const New = () => {
             onClick={async () => {
               // FIXME: Post validation is removed for now because it conflicts with cloud validation.
               // applyPostValidation();
+
               if (isOnline) {
                 // Submit to cloud when online
                 await insertCensus(data)
-                  .then((response) => applyCloudValidation(response as Tree[]))
+                  .then((response) => {
+                    applyCloudValidation(response as Tree[]);
+                  })
                   .catch((error) => setErrors(error));
               } else {
                 // Save locally when offline
                 data.forEach((census) =>
                   userInputStore
-                    ?.setItem(census.CensusId.toString(), census)
+                    ?.setItem(getKey(census), census)
                     .catch((error: any) => console.error(error))
                 );
               }
