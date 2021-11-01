@@ -1,7 +1,9 @@
+import { ConnectivityStateDispatch } from "../../context/connectivityContext";
 import { Tree } from "../../types";
 
 function getData<T>(
   url: string,
+  networkStateDispatch?: ConnectivityStateDispatch,
   adtlHeaders?: Headers | string[][] | Record<string, string>
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -16,13 +18,25 @@ function getData<T>(
     })
       .then((response: any) => response.json())
       .then((response: any) => resolve(response))
-      .catch((error) => reject(error));
+      .catch((error) => {
+        // Handle network error.
+        if (
+          networkStateDispatch != null &&
+          error.message === "Failed to fetch"
+        ) {
+          // update network status to offline
+          networkStateDispatch(false);
+        }
+
+        reject(error);
+      });
   });
 }
 
 async function postData(
   url: string,
   body: any,
+  networkStateDispatch?: ConnectivityStateDispatch,
   adtlHeaders?: Headers | string[][] | Record<string, string>
 ): Promise<Tree[]> {
   return new Promise<Tree[]>((resolve, reject) => {
@@ -36,25 +50,40 @@ async function postData(
       headers,
       body: JSON.stringify(body),
     })
-      .then(response => response.text())
-      .then(text => JSON.parse(text))
-      .then(arr => resolve(arr))
-      .catch((error) => reject(error));
+      .then((response) => response.text())
+      .then((text) => JSON.parse(text))
+      .then((arr) => resolve(arr))
+      .catch((error) => {
+        // Handle network error
+        if (
+          networkStateDispatch != null &&
+          error.message === "Failed to fetch"
+        ) {
+          // update network status to offline
+          networkStateDispatch(false);
+        }
+        reject(error);
+      });
   });
 }
 
-export function getCensus(): Promise<Tree[]> {
+export function getCensus(
+  networkStateDispatch?: ConnectivityStateDispatch
+): Promise<Tree[]> {
   // TODO: Remove the access code and generate a new one
   const url =
     "https://forestgeodataapi.azurewebsites.net/api/Census?code=0kOITiOaxOVEYuCNzIc9V6uwhTz41qPvf92RgFF6bBfHQAZcsavyPA==";
 
-  return getData(url);
+  return getData(url, networkStateDispatch);
 }
 
-export async function insertCensus(stems: Tree[]): Promise<Tree[]> {
+export function insertCensus(
+  stems: Tree[],
+  networkStateDispatch?: ConnectivityStateDispatch
+): Promise<Tree[]> {
   // TODO: Remove the access code and generate a new one
   const url =
     "https://forestgeodataapi.azurewebsites.net/api/Census?code=xqRLaAgGAAQkMuMUwFu//JKC7BCEraubIlmfWOZsSBs4IsdbPDMF8w==";
 
-  return postData(url, stems);
+  return postData(url, stems, networkStateDispatch);
 }

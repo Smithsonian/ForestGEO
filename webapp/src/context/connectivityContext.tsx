@@ -1,6 +1,7 @@
 import {
   createContext,
   ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -10,6 +11,8 @@ type ConnectivityProviderProps = {
   children: ReactNode;
 };
 
+export type ConnectivityStateDispatch = (isOnline: boolean) => void;
+
 type ConnectivityContext = {
   isOnline: boolean;
 };
@@ -18,8 +21,17 @@ const ConnectivityStateContext = createContext<ConnectivityContext>({
   isOnline: true,
 });
 
+const ConnectivityStateDispatchContext = createContext<
+  ConnectivityStateDispatch | undefined
+>(undefined);
+
 function ConnectivityProvider({ children }: ConnectivityProviderProps) {
   const [online, setOnline] = useState(navigator.onLine);
+
+  const setOnlineCallback = useCallback(
+    (newData) => setOnline(newData),
+    [setOnline]
+  );
 
   function handleOnline() {
     setOnline(true);
@@ -47,7 +59,9 @@ function ConnectivityProvider({ children }: ConnectivityProviderProps) {
         isOnline: online,
       }}
     >
-      {children}
+      <ConnectivityStateDispatchContext.Provider value={setOnlineCallback}>
+        {children}
+      </ConnectivityStateDispatchContext.Provider>
     </ConnectivityStateContext.Provider>
   );
 }
@@ -64,8 +78,21 @@ function useConnectivityContext() {
   return context;
 }
 
+function useConnectivityStateDispatch() {
+  const context = useContext(ConnectivityStateDispatchContext);
+
+  if (context === undefined) {
+    throw new Error(
+      "useConnectivityStateDispatch must be used within a ConnectivityProvider"
+    );
+  }
+
+  return context;
+}
+
 export {
   ConnectivityProvider,
   useConnectivityContext,
+  useConnectivityStateDispatch,
   ConnectivityStateContext,
 };
