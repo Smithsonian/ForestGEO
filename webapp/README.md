@@ -42,6 +42,11 @@ To install serve, run `npm install -g serve`
 After the product build succeed, run
 `serve -s build`
 
+## Accessibility 
+To develop an accessible web app, these are useful resources:
+1. [W3C Accessibility Tutorials](https://www.w3.org/WAI/tutorials/)
+2. [Lighthouse](https://developers.google.com/web/tools/lighthouse/) for accessibility testing
+
 ## Deployment
 This project isn't enabled CI/CD. Depolyment is done manually by uploading production build files into web server.
 To be able to register service worker for PWA, the web server has to enabled HTTPS if the domain is not localhost.

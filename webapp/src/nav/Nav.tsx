@@ -8,9 +8,9 @@ export const Nav = () => {
 
   return (
     <nav className="topnav">
-      <img src={logo} alt="logo" width="150" className="logo" />
-      <ul className="menu">
-        <li>
+      <img src={logo} alt="The logo of ForestGEO - Global Earth Observatory Network" width="150" className="logo" />
+      <ul role="menubar" className="menu">
+        <li role="menuitem">
           <Link to="/">Home</Link>
         </li>
         <li>
