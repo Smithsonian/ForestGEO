@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import '@testing-library/jest-dom';
 
 import App from '../renderer/App';
+import Nav from '../renderer/Nav';
 
 describe('App', () => {
   it('should render', () => {
@@ -12,8 +13,12 @@ describe('App', () => {
   });
 });
 
-describe('Data Entry', () => {
-  it('should render on click', () => {
+describe('Nav', () => {
+  it('should render', () => {
+    expect(render(<Nav />, { wrapper: MemoryRouter })).toBeTruthy();
+  });
+
+  it('should switch to Data Entry', () => {
     render(<App />, { wrapper: MemoryRouter });
 
     const leftClick = { button: 0 };
@@ -21,23 +26,19 @@ describe('Data Entry', () => {
 
     expect(screen.getByText(/you are in data entry mode/i)).toBeInTheDocument();
   });
-});
 
-describe('Data Reports', () => {
-  it('should render on click', () => {
+  it('should switch to Data Reports', () => {
     render(<App />, { wrapper: MemoryRouter });
 
     const leftClick = { button: 0 };
-    userEvent.click(screen.getByText(/data report/i), leftClick);
+    userEvent.click(screen.getByText(/data reports/i), leftClick);
 
     expect(
       screen.getByText(/you are in data reports mode/i)
     ).toBeInTheDocument();
   });
-});
 
-describe('Field Forms', () => {
-  it('should render on click', () => {
+  it('should switch to Field Forms', () => {
     render(<App />, { wrapper: MemoryRouter });
 
     const leftClick = { button: 0 };
