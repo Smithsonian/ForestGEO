@@ -1,9 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+
 import '@testing-library/jest-dom';
 import App from '../renderer/App';
 import Nav from '../renderer/Nav';
+import DataEntry from '../renderer/routes/data-entry';
+import DataReports from '../renderer/routes/data-reports';
+import FieldForms from '../renderer/routes/field-forms';
 
 describe('Nav', () => {
   const leftClick = { button: 0 };
@@ -17,7 +21,7 @@ describe('Nav', () => {
 
     userEvent.click(screen.getByText(/data entry/i), leftClick);
 
-    expect(screen.getByText(/you are in data entry mode/i)).toBeInTheDocument();
+    expect(render(<DataEntry />, { wrapper: MemoryRouter })).toBeTruthy();
   });
 
   it('should switch to Data Reports', () => {
@@ -25,9 +29,7 @@ describe('Nav', () => {
 
     userEvent.click(screen.getByText(/data reports/i), leftClick);
 
-    expect(
-      screen.getByText(/you are in data reports mode/i)
-    ).toBeInTheDocument();
+    expect(render(<DataReports />, { wrapper: MemoryRouter })).toBeTruthy();
   });
 
   it('should switch to Field Forms', () => {
@@ -35,8 +37,6 @@ describe('Nav', () => {
 
     userEvent.click(screen.getByText(/field forms/i), leftClick);
 
-    expect(
-      screen.getByText(/you are in field forms mode/i)
-    ).toBeInTheDocument();
+    expect(render(<FieldForms />, { wrapper: MemoryRouter })).toBeTruthy();
   });
 });
