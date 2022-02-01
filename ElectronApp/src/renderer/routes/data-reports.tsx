@@ -1,6 +1,6 @@
 export default function DataReports() {
   return (
-    <div>
+    <div data-testid="data-reports">
       <h2>Data Reports</h2>
     </div>
   );
