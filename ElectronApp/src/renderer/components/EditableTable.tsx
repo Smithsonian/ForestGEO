@@ -1,4 +1,8 @@
+/* eslint-disable @typescript-eslint/ban-types */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react/jsx-props-no-spreading */
+/* eslint react/prop-types: 0 */
+
 import React from 'react';
 import styled from 'styled-components';
 import { useTable, usePagination } from 'react-table';
@@ -41,15 +45,22 @@ const Styles = styled.div`
   }
 `;
 
+export interface EditableCellProps {
+  value: any;
+  row: any;
+  column: any;
+  updateMyData: Function;
+}
+
 const EditableCell = ({
   value: initialValue,
   row: { index },
   column: { id },
   updateMyData,
-}) => {
+}: EditableCellProps) => {
   const [value, setValue] = React.useState(initialValue);
 
-  const onChange = (e) => {
+  const onChange = (e: { target: { value: any } }) => {
     setValue(e.target.value);
   };
 
@@ -67,8 +78,13 @@ const EditableCell = ({
 const defaultColumn = {
   Cell: EditableCell,
 };
+export interface TableProps {
+  columns: any;
+  data: any;
+  updateMyData: (rowIndex: string | number, columnId: any, value: any) => void;
+}
 
-function Table({ columns, data, updateMyData }) {
+function Table({ columns, data, updateMyData }: TableProps) {
   const { getTableProps, getTableBodyProps, headerGroups, prepareRow, rows } =
     useTable(
       {
@@ -145,8 +161,12 @@ function EditableTable() {
 
   const [data, setData] = React.useState(() => makeData(20));
 
-  const updateMyData = (rowIndex, columnId, value) => {
-    setData((old) =>
+  const updateMyData = (
+    rowIndex: string | number,
+    columnId: any,
+    value: any
+  ) => {
+    setData((old: any[]) =>
       old.map((row, index) => {
         if (index === rowIndex) {
           return {
