@@ -9,6 +9,12 @@ import { useTable, usePagination } from 'react-table';
 
 import makeData from './makeData';
 
+declare module 'react-table' {
+  interface TableOptions<D extends object> {
+    updateMyData: (rowIndex: number, columnId: string, value: any) => void;
+  }
+}
+
 const Styles = styled.div`
   padding: 1rem;
 
@@ -81,7 +87,7 @@ const defaultColumn = {
 export interface TableProps {
   columns: any;
   data: any;
-  updateMyData: (rowIndex: string | number, columnId: any, value: any) => void;
+  updateMyData: any;
 }
 
 function Table({ columns, data, updateMyData }: TableProps) {

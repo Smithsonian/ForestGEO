@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import '@testing-library/jest-dom';
 
-import EditableTable from '../renderer/components/EditableTable';
 import App from '../renderer/App';
 
 describe('Editable Table', () => {
@@ -14,6 +13,6 @@ describe('Editable Table', () => {
 
     userEvent.click(screen.getByText(/data entry/i), leftClick);
 
-    expect(EditableTable).toBeInTheDocument();
+    expect(screen.getByText(/tree tag/i)).toBeInTheDocument();
   });
 });

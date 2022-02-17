@@ -15,16 +15,22 @@ const newTree = () => {
   };
 };
 
+interface Tree {
+  subRows: Tree[] | undefined;
+  tag: number;
+  subquadrat: number;
+  spcode: string;
+}
 export default function makeData(...lens: number[]) {
-  const makeDataLevel = (depth = 0) => {
-    const len = lens[depth];
-    return range(len).map(() => {
+  function makeDataLevel(depth = 0) {
+    function makeTree(): Tree {
       return {
         ...newTree(),
         subRows: lens[depth + 1] ? makeDataLevel(depth + 1) : undefined,
       };
-    });
-  };
-
+    }
+    const len = lens[depth];
+    return range(len).map(makeTree);
+  }
   return makeDataLevel();
 }
