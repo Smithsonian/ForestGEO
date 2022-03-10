@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import Nav from './Nav';
-import DataEntry from './routes/data-entry';
+import DataEntry from './components/data-entry';
 import DataReports from './routes/data-reports';
 import FieldForms from './routes/field-forms';
 
