@@ -5,10 +5,10 @@
 
 import React from 'react';
 import styled from 'styled-components';
-import { useTable } from 'react-table';
+import { useTable, usePagination } from 'react-table';
 
 import makeData from './makeData';
-// From DefinitelyTyped
+
 declare module 'react-table' {
   interface TableOptions<D extends object> {
     updateMyData: (rowIndex: number, columnId: string, value: any) => void;
@@ -50,15 +50,14 @@ const Styles = styled.div`
     }
   }
 `;
-// Added types
+
 export interface EditableCellProps {
   value: any;
-  row: number;
-  column: number;
+  row: any;
+  column: any;
   updateMyData: Function;
 }
 
-// Checked
 const EditableCell = ({
   value: initialValue,
   row: { index },
@@ -81,7 +80,7 @@ const EditableCell = ({
 
   return <input value={value} onChange={onChange} onBlur={onBlur} />;
 };
-// Checked
+
 const defaultColumn = {
   Cell: EditableCell,
 };
@@ -91,77 +90,17 @@ export interface TableProps {
   updateMyData: any;
 }
 
-// const EnhancedTable = ({
-//   columns,
-//   data,
-//   setData,
-//   updateMyData,
-//   skipPageReset,
-// }) => {
-//   const {
-//     getTableProps,
-//     headerGroups,
-//     prepareRow,
-//     page,
-//     gotoPage,
-//     setPageSize,
-//     preGlobalFilteredRows,
-//     setGlobalFilter,
-//     state: { pageIndex, pageSize, selectedRowIds, globalFilter },
-//   } = useTable(
-//     {
-//       columns,
-//       data,
-//       defaultColumn,
-//       autoResetPage: !skipPageReset,
-//       // updateMyData isn't part of the API, but
-//       // anything we put into these options will
-//       // automatically be available on the instance.
-//       // That way we can call this function from our
-//       // cell renderer!
-//       updateMyData,
-//     },
-//     useGlobalFilter,
-//     useSortBy,
-//     usePagination,
-//     useRowSelect,
-//     hooks => {
-//       hooks.allColumns.push(columns => [
-//         // Let's make a column for selection
-//         {
-//           id: 'selection',
-//           // The header can use the table's getToggleAllRowsSelectedProps method
-//           // to render a checkbox.  Pagination is a problem since this will select all
-//           // rows even though not all rows are on the current page.  The solution should
-//           // be server side pagination.  For one, the clients should not download all
-//           // rows in most cases.  The client should only download data for the current page.
-//           // In that case, getToggleAllRowsSelectedProps works fine.
-//           Header: ({ getToggleAllRowsSelectedProps }) => (
-//             <div>
-//               <IndeterminateCheckbox {...getToggleAllRowsSelectedProps()} />
-//             </div>
-//           ),
-//           // The cell can use the individual row's getToggleRowSelectedProps method
-//           // to the render a checkbox
-//           Cell: ({ row }) => (
-//             <div>
-//               <IndeterminateCheckbox {...row.getToggleRowSelectedProps()} />
-//             </div>
-//           ),
-//         },
-//         ...columns,
-//       ])
-//     }
-//   )
-
 function Table({ columns, data, updateMyData }: TableProps) {
   const { getTableProps, getTableBodyProps, headerGroups, prepareRow, rows } =
-    useTable({
-      columns,
-      data,
-      defaultColumn,
-      updateMyData,
-    });
+    useTable(
+      {
+        columns,
+        data,
+        defaultColumn,
+        updateMyData,
+      },
+      usePagination
+    );
 
   return (
     <>
@@ -222,18 +161,17 @@ function EditableTable() {
         accessor: 'codes',
       },
     ],
+
     []
   );
 
   const [data, setData] = React.useState(() => makeData(20));
-  const [skipPageReset, setSkipPageReset] = React.useState(false);
 
   const updateMyData = (
     rowIndex: string | number,
     columnId: any,
     value: any
   ) => {
-    setSkipPageReset(true);
     setData((old: any[]) =>
       old.map((row, index) => {
         if (index === rowIndex) {
@@ -249,12 +187,7 @@ function EditableTable() {
 
   return (
     <Styles>
-      <Table
-        columns={columns}
-        data={data}
-        updateMyData={updateMyData}
-        skipPageReset={skipPageReset}
-      />
+      <Table columns={columns} data={data} updateMyData={updateMyData} />
     </Styles>
   );
 }
