@@ -5,7 +5,7 @@
 import webpack from 'webpack';
 import path from 'path';
 import { merge } from 'webpack-merge';
-import baseConfig from './webpack.config.base';
+import baseConfig from './.base';
 import webpackPaths from './webpack.paths';
 import { dependencies } from '../../package.json';
 import checkNodeEnv from '../scripts/check-node-env';
@@ -14,7 +14,7 @@ checkNodeEnv('development');
 
 const dist = webpackPaths.dllPath;
 
-const configuration: webpack.Configuration = {
+const configuration: uration = {
   context: webpackPaths.rootPath,
 
   devtool: 'eval',
@@ -26,9 +26,9 @@ const configuration: webpack.Configuration = {
   externals: ['fsevents', 'crypto-browserify'],
 
   /**
-   * Use `module` from `webpack.config.renderer.dev.js`
+   * Use `module` from `.renderer.dev.js`
    */
-  module: require('./webpack.config.renderer.dev').default.module,
+  module: require('./.renderer.dev').default.module,
 
   entry: {
     renderer: Object.keys(dependencies || {}),
