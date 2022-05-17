@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Box } from '@mui/system';
-import { parse } from 'papaparse';
+import { parse, ParseConfig } from 'papaparse';
+import Box from '@mui/material/Box';
 
 export default function Dropzone() {
   // @ts-ignore
@@ -27,7 +27,8 @@ export default function Dropzone() {
         const binaryStr = reader.result as string;
         console.log(binaryStr);
         console.log(parse(binaryStr));
-        const results = parse(binaryStr);
+        const config: ParseConfig = { delimiter: ',' };
+        const results = parse(binaryStr, config);
 
         console.log(JSON.stringify(results.data));
 
@@ -46,15 +47,29 @@ export default function Dropzone() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
 
   return (
-    <Box component="div" sx={{ p: 2, border: '1px dashed grey' }}>
-      <div {...getRootProps()}>
-        <input {...getInputProps()} />
-        {isDragActive ? (
-          <p>Drop the files here ...</p>
-        ) : (
-          <p>Drag 'n' drop some files here, or click to select files</p>
-        )}
-      </div>
+    <Box
+      sx={{
+        width: 750,
+        height: 450,
+        typography: 'body1',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        justify: 'center',
+        backgroundColor: 'primary.light',
+        '&:hover': {
+          backgroundColor: 'primary.main',
+          opacity: [0.9, 0.8, 0.7],
+        },
+      }}
+      {...getRootProps()}
+    >
+      <input {...getInputProps()} />
+      {isDragActive ? (
+        <p>Drop the files here ...</p>
+      ) : (
+        <p>Drag 'n' drop some files here, or click to select files</p>
+      )}
     </Box>
   );
 }

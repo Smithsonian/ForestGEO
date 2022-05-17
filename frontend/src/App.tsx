@@ -1,12 +1,12 @@
 import React from 'react';
-import Button from '@mui/material/Button';
 import Dropzone from './components/Dropzone';
+import Navbar from './components/Navbar';
 
 function App() {
   return (
     <>
+      <Navbar />
       <Dropzone />
-      <Button variant="contained">Hello World</Button>
     </>
   );
 }
