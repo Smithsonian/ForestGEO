@@ -3,6 +3,51 @@ import { useDropzone } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
 import Box from '@mui/material/Box';
 
+export interface DropzonePureProps {
+  isDragActive: boolean;
+  getRootProps: any;
+  getInputProps: any;
+}
+
+export function DropzonePure({
+  getRootProps,
+  getInputProps,
+  isDragActive,
+}: DropzonePureProps) {
+  const extraStyles = isDragActive
+    ? {}
+    : {
+        '&:hover': {
+          backgroundColor: 'primary.main',
+          opacity: [0.9, 0.8, 0.7],
+        },
+      };
+
+  return (
+    <Box
+      sx={{
+        width: 750,
+        height: 450,
+        typography: 'body1',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        justify: 'center',
+        backgroundColor: 'primary.light',
+        ...extraStyles,
+      }}
+      {...getRootProps()}
+    >
+      <input {...getInputProps()} />
+      {isDragActive ? (
+        <p>Drop the files here ...</p>
+      ) : (
+        <p>Drag 'n' drop some files here, or click to select files</p>
+      )}
+    </Box>
+  );
+}
+
 export default function Dropzone() {
   // @ts-ignore
   const onDrop = useCallback((acceptedFiles) => {
@@ -47,29 +92,10 @@ export default function Dropzone() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
 
   return (
-    <Box
-      sx={{
-        width: 750,
-        height: 450,
-        typography: 'body1',
-        textAlign: 'center',
-        display: 'flex',
-        flexDirection: 'column',
-        justify: 'center',
-        backgroundColor: 'primary.light',
-        '&:hover': {
-          backgroundColor: 'primary.main',
-          opacity: [0.9, 0.8, 0.7],
-        },
-      }}
-      {...getRootProps()}
-    >
-      <input {...getInputProps()} />
-      {isDragActive ? (
-        <p>Drop the files here ...</p>
-      ) : (
-        <p>Drag 'n' drop some files here, or click to select files</p>
-      )}
-    </Box>
+    <DropzonePure
+      isDragActive={isDragActive}
+      getRootProps={getRootProps}
+      getInputProps={getInputProps}
+    />
   );
 }
