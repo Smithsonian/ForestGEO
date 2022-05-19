@@ -12,7 +12,12 @@ export default function Navbar() {
       <AppBar position="static">
         <Toolbar>
           <SelectedMenu />
-          <IconButton size="large" color="inherit" aria-label="menu">
+          <IconButton
+            size="large"
+            color="inherit"
+            aria-label="menu"
+            sx={{ marginLeft: 'auto' }}
+          >
             <AccountCircle />
           </IconButton>
         </Toolbar>
