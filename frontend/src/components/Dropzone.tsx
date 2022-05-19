@@ -2,6 +2,8 @@ import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
 import Box from '@mui/material/Box';
+import FileUploadIcon from '@mui/icons-material/FileUpload';
+import { Typography } from '@mui/material';
 
 export interface DropzonePureProps {
   isDragActive: boolean;
@@ -14,35 +16,39 @@ export function DropzonePure({
   getInputProps,
   isDragActive,
 }: DropzonePureProps) {
-  const extraStyles = isDragActive
-    ? {}
-    : {
-        '&:hover': {
-          backgroundColor: 'primary.main',
-          opacity: [0.9, 0.8, 0.7],
-        },
-      };
-
   return (
     <Box
       sx={{
-        width: 750,
-        height: 450,
-        typography: 'body1',
-        textAlign: 'center',
-        display: 'flex',
-        flexDirection: 'column',
-        justify: 'center',
-        backgroundColor: 'primary.light',
-        ...extraStyles,
+        width: 700,
+        height: 400,
+        backgroundColor: '#E2EAE6',
+        m: 'auto',
+        mt: 8,
+        border: '3px dashed',
+        borderColor: 'primary.main',
       }}
-      {...getRootProps()}
     >
+      <Typography align="center">
+        {' '}
+        <FileUploadIcon color="primary" sx={{ fontSize: 80 }} />{' '}
+      </Typography>
       <input {...getInputProps()} />
       {isDragActive ? (
-        <p>Drop the files here ...</p>
+        <Typography
+          color="primary"
+          align="center"
+          sx={{ textTransform: 'uppercase' }}
+        >
+          Drop the files here ...
+        </Typography>
       ) : (
-        <p>Drag 'n' drop some files here, or click to select files</p>
+        <Typography
+          color="primary"
+          align="center"
+          sx={{ textTransform: 'uppercase' }}
+        >
+          Drag 'n' drop some files here, or click to select files
+        </Typography>
       )}
     </Box>
   );
