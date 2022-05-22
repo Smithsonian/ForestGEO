@@ -27,6 +27,7 @@ export function DropzonePure({
         border: '3px dashed',
         borderColor: 'primary.main',
       }}
+      {...getRootProps()}
     >
       <Typography align="center">
         {' '}
