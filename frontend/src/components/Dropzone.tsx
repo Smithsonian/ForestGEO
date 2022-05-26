@@ -4,6 +4,7 @@ import { parse, ParseConfig } from 'papaparse';
 import Box from '@mui/material/Box';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import { Typography } from '@mui/material';
+import { Stack } from '@mui/material';
 
 export interface DropzonePureProps {
   isDragActive: boolean;
@@ -18,6 +19,9 @@ export function DropzonePure({
 }: DropzonePureProps) {
   return (
     <Box
+      component={Stack}
+      direction="column"
+      justifyContent="center"
       sx={{
         width: 700,
         height: 400,
@@ -35,20 +39,12 @@ export function DropzonePure({
       </Typography>
       <input {...getInputProps()} />
       {isDragActive ? (
-        <Typography
-          color="primary"
-          align="center"
-          sx={{ textTransform: 'uppercase' }}
-        >
-          Drop the files here ...
+        <Typography color="primary" align="center">
+          Drop file here...
         </Typography>
       ) : (
-        <Typography
-          color="primary"
-          align="center"
-          sx={{ textTransform: 'uppercase' }}
-        >
-          Drag 'n' drop some files here, or click to select files
+        <Typography color="primary" align="center">
+          <b>Choose a CSV file</b> or drag it here.
         </Typography>
       )}
     </Box>
