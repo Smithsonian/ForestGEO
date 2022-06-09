@@ -73,12 +73,8 @@ export default function Dropzone() {
         // Here we output the content of the files in JSON format as a placeholder.
         // In the future, we would like to make API calls to our backend function app to validate the data.
         const binaryStr = reader.result as string;
-        console.log(binaryStr);
-        console.log(parse(binaryStr));
         const config: ParseConfig = { delimiter: ',' };
         const results = parse(binaryStr, config);
-
-        console.log(JSON.stringify(results.data));
 
         if (results.errors.length) {
           alert(
