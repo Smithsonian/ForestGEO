@@ -56,13 +56,12 @@ export default function Dropzone() {
   const onDrop = useCallback((acceptedFiles) => {
     acceptedFiles.forEach((file: File) => {
       if (file.type !== 'text/csv') {
-        // Not the right type of file, so we skip it for now.
         alert(
           'Only .csv files are supported. Uploaded file is called:' +
             file.name +
             ':'
         );
-        // Skip this file
+        // Not the right type of file, so we skip it for now.
         return;
       }
 
@@ -71,7 +70,8 @@ export default function Dropzone() {
       reader.onabort = () => alert('file reading was aborted');
       reader.onerror = () => alert('file reading has failed');
       reader.onload = () => {
-        // Do whatever you want with the file contents
+        // Here we output the content of the files in JSON format as a placeholder.
+        // In the future, we would like to make API calls to our backend function app to validate the data.
         const binaryStr = reader.result as string;
         console.log(binaryStr);
         console.log(parse(binaryStr));
@@ -89,8 +89,6 @@ export default function Dropzone() {
       };
       reader.readAsText(file);
     });
-    // Do something with the files
-    // console.log('acceptedFiles', acceptedFiles);
   }, []);
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
 
