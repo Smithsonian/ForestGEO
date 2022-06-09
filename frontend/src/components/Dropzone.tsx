@@ -58,8 +58,7 @@ export default function Dropzone() {
       if (file.type !== 'text/csv') {
         alert(
           'Only .csv files are supported. Uploaded file is called:' +
-            file.name +
-            ':'
+            file.name
         );
         // Not the right type of file, so we skip it for now.
         return;
@@ -75,6 +74,8 @@ export default function Dropzone() {
         const binaryStr = reader.result as string;
         const config: ParseConfig = { delimiter: ',' };
         const results = parse(binaryStr, config);
+
+        console.log(JSON.stringify(results.data));
 
         if (results.errors.length) {
           alert(
