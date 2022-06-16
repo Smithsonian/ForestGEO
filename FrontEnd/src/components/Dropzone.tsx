@@ -57,8 +57,7 @@ export default function Dropzone() {
     acceptedFiles.forEach((file: File) => {
       if (file.type !== 'text/csv') {
         alert(
-          'Only .csv files are supported. Uploaded file is called:' +
-            file.name
+          'Only .csv files are supported. Uploaded file is called:' + file.name
         );
         // Not the right type of file, so we skip it for now.
         return;
