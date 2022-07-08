@@ -1,0 +1,31 @@
+# in storybook you can create components or elements
+# an example of a component is a button, header, etc.
+
+# you can have a variation of each component using stories
+# an example of a variation is a blue button or a red button
+
+  ####################
+
+# How to add new UI element/component storybook
+
+# you will need 3 different files for each component:
+
+# file 1 Button.js - the component itself
+# this file will return a function component
+
+# file 2 Button.css - the base style for the component
+# you can make different variations of the component using classes
+
+# file 3 Button.stories.js - the component story
+# need to use component story format:
+  # add default export 
+  # name exports - represents each story (each variation)
+
+
+
+# to start the component explorer on port 6006:
+# allows you to see all components on your storybook
+  yarn storybook
+
+# to run the frontend app on port 3000:
+  yarn start
