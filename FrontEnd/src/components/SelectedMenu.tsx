@@ -31,7 +31,6 @@ export default function SelectedMenu() {
     <div>
       <List component="nav" aria-label="Device settings">
         <ListItem
-          button
           id="lock-button"
           aria-haspopup="listbox"
           aria-controls="lock-menu"
