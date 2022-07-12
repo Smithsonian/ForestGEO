@@ -4,25 +4,17 @@ import Navbar from './components/Navbar';
 import Validate from './components/Validate';
 import Browse from './components/Browse';
 import Report from './components/Report';
-import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 function App() {
   return (
     <Router>
-      <>
-        <Navbar />
-        <Switch>
-          <Route exact path="/">
-            <Validate />
-          </Route>
-          <Route exact path="/browse">
-            <Browse />
-          </Route>
-          <Route exact path="/report">
-            <Report />
-          </Route>
-        </Switch>
-      </>
+      <Navbar />
+      <Routes>
+        <Route path="/" element={<Validate />} />
+        <Route path="/browse" element={<Browse />} />
+        <Route path="/report" element={<Report />} />
+      </Routes>
     </Router>
   );
 }
