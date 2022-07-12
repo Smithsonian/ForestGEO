@@ -21,4 +21,4 @@ See our [technical specification](https://github.com/ForestGeoHack/ForestGEO/wik
 
 # How to use Storybook
 
-[**Link to Storybook document**](https://github.com/ForestGeoHack/ForestGEO/blob/gabriellaarcilla-patch-1/FrontEnd/buildStorybookUI.md)
+[Link to storybook document](buildStorybookUI.md)
