@@ -18,3 +18,7 @@ See our [technical specification](https://github.com/ForestGeoHack/ForestGEO/wik
 **Figure 1.3** Previously uploaded file list, with indication of validation status and ability to edit or delete files.
 
 ![Desktop - 4](https://user-images.githubusercontent.com/43100092/169611038-1e8c8150-ef0d-4a91-8408-50bed59970fd.jpg)
+
+# How to use Storybook
+
+[Link to storybook document](buildStorybookUI.md)
