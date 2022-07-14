@@ -4,10 +4,13 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import MenuItem from '@mui/material/MenuItem';
 import Menu from '@mui/material/Menu';
+import { useNavigate } from 'react-router-dom';
 
 const options = ['Validate', 'Report', 'Browse'];
 
 export default function SelectedMenu() {
+  let navigate = useNavigate();
+
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const open = Boolean(anchorEl);
@@ -21,6 +24,13 @@ export default function SelectedMenu() {
   ) => {
     setSelectedIndex(index);
     setAnchorEl(null);
+    if (index == 0) {
+      navigate('/');
+    } else if (index == 1) {
+      navigate('/report');
+    } else if (index == 2) {
+      navigate('/browse');
+    }
   };
 
   const handleClose = () => {
@@ -31,7 +41,6 @@ export default function SelectedMenu() {
     <div>
       <List component="nav" aria-label="Device settings">
         <ListItem
-          button
           id="lock-button"
           aria-haspopup="listbox"
           aria-controls="lock-menu"
