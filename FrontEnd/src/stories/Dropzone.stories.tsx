@@ -3,6 +3,7 @@ import { ComponentMeta, Story } from '@storybook/react';
 import Dropzone, {
   DropzonePure,
   DropzonePureProps,
+  DropzoneProps,
 } from '../components/Dropzone';
 
 export default {
@@ -27,7 +28,7 @@ Dropping.args = {
   getInputProps: () => null,
 };
 
-const TemplateDropzone: Story<{}> = (args) => <Dropzone {...args} />;
+const TemplateDropzone: Story<DropzoneProps> = (args) => <Dropzone {...args} />;
 
 export const DropzoneActive = TemplateDropzone.bind({});
-DropzoneActive.args = {};
+DropzoneActive.args = { onChange: () => null };
