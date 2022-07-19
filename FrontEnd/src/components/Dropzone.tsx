@@ -78,12 +78,11 @@ export default function Dropzone({ onChange }: DropzoneProps) {
         reader.onload = () => {
           // Do whatever you want with the file contents
           const binaryStr = reader.result as string;
-          console.log(binaryStr);
-          console.log(parse(binaryStr));
+
           const config: ParseConfig = { delimiter: ',' };
           const results = parse(binaryStr, config);
 
-          console.log(JSON.stringify(results.data));
+          //console.log(JSON.stringify(results.data));
 
           if (results.errors.length) {
             alert(
