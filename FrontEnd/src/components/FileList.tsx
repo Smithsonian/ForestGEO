@@ -1,5 +1,5 @@
 import { FileWithPath } from 'react-dropzone';
-//Test
+
 interface FileListProps {
   acceptedFiles: FileWithPath[];
 }
@@ -12,6 +12,7 @@ export default function FileList({ acceptedFiles }: FileListProps) {
         {file.path} - {file.size} bytes
       </li>
     ));
+
 
   return (
     <div>
