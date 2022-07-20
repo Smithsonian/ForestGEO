@@ -13,7 +13,6 @@ export default function FileList({ acceptedFiles }: FileListProps) {
       </li>
     ));
 
-
   return (
     <div>
       <aside>
