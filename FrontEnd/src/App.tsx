@@ -1,9 +1,9 @@
 import React from 'react';
 import Dropzone from './components/Dropzone';
 import Navbar from './components/Navbar';
-import Validate from './components/Validate';
-import Browse from './components/Browse';
-import Report from './components/Report';
+import Validate from './pages/Validate';
+import Browse from './pages/Browse';
+import Report from './pages/Report';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 function App() {
