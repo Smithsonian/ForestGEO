@@ -5,13 +5,11 @@ interface FileListProps {
 }
 
 export default function FileList({ acceptedFiles }: FileListProps) {
-  const newFiles = acceptedFiles
-    .filter((file) => file.type == 'text/csv')
-    .map((file: FileWithPath) => (
-      <li key={file.path}>
-        {file.path} - {file.size} bytes
-      </li>
-    ));
+  const newFiles = acceptedFiles.map((file: FileWithPath) => (
+    <li key={file.path}>
+      {file.path} - {file.size} bytes
+    </li>
+  ));
 
   return (
     <div>
