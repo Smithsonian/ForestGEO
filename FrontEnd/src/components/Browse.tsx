@@ -24,11 +24,6 @@ const Browse = () => {
     setRows(newRows);
   };
 
-  //PERMANENT CODE BELOW
-  //Commented out code is for use once the backend is set up.
-  //Once set up, simply replace fetch call with correct link, uncomment the code,
-  //and then delete the TEMPORARY code at the end of the file.
-
   async function getData() {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
@@ -128,66 +123,6 @@ const Browse = () => {
       </Grid>
     );
   }
-  /*
-  //TEMPORARY CODE BELOW
-  //Everything below is TEMPORARY data to test the UI for the table on browse page.
-  const [rows, setRows] = useState(data);
-
-  return (
-    <Grid
-      container
-      direction="row"
-      justifyContent="center"
-      alignItems="center"
-      sx={{ marginTop: 10 }}
-    >
-      <TableContainer
-        sx={{
-          maxHeight: '300px',
-          maxWidth: '75%',
-          border: 'solid',
-          borderColor: 'primary.main',
-          borderRadius: 2,
-        }}
-      >
-        <Table aria-label="simple table" stickyHeader>
-          <TableHead>
-            <TableRow>
-              <TableCell sx={{ fontWeight: 'bold' }}>Form</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Quadrant</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Date Entered</TableCell>
-              <TableCell sx={{ fontWeight: 'bold' }}>Validation</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 'bold' }}>
-                Actions
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.file}>
-                <TableCell>{row.file}</TableCell>
-                <TableCell>{row.quadrant}</TableCell>
-                <TableCell>{row.date}</TableCell>
-                <TableCell>{row.validation}</TableCell>
-                <TableCell align="center">
-                  <Button>
-                    <DownloadIcon></DownloadIcon>
-                  </Button>
-                  <Button>
-                    <EditIcon></EditIcon>
-                  </Button>
-                  <Button onClick={() => handleRemove(row.file)}>
-                    <DeleteIcon></DeleteIcon>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Grid>
-  );
-  */
 };
 
 export default Browse;
