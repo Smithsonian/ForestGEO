@@ -82,8 +82,6 @@ export default function Dropzone({ onChange }: DropzoneProps) {
       });
 
       onChange(acceptedFiles, rejectedFiles);
-      // console.log('acceptedFiles', acceptedFiles);
-      // console.log('rejectedFiles', rejectedFiles);
       rejectedFiles.forEach((fileRejection: FileRejection) => {
         alert(
           ' The file ' +
