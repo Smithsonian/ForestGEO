@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { useDropzone, FileWithPath } from 'react-dropzone';
+import { useDropzone, FileWithPath, FileRejection } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
 import Box from '@mui/material/Box';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
@@ -52,25 +52,13 @@ export function DropzonePure({
 }
 
 export interface DropzoneProps {
-  onChange(acceptedFiles: FileWithPath[]): void;
+  onChange(acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]): void;
 }
 
 export default function Dropzone({ onChange }: DropzoneProps) {
-  // @ts-ignore
   const onDrop = useCallback(
-    (acceptedFiles: FileWithPath[]) => {
+    (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
-        if (file.type !== 'text/csv') {
-          // Not the right type of file, so we skip it for now.
-          alert(
-            'Only .csv files are supported. Uploaded file is called:' +
-              file.name +
-              ':'
-          );
-          // Skip this file
-          return;
-        }
-
         const reader = new FileReader();
 
         reader.onabort = () => alert('file reading was aborted');
@@ -93,13 +81,21 @@ export default function Dropzone({ onChange }: DropzoneProps) {
         reader.readAsText(file);
       });
 
-      onChange(acceptedFiles);
-      // Do something with the files
-      // console.log('acceptedFiles', acceptedFiles);
+      onChange(acceptedFiles, rejectedFiles);
+      rejectedFiles.forEach((fileRejection: FileRejection) => {
+        alert(
+          ' The file ' +
+            fileRejection.file.name +
+            ' was not uploaded. Only .csv files are supported.'
+        );
+      });
     },
     [onChange]
   );
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: 'text/csv, application/vnd.ms-excel',
+  });
 
   return (
     <DropzonePure
