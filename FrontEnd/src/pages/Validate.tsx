@@ -1,5 +1,5 @@
-import Dropzone from './Dropzone';
-import FileList from './FileList';
+import Dropzone from '../components/Dropzone';
+import FileList from '../components/FileList';
 import { FileWithPath } from 'react-dropzone';
 import React from 'react';
 
