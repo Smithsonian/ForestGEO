@@ -1,10 +1,11 @@
+import { render } from '@testing-library/react';
 import React from 'react';
 import data from '../data.json';
 import '../stories/Table.css';
 
 export interface TableProps {
   error: boolean;
-  errorMessage: string;
+  errorMessage: { [index: number]: string };
 }
 
 const headers = [
@@ -34,7 +35,7 @@ export default function Table({ error, errorMessage }: TableProps) {
           </table>
 
           <div>
-            {data.map((data) => {
+            {data.map((data, index) => {
               return (
                 <table>
                   <tr>
@@ -46,7 +47,7 @@ export default function Table({ error, errorMessage }: TableProps) {
                     <td>{data.Codes}</td>
                     <td>{data.Comments}</td>
                   </tr>
-                  {<tr className="errorMessage">{errorMessage}</tr>}
+                  <tr className="errorMessage">{errorMessage[index]}</tr>
                 </table>
               );
             })}
