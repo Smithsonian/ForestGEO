@@ -24,11 +24,11 @@ export default function SelectedMenu() {
   ) => {
     setSelectedIndex(index);
     setAnchorEl(null);
-    if (index == 0) {
+    if (index === 0) {
       navigate('/');
-    } else if (index == 1) {
+    } else if (index === 1) {
       navigate('/report');
-    } else if (index == 2) {
+    } else if (index === 2) {
       navigate('/browse');
     }
   };
