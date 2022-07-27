@@ -1,5 +1,4 @@
 import React from 'react';
-import Dropzone from './components/Dropzone';
 import Navbar from './components/Navbar';
 import Validate from './pages/Validate';
 import Browse from './pages/Browse';
