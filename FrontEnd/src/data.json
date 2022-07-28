@@ -1,0 +1,56 @@
+[
+  {
+    "Tag": 1,
+    "Subquadrat": "testing",
+    "SpCode": "Letester",
+    "DBH": "com",
+    "Htmeas": "example",
+    "Codes": "51.189.247.168",
+    "Comments": "commentsss"
+  },
+  {
+    "Tag": 2,
+    "Subquadrat": "testing",
+    "SpCode": "tester",
+    "DBH": "@.com",
+    "Htmeas": "example",
+    "Codes": "106.123.76.196",
+    "Comments": "commentsss"
+  },
+  {
+    "Tag": 3,
+    "Subquadrat": "testing",
+    "SpCode": "tester",
+    "DBH": "s.com",
+    "Htmeas": "example",
+    "Codes": "95.153.34.2",
+    "Comments": "commentsss"
+  },
+  {
+    "Tag": 4,
+    "Subquadrat": "testing",
+    "SpCode": "tester",
+    "DBH": ".com",
+    "Htmeas": "example",
+    "Codes": "82.126.211.160",
+    "Comments": "commentsss"
+  },
+  {
+    "Tag": 5,
+    "Subquadrat": "testing",
+    "SpCode": "tester",
+    "DBH": "@.",
+    "Htmeas": "example",
+    "Codes": "154.110.25.119",
+    "Comments": "commentsss"
+  },
+  {
+    "Tag": 6,
+    "Subquadrat": "testing",
+    "SpCode": "vtester",
+    "DBH": "com",
+    "Htmeas": "Htmeaser",
+    "Codes": "196.73.68.88",
+    "Comments": "commentsss"
+  }
+]
