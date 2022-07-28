@@ -15,6 +15,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import data from '../mock-table-data.json';
 import CircularProgress from '@mui/material/CircularProgress';
+import '../CSS/Browse.css';
 
 const Browse = () => {
   let handleRemove = (i: any) => {
@@ -54,47 +55,23 @@ const Browse = () => {
     return <div>Error</div>;
   } else if (!isLoaded) {
     return (
-      <Grid
-        container
-        direction="column"
-        justifyContent="center"
-        alignItems="center"
-        sx={{ marginTop: 20 }}
-      >
-        <Box sx={{ fontWeight: 'bold', fontSize: '35px', mb: '30px' }}>
-          Loading Files...
-        </Box>
+      <Grid id={'grid1'} container direction="column" sx={{ marginTop: 20 }}>
+        <Box id={'box'}>Loading Files...</Box>
         <CircularProgress size={60}></CircularProgress>
       </Grid>
     );
   } else {
     return (
-      <Grid
-        container
-        direction="row"
-        justifyContent="center"
-        alignItems="center"
-        sx={{ marginTop: 10 }}
-      >
-        <TableContainer
-          sx={{
-            maxHeight: '300px',
-            maxWidth: '75%',
-            border: 'solid',
-            borderColor: 'primary.main',
-            borderRadius: 2,
-          }}
-        >
+      <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
+        <TableContainer id={'tableContainer'}>
           <Table aria-label="simple table" stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>Form</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Quadrant</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Date Entered</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Validation</TableCell>
-                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
-                  Actions
-                </TableCell>
+                <TableCell id="tableCell">Form</TableCell>
+                <TableCell id="tableCell">Quadrant</TableCell>
+                <TableCell id="tableCell">Date Entered</TableCell>
+                <TableCell id="tableCell">Validation</TableCell>
+                <TableCell id="lastTableCell">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
