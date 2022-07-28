@@ -1,0 +1,32 @@
+#grid1{
+    justify-content: center;
+    align-items: center;
+}
+
+#grid2{
+    justify-content: center;
+    align-items: center;
+}
+
+#box{
+    font-weight: bold;
+    font-size: 35px;
+    margin-bottom: 30px;
+}
+
+#tableContainer{
+    max-height: 300px;
+    max-width: 75%;
+    border: solid;
+    border-color: #0F5530;
+    border-radius: 2px;
+}
+
+#tableCell{
+    font-weight: bold;
+}
+
+#lastTableCell{
+    font-weight: bold;
+    text-align: center;
+}
