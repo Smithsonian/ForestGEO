@@ -1,0 +1,22 @@
+/** create spacing between rows */
+table {
+  border-collapse: separate; /** border-spacing is allow only if border-collapse is separate */
+  border-spacing: 0 20px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+th,
+td {
+  border: 1px solid #aba5a5;
+  display: inline-block; /* no line break // elements can be close together */
+  width: 115px;
+  height: 25px;
+  overflow: auto;
+  text-align: justify;
+  padding: 8px 5px;
+}
+
+.errorMessage {
+  color: red;
+}
