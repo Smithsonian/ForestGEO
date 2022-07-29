@@ -1,10 +1,14 @@
 import React from 'react';
+import Navbar from '../components/Navbar';
 
 const Report = () => {
   return (
-    <div>
-      <h2>Report Page!</h2>
-    </div>
+    <>
+      <Navbar></Navbar>
+      <div>
+        <h2>Report Page!</h2>
+      </div>
+    </>
   );
 };
 

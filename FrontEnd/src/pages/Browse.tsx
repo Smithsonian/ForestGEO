@@ -16,6 +16,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import data from '../mock-table-data.json';
 import CircularProgress from '@mui/material/CircularProgress';
 import '../CSS/Browse.css';
+import Navbar from '../components/Navbar';
 
 const Browse = () => {
   let handleRemove = (i: any) => {
@@ -62,42 +63,45 @@ const Browse = () => {
     );
   } else {
     return (
-      <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
-        <TableContainer id={'tableContainer'}>
-          <Table aria-label="simple table" stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell id="tableCell">Form</TableCell>
-                <TableCell id="tableCell">Quadrant</TableCell>
-                <TableCell id="tableCell">Date Entered</TableCell>
-                <TableCell id="tableCell">Validation</TableCell>
-                <TableCell id="lastTableCell">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.file}>
-                  <TableCell>{row.file}</TableCell>
-                  <TableCell>{row.quadrant}</TableCell>
-                  <TableCell>{row.date}</TableCell>
-                  <TableCell>{row.validation}</TableCell>
-                  <TableCell align="center">
-                    <Button>
-                      <DownloadIcon></DownloadIcon>
-                    </Button>
-                    <Button>
-                      <EditIcon></EditIcon>
-                    </Button>
-                    <Button onClick={() => handleRemove(row.file)}>
-                      <DeleteIcon></DeleteIcon>
-                    </Button>
-                  </TableCell>
+      <>
+        <Navbar></Navbar>
+        <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
+          <TableContainer id={'tableContainer'}>
+            <Table aria-label="simple table" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell id="tableCell">Form</TableCell>
+                  <TableCell id="tableCell">Quadrant</TableCell>
+                  <TableCell id="tableCell">Date Entered</TableCell>
+                  <TableCell id="tableCell">Validation</TableCell>
+                  <TableCell id="lastTableCell">Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Grid>
+              </TableHead>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.file}>
+                    <TableCell>{row.file}</TableCell>
+                    <TableCell>{row.quadrant}</TableCell>
+                    <TableCell>{row.date}</TableCell>
+                    <TableCell>{row.validation}</TableCell>
+                    <TableCell align="center">
+                      <Button>
+                        <DownloadIcon></DownloadIcon>
+                      </Button>
+                      <Button>
+                        <EditIcon></EditIcon>
+                      </Button>
+                      <Button onClick={() => handleRemove(row.file)}>
+                        <DeleteIcon></DeleteIcon>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Grid>
+      </>
     );
   }
 };

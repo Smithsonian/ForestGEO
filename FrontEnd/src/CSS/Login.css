@@ -1,0 +1,92 @@
+#login{
+    margin: auto;
+    padding: 10px;
+    width: 50%;
+    margin-top: 10px;
+    display: flex;
+    align-items:center;
+}
+
+img{
+    height: 250px;
+    width: 250px;
+}
+
+#loginForm{
+    border: solid;
+    border-color: #0F5530;
+    borderRadius: 2;
+    flex: 1;
+    height: 400px;
+    width: 300px;
+    padding: 10px;
+    text-algin:center;
+}
+
+#loginTitle{
+    text-align: center;
+    color: #0F5530;
+}
+
+#form{
+    margin-left: 20px;
+}
+
+#textFields{
+    font-size: 20px;
+    padding-top: 20px;
+}
+
+#username{
+
+}
+
+#blankUsernameError{
+    margin-bottom: 40px;
+}
+
+#fullUsernameError{
+    margin-top: 0px;
+    margin-bottom: 10px;
+    color: red;
+}
+
+#usernameField{
+    font-size: 15px;
+    margin-left: 5px;
+}
+
+#password{
+
+}
+
+#passwordField{
+    font-size: 15px;
+    margin-left: 5px;
+}
+
+#blankPasswordError{
+    margin-bottom: 40px;
+}
+
+#fullPasswordError{
+    margin-top: 0px;
+    margin-bottom: 10px;
+    color: red;
+}
+
+#loginButton{
+    margin: auto;
+    width: 30%;
+    border: 2px solid #0F5530;
+    padding: 10px;
+    margin-top: 20px;
+    font-size: 15px;
+}
+
+#successfulLogin{
+    text-align: center;
+    margin-top: 70px;
+    font-size: 50px;
+    color: #0F5530;
+}
