@@ -32,41 +32,38 @@ export default function Login() {
     }
   }
 
-  console.log(userInfo);
-
   return (
-    <>
-      {userInfo ? (
-        navigate('/validate')
-      ) : (
-        <Typography id={'login'}>
-          <div>
-            <img src={image} />
-          </div>
-          <div id={'loginForm'}>
-            <h1 id={'loginTitle'}>Login to save the environment!</h1>
-            <form id="form" noValidate>
-              <button id={'loginButton'}>
+    <div>
+      <div>{userInfo && <Validate></Validate>}</div>
+      <div>
+        {!userInfo && (
+          <Typography id={'login'}>
+            <div>
+              <img src={image} />
+            </div>
+            <div id={'loginForm'}>
+              <h1 id={'loginTitle'}>Login to save the environment!</h1>
+              <form id="form" noValidate>
                 <a
                   key={'github'}
+                  id={'loginButton'}
                   href={`/.auth/login/github?post_login_redirect_uri=${redirect}`}
                 >
                   github
                 </a>
-              </button>
 
-              <button id={'loginButton'}>
                 <a
                   key={'google'}
+                  id={'loginButton'}
                   href={`/.auth/login/google?post_login_redirect_uri=${redirect}`}
                 >
                   google
                 </a>
-              </button>
-            </form>
-          </div>
-        </Typography>
-      )}
-    </>
+              </form>
+            </div>
+          </Typography>
+        )}
+      </div>
+    </div>
   );
 }

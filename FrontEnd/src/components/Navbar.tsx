@@ -26,11 +26,9 @@ export default function Navbar() {
           </IconButton>
         </Toolbar>
       </AppBar>
-      <button onClick={() => navigate('/')}>
-        <a href={`/.auth/logout?post_logout_redirect_uri=${redirect}`}>
-          Logout
-        </a>
-      </button>
+      <a onClick={() => navigate('/')} href={`/.auth/logout`}>
+        Logout
+      </a>
     </Box>
   );
 }
