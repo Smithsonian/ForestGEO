@@ -20,6 +20,7 @@ const Validate = () => {
         skipEmptyLines: true,
         complete: function (results: any) {
           try {
+            // eslint-disable-next-line array-callback-return
             results.data.map((i: dataStructure) => {
               data.push(i as dataStructure);
             });
