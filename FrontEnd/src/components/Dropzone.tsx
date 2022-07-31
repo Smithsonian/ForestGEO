@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import React, { useCallback } from 'react';
 import { useDropzone, FileWithPath, FileRejection } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
@@ -5,6 +6,8 @@ import Box from '@mui/material/Box';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import { Typography } from '@mui/material';
 import { Stack } from '@mui/material';
+import { resourceLimits } from 'worker_threads';
+import { ResetTvOutlined } from '@mui/icons-material';
 
 export interface DropzonePureProps {
   isDragActive: boolean;

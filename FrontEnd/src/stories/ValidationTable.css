@@ -22,4 +22,7 @@ td {
 .errorMessage {
   color: red;
   font-family: 'Roboto', sans-serif;
+  border: none;
+  padding: 0px;
+  width: 100%;
 }

@@ -1,11 +1,20 @@
-import { render } from '@testing-library/react';
-import React from 'react';
-import data from '../data.json';
+import { width } from '@mui/system';
 import '../stories/ValidationTable.css';
 
 export interface ValidationTableProps {
   error: boolean;
   errorMessage: { [index: number]: string };
+  uploadedData: dataStructure[];
+}
+
+export interface dataStructure {
+  Tag: string;
+  Subquadrat: string;
+  SpCode: string;
+  DBH: string;
+  Htmeas: string;
+  Codes: string;
+  Comments: string;
 }
 
 const headers = [
@@ -21,6 +30,7 @@ const headers = [
 export default function ValidationTable({
   error,
   errorMessage,
+  uploadedData,
 }: ValidationTableProps) {
   return (
     <div>
@@ -29,28 +39,33 @@ export default function ValidationTable({
           <table>
             <thead>
               <tr>
-                {headers.map((row) => {
-                  // display headers in table row using html array map
-                  return <td>{row.label}</td>;
+                {headers.map((row, index) => {
+                  return <td key={'header' + index}>{row.label}</td>;
                 })}
               </tr>
             </thead>
           </table>
 
           <div>
-            {data.map((data, index) => {
+            {uploadedData.map((uploadedData: dataStructure, index) => {
               return (
-                <table>
-                  <tr>
-                    <td>{data.Tag}</td>
-                    <td>{data.Subquadrat}</td>
-                    <td>{data.SpCode}</td>
-                    <td>{data.DBH}</td>
-                    <td>{data.Htmeas}</td>
-                    <td>{data.Codes}</td>
-                    <td>{data.Comments}</td>
-                  </tr>
-                  <tr className="errorMessage">{errorMessage[index]}</tr>
+                <table key={'table' + index}>
+                  <tbody key={'tbody' + index}>
+                    <tr key={index}>
+                      <td key={'Tag' + index}>{uploadedData.Tag}</td>
+                      <td key={'Subquadrat' + index}>
+                        {uploadedData.Subquadrat}
+                      </td>
+                      <td key={'SpCode' + index}>{uploadedData.SpCode}</td>
+                      <td key={'DBH' + index}>{uploadedData.DBH}</td>
+                      <td key={'Htmeas' + index}>{uploadedData.Htmeas}</td>
+                      <td key={'Codes' + index}>{uploadedData.Codes}</td>
+                      <td key={'Comments' + index}>{uploadedData.Comments}</td>
+                    </tr>
+                    <tr className="errorMessage">
+                      <td className="errorMessage">{errorMessage[index]}</td>
+                    </tr>
+                  </tbody>
                 </table>
               );
             })}
