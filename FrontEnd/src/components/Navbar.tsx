@@ -6,6 +6,8 @@ import AccountCircle from '@mui/icons-material/AccountCircle';
 import SelectedMenu from './SelectedMenu';
 import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useState } from 'react';
+import Link from '@mui/material/Link';
+import { Typography } from '@mui/material';
 
 export default function Navbar() {
   const redirect = window.location.pathname;
@@ -37,20 +39,24 @@ export default function Navbar() {
           <SelectedMenu />
           {userInfo ? (
             <>
-              <p aria-label="menu">{userInfo.userDetails}</p>
-              <a onClick={() => navigate('/')} href={`/.auth/logout`}>
+              <Typography
+                aria-label="menu"
+                sx={{ color: 'white', ml: 'auto', mr: '10px' }}
+              >
+                {userInfo.userDetails}
+              </Typography>
+              <Link
+                sx={{ textDecoration: 'underline', color: 'white' }}
+                onClick={() => navigate('/')}
+                href={`/.auth/logout`}
+              >
                 Logout
-              </a>
+              </Link>
             </>
           ) : (
             <p></p>
           )}
-          <IconButton
-            size="large"
-            color="inherit"
-            aria-label="menu"
-            sx={{ marginLeft: 'auto' }}
-          >
+          <IconButton size="large" color="inherit" aria-label="menu">
             <AccountCircle />
           </IconButton>
         </Toolbar>
