@@ -1,4 +1,3 @@
-import { width } from '@mui/system';
 import '../stories/ValidationTable.css';
 
 export interface ValidationTableProps {
