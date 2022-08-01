@@ -10,12 +10,41 @@ import React, { useEffect, useState } from 'react';
 export default function Navbar() {
   const redirect = window.location.pathname;
   let navigate = useNavigate();
+  const [userInfo, setUserInfo] = useState<any>();
+
+  useEffect(() => {
+    (async () => {
+      setUserInfo(await getUserInfo());
+    })();
+  }, []);
+
+  async function getUserInfo() {
+    try {
+      const response = await fetch('/.auth/me');
+      const payload = await response.json();
+      const { clientPrincipal } = payload;
+      return clientPrincipal;
+    } catch (error) {
+      console.error('No profile could be found');
+      return undefined;
+    }
+  }
 
   return (
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
           <SelectedMenu />
+          {userInfo ? (
+            <>
+              <p aria-label="menu">{userInfo.userDetails}</p>
+              <a onClick={() => navigate('/')} href={`/.auth/logout`}>
+                Logout
+              </a>
+            </>
+          ) : (
+            <p></p>
+          )}
           <IconButton
             size="large"
             color="inherit"
@@ -26,9 +55,6 @@ export default function Navbar() {
           </IconButton>
         </Toolbar>
       </AppBar>
-      <a onClick={() => navigate('/')} href={`/.auth/logout`}>
-        Logout
-      </a>
     </Box>
   );
 }
