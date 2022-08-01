@@ -1,4 +1,4 @@
-import '../stories/ValidationTable.css';
+import '../CSS/ValidationTable.css';
 
 export interface ValidationTableProps {
   error: boolean;
