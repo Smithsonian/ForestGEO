@@ -55,12 +55,9 @@ const Validate = () => {
             }}
           />
           <FileList acceptedFilesList={acceptedFilesList} />
-          <Button
-            label="UPLOAD"
-            backgroundColor="#0F5530"
-            textColor="white"
-            onClick={display}
-          />
+          {acceptedFilesList.length > 0 && (
+            <Button label="UPLOAD" onClick={display} />
+          )}
         </div>
       )}
     </>

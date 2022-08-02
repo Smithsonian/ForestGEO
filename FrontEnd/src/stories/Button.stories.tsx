@@ -1,21 +1,19 @@
+import { Button } from '@mui/material';
 import { ComponentMeta, Story } from '@storybook/react';
-import Button, { ButtonProps } from '../components/Button';
+import ButtonComponent, { ButtonProps } from '../components/Button';
 
 export default {
   title: 'Button',
-  component: Button,
+  component: ButtonComponent,
   argTypes: {
     label: { control: 'text' },
-    backgroundColor: { control: 'text' },
     onClick: { action: 'clicked' },
   },
-} as ComponentMeta<typeof Button>;
+} as ComponentMeta<typeof ButtonComponent>;
 
 const Template: Story<ButtonProps> = (args) => <Button {...args} />;
 
 export const UploadButton = Template.bind({});
 UploadButton.args = {
   label: 'UPLOAD',
-  backgroundColor: '#0F5530',
-  textColor: 'white',
 };
