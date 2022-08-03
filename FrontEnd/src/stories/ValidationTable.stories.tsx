@@ -17,6 +17,7 @@ export const NoError = Template.bind({});
 NoError.args = {
   error: false,
   errorMessage: {},
+  uploadedData: [],
 };
 
 export const Error = Template.bind({});
@@ -27,4 +28,5 @@ Error.args = {
     3: 'ERROR: testing',
     0: 'ERROR: testing',
   },
+  uploadedData: [],
 };
