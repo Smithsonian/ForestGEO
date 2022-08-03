@@ -19,7 +19,7 @@ export default function Login() {
             <Link
               key={'microsoft'}
               id={'microsoftButton'}
-              href={`/.auth/login/microsoft?post_login_redirect_uri=${redirect}`}
+              href={`/.auth/login/aad?post_login_redirect_uri=${redirect}`}
             >
               Login with Microsoft
             </Link>
