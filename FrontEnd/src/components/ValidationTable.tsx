@@ -46,20 +46,18 @@ export default function ValidationTable({
           </table>
 
           <div>
-            {uploadedData.map((uploadedData: dataStructure, index) => {
+            {uploadedData.map((data: dataStructure, index) => {
               return (
                 <table key={'table' + index}>
                   <tbody key={'tbody' + index}>
                     <tr key={index}>
-                      <td key={'Tag' + index}>{uploadedData.Tag}</td>
-                      <td key={'Subquadrat' + index}>
-                        {uploadedData.Subquadrat}
-                      </td>
-                      <td key={'SpCode' + index}>{uploadedData.SpCode}</td>
-                      <td key={'DBH' + index}>{uploadedData.DBH}</td>
-                      <td key={'Htmeas' + index}>{uploadedData.Htmeas}</td>
-                      <td key={'Codes' + index}>{uploadedData.Codes}</td>
-                      <td key={'Comments' + index}>{uploadedData.Comments}</td>
+                      <td key={'Tag' + index}>{data.Tag}</td>
+                      <td key={'Subquadrat' + index}>{data.Subquadrat}</td>
+                      <td key={'SpCode' + index}>{data.SpCode}</td>
+                      <td key={'DBH' + index}>{data.DBH}</td>
+                      <td key={'Htmeas' + index}>{data.Htmeas}</td>
+                      <td key={'Codes' + index}>{data.Codes}</td>
+                      <td key={'Comments' + index}>{data.Comments}</td>
                     </tr>
                     <tr className="errorMessage">
                       <td className="errorMessage">{errorMessage[index]}</td>
