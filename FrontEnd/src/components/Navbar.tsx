@@ -10,7 +10,6 @@ import Link from '@mui/material/Link';
 import { Typography } from '@mui/material';
 
 export default function Navbar() {
-  const redirect = window.location.pathname;
   let navigate = useNavigate();
   const [userInfo, setUserInfo] = useState<any>();
 

@@ -11,7 +11,7 @@ export default function Login() {
     <div>
       <Typography id={'login'}>
         <div>
-          <img src={image} />
+          <img src={image} alt="ForestGeo Logo" />
         </div>
         <div id={'loginForm'}>
           <h1 id={'loginTitle'}>Login to save the environment!</h1>
