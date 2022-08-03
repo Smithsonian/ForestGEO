@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import React, { useCallback } from 'react';
 import { useDropzone, FileWithPath, FileRejection } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
