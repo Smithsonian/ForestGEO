@@ -1,11 +1,7 @@
 import React from 'react';
 import { Typography } from '@mui/material';
-import { useState, useEffect } from 'react';
 import '../CSS/Login.css';
 import image from '../login-image.png';
-import Validate from '../pages/Validate';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { useNavigate } from 'react-router-dom';
 import Link from '@mui/material/Link';
 
 export default function Login() {

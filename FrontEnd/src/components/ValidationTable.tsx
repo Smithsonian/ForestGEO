@@ -1,4 +1,3 @@
-import { render } from '@testing-library/react';
 import React from 'react';
 import data from '../data.json';
 import '../stories/ValidationTable.css';

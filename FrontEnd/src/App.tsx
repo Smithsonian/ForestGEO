@@ -1,5 +1,4 @@
 import React from 'react';
-import Navbar from './components/Navbar';
 import Validate from './pages/Validate';
 import Browse from './pages/Browse';
 import Report from './pages/Report';
