@@ -1,13 +1,16 @@
 {
     "routes": [
       {
-        "route": "/validate"
+        "route": "/validate",
+        "allowedRoles": ["authenticated"]
       },
       {
-        "route": "/report"
+        "route": "/report",
+        "allowedRoles": ["authenticated"]
       },
       {
-        "route": "/browse"
+        "route": "/browse",
+        "allowedRoles": ["authenticated"]
       },
       {
         "route": "/api/*",
