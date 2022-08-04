@@ -1,0 +1,47 @@
+{
+    "routes": [
+      {
+        "route": "/validate"
+      },
+      {
+        "route": "/report"
+      },
+      {
+        "route": "/browse"
+      },
+      {
+        "route": "/api/*",
+        "methods": ["GET"],
+        "allowedRoles": ["registeredusers"]
+      },
+      {
+        "route": "/api/*",
+        "methods": ["PUT", "POST", "PATCH", "DELETE"],
+        "allowedRoles": ["administrator"]
+      },
+      {
+        "route": "/api/*",
+        "allowedRoles": ["authenticated"]
+      },
+      {
+        "route": "/logout",
+        "redirect": "/.auth/logout"
+      }
+    ],
+    "navigationFallback": {
+      "rewrite": "/",
+      "exclude": ["/images/*.{png,jpg,gif}", "/css/*"]
+    },
+    "responseOverrides": {
+      "401": {
+        "redirect": "/",
+        "statusCode": 302
+      }
+    },
+    "globalHeaders": {
+      "content-security-policy": "default-src https: 'unsafe-eval' 'unsafe-inline'; object-src 'none'"
+    },
+    "mimeTypes": {
+      ".json": "text/json"
+    }
+  }
