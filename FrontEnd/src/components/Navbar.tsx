@@ -47,7 +47,7 @@ export default function Navbar() {
               <Link
                 sx={{ textDecoration: 'underline', color: 'white' }}
                 onClick={() => navigate('/')}
-                href={`/.auth/logout`}
+                href={`/logout`}
               >
                 Logout
               </Link>
