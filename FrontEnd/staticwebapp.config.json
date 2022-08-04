@@ -1,5 +1,8 @@
 {
     "routes": [
+        {
+            "route": "/"
+          },
       {
         "route": "/validate",
         "allowedRoles": ["authenticated"]
@@ -27,8 +30,12 @@
         "allowedRoles": ["authenticated"]
       },
       {
+        "route": "/login",
+        "rewrite": "/.auth/login/aad?post_login_redirect_uri=validate"
+      },
+      {
         "route": "/logout",
-        "redirect": "/.auth/logout"
+        "redirect": "/.auth/logout?post_logout_redirect_uri=/"
       }
     ],
     "navigationFallback": {

@@ -5,8 +5,6 @@ import image from '../login-image.png';
 import Link from '@mui/material/Link';
 
 export default function Login() {
-  const redirect = '/validate';
-
   return (
     <div>
       <Typography id={'login'}>
@@ -16,11 +14,7 @@ export default function Login() {
         <div id={'loginForm'}>
           <h1 id={'loginTitle'}>Login to save the environment!</h1>
           <form id="form" noValidate>
-            <Link
-              key={'microsoft'}
-              id={'microsoftButton'}
-              href={`/.auth/login/aad?post_login_redirect_uri=${redirect}`}
-            >
+            <Link key={'microsoft'} id={'microsoftButton'} href={`/login`}>
               Login with Microsoft
             </Link>
           </form>
