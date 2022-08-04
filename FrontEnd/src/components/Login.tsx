@@ -5,7 +5,7 @@ import image from '../login-image.png';
 import Link from '@mui/material/Link';
 
 export default function Login() {
-  const redirect = window.location.pathname;
+  const redirect = '/validate';
 
   return (
     <div>
