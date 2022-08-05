@@ -46,7 +46,7 @@ export default function Navbar() {
               </Typography>
               <Link
                 sx={{ textDecoration: 'underline', color: 'white' }}
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/logout')}
                 href={`/logout`}
               >
                 Logout
