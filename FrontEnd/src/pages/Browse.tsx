@@ -16,7 +16,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import data from '../mock-table-data.json';
 import CircularProgress from '@mui/material/CircularProgress';
 import '../CSS/Browse.css';
-import Navbar from '../components/Navbar';
 
 const Browse = () => {
   let handleRemove = (i: any) => {
@@ -64,7 +63,6 @@ const Browse = () => {
   } else {
     return (
       <>
-        <Navbar></Navbar>
         <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
           <TableContainer id={'tableContainer'}>
             <Table aria-label="simple table" stickyHeader>

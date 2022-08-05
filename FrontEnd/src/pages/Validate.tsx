@@ -2,7 +2,7 @@ import Dropzone from '../components/Dropzone';
 import FileList from '../components/FileList';
 import Button from '../components/Button';
 import { FileWithPath } from 'react-dropzone';
-import Navbar from '../components/Navbar';
+
 import React, { useState } from 'react';
 import ValidationTable, { dataStructure } from '../components/ValidationTable';
 import { parse } from 'papaparse';
@@ -37,7 +37,6 @@ const Validate = () => {
 
   return (
     <>
-      <Navbar></Navbar>
       {clicked ? (
         <div id="validationTable">
           <ValidationTable
