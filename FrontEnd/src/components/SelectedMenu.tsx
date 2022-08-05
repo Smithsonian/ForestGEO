@@ -25,7 +25,7 @@ export default function SelectedMenu() {
     setSelectedIndex(index);
     setAnchorEl(null);
     if (index === 0) {
-      navigate('/');
+      navigate('/validate');
     } else if (index === 1) {
       navigate('/report');
     } else if (index === 2) {

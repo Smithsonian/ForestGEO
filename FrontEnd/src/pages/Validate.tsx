@@ -2,6 +2,7 @@ import Dropzone from '../components/Dropzone';
 import FileList from '../components/FileList';
 import Button from '../components/Button';
 import { FileWithPath } from 'react-dropzone';
+
 import React, { useState } from 'react';
 import ValidationTable, { dataStructure } from '../components/ValidationTable';
 import { parse } from 'papaparse';
