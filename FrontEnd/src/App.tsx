@@ -1,16 +1,37 @@
-import React from 'react';
-import Navbar from './components/Navbar';
+import React, { useEffect, useState } from 'react';
 import Validate from './pages/Validate';
 import Browse from './pages/Browse';
 import Report from './pages/Report';
+import Login from './components/Login';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
 
 function App() {
+  const [userInfo, setUserInfo] = useState<any>();
+
+  useEffect(() => {
+    (async () => {
+      setUserInfo(await getUserInfo());
+    })();
+  }, []);
+
+  async function getUserInfo() {
+    try {
+      const response = await fetch('/.auth/me');
+      const payload = await response.json();
+      const { clientPrincipal } = payload;
+      return clientPrincipal;
+    } catch (error) {
+      console.error('No profile could be found');
+      return undefined;
+    }
+  }
   return (
     <Router>
-      <Navbar />
+      {userInfo ? <Navbar /> : <p></p>}
       <Routes>
-        <Route path="/" element={<Validate />} />
+        <Route path="/" element={<Login />} />
+        <Route path="/validate" element={<Validate />} />
         <Route path="/browse" element={<Browse />} />
         <Route path="/report" element={<Report />} />
       </Routes>

@@ -1,0 +1,5 @@
+{
+  "Host": {
+    "CORS": "http://localhost:3000"
+  }
+}
