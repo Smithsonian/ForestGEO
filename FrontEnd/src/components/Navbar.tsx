@@ -7,17 +7,10 @@ import SelectedMenu from './SelectedMenu';
 import { useNavigate } from 'react-router-dom';
 import Link from '@mui/material/Link';
 import { Typography } from '@mui/material';
-import GetUser from './GetUser';
+import GetUser, { clientPrincipal } from './GetUser';
 
 export default function Navbar() {
   let navigate = useNavigate();
-  interface clientPrincipal {
-    userId: string;
-    userRoles: string[];
-    claims: string[];
-    identityProvider: string;
-    userDetails: string;
-  }
 
   const userInfo: clientPrincipal | undefined = GetUser();
 

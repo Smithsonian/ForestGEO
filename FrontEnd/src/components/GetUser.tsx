@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react';
 
-export default function GetUser() {
-  interface clientPrincipal {
-    userId: string;
-    userRoles: string[];
-    claims: string[];
-    identityProvider: string;
-    userDetails: string;
-  }
+export interface clientPrincipal {
+  userId: string;
+  userRoles: string[];
+  claims: string[];
+  identityProvider: string;
+  userDetails: string;
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function GetUser() {
   const [userInfo, setUserInfo] = useState<clientPrincipal>();
 
   useEffect(() => {
