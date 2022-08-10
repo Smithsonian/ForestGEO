@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import React, { useCallback } from 'react';
 import { useDropzone, FileWithPath, FileRejection } from 'react-dropzone';
 import { parse, ParseConfig } from 'papaparse';
@@ -5,6 +6,7 @@ import Box from '@mui/material/Box';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import { Typography } from '@mui/material';
 import { Stack } from '@mui/material';
+import '../CSS/Dropezone.css';
 
 export interface DropzonePureProps {
   isDragActive: boolean;
@@ -19,16 +21,12 @@ export function DropzonePure({
 }: DropzonePureProps) {
   return (
     <Box
+      id={'outerBox'}
       component={Stack}
       direction="column"
-      justifyContent="center"
       sx={{
-        width: 700,
-        height: 400,
-        backgroundColor: '#E2EAE6',
         m: 'auto',
         mt: 8,
-        border: '3px dashed',
         borderColor: 'primary.main',
       }}
       {...getRootProps()}
