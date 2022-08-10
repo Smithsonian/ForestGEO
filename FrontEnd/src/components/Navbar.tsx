@@ -5,7 +5,6 @@ import IconButton from '@mui/material/IconButton';
 import AccountCircle from '@mui/icons-material/AccountCircle';
 import SelectedMenu from './SelectedMenu';
 import { useNavigate } from 'react-router-dom';
-import React, { useEffect, useState } from 'react';
 import Link from '@mui/material/Link';
 import { Typography } from '@mui/material';
 import GetUser from './GetUser';
