@@ -5,31 +5,14 @@ import IconButton from '@mui/material/IconButton';
 import AccountCircle from '@mui/icons-material/AccountCircle';
 import SelectedMenu from './SelectedMenu';
 import { useNavigate } from 'react-router-dom';
-import React, { useEffect, useState } from 'react';
 import Link from '@mui/material/Link';
 import { Typography } from '@mui/material';
+import GetUser, { clientPrincipal } from './GetUser';
 
 export default function Navbar() {
   let navigate = useNavigate();
-  const [userInfo, setUserInfo] = useState<any>();
 
-  useEffect(() => {
-    (async () => {
-      setUserInfo(await getUserInfo());
-    })();
-  }, []);
-
-  async function getUserInfo() {
-    try {
-      const response = await fetch('/.auth/me');
-      const payload = await response.json();
-      const { clientPrincipal } = payload;
-      return clientPrincipal;
-    } catch (error) {
-      console.error('No profile could be found');
-      return undefined;
-    }
-  }
+  const userInfo: clientPrincipal | undefined = GetUser();
 
   return (
     <Box sx={{ flexGrow: 1 }}>
