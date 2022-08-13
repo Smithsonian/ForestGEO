@@ -6,6 +6,7 @@ import { FileWithPath } from 'react-dropzone';
 import React, { useState } from 'react';
 import ValidationTable, { dataStructure } from '../components/ValidationTable';
 import { parse } from 'papaparse';
+import { uploadFiles } from '../components/BlobUpload';
 
 const Validate = () => {
   const initialState: Array<FileWithPath> = [];
@@ -35,6 +36,11 @@ const Validate = () => {
     });
   };
 
+  const handleUpload = () => {
+    console.log('upload triggerred!');
+    uploadFiles(acceptedFilesList);
+  };
+
   return (
     <>
       {clicked ? (
@@ -44,6 +50,7 @@ const Validate = () => {
             errorMessage={{ 1: 'ERROR: message' }}
             uploadedData={finalData}
           />
+          <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
         </div>
       ) : (
         <div id="dropZone">
