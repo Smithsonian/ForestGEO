@@ -1,15 +1,8 @@
 import { BlobServiceClient } from '@azure/storage-blob';
 import { FileWithPath } from 'react-dropzone';
 
-const AZURE_STORAGE_CONNECTION_STRING =
-  process.env.REACT_APP_AZURE_STORAGE_CONNECTION_STRING;
-
-if (!AZURE_STORAGE_CONNECTION_STRING) {
-  throw Error('Azure Storage Connection string not found');
-}
-
-const blobServiceClient = BlobServiceClient.fromConnectionString(
-  AZURE_STORAGE_CONNECTION_STRING
+const blobServiceClient = new BlobServiceClient(
+  `https://forestgeostorage.blob.core.windows.net/?sv=2021-06-08&ss=b&srt=sco&sp=rwdlacitfx&se=2023-08-14T05:10:57Z&st=2022-08-13T21:10:57Z&spr=https&sig=3Ec7AhKV%2Bxx%2FeO78J3l6VeI8VAgwvRAbrR7m1UZXo0I%3D`
 );
 
 const containersNames: String[] = [];
