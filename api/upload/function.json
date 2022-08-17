@@ -1,7 +1,7 @@
 {
   "bindings": [
     {
-      "authLevel": "anonymous",
+      "authLevel": "function",
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
@@ -10,17 +10,17 @@
       ]
     },
     {
+      "name": "csvUpload",
+      "type": "blob",
+      "path": "uploads/csvFile.csv",
+      "direction": "out",
+      "connection": "AzureWebJobsStorage"
+    },
+    {
       "type": "http",
       "direction": "out",
       "name": "res"
-    },
-    {
-      "type": "blob",
-      "direction": "out",
-      "name": "csvBlob",
-      "path": "uploads/test.csv",
-      "connection": "AzureWebJobsStorage"
-        }
+    }
   ],
   "scriptFile": "../dist/upload/index.js"
 }

@@ -1,29 +1,26 @@
-import { AzureFunction, Context, HttpRequest } from "@azure/functions"
+import { AzureFunction, Context, HttpRequest } from "@azure/functions";
 
-const httpTrigger: AzureFunction = async function (context: Context, req: HttpRequest): Promise<void> {
-   
-    let responseStatusCode: number
-    let responseMessage: string
+const httpTrigger: AzureFunction = async function (
+  context: Context,
+  req: HttpRequest
+): Promise<void> {
+  let responseStatusCode: number;
+  let responseMessage: string;
 
-    if (req.body) {
+  if (req.body) {
+    context.bindings.csvUpload = req.body;
 
-        context.bindings.upload = req.body
+    responseStatusCode = 201;
+    responseMessage = "File uploaded to the cloud successfully";
+  } else {
+    responseStatusCode = 400;
+    responseMessage = "Something went wrong";
+  }
 
-        responseStatusCode = 201
-        responseMessage = "File uploaded to the cloud successfully"
-
-    }
-    else {
-
-        responseStatusCode = 400
-        responseMessage = "Something went wrong"
-    }
-
-    context.res = {
-        status: responseStatusCode,
-        body: responseMessage
-    }
-
+  context.res = {
+    status: responseStatusCode,
+    body: responseMessage,
+  };
 };
 
 export default httpTrigger;
