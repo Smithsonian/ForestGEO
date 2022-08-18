@@ -1,5 +1,6 @@
 import { AzureFunction, Context, HttpRequest } from "@azure/functions";
 import { uploadFiles } from "../components/BlobUpload";
+import parseMultipartFormData from "@anzp/azure-function-multipart";
 
 const httpTrigger: AzureFunction = async function (
   context: Context,
@@ -8,11 +9,14 @@ const httpTrigger: AzureFunction = async function (
   let responseStatusCode: number;
   let responseMessage: string;
 
-  console.log(context);
+  // console.log(context);
+  // console.log(req);
+  const { fields, files } = await parseMultipartFormData(req);
+  console.log({ files });
 
   if (req.body) {
-    const acceptedFilesForm = req.body.parseFormBody();
-    console.log(acceptedFilesForm);
+    const acceptedFilesForm = req.parseFormBody();
+    console.log({ acceptedFilesForm });
 
     // uploadFiles();
 

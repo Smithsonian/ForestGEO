@@ -1,5 +1,4 @@
 import { BlobServiceClient } from '@azure/storage-blob';
-import { FileWithPath } from 'react-dropzone';
 
 const blobUrl = process.env.REACT_APP_BLOBURL || undefined;
 if (!blobUrl) {
@@ -14,7 +13,7 @@ const listContainers = async () => {
   }
 };
 
-const uploadFiles = async (acceptedFilesList: FileWithPath[]) => {
+const uploadFiles = async (acceptedFilesList: any) => {
   try {
     await listContainers();
     for (const file of acceptedFilesList) {

@@ -43,9 +43,6 @@ const Validate = () => {
     }
     console.log(fileToFormData.get('csvFile'));
     fetch('/api/upload', {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
       method: 'Post',
       body: fileToFormData,
     });
