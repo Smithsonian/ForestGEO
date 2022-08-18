@@ -1,4 +1,5 @@
 import { AzureFunction, Context, HttpRequest } from "@azure/functions";
+import { uploadFiles } from "../components/BlobUpload";
 
 const httpTrigger: AzureFunction = async function (
   context: Context,
@@ -7,8 +8,13 @@ const httpTrigger: AzureFunction = async function (
   let responseStatusCode: number;
   let responseMessage: string;
 
+  console.log(context);
+
   if (req.body) {
-    context.bindings.csvUpload = req.body;
+    const acceptedFilesForm = req.body.parseFormBody();
+    console.log(acceptedFilesForm);
+
+    // uploadFiles();
 
     responseStatusCode = 201;
     responseMessage = "File uploaded to the cloud successfully";

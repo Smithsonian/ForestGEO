@@ -6,7 +6,6 @@ import { FileWithPath } from 'react-dropzone';
 import React, { useState } from 'react';
 import ValidationTable, { dataStructure } from '../components/ValidationTable';
 import { parse } from 'papaparse';
-import { uploadFiles } from '../components/BlobUpload';
 
 const Validate = () => {
   const initialState: Array<FileWithPath> = [];
@@ -37,8 +36,26 @@ const Validate = () => {
   };
 
   const handleUpload = () => {
-    console.log('upload successful!');
-    uploadFiles(acceptedFilesList);
+    console.log(acceptedFilesList);
+    const fileToFormData = new FormData();
+    for (const file of acceptedFilesList) {
+      fileToFormData.append('csvFile', file);
+    }
+    console.log(fileToFormData.get('csvFile'));
+    fetch('/api/upload', {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      method: 'Post',
+      body: fileToFormData,
+    });
+    // .then((Response) => Response.json())
+    // .then((data) => {
+    //   console.log('Success', data);
+    // })
+    // .catch((error) => {
+    //   console.log('Error', data);
+    // });
   };
 
   return (
