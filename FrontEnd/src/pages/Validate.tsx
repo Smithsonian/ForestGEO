@@ -37,7 +37,7 @@ const Validate = () => {
   };
 
   const handleUpload = () => {
-    console.log('upload triggerred!');
+    console.log('upload successful!');
     uploadFiles(acceptedFilesList);
   };
 
