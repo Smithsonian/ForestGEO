@@ -1,10 +1,10 @@
 import { BlobServiceClient } from '@azure/storage-blob';
 
-const blobUrl = process.env.REACT_APP_BLOBURL || undefined;
-if (!blobUrl) {
-  throw new Error('No string attached!');
-}
-const blobServiceClient = new BlobServiceClient(blobUrl);
+// const blobUrl = process.env.REACT_APP_BLOBURL || undefined;
+// if (!blobUrl) {
+//   throw new Error('No string attached!');
+// }
+const blobServiceClient = BlobServiceClient.fromConnectionString('SharedAccessSignature=sv=2021-04-10&ss=btqf&srt=sco&st=2022-08-18T21%3A39%3A57Z&se=2023-08-19T21%3A39%3A00Z&sp=rwl&sig=YbdX2fDELNCWJNkl9%2B%2BAMryTYBSqIYBP6XevMd9cdok%3D;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;');
 const containersNames: String[] = [];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {

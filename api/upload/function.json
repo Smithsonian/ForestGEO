@@ -10,13 +10,6 @@
       ]
     },
     {
-      "name": "csvUpload",
-      "type": "blob",
-      "path": "uploads/csvFile.csv",
-      "direction": "out",
-      "connection": "AzureWebJobsStorage"
-    },
-    {
       "type": "http",
       "direction": "out",
       "name": "res"

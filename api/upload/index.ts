@@ -11,14 +11,11 @@ const httpTrigger: AzureFunction = async function (
 
   // console.log(context);
   // console.log(req);
+  if (req) {
   const { fields, files } = await parseMultipartFormData(req);
   console.log({ files });
 
-  if (req.body) {
-    const acceptedFilesForm = req.parseFormBody();
-    console.log({ acceptedFilesForm });
-
-    // uploadFiles();
+    // uploadFiles(files); 
 
     responseStatusCode = 201;
     responseMessage = "File uploaded to the cloud successfully";

@@ -39,20 +39,12 @@ const Validate = () => {
     console.log(acceptedFilesList);
     const fileToFormData = new FormData();
     for (const file of acceptedFilesList) {
-      fileToFormData.append('csvFile', file);
+      fileToFormData.append('file', file);
     }
-    console.log(fileToFormData.get('csvFile'));
     fetch('/api/upload', {
       method: 'Post',
       body: fileToFormData,
     });
-    // .then((Response) => Response.json())
-    // .then((data) => {
-    //   console.log('Success', data);
-    // })
-    // .catch((error) => {
-    //   console.log('Error', data);
-    // });
   };
 
   return (
