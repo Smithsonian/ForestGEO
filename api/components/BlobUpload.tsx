@@ -1,10 +1,11 @@
+import { ParsedFile } from '@anzp/azure-function-multipart/dist/types/parsed-file.type';
 import { BlobServiceClient } from '@azure/storage-blob';
-
-// const blobUrl = process.env.REACT_APP_BLOBURL || undefined;
-// if (!blobUrl) {
-//   throw new Error('No string attached!');
-// }
-const blobServiceClient = BlobServiceClient.fromConnectionString('SharedAccessSignature=sv=2021-04-10&ss=btqf&srt=sco&st=2022-08-18T21%3A39%3A57Z&se=2023-08-19T21%3A39%3A00Z&sp=rwl&sig=YbdX2fDELNCWJNkl9%2B%2BAMryTYBSqIYBP6XevMd9cdok%3D;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;');
+require('dotenv').config();
+const blobUrl: string = process.env.REACT_APP_BLOB_STR || undefined;
+if (!blobUrl) {
+  throw new Error('No string attached!');
+}
+const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 const containersNames: String[] = [];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {
@@ -13,21 +14,20 @@ const listContainers = async () => {
   }
 };
 
-const uploadFiles = async (acceptedFilesList: any) => {
+const uploadFiles = async (acceptedFilesList: ParsedFile[]) => {
   try {
     await listContainers();
     for (const file of acceptedFilesList) {
       const fileName =
-        file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
-        console.log(fileName);
+        file.filename.substring(0, file.filename.lastIndexOf('.')) || file.filename;
       if (containersNames.includes(fileName)) {
         const containerForUpload = fileName;
         const containerClient =
           blobServiceClient.getContainerClient(containerForUpload);
-        const blobName = file.name;
+        const blobName = file.filename;
         const blobClient = containerClient.getBlockBlobClient(blobName);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file, file.size);
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength);
       } else {
         console.log('Plot ', fileName, 'does not exist');
         alert('Plot ' + fileName + ' does not exist');
