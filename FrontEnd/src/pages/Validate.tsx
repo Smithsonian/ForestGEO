@@ -36,7 +36,6 @@ const Validate = () => {
   };
 
   const handleUpload = () => {
-    console.log(acceptedFilesList);
     const fileToFormData = new FormData();
     let i = 0;
     for (const file of acceptedFilesList) {
