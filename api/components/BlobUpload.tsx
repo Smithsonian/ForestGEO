@@ -29,15 +29,12 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
       console.log("Found in " + containerForUpload + "!");
     
     for (const file of acceptedFilesList) {
-      
         const containerClient =
           blobServiceClient.getContainerClient(containerForUpload);
         const blobName = file.filename;
         const blobClient = containerClient.getBlockBlobClient(blobName);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength);
-        if (uploadBlob)
-    
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength);          
     }
   } else {
     console.log('Plot ', plot, 'does not exist');

@@ -15,7 +15,6 @@ const httpTrigger: AzureFunction = async function (
     console.log(plot);
 
     uploadFiles(files, plot);
-
     responseStatusCode = 201;
     responseMessage = "File uploaded to the cloud successfully";
   } else {

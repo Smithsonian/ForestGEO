@@ -47,6 +47,7 @@ const Validate = () => {
       fileToFormData.append(`file_${i}`, file);
       i++;
     }
+    
     fetch('/api/upload?plot=' + plot.plotName, {
       method: 'Post',
       body: fileToFormData,
