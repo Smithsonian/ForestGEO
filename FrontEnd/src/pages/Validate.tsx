@@ -35,6 +35,19 @@ const Validate = () => {
     });
   };
 
+  const handleUpload = () => {
+    const fileToFormData = new FormData();
+    let i = 0;
+    for (const file of acceptedFilesList) {
+      fileToFormData.append(`file_${i}`, file);
+      i++;
+    }
+    fetch('/api/upload', {
+      method: 'Post',
+      body: fileToFormData,
+    });
+  };
+
   return (
     <>
       {clicked ? (
@@ -44,6 +57,7 @@ const Validate = () => {
             errorMessage={{ 1: 'ERROR: message' }}
             uploadedData={finalData}
           />
+          <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
         </div>
       ) : (
         <div id="dropZone">
