@@ -26,7 +26,7 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
     const found = containers.find((container) => container.name === plotReplaced);
     if (found) {
       const containerForUpload = found.name;
-      console.log("Found in " + containerForUpload + "!");
+      // console.log("Found in " + containerForUpload + "!");
     
     for (const file of acceptedFilesList) {
         const containerClient =
