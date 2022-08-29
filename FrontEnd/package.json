@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@azure/storage-blob": "^12.11.0",
     "@emotion/react": "^11.9.3",
     "@emotion/styled": "^11.9.3",
     "@fontsource/roboto": "^4.5.5",
@@ -16,6 +17,7 @@
     "@types/papaparse": "^5.3.2",
     "@types/react": "^18.0.5",
     "@types/react-dom": "^18.0.0",
+    "http-status-codes": "^2.2.0",
     "papaparse": "^5.3.2",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
@@ -76,6 +78,7 @@
     ]
   },
   "devDependencies": {
+    "@azure/functions": "^3.2.0",
     "@storybook/addon-actions": "^6.4.22",
     "@storybook/addon-essentials": "^6.4.22",
     "@storybook/addon-interactions": "^6.4.22",

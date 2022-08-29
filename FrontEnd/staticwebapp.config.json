@@ -1,57 +1,61 @@
 {
-    "routes": [
-        {
-            "route": "/"
-          },
-      {
-        "route": "/validate",
-        "allowedRoles": ["authenticated"]
-      },
-      {
-        "route": "/report",
-        "allowedRoles": ["authenticated"]
-      },
-      {
-        "route": "/browse",
-        "allowedRoles": ["authenticated"]
-      },
-      {
-        "route": "/api/*",
-        "methods": ["GET"],
-        "allowedRoles": ["registeredusers"]
-      },
-      {
-        "route": "/api/*",
-        "methods": ["PUT", "POST", "PATCH", "DELETE"],
-        "allowedRoles": ["administrator"]
-      },
-      {
-        "route": "/api/*",
-        "allowedRoles": ["authenticated"]
-      },
-      {
-        "route": "/login",
-        "rewrite": "/.auth/login/aad?post_login_redirect_uri=validate"
-      },
-      {
-        "route": "/logout",
-        "rewrite": "/.auth/logout?post_logout_redirect_uri=/"
-      }
-    ],
-    "navigationFallback": {
-      "rewrite": "/",
-      "exclude": ["/images/*.{png,jpg,gif}", "/css/*"]
+  "routes": [
+    {
+      "route": "/"
     },
-    "responseOverrides": {
-      "401": {
-        "redirect": "/",
-        "statusCode": 302
-      }
+    {
+      "route": "/validate",
+      "allowedRoles": [
+        "authenticated"
+      ]
     },
-    "globalHeaders": {
-      "content-security-policy": "default-src https: 'unsafe-eval' 'unsafe-inline'; object-src 'none'"
+    {
+      "route": "/report",
+      "allowedRoles": [
+        "authenticated"
+      ]
     },
-    "mimeTypes": {
-      ".json": "text/json"
+    {
+      "route": "/browse",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/api/upload",
+      "methods": [
+        "POST"
+      ],
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/login",
+      "rewrite": "/.auth/login/aad?post_login_redirect_uri=validate"
+    },
+    {
+      "route": "/logout",
+      "rewrite": "/.auth/logout?post_logout_redirect_uri=/"
     }
+  ],
+  "navigationFallback": {
+    "rewrite": "/",
+    "exclude": [
+      "/images/*.{png,jpg,gif}",
+      "/css/*"
+    ]
+  },
+  "responseOverrides": {
+    "401": {
+      "redirect": "/",
+      "statusCode": 302
+    }
+  },
+  "globalHeaders": {
+    "content-security-policy": "default-src https: 'unsafe-eval' 'unsafe-inline'; object-src 'none'"
+  },
+  "mimeTypes": {
+    ".json": "text/json"
   }
+}
