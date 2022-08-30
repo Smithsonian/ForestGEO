@@ -6,33 +6,40 @@ if (!blobUrl) {
   throw new Error('No string attached!');
 }
 const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
-const containersNames: String[] = [];
+const containers: {name: string; nameShort: string}[] = [];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {
   for await (const container of blobServiceClient.listContainers()) {
-    containersNames.push(container.name);
+    // figure out how to use metadata, for now using names to compare
+    const containerName = container.name;
+    const containerNameShort = container.name.replace(/[^a-z0-9]/gi, '');
+
+    containers.push(
+      { name: containerName, nameShort: containerNameShort });
   }
 };
 
-const uploadFiles = async (acceptedFilesList: ParsedFile[]) => {
+const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
   try {
     await listContainers();
+    const plotReplaced = plot.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const found = containers.find((container) => container.name === plotReplaced);
+    if (found) {
+      const containerForUpload = found.name;
+      // console.log("Found in " + containerForUpload + "!");
+    
     for (const file of acceptedFilesList) {
-      const fileName =
-        file.filename.substring(0, file.filename.lastIndexOf('.')) || file.filename;
-      if (containersNames.includes(fileName)) {
-        const containerForUpload = fileName;
         const containerClient =
           blobServiceClient.getContainerClient(containerForUpload);
         const blobName = file.filename;
         const blobClient = containerClient.getBlockBlobClient(blobName);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength);
-      } else {
-        console.log('Plot ', fileName, 'does not exist');
-        alert('Plot ' + fileName + ' does not exist');
-      }
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength);          
     }
+  } else {
+    console.log('Plot ', plot, 'does not exist');
+    alert('Plot ' + plot + ' does not exist');
+  }
   } catch (e) {
     console.log(e);
   }
