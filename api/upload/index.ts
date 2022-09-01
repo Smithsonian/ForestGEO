@@ -41,7 +41,6 @@ const httpTrigger: AzureFunction = async function (
 
       };
       const results = parse(parsedFile.bufferFile.toString('utf-8'), config);
-      console.log(results.data);
 
       // If there is no data, send response immediately?
       if (!results.data) {
@@ -49,9 +48,9 @@ const httpTrigger: AzureFunction = async function (
         errors.push("No data for upload!");
       }
 
-      results.data.map((csv) => {
+      results.data.map((csv, index) => {
         const keys = Object.keys(csv);
-        console.log(keys);
+        const currentRow = index + 1;
 
         if (!keys.every((entry) => headers.includes(entry))) {
           console.log("Headers test failed!");
@@ -60,32 +59,27 @@ const httpTrigger: AzureFunction = async function (
           );
         }
 
-        for (const key of keys) {
+        keys.map((key) => {
           if (csv[key] === "" || undefined) {
-            console.log("Missing value in " + key);
-            errors.push("Missing value in " + key);
+            console.log("Missing value in " + key + " in the row " + currentRow);
+            errors.push("Missing value in " + key + " in the row " + currentRow);
           }
-        }
-        // jsonResults.push(csv);
+          else if (key === 'DBH' && (parseInt(csv[key]) < 0.1 || parseInt(csv[key]) > 50)) {
+            console.log("Check value of DBH in the row " + currentRow );
+            errors.push("Check value of DBH in the row " + currentRow);
+          }
+        });
       });
       if (results.errors.length) {
         console.log(
           `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`
         );
+        errors.push(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
       }
-      console.log("Validaton errors:", errors);
+      console.log("Validation errors:", errors);
     }
-    // check for headers
-    // for (const csvContents of jsonResults) {
-    //   const keys = Object.keys(csvContents);
-    //   if (!keys.every(entry => headers.includes(entry))) {
-    //     console.log('Headers test failed!')
-    //   }
-    //   console.log(result);
 
-    // };
-
-    if (!errors.length) {
+    if (!errors.length ) {
       uploadFiles(files, plot);
       responseStatusCode = 201;
       responseMessage = "File uploaded to the cloud successfully";
