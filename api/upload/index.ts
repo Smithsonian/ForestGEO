@@ -2,6 +2,7 @@ import { AzureFunction, Context, HttpRequest } from "@azure/functions";
 import { uploadFiles } from "../components/BlobUpload";
 import parseMultipartFormData from "@anzp/azure-function-multipart";
 import { parse, ParseConfig } from "papaparse";
+import { ParsedFile } from "@anzp/azure-function-multipart/dist/types/parsed-file.type";
 
 const httpTrigger: AzureFunction = async function (
   context: Context,
@@ -28,7 +29,13 @@ const httpTrigger: AzureFunction = async function (
     ];
 
     // array for collected errors
-    const errors: string[] = [];
+    const errors: any = {};
+
+    function createFileEntry(parsedFile: ParsedFile) {
+      if (errors[parsedFile.filename] == undefined) {
+        errors[parsedFile.filename] = {};
+      };
+    }
 
     for (const parsedFile of files) {
       // without the transformHeader parameter first header is parsed with quotes
@@ -41,11 +48,18 @@ const httpTrigger: AzureFunction = async function (
 
       };
       const results = parse(parsedFile.bufferFile.toString('utf-8'), config);
+      console.log(results.data);
 
       // If there is no data, send response immediately?
-      if (!results.data) {
+      if (!results.data.length) {
         console.log("No data for upload!");
-        errors.push("No data for upload!");
+        context.res = {
+          status: 400,
+          body: {
+            error: "No data for upload!"
+          },
+        };
+      return
       }
 
       results.data.map((csv, index) => {
@@ -53,33 +67,35 @@ const httpTrigger: AzureFunction = async function (
         const currentRow = index + 1;
 
         if (!keys.every((entry) => headers.includes(entry))) {
+          createFileEntry(parsedFile);
           console.log("Headers test failed!");
-          errors.push(
-            "There are missing headers in the file " + parsedFile.filename
-          );
+          errors[parsedFile.filename]["headers"] = "Missing Headers";
         }
 
         keys.map((key) => {
           if (csv[key] === "" || undefined) {
-            console.log("Missing value in " + key + " in the row " + currentRow + ", file " + parsedFile.filename);
-            errors.push("Missing value in " + key + " in the row " + currentRow + ", file " + parsedFile.filename);
+            createFileEntry(parsedFile);
+            errors[parsedFile.filename][currentRow] = "Missing value in ";
+            console.log(errors[parsedFile.filename][currentRow]);
           }
-          else if (key === 'DBH' && (parseInt(csv[key]) < 0.1 || parseInt(csv[key]) > 50)) {
-            console.log("Check value of DBH in the row " + currentRow + ", file " + parsedFile.filename );
-            errors.push("Check value of DBH in the row " + currentRow + ", file " + parsedFile.filename);
+          else if (key === 'DBH' && (parseInt(csv[key]) < 1)) {
+            createFileEntry(parsedFile);
+            errors[parsedFile.filename][currentRow] = "Check the value of DBH";
+            console.log(errors[parsedFile.filename][currentRow]);
           }
         });
       });
       if (results.errors.length) {
+        createFileEntry(parsedFile);
         console.log(
           `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`
         );
-        errors.push(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
+        errors[parsedFile.filename][results.errors[0].row] = results.errors[0].message;
       }
       console.log("Validation errors:", errors);
     }
 
-    if (!errors.length ) {
+    if (!errors.length) {
       uploadFiles(files, plot);
       responseStatusCode = 201;
       responseMessage = "File uploaded to the cloud successfully";
