@@ -32,22 +32,26 @@ const httpTrigger: AzureFunction = async function (
 
     for (const parsedFile of files) {
       // without the transformHeader parameter first header is parsed with quotes
+      
       const config: ParseConfig = {
-        skipEmptyLines: true,
+        delimiter: ",",
         header: true,
-        transformHeader: (h) => h.trim(),
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim(),               
+
       };
-      const results = parse(parsedFile.bufferFile.toString(), config);
+      const results = parse(parsedFile.bufferFile.toString('utf-8'), config);
+      console.log(results.data);
 
       // If there is no data, send response immediately?
       if (!results.data) {
-        console.log("No data for upload!")
+        console.log("No data for upload!");
         errors.push("No data for upload!");
       }
-      
+
       results.data.map((csv) => {
         const keys = Object.keys(csv);
-        console.log(csv);
+        console.log(keys);
 
         if (!keys.every((entry) => headers.includes(entry))) {
           console.log("Headers test failed!");
@@ -58,11 +62,11 @@ const httpTrigger: AzureFunction = async function (
 
         for (const key of keys) {
           if (csv[key] === "" || undefined) {
-            console.log("Missing value in ", key);
-            errors.push("Missing value in ", key);
+            console.log("Missing value in " + key);
+            errors.push("Missing value in " + key);
           }
         }
-        jsonResults.push(csv);
+        // jsonResults.push(csv);
       });
       if (results.errors.length) {
         console.log(
