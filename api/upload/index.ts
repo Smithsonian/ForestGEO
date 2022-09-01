@@ -61,12 +61,12 @@ const httpTrigger: AzureFunction = async function (
 
         keys.map((key) => {
           if (csv[key] === "" || undefined) {
-            console.log("Missing value in " + key + " in the row " + currentRow);
-            errors.push("Missing value in " + key + " in the row " + currentRow);
+            console.log("Missing value in " + key + " in the row " + currentRow + ", file " + parsedFile.filename);
+            errors.push("Missing value in " + key + " in the row " + currentRow + ", file " + parsedFile.filename);
           }
           else if (key === 'DBH' && (parseInt(csv[key]) < 0.1 || parseInt(csv[key]) > 50)) {
-            console.log("Check value of DBH in the row " + currentRow );
-            errors.push("Check value of DBH in the row " + currentRow);
+            console.log("Check value of DBH in the row " + currentRow + ", file " + parsedFile.filename );
+            errors.push("Check value of DBH in the row " + currentRow + ", file " + parsedFile.filename);
           }
         });
       });
