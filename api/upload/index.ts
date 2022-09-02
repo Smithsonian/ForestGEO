@@ -100,9 +100,14 @@ const httpTrigger: AzureFunction = async function (
       responseStatusCode = 201;
       responseMessage = "File uploaded to the cloud successfully";
     } else {
-      responseStatusCode = 400;
-      responseMessage = JSON.stringify(errors);
-      
+      context.res = {
+        status: 400,
+        body: errors,
+        headers: {
+            'Content-Type': 'application/json'
+        }
+      };
+      return;
     }
   } else {
     responseStatusCode = 400;
