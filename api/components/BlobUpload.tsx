@@ -5,6 +5,16 @@ const blobUrl: string = process.env.REACT_APP_BLOB_STR || undefined;
 if (!blobUrl) {
   throw new Error('No string attached!');
 }
+
+// async function getUserInfo() {
+//   const response = await fetch('/.auth/me');
+//   const payload = await response.json();
+//   const { clientPrincipal } = payload;
+//   return clientPrincipal;
+// };
+
+// const user = getUserInfo();
+
 const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 const containers: {name: string; nameShort: string}[] = [];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -33,8 +43,20 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
           blobServiceClient.getContainerClient(containerForUpload);
         const blobName = file.filename;
         const blobClient = containerClient.getBlockBlobClient(blobName);
+
+        const uploadOptions = {
+          metadata: {
+            user: user,
+            date: (new Date()).toDateString(),
+          },
+          tags: {
+            uploadedBy: user,
+            uploadedOn: (new Date()).toDateString(),
+          }
+        }
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength);          
+        // @ts-ignore
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength, uploadOptions);          
     }
   } else {
     console.log('Plot ', plot, 'does not exist');
