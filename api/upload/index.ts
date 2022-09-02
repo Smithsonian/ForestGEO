@@ -4,6 +4,7 @@ import parseMultipartFormData from "@anzp/azure-function-multipart";
 import { parse, ParseConfig } from "papaparse";
 import { ParsedFile } from "@anzp/azure-function-multipart/dist/types/parsed-file.type";
 
+
 const httpTrigger: AzureFunction = async function (
   context: Context,
   req: HttpRequest
@@ -29,7 +30,7 @@ const httpTrigger: AzureFunction = async function (
     ];
 
     // array for collected errors
-    const errors: any = {};
+    const errors: { [fileName: string]: { [currentRow: string]: string } } = {};
 
     function createFileEntry(parsedFile: ParsedFile) {
       if (errors[parsedFile.filename] == undefined) {
@@ -75,7 +76,7 @@ const httpTrigger: AzureFunction = async function (
         keys.map((key) => {
           if (csv[key] === "" || undefined) {
             createFileEntry(parsedFile);
-            errors[parsedFile.filename][currentRow] = "Missing value in ";
+            errors[parsedFile.filename][currentRow] = "Missing value";
             console.log(errors[parsedFile.filename][currentRow]);
           }
           else if (key === 'DBH' && (parseInt(csv[key]) < 1)) {
@@ -92,15 +93,16 @@ const httpTrigger: AzureFunction = async function (
         );
         errors[parsedFile.filename][results.errors[0].row] = results.errors[0].message;
       }
-      console.log("Validation errors:", errors);
     }
 
-    if (!errors.length) {
+    if (Object.keys(errors).length === 0) {
       uploadFiles(files, plot);
       responseStatusCode = 201;
       responseMessage = "File uploaded to the cloud successfully";
     } else {
-      // send the response with errors
+      responseStatusCode = 400;
+      responseMessage = JSON.stringify(errors);
+      
     }
   } else {
     responseStatusCode = 400;
