@@ -49,12 +49,33 @@ Try and fix errors automatically.
 
 Run the TypeScript type checker.
 
+### `npm run storybook`
+
+View a demo of components ("storybook") in the browser.
+
 ## Learn More
 
 You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
 
 To learn React, check out the [React documentation](https://reactjs.org/).
 
-# How to use Storybook
+### How to use Storybook? What is storybook?
 
-[Link to storybook document](buildStorybookUI.md)
+Storybook is a demo of our components. 
+It's useful for development and testing variations of our components.
+We can _create variations_ of each component by using **stories**,
+an example of a variation is a blue button or a red button.
+
+To see the storybook running run this:
+
+```bash
+npm run storybook
+```
+
+... which opens the browser on port 6006 and allows you to see all components with stories.
+
+See [official tutorial](https://storybook.js.org/tutorials/intro-to-storybook/react/en/simple-component/) to create new components.
+
+See src/components/DropZone/DropZone.stories.tsx and other .stories.tsx files as examples.
+
+Each Component.tsx should have a Component.stories.tsx next to it.
