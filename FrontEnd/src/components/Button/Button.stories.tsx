@@ -1,15 +1,14 @@
-import { Button } from '@mui/material';
 import { ComponentMeta, Story } from '@storybook/react';
-import ButtonComponent, { ButtonProps } from '../components/Button';
+import Button, { ButtonProps } from './Button';
 
 export default {
   title: 'Button',
-  component: ButtonComponent,
+  component: Button,
   argTypes: {
     label: { control: 'text' },
     onClick: { action: 'clicked' },
   },
-} as ComponentMeta<typeof ButtonComponent>;
+} as ComponentMeta<typeof Button>;
 
 const Template: Story<ButtonProps> = (args) => <Button {...args} />;
 
