@@ -6,14 +6,21 @@ import Box from '@mui/material/Box';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import { Typography } from '@mui/material';
 import { Stack } from '@mui/material';
-import '../CSS/Dropezone.css';
+import './Dropzone.css';
 
 export interface DropzonePureProps {
+  /** Is someone dragging file(s) onto the dropzone? */
   isDragActive: boolean;
+  /** From react-dropzone, function which gets  for putting properties */
   getRootProps: any;
+  /** From react-dropzone, function which gets properties for the input field. */
   getInputProps: any;
 }
 
+/**
+ * This is the presentation component for Dropzone.
+ * It should be free of logic, and concentrate on the presentation.
+ */
 export function DropzonePure({
   getRootProps,
   getInputProps,
@@ -50,9 +57,20 @@ export function DropzonePure({
 }
 
 export interface DropzoneProps {
+  /**
+   * A callback function which is called when files given for upload.
+   * Files can be given by the user either by dropping the files
+   * with drag and drop, or by using the file browse button.
+   *
+   * @param acceptedFiles - files which were accepted for upload.
+   * @param rejectedFiles - files which are denied uploading.
+   */
   onChange(acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]): void;
 }
 
+/**
+ * A drop zone for CSV file uploads.
+ */
 export default function Dropzone({ onChange }: DropzoneProps) {
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
