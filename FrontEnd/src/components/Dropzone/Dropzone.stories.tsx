@@ -4,7 +4,7 @@ import Dropzone, {
   DropzonePure,
   DropzonePureProps,
   DropzoneProps,
-} from '../components/Dropzone';
+} from './Dropzone';
 
 export default {
   title: 'Dropzone',
