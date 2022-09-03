@@ -6,14 +6,14 @@ if (!blobUrl) {
   throw new Error('No string attached!');
 }
 
-// async function getUserInfo() {
-//   const response = await fetch('/.auth/me');
-//   const payload = await response.json();
-//   const { clientPrincipal } = payload;
-//   return clientPrincipal;
-// };
-
-// const user = getUserInfo();
+// user info interface (received from the 'x-ms-client-principal' cookie in the upload function)
+export interface clientPrincipal {
+  userId: string;
+  userRoles: string[];
+  claims: string[];
+  identityProvider: string;
+  userDetails: string;
+}
 
 const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 const containers: {name: string; nameShort: string}[] = [];
@@ -29,7 +29,7 @@ const listContainers = async () => {
   }
 };
 
-const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
+const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userInfo: clientPrincipal) => {
   try {
     await listContainers();
     const plotReplaced = plot.replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -46,16 +46,16 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
 
         const uploadOptions = {
           metadata: {
-            user: user,
+            user: userInfo.userDetails,
             date: (new Date()).toDateString(),
           },
           tags: {
-            uploadedBy: user,
+            uploadedBy: userInfo.userDetails,
             uploadedOn: (new Date()).toDateString(),
           }
         }
+        console.log(uploadOptions);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        // @ts-ignore
         const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength, uploadOptions);          
     }
   } else {
