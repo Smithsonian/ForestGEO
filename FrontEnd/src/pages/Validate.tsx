@@ -5,8 +5,7 @@ import { FileWithPath } from 'react-dropzone';
 import SelectPlot, { Plot } from '../components/SelectPlot';
 
 import React, { useState } from 'react';
-import ValidationTable, { dataStructure } from '../components/ValidationTable';
-import { parse } from 'papaparse';
+import ValidationTable from '../components/ValidationTable';
 import Container from '@mui/material/Container';
 import { CircularProgress } from '@mui/material';
 
@@ -14,7 +13,7 @@ const Validate = () => {
   const initialState: Array<FileWithPath> = [];
   const [acceptedFilesList, setAcceptedFilesList] = useState(initialState);
   const filesWithErrorsList: FileWithPath[] = [];
-  const [isLoading, setIsLoading] = useState(false);
+  // const [isLoading, setIsLoading] = useState(false);
 
   const errorsInitialState: {
     [fileName: string]: { [currentRow: string]: string };
@@ -83,7 +82,7 @@ const Validate = () => {
             {acceptedFilesList.length > 0 && plot.plotNumber > 0 && (
               <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
             )}
-            {isLoading && <CircularProgress />}
+            {/* {isLoading && <CircularProgress />} */}
           </div>
         </>
       )}
