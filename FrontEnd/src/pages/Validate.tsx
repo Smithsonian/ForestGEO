@@ -7,7 +7,7 @@ import SelectPlot, { Plot } from '../components/SelectPlot';
 import React, { useState } from 'react';
 import ValidationTable from '../components/ValidationTable';
 import Container from '@mui/material/Container';
-import { CircularProgress } from '@mui/material';
+// import { CircularProgress } from '@mui/material';
 
 const Validate = () => {
   const initialState: Array<FileWithPath> = [];
