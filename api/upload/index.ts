@@ -3,6 +3,7 @@ import { uploadFiles } from "../components/BlobUpload";
 import parseMultipartFormData from "@anzp/azure-function-multipart";
 import { parse, ParseConfig } from "papaparse";
 import { ParsedFile } from "@anzp/azure-function-multipart/dist/types/parsed-file.type";
+import { clientPrincipal } from "../components/BlobUpload";
 
 const httpTrigger: AzureFunction = async function (
   context: Context,
@@ -10,6 +11,14 @@ const httpTrigger: AzureFunction = async function (
 ): Promise<void> {
   let responseStatusCode: number;
   let responseMessage: string;
+
+  // get user info
+  const header = req.headers['x-ms-client-principal'];
+  const encoded = Buffer.from(header, 'base64');
+  const decoded = encoded.toString('ascii');
+  const userInfo: clientPrincipal = JSON.parse(decoded);
+
+
 
   if (req.body) {
     const { fields, files } = await parseMultipartFormData(req);
@@ -95,7 +104,7 @@ const httpTrigger: AzureFunction = async function (
     }
 
     if (Object.keys(errors).length === 0) {
-      uploadFiles(files, plot);
+      uploadFiles(files, plot, userInfo);
       context.res = {
         status: 201,
         body: {
