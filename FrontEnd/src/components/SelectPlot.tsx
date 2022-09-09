@@ -65,7 +65,6 @@ export default function SelectPlot(props: plotProps) {
 
   const handleChange = (event: SelectChangeEvent) => {
     const chosenPlotNumber = parseInt(event.target.value);
-    console.log(chosenPlotNumber);
     const setNumberPlot = plots.find(
       (e) => e.plotNumber === chosenPlotNumber
     ) || {
@@ -77,9 +76,15 @@ export default function SelectPlot(props: plotProps) {
       plotName: chosenPlotName,
       plotNumber: chosenPlotNumber,
     };
-    console.log(newPlot);
     props.setPlot(newPlot);
+    localStorage.setItem('localPlot', JSON.stringify(newPlot));
   };
+
+  let localPlotObject = null;
+  if (localStorage.getItem('localPlot')) {
+    let localPlot = localStorage.getItem('localPlot');
+    localPlotObject = JSON.parse(localPlot!);
+  }
 
   return (
     <FormControl sx={{ m: 1, minWidth: 180 }} required>
@@ -91,9 +96,16 @@ export default function SelectPlot(props: plotProps) {
         label="Plot *"
         onChange={handleChange}
       >
-        <MenuItem value="0">
-          <em>None</em>
-        </MenuItem>
+        {Object.keys(localPlotObject).length ? (
+          <MenuItem value={localPlotObject.plotNumber.toString()}>
+            <em>{localPlotObject.plotName}</em>
+          </MenuItem>
+        ) : (
+          <MenuItem value="">
+            <em>None</em>
+          </MenuItem>
+        )}
+
         {plots.map((plot: Plot, i) => {
           return (
             <MenuItem value={plot.plotNumber.toString()}>

@@ -16,6 +16,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import data from '../mock-table-data.json';
 import CircularProgress from '@mui/material/CircularProgress';
 import '../CSS/Browse.css';
+import SelectPlot, { Plot } from '../components/SelectPlot';
 
 const Browse = () => {
   let handleRemove = (i: any) => {
@@ -37,6 +38,8 @@ const Browse = () => {
   const [error, setError] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
+  const initialPlotState: Plot = { plotName: '', plotNumber: 0 };
+  const [plot, setPlot] = React.useState(initialPlotState);
 
   useEffect(() => {
     getData().then(
@@ -63,6 +66,7 @@ const Browse = () => {
   } else {
     return (
       <>
+        <SelectPlot plot={plot} setPlot={setPlot} />
         <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
           <TableContainer id={'tableContainer'}>
             <Table aria-label="simple table" stickyHeader>
