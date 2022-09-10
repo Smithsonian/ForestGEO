@@ -10,7 +10,7 @@ const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 
 const containers: { name: string; nameShort: string }[] = [];
 
-let blobData: string[] = new Array();
+let blobData: { [fileName: string]: { [metaData: string]: string } } = {};
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {
@@ -36,15 +36,17 @@ const showFiles = async (plot: string) => {
       const containerClient =
         blobServiceClient.getContainerClient(containerName);
 
-      for await (const blob of containerClient.listBlobsFlat()) {
-        blobData.push(blob.name);
+      for await (const blob of containerClient.listBlobsFlat({
+        includeMetadata: true,
+      })) {
+        blobData[blob.name] = blob.metadata;
       }
+      return blobData;
     } else {
       console.log("Plot ", plot, "does not exist");
       alert("Plot " + plot + " does not exist");
-      return blobData.push("error");
+      return null;
     }
-    return blobData;
   } catch (e) {
     console.log(e);
   }
