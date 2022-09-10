@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, SetStateAction, useEffect } from 'react';
 import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
 import FormHelperText from '@mui/material/FormHelperText';
@@ -10,14 +10,15 @@ export interface Plot {
   plotNumber: number;
 }
 
-type plotProps = {
+export interface plotProps {
   plot: Plot;
   setPlot: Dispatch<SetStateAction<Plot>>;
-};
+}
 
 export default function SelectPlot(props: plotProps) {
-  // const initialState: Plot = { plotName: '', plotNumber: 0 };
-  // const [plot, setPlot] = React.useState(initialState);
+  useEffect(() => {
+    localStorage.setItem('localPlot', JSON.stringify(props.plot));
+  }, [props.plot]);
 
   const plots: Plot[] = [];
 
@@ -56,6 +57,7 @@ export default function SelectPlot(props: plotProps) {
     { Vandermeer: 14 },
     { wanang: 21 },
     { Yosemite: 33 },
+    { 'Choose a plot ': 0 },
   ];
 
   plotsObjects.forEach((e) => {
@@ -65,26 +67,16 @@ export default function SelectPlot(props: plotProps) {
 
   const handleChange = (event: SelectChangeEvent) => {
     const chosenPlotNumber = parseInt(event.target.value);
-    const setNumberPlot = plots.find(
-      (e) => e.plotNumber === chosenPlotNumber
-    ) || {
-      plotName: '',
-      plotNumber: 0,
-    };
-    const chosenPlotName = setNumberPlot.plotName;
+    const setNumberPlot = plots.find((e) => e.plotNumber === chosenPlotNumber);
+    const chosenPlotName = setNumberPlot!.plotName;
     const newPlot: Plot = {
       plotName: chosenPlotName,
       plotNumber: chosenPlotNumber,
     };
+    // props.setPlot(newPlot);
     props.setPlot(newPlot);
-    localStorage.setItem('localPlot', JSON.stringify(newPlot));
+    localStorage.setItem('localPlot', JSON.stringify(props.plot));
   };
-
-  let localPlotObject = null;
-  if (localStorage.getItem('localPlot')) {
-    let localPlot = localStorage.getItem('localPlot');
-    localPlotObject = JSON.parse(localPlot!);
-  }
 
   return (
     <FormControl sx={{ m: 1, minWidth: 180 }} required>
@@ -96,19 +88,13 @@ export default function SelectPlot(props: plotProps) {
         label="Plot *"
         onChange={handleChange}
       >
-        {Object.keys(localPlotObject).length ? (
-          <MenuItem value={localPlotObject.plotNumber.toString()}>
-            <em>{localPlotObject.plotName}</em>
-          </MenuItem>
-        ) : (
-          <MenuItem value="">
-            <em>None</em>
-          </MenuItem>
-        )}
+        <MenuItem value="">
+          <em>None</em>
+        </MenuItem>
 
         {plots.map((plot: Plot, i) => {
           return (
-            <MenuItem value={plot.plotNumber.toString()}>
+            <MenuItem key={i} value={plot.plotNumber.toString()}>
               {plot.plotName}
             </MenuItem>
           );

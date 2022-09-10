@@ -8,16 +8,14 @@ import React, { useState } from 'react';
 import ValidationTable, { dataStructure } from '../components/ValidationTable';
 import { parse } from 'papaparse';
 import Container from '@mui/material/Container';
+import { plotProps } from '../components/SelectPlot';
 
-const Validate = () => {
+const Validate = (props: plotProps) => {
   const initialState: Array<FileWithPath> = [];
   const [acceptedFilesList, setAcceptedFilesList] = useState(initialState);
   const [clicked, setClicked] = useState(false);
   const [finalData, setFinalData] = useState<dataStructure[]>([]);
   const data: dataStructure[] = [];
-
-  const initialPlotState: Plot = { plotName: '', plotNumber: 0 };
-  const [plot, setPlot] = React.useState(initialPlotState);
 
   const display = () => {
     acceptedFilesList.forEach((file: any) => {
@@ -48,7 +46,7 @@ const Validate = () => {
       i++;
     }
 
-    fetch('/api/upload?plot=' + plot.plotName, {
+    fetch('/api/upload?plot=' + props.plot.plotName, {
       method: 'Post',
       body: fileToFormData,
     });
@@ -68,7 +66,7 @@ const Validate = () => {
       ) : (
         <>
           <Container fixed>
-            <SelectPlot plot={plot} setPlot={setPlot} />
+            <SelectPlot plot={props.plot} setPlot={props.setPlot} />
           </Container>
           <div id="dropZone">
             <Dropzone
@@ -80,7 +78,7 @@ const Validate = () => {
               }}
             />
             <FileList acceptedFilesList={acceptedFilesList} />
-            {acceptedFilesList.length > 0 && plot.plotNumber > 0 && (
+            {acceptedFilesList.length > 0 && props.plot.plotNumber > 0 && (
               <Button label="UPLOAD" onClick={display} />
             )}
           </div>
