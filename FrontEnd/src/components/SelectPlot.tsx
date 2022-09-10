@@ -80,9 +80,9 @@ export default function SelectPlot(props: plotProps) {
 
   return (
     <FormControl sx={{ m: 1, minWidth: 180 }} required>
-      <InputLabel id="demo-simple-select-required-label">Plot</InputLabel>
+      <InputLabel id="simple">Plot</InputLabel>
       <Select
-        labelId="demo-simple-select-required-label"
+        labelId="simple"
         id="demo-simple-select-required"
         value={props.plot.plotNumber.toString()}
         label="Plot *"

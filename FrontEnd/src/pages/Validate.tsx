@@ -2,7 +2,7 @@ import Dropzone from '../components/Dropzone';
 import FileList from '../components/FileList';
 import Button from '../components/Button';
 import { FileWithPath } from 'react-dropzone';
-import SelectPlot, { Plot } from '../components/SelectPlot';
+import SelectPlot from '../components/SelectPlot';
 
 import React, { useState } from 'react';
 import ValidationTable, { dataStructure } from '../components/ValidationTable';
