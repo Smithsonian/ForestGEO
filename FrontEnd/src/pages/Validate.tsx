@@ -5,38 +5,24 @@ import { FileWithPath } from 'react-dropzone';
 import SelectPlot from '../components/SelectPlot';
 
 import React, { useState } from 'react';
-import ValidationTable, { dataStructure } from '../components/ValidationTable';
-import { parse } from 'papaparse';
+import ValidationTable from '../components/ValidationTable';
 import Container from '@mui/material/Container';
-import { plotProps } from '../components/SelectPlot';
+// import { CircularProgress } from '@mui/material';
 
 const Validate = (props: plotProps) => {
   const initialState: Array<FileWithPath> = [];
   const [acceptedFilesList, setAcceptedFilesList] = useState(initialState);
-  const [clicked, setClicked] = useState(false);
-  const [finalData, setFinalData] = useState<dataStructure[]>([]);
-  const data: dataStructure[] = [];
+  const filesWithErrorsList: FileWithPath[] = [];
+  // const [isLoading, setIsLoading] = useState(false);
 
-  const display = () => {
-    acceptedFilesList.forEach((file: any) => {
-      parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: function (results: any) {
-          try {
-            // eslint-disable-next-line array-callback-return
-            results.data.map((i: dataStructure) => {
-              data.push(i as dataStructure);
-            });
-            setFinalData(data);
-            setClicked(true);
-          } catch (e) {
-            console.log(e);
-          }
-        },
-      });
-    });
-  };
+  const errorsInitialState: {
+    [fileName: string]: { [currentRow: string]: string };
+  } = {};
+  const [errorsData, setErrorsData] = useState(errorsInitialState);
+
+  const [uploadClicked, setUploadClicked] = useState(false);
+  const initialPlotState: Plot = { plotName: '', plotNumber: 0 };
+  const [plot, setPlot] = React.useState(initialPlotState);
 
   const handleUpload = () => {
     const fileToFormData = new FormData();
@@ -49,20 +35,34 @@ const Validate = (props: plotProps) => {
     fetch('/api/upload?plot=' + props.plot.plotName, {
       method: 'Post',
       body: fileToFormData,
-    });
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        setErrorsData(data.errors);
+      })
+      .then(() => setUploadClicked(true));
   };
+
+  if (Object.keys(errorsData).length) {
+    acceptedFilesList.forEach((file: FileWithPath) => {
+      if (Object.keys(errorsData).includes(file.name.toString())) {
+        filesWithErrorsList.push(file);
+      }
+    });
+  }
 
   return (
     <>
-      {clicked ? (
-        <div id="validationTable">
-          <ValidationTable
-            error={true}
-            errorMessage={{ 1: 'ERROR: message' }}
-            uploadedData={finalData}
-          />
-          <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
-        </div>
+      {uploadClicked && Object.keys(errorsData).length ? (
+        <>
+          <div id="validationTable">
+            <ValidationTable
+              error={true}
+              errorMessage={errorsData}
+              uploadedData={filesWithErrorsList}
+            />
+          </div>
+        </>
       ) : (
         <>
           <Container fixed>
@@ -78,9 +78,10 @@ const Validate = (props: plotProps) => {
               }}
             />
             <FileList acceptedFilesList={acceptedFilesList} />
-            {acceptedFilesList.length > 0 && props.plot.plotNumber > 0 && (
-              <Button label="UPLOAD" onClick={display} />
+            {acceptedFilesList.length > 0 && plot.plotNumber > 0 && (
+              <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
             )}
+            {/* {isLoading && <CircularProgress />} */}
           </div>
         </>
       )}
