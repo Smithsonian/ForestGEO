@@ -1,6 +1,9 @@
 ## Azure Static Web Apps service
 The project test app is currently deployed using Azure Static Web Apps service
-and can be accessed at https://black-flower-0ae66d51e.1.azurestaticapps.net/  
+and can be accessed at 
+
+https://agreeable-wave-08a957210.1.azurestaticapps.net/
+
 When we get an update on subscription we can use, the URL will be changed.
 During the deployment process Azure automatically creates GitHub workflow file that defines CI/CD (Continuous integration/deployment). For example, when the code is updated and PR is created, GitHub automatically creates a copy of the app with the updated code and provides URL for that so it is easy to test the changes and compare updated app with the one in production.
   
