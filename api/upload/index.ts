@@ -72,16 +72,16 @@ const httpTrigger: AzureFunction = async function (
       }
 
       results.data.map((csv, index) => {
-        const keys = Object.keys(csv);
+        const csvHeaders = Object.keys(csv);
         const currentRow = index + 1;
 
-        if (!keys.every((entry) => headers.includes(entry))) {
+        if (!csvHeaders.every((entry) => headers.includes(entry))) {
           createFileEntry(parsedFile);
           console.log("Headers test failed!");
           errors[parsedFile.filename]["headers"] = "Missing Headers";
         }
 
-        keys.map((key) => {
+        csvHeaders.map((key) => {
           if (csv[key] === "" || undefined) {
             createFileEntry(parsedFile);
             errors[parsedFile.filename][currentRow] = "Missing value";
