@@ -96,7 +96,7 @@ export default function SelectPlot(props: plotProps) {
         </MenuItem>
         {plots.map((plot: Plot, i) => {
           return (
-            <MenuItem value={plot.plotNumber.toString()}>
+            <MenuItem value={plot.plotNumber.toString()} key={i}>
               {plot.plotName}
             </MenuItem>
           );
