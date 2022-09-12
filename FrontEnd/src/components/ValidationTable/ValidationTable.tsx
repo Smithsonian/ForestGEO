@@ -7,8 +7,10 @@ import {
   TableCell,
   Typography,
   Paper,
+  TableFooter,
 } from '@mui/material';
 import { parse } from 'papaparse';
+import { useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { useNavigate } from 'react-router-dom';
 import Button from '../Button';
@@ -49,72 +51,86 @@ export default function ValidationTable({
   errorMessage,
 }: ValidationTableProps): JSX.Element {
   let navigate = useNavigate();
+  let tempData: { fileName: string; data: dataStructure[] }[] = [];
+  const initState: { fileName: string; data: dataStructure[] }[] = [];
+  const [data, setData] = useState(initState);
 
-  const display = (fileName: string) => {
-    let data: dataStructure[] = [];
+  const display = () => {
+    // eslint-disable-next-line array-callback-return
     uploadedData.forEach((file: FileWithPath) => {
-      if (file.name === fileName)
-        parse(file, {
-          header: true,
-          skipEmptyLines: true,
-          complete: function (results: any) {
-            try {
-              // eslint-disable-next-line array-callback-return
-              results.data.map((i: dataStructure) => {
-                data.push(i as dataStructure);
-              });
-              // console.log(data);
-              // console.log('data was parsed');
-            } catch (e) {
-              console.log(e);
-            }
-          },
-        });
+      parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function (results: any) {
+          try {
+            // eslint-disable-next-line array-callback-return
+            tempData.push({ fileName: file.name, data: results.data });
+            setData(tempData);
+          } catch (e) {
+            console.log(e);
+          }
+        },
+      });
     });
-    return data;
   };
+  display();
+  let fileData: { fileName: string; data: dataStructure[] };
+
   return (
     <>
       {Object.keys(errorMessage).map((fileName) => {
-        const data: dataStructure[] = display(fileName);
-        const errorsList = Object.keys(errorMessage[fileName]).map((row) => {
-          return (
-            <li key={parseInt(row[0])}>
-              Row {row}: {errorMessage[fileName][row]}
-            </li>
-          );
-        });
-        console.log('data for the table:', data);
+        fileData = data.find((file) => file.fileName === fileName) || {
+          fileName: '',
+          data: [],
+        };
         return (
           <TableContainer component={Paper}>
             <h3>file: {fileName}</h3>
+
             <Table>
-              <TableHead>
-                <TableRow>
-                  {HEADERS.map((row, index) => {
-                    return <TableCell>{row.label}</TableCell>;
-                  })}
-                </TableRow>
-              </TableHead>
-              {data.map((data: dataStructure) => {
-                return (
-                  <TableBody>
+              {errorMessage[fileName]['headers'] ? (
+                <></>
+              ) : (
+                <>
+                  <TableHead>
                     <TableRow>
-                      {HEADERS.map((header) => (
-                        <TableCell>{data[header.label]}</TableCell>
-                      ))}
+                      {HEADERS.map((row, index) => {
+                        return <TableCell key={index}>{row.label}</TableCell>;
+                      })}
                     </TableRow>
-                  </TableBody>
-                );
-              })}
-              {error && errorMessage && (
-                <TableRow className="errorMessage">
-                  <TableCell colSpan={HEADERS.length}>
-                    <Typography className="errorMessage" component={'span'}>
-                      <ul>{errorsList}</ul>
-                    </Typography>
-                  </TableCell>
-                </TableRow>
+                  </TableHead>
+
+                  {fileData!.data.map((data: dataStructure) => {
+                    return (
+                      <TableBody>
+                        <TableRow>
+                          {HEADERS.map((header, i) => (
+                            <TableCell key={i}>{data[header.label]}</TableCell>
+                          ))}
+                        </TableRow>
+                      </TableBody>
+                    );
+                  })}
+                </>
+              )}
+              {errorMessage && (
+                <TableFooter>
+                  <TableRow className="errorMessage">
+                    <TableCell colSpan={HEADERS.length}>
+                      <Typography className="errorMessage" component={'span'}>
+                        <ul>
+                          {Object.keys(errorMessage[fileName]).map((row) => {
+                            return (
+                              <li key={parseInt(row[0])}>
+                                Row {row}: {errorMessage[fileName][row]}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                </TableFooter>
               )}
             </Table>
           </TableContainer>

@@ -38,7 +38,6 @@ const Validate = () => {
     })
       .then((response) => response.json())
       .then((data) => {
-        console.log(data.errors);
         setErrorsData(data.errors);
       })
       .then(() => setUploadClicked(true));
