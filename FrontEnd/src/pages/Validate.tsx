@@ -54,7 +54,7 @@ const Validate = () => {
   }
 
   if (uploadDone) {
-    if (Object.keys(errorsData).length == 0) {
+    if (Object.keys(errorsData).length === 0) {
       return (
         <>
           <h1>Succesfully uploaded!</h1>
