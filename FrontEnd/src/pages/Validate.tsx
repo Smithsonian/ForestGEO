@@ -1,28 +1,30 @@
 import Dropzone from '../components/Dropzone';
 import FileList from '../components/FileList';
-import Button from '../components/Button';
+import { Button } from '@mui/material';
 import { FileWithPath } from 'react-dropzone';
 import SelectPlot, { Plot, plotProps } from '../components/SelectPlot';
 
 import React, { useState } from 'react';
 import ValidationTable from '../components/ValidationTable';
 import Container from '@mui/material/Container';
-// import { CircularProgress } from '@mui/material';
+import { CircularProgress } from '@mui/material';
 
 const Validate = (props: plotProps) => {
   const initialState: Array<FileWithPath> = [];
   const [acceptedFilesList, setAcceptedFilesList] = useState(initialState);
   const filesWithErrorsList: FileWithPath[] = [];
-  // const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setisUploading] = useState(false);
 
   const errorsInitialState: {
     [fileName: string]: { [currentRow: string]: string };
   } = {};
   const [errorsData, setErrorsData] = useState(errorsInitialState);
 
-  const [uploadClicked, setUploadClicked] = useState(false);
+  const [uploadDone, setUploadDone] = useState(false);
+  const initialPlotState: Plot = { plotName: '', plotNumber: 0 };
+  const [plot, setPlot] = React.useState(initialPlotState);
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     const fileToFormData = new FormData();
     let i = 0;
     for (const file of acceptedFilesList) {
@@ -30,15 +32,17 @@ const Validate = (props: plotProps) => {
       i++;
     }
 
-    fetch('/api/upload?plot=' + props.plot.plotName, {
+    setisUploading(true);
+
+    const response = await fetch('/api/upload?plot=' + plot.plotName, {
       method: 'Post',
       body: fileToFormData,
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        setErrorsData(data.errors);
-      })
-      .then(() => setUploadClicked(true));
+    });
+    const data = await response.json();
+    setErrorsData(data.errors);
+
+    setisUploading(false);
+    setUploadDone(true);
   };
 
   if (Object.keys(errorsData).length) {
@@ -49,9 +53,16 @@ const Validate = (props: plotProps) => {
     });
   }
 
-  return (
-    <>
-      {uploadClicked && Object.keys(errorsData).length ? (
+  if (uploadDone) {
+    if (Object.keys(errorsData).length === 0) {
+      return (
+        <>
+          <h1>Succesfully uploaded!</h1>
+        </>
+      );
+    } else {
+      // Show errors with the data that were uploaded
+      return (
         <>
           <div id="validationTable">
             <ValidationTable
@@ -61,28 +72,36 @@ const Validate = (props: plotProps) => {
             />
           </div>
         </>
-      ) : (
-        <>
-          <Container fixed>
-            <SelectPlot plot={props.plot} setPlot={props.setPlot} />
-          </Container>
-          <div id="dropZone">
-            <Dropzone
-              onChange={(acceptedFiles) => {
-                setAcceptedFilesList((acceptedFilesList) => [
-                  ...acceptedFilesList,
-                  ...acceptedFiles,
-                ]);
-              }}
-            />
-            <FileList acceptedFilesList={acceptedFilesList} />
-            {acceptedFilesList.length > 0 && props.plot.plotNumber > 0 && (
-              <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
-            )}
-            {/* {isLoading && <CircularProgress />} */}
-          </div>
-        </>
-      )}
+      );
+    }
+  }
+
+  return (
+    <>
+      <Container fixed>
+        <SelectPlot plot={plot} setPlot={setPlot} />
+      </Container>
+      <div id="dropZone">
+        <Dropzone
+          onChange={(acceptedFiles) => {
+            setAcceptedFilesList((acceptedFilesList) => [
+              ...acceptedFilesList,
+              ...acceptedFiles,
+            ]);
+          }}
+        />
+        <FileList acceptedFilesList={acceptedFilesList} />
+        {acceptedFilesList.length > 0 && plot.plotNumber > 0 && (
+          <Button
+            disabled={isUploading}
+            variant="contained"
+            onClick={handleUpload}
+          >
+            Upload to server
+          </Button>
+        )}
+        {isUploading && <CircularProgress />}
+      </div>
     </>
   );
 };
