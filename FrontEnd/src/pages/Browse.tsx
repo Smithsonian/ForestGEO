@@ -13,13 +13,30 @@ import {
 import DownloadIcon from '@mui/icons-material/Download';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import data from '../mock-table-data.json';
 import CircularProgress from '@mui/material/CircularProgress';
 import '../CSS/Browse.css';
 import SelectPlot from '../components/SelectPlot';
 import { plotProps } from '../components/SelectPlot';
 
 const Browse = (props: plotProps) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [listOfFiles, setListOfFiles] = useState([]);
+
+  const getListOfFiles = () => {
+    if (props.plot.plotName) {
+      fetch('/api/download?plot=' + props.plot.plotName, {
+        method: 'Get',
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          setListOfFiles(data);
+        });
+    } else {
+      console.log('Plot is undefined');
+      throw new Error('No plot');
+    }
+  };
+
   let handleRemove = (i: any) => {
     const newRows = [...rows];
     const index = rows.findIndex((row) => row.file === i);
@@ -30,8 +47,8 @@ const Browse = (props: plotProps) => {
   async function getData() {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
-        resolve(data);
-        //reject('Failed to load');
+        resolve(getListOfFiles);
+        reject('Failed to load');
       }, 2000);
     });
   }
@@ -39,8 +56,6 @@ const Browse = (props: plotProps) => {
   const [error, setError] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
-  // const initialPlotState: Plot = { plotName: '', plotNumber: 0 };
-  // const [plot, setPlot] = useState(initialPlotState);
 
   useEffect(() => {
     getData().then(
@@ -54,6 +69,8 @@ const Browse = (props: plotProps) => {
       }
     );
   }, []);
+
+  console.log(listOfFiles);
 
   if (error) {
     return <div>Error</div>;

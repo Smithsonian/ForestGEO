@@ -2,7 +2,7 @@ import Dropzone from '../components/Dropzone';
 import FileList from '../components/FileList';
 import Button from '../components/Button';
 import { FileWithPath } from 'react-dropzone';
-import SelectPlot from '../components/SelectPlot';
+import SelectPlot, { Plot, plotProps } from '../components/SelectPlot';
 
 import React, { useState } from 'react';
 import ValidationTable from '../components/ValidationTable';
@@ -21,8 +21,6 @@ const Validate = (props: plotProps) => {
   const [errorsData, setErrorsData] = useState(errorsInitialState);
 
   const [uploadClicked, setUploadClicked] = useState(false);
-  const initialPlotState: Plot = { plotName: '', plotNumber: 0 };
-  const [plot, setPlot] = React.useState(initialPlotState);
 
   const handleUpload = () => {
     const fileToFormData = new FormData();
@@ -78,7 +76,7 @@ const Validate = (props: plotProps) => {
               }}
             />
             <FileList acceptedFilesList={acceptedFilesList} />
-            {acceptedFilesList.length > 0 && plot.plotNumber > 0 && (
+            {acceptedFilesList.length > 0 && props.plot.plotNumber > 0 && (
               <Button label="UPLOAD TO SERVER" onClick={handleUpload} />
             )}
             {/* {isLoading && <CircularProgress />} */}
