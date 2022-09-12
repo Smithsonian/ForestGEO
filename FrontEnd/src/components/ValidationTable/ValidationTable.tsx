@@ -88,7 +88,7 @@ export default function ValidationTable({
             <h3>file: {fileName}</h3>
 
             <Table>
-              {errorMessage[fileName]['headers'] ? (
+              {errorMessage[fileName]['error'] ? (
                 <></>
               ) : (
                 <>
@@ -100,7 +100,7 @@ export default function ValidationTable({
                     </TableRow>
                   </TableHead>
 
-                  {fileData!.data.map((data: dataStructure) => {
+                  {fileData.data.map((data: dataStructure) => {
                     return (
                       <TableBody>
                         <TableRow>
