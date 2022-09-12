@@ -14,3 +14,10 @@ In the main dashboard search for Static Web Apps resource, click +Create and fil
 and choose correct build preset (React Framework for ForestGEO project).  
 **Important:** you need to be a repository owner or an administrator to deploy it. The easiest way to test the service is to fork a repository and deploy it.
 
+### Instruction for local development  
+(based on https://docs.microsoft.com/en-us/azure/static-web-apps/local-development)
+1. Install nesessary packages in Api and FrontEnd folders (e.g. cd /Api && npm install)
+2. Install static-web-apps-cli in the FrontEnd folder (cd /FrontEnd && npm install @azure/static-web-apps-cli)
+3. Go to Api folder and execute 'npm run watch' command
+4. In the new terminal execute 'swa start' command
+5. Server should be up and running at http://localhost:4280 
