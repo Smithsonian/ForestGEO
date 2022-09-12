@@ -36,7 +36,6 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
     const found = containers.find((container) => container.name === plotReplaced);
     if (found) {
       const containerForUpload = found.name;
-      // console.log("Found in " + containerForUpload + "!");
     
     for (const file of acceptedFilesList) {
         const containerClient =
@@ -54,9 +53,8 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
             uploadedOn: (new Date()).toDateString(),
           }
         }
-        console.log(uploadOptions);
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.byteLength, uploadOptions);          
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.length, uploadOptions);          
     }
   } else {
     console.log('Plot ', plot, 'does not exist');
