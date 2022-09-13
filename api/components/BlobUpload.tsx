@@ -54,7 +54,7 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
           }
         }
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.length, uploadOptions);     
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.length, uploadOptions);          
     }
   } else {
     console.log('Plot ', plot, 'does not exist');

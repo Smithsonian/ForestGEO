@@ -1,6 +1,9 @@
 ## Azure Static Web Apps service
 The project test app is currently deployed using Azure Static Web Apps service
-and can be accessed at https://black-flower-0ae66d51e.1.azurestaticapps.net/  
+and can be accessed at 
+
+https://agreeable-wave-08a957210.1.azurestaticapps.net/
+
 When we get an update on subscription we can use, the URL will be changed.
 During the deployment process Azure automatically creates GitHub workflow file that defines CI/CD (Continuous integration/deployment). For example, when the code is updated and PR is created, GitHub automatically creates a copy of the app with the updated code and provides URL for that so it is easy to test the changes and compare updated app with the one in production.
   
@@ -14,3 +17,10 @@ In the main dashboard search for Static Web Apps resource, click +Create and fil
 and choose correct build preset (React Framework for ForestGEO project).  
 **Important:** you need to be a repository owner or an administrator to deploy it. The easiest way to test the service is to fork a repository and deploy it.
 
+### Instruction for local development  
+(based on https://docs.microsoft.com/en-us/azure/static-web-apps/local-development)
+1. Install necessary packages in Api and FrontEnd folders (e.g. cd /Api && npm install)
+2. Install static-web-apps-cli in the FrontEnd folder (cd /FrontEnd && npm install @azure/static-web-apps-cli)
+3. Go to Api folder and execute 'npm run watch' command
+4. In the new terminal execute 'swa start' command
+5. Server should be up and running at http://localhost:4280 
