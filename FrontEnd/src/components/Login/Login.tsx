@@ -1,5 +1,5 @@
 import React from 'react';
-import { Typography } from '@mui/material';
+import { Grid, Typography } from '@mui/material';
 import './Login.css';
 import image from './login.png';
 import Link from '@mui/material/Link';
@@ -13,21 +13,19 @@ export interface LoginPureProps {}
  */
 export function LoginPure() {
   return (
-    <div>
-      <Typography id={'login'}>
-        <div>
-          <img src={image} alt="ForestGeo Logo" />
-        </div>
-        <div id={'loginForm'}>
-          <h1 id={'loginTitle'}>Login Page</h1>
-          <form id="form" noValidate>
-            <Link key={'microsoft'} id={'microsoftButton'} href={`/login`}>
-              Login with Microsoft
-            </Link>
-          </form>
-        </div>
-      </Typography>
-    </div>
+    <Grid container spacing={2}>
+      <Grid item xs={4}>
+        <img src={image} alt="ForestGeo Logo" />
+      </Grid>
+      <Grid item xs={8}>
+        <Typography variant="h3" component="h1" id={'loginTitle'}>
+          Welcome to the ForestGEO web-app
+        </Typography>
+        <Link key={'microsoft'} id={'microsoftButton'} href={`/login`}>
+          Login with Microsoft
+        </Link>
+      </Grid>
+    </Grid>
   );
 }
 
