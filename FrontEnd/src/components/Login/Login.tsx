@@ -1,6 +1,5 @@
 import React from 'react';
 import { Grid, Typography } from '@mui/material';
-import './Login.css';
 import image from './login.png';
 import Link from '@mui/material/Link';
 import GetUser, { clientPrincipal } from '../GetUser';
@@ -15,14 +14,25 @@ export function LoginPure() {
   return (
     <Grid container spacing={2}>
       <Grid item xs={4}>
-        <img src={image} alt="ForestGeo Logo" />
+        <img
+          src={image}
+          alt="ForestGeo Logo"
+          style={{
+            maxWidth: '100%',
+            height: 'auto',
+            padding: 0,
+            margin: 0,
+          }}
+        />
       </Grid>
       <Grid item xs={8}>
-        <Typography variant="h3" component="h1" id={'loginTitle'}>
+        <Typography variant="h3" component="h1">
           Welcome to the ForestGEO web-app
         </Typography>
-        <Link key={'microsoft'} id={'microsoftButton'} href={`/login`}>
-          Login with Microsoft
+        <Link href={`/login`}>
+          <Typography variant="h4" component="h2" sx={{ pt: 8 }}>
+            Login with Microsoft
+          </Typography>
         </Link>
       </Grid>
     </Grid>
