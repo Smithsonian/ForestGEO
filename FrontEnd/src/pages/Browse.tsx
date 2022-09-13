@@ -20,29 +20,32 @@ import { plotProps } from '../components/SelectPlot';
 
 const Browse = (props: plotProps) => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [listOfFiles, setListOfFiles] = useState([]);
+  const initialState: { [fileName: string]: { [metaData: string]: string } } =
+    {};
+  // const [listOfFiles, setListOfFiles] = useState(initialState);
 
-  const getListOfFiles = () => {
-    if (props.plot.plotName) {
-      fetch('/api/download?plot=' + props.plot.plotName, {
-        method: 'Get',
-      })
-        .then((response) => response.json())
-        .then((data) => {
-          setListOfFiles(data);
-        });
+  const getListOfFiles = async () => {
+    if (props.plot) {
+      const response = await fetch(
+        '/api/download?plot=' + props.plot.plotName,
+        {
+          method: 'Get',
+        }
+      );
+      const data = await response.json();
+      return data;
     } else {
       console.log('Plot is undefined');
       throw new Error('No plot');
     }
   };
 
-  let handleRemove = (i: any) => {
-    const newRows = [...rows];
-    const index = rows.findIndex((row) => row.file === i);
-    newRows.splice(index, 1);
-    setRows(newRows);
-  };
+  // let handleRemove = (i: any) => {
+  //   const newRows = [...rows];
+  //   const index = rows.findIndex((row) => row.file === i);
+  //   newRows.splice(index, 1);
+  //   setRows(newRows);
+  // };
 
   async function getData() {
     return new Promise((resolve, reject) => {
@@ -55,7 +58,9 @@ const Browse = (props: plotProps) => {
 
   const [error, setError] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [rows, setRows] = useState<any[]>([]);
+  const [rows, setRows] = useState<{
+    [fileName: string]: { [metaData: string]: string };
+  }>({});
 
   useEffect(() => {
     getData().then(
@@ -68,9 +73,7 @@ const Browse = (props: plotProps) => {
         setError(error);
       }
     );
-  }, []);
-
-  console.log(listOfFiles);
+  });
 
   if (error) {
     return <div>Error</div>;
@@ -90,20 +93,20 @@ const Browse = (props: plotProps) => {
             <Table aria-label="simple table" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell id="tableCell">Form</TableCell>
-                  <TableCell id="tableCell">Quadrant</TableCell>
+                  <TableCell id="tableCell">#</TableCell>
+                  <TableCell id="tableCell">File Name</TableCell>
                   <TableCell id="tableCell">Date Entered</TableCell>
-                  <TableCell id="tableCell">Validation</TableCell>
+                  <TableCell id="tableCell">Uploaded by</TableCell>
                   <TableCell id="lastTableCell">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.file}>
-                    <TableCell>{row.file}</TableCell>
-                    <TableCell>{row.quadrant}</TableCell>
-                    <TableCell>{row.date}</TableCell>
-                    <TableCell>{row.validation}</TableCell>
+                {Object.entries(rows).map((row, index) => (
+                  <TableRow key={index}>
+                    <TableCell>{index}</TableCell>
+                    <TableCell>{row[0]}</TableCell>
+                    <TableCell>{row[0][0]}</TableCell>
+                    <TableCell>{row[0][1]}</TableCell>
                     <TableCell align="center">
                       <Button>
                         <DownloadIcon></DownloadIcon>
@@ -111,7 +114,9 @@ const Browse = (props: plotProps) => {
                       <Button>
                         <EditIcon></EditIcon>
                       </Button>
-                      <Button onClick={() => handleRemove(row.file)}>
+                      <Button
+                        onClick={() => console.log('trying to remove the file')}
+                      >
                         <DeleteIcon></DeleteIcon>
                       </Button>
                     </TableCell>

@@ -16,10 +16,6 @@ export interface plotProps {
 }
 
 export default function SelectPlot(props: plotProps) {
-  useEffect(() => {
-    localStorage.setItem('localPlot', JSON.stringify(props.plot));
-  }, [props.plot]);
-
   const plots: Plot[] = [];
 
   const plotsObjects: { [key: string]: number }[] = [
@@ -57,7 +53,6 @@ export default function SelectPlot(props: plotProps) {
     { Vandermeer: 14 },
     { wanang: 21 },
     { Yosemite: 33 },
-    { 'Choose a plot ': 0 },
   ];
 
   plotsObjects.forEach((e) => {
@@ -73,18 +68,20 @@ export default function SelectPlot(props: plotProps) {
       plotName: chosenPlotName,
       plotNumber: chosenPlotNumber,
     };
-    // props.setPlot(newPlot);
     props.setPlot(newPlot);
     localStorage.setItem('localPlot', JSON.stringify(props.plot));
   };
-
+  let value;
+  props.plot.plotNumber === 0
+    ? (value = '')
+    : (value = props.plot.plotNumber.toString());
   return (
     <FormControl sx={{ m: 1, minWidth: 180 }} required>
       <InputLabel id="simple">Plot</InputLabel>
       <Select
         labelId="simple"
-        id="demo-simple-select-required"
-        value={props.plot.plotNumber.toString()}
+        id="simple-select-required"
+        value={value}
         label="Plot *"
         onChange={handleChange}
       >
