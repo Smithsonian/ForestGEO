@@ -8,6 +8,8 @@ import { useNavigate } from 'react-router-dom';
 export interface LoginPureProps {}
 
 /**
+ * LoginPure welcomes people, and links to /login
+ *
  * The presentational part of the Login component.
  */
 export function LoginPure() {
@@ -18,7 +20,7 @@ export function LoginPure() {
           src={image}
           alt="ForestGeo Logo"
           style={{
-            maxWidth: '100%',
+            maxWidth: '100%', // responsive image
             height: 'auto',
             padding: 0,
             margin: 0,
@@ -29,9 +31,15 @@ export function LoginPure() {
         <Typography variant="h3" component="h1">
           Welcome to the ForestGEO web-app
         </Typography>
-        <Link href={`/login`}>
-          <Typography variant="h4" component="h2" sx={{ pt: 8 }}>
-            Login with Microsoft
+        <Link
+          href={`/login`}
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+          }}
+        >
+          <Typography variant="h4" component="h2" sx={{ pt: '20%' }}>
+            Login
           </Typography>
         </Link>
       </Grid>
@@ -43,6 +51,8 @@ export interface LoginProps {}
 
 /**
  * For logging into the app.
+ *
+ * If the user is already logged in, then we redirect them to /validate
  */
 export default function Login() {
   let navigate = useNavigate();
