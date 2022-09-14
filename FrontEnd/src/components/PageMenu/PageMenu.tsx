@@ -1,5 +1,6 @@
 import * as React from 'react';
 import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
 import MenuItem from '@mui/material/MenuItem';
 import Menu from '@mui/material/Menu';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -7,16 +8,14 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const OPTIONS = ['Validate', 'Report', 'Browse'];
 const LOCATIONS = ['/validate', '/report', '/browse'];
 
-// @todo: Show the 3 pages in the app bar when it's not mobile view.
-//   In mobile view, use the menu as it is now.
-//   See https://mui.com/material-ui/react-app-bar/#app-bar-with-responsive-menu
-
 export interface PageMenuProps {}
 
 /**
  * Allows selecting pages from a menu.
  *
- * Shows the selected menu item depending on the pathname.
+ * Shows the selected menu item depending on the route pathname.
+ *
+ * Is responsive. Shows a menu on mobile, and shows links on desktop.
  */
 export default function PageMenu() {
   const navigate = useNavigate();
@@ -57,36 +56,59 @@ export default function PageMenu() {
 
   return (
     <>
-      <Button
-        id="lock-button"
-        aria-haspopup="listbox"
-        aria-controls="lock-menu"
-        aria-label="when device is locked"
-        aria-expanded={open ? 'true' : undefined}
-        onClick={handleClickListItem}
-      >
-        {OPTIONS[selectedIndex]}
-      </Button>
-      <Menu
-        id="lock-menu"
-        anchorEl={anchorEl}
-        open={open}
-        onClose={handleClose}
-        MenuListProps={{
-          'aria-labelledby': 'lock-button',
-          role: 'listbox',
+      <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' } }}>
+        {OPTIONS.map((page, index) => (
+          <Button
+            key={page}
+            onClick={(event) => handleMenuItemClick(event, index)}
+            sx={{
+              my: 2,
+              color: 'white',
+              display: 'block',
+            }}
+            color={index === selectedIndex ? 'secondary' : 'primary'}
+            variant={index === selectedIndex ? 'outlined' : 'text'}
+          >
+            {page}
+          </Button>
+        ))}
+      </Box>
+      <Box
+        sx={{
+          display: { xs: 'block', md: 'none' },
         }}
       >
-        {OPTIONS.map((option, index) => (
-          <MenuItem
-            key={option}
-            selected={index === selectedIndex}
-            onClick={(event) => handleMenuItemClick(event, index)}
-          >
-            {option}
-          </MenuItem>
-        ))}
-      </Menu>
+        <Button
+          id="lock-button"
+          aria-haspopup="listbox"
+          aria-controls="lock-menu"
+          aria-label="when device is locked"
+          aria-expanded={open ? 'true' : undefined}
+          onClick={handleClickListItem}
+        >
+          {OPTIONS[selectedIndex]}
+        </Button>
+        <Menu
+          id="lock-menu"
+          anchorEl={anchorEl}
+          open={open}
+          onClose={handleClose}
+          MenuListProps={{
+            'aria-labelledby': 'lock-button',
+            role: 'listbox',
+          }}
+        >
+          {OPTIONS.map((option, index) => (
+            <MenuItem
+              key={option}
+              selected={index === selectedIndex}
+              onClick={(event) => handleMenuItemClick(event, index)}
+            >
+              {option}
+            </MenuItem>
+          ))}
+        </Menu>
+      </Box>
     </>
   );
 }
