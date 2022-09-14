@@ -3,7 +3,7 @@ import Box from '@mui/material/Box';
 import Toolbar from '@mui/material/Toolbar';
 import IconButton from '@mui/material/IconButton';
 import AccountCircle from '@mui/icons-material/AccountCircle';
-import SelectedMenu from './SelectedMenu';
+import PageMenu from './PageMenu';
 import { useNavigate } from 'react-router-dom';
 import Link from '@mui/material/Link';
 import { Typography } from '@mui/material';
@@ -18,7 +18,7 @@ export default function Navbar() {
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
-          <SelectedMenu />
+          <PageMenu />
           {userInfo ? (
             <>
               <Typography
