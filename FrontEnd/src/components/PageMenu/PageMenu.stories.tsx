@@ -1,4 +1,6 @@
 import { MemoryRouter } from 'react-router-dom';
+import AppBar from '@mui/material/AppBar';
+import Toolbar from '@mui/material/Toolbar';
 
 import { ComponentMeta, Story } from '@storybook/react';
 import PageMenu, { PageMenuProps } from './PageMenu';
@@ -12,7 +14,11 @@ export default {
 const Template: Story<PageMenuProps> = (args) => {
   return (
     <MemoryRouter>
-      <PageMenu {...args} />
+      <AppBar position="static">
+        <Toolbar>
+          <PageMenu {...args} />
+        </Toolbar>
+      </AppBar>
     </MemoryRouter>
   );
 };
@@ -20,13 +26,17 @@ const Template: Story<PageMenuProps> = (args) => {
 /**
  * Initially if there is not a matching pathname, it defaults to Validate.
  */
-export const ValidateMenu = Template.bind({});
-ValidateMenu.args = {};
+export const ValidateSelected = Template.bind({});
+ValidateSelected.args = {};
 
 const BrowseTemplate: Story<PageMenuProps> = (args) => {
   return (
     <MemoryRouter initialEntries={['/browse']}>
-      <PageMenu {...args} />
+      <AppBar position="static">
+        <Toolbar>
+          <PageMenu {...args} />
+        </Toolbar>
+      </AppBar>
     </MemoryRouter>
   );
 };
@@ -34,5 +44,5 @@ const BrowseTemplate: Story<PageMenuProps> = (args) => {
 /**
  * This shows that when the pathname is /browse the Browse menu item is selected.
  */
-export const BrowseMenu = BrowseTemplate.bind({});
-BrowseMenu.args = {};
+export const BrowseSelected = BrowseTemplate.bind({});
+BrowseSelected.args = {};
