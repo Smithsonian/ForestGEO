@@ -17,29 +17,16 @@ import CircularProgress from '@mui/material/CircularProgress';
 import '../CSS/Browse.css';
 import SelectPlot from '../components/SelectPlot';
 import { plotProps } from '../components/SelectPlot';
+import { useNavigate } from 'react-router-dom';
+import ForestGeoButton from '../components/Button';
+
+interface FileWithMetadata {
+  fileName: {
+    metaData: string;
+  };
+}
 
 const Browse = (props: plotProps) => {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const initialState: { [fileName: string]: { [metaData: string]: string } } =
-    {};
-  // const [listOfFiles, setListOfFiles] = useState(initialState);
-
-  const getListOfFiles = async () => {
-    if (props.plot) {
-      const response = await fetch(
-        '/api/download?plot=' + props.plot.plotName,
-        {
-          method: 'Get',
-        }
-      );
-      const data = await response.json();
-      return data;
-    } else {
-      console.log('Plot is undefined');
-      throw new Error('No plot');
-    }
-  };
-
   // let handleRemove = (i: any) => {
   //   const newRows = [...rows];
   //   const index = rows.findIndex((row) => row.file === i);
@@ -56,11 +43,27 @@ const Browse = (props: plotProps) => {
     });
   }
 
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
-  const [rows, setRows] = useState<{
-    [fileName: string]: { [metaData: string]: string };
-  }>({});
+  const [rows, setRows] = useState<FileWithMetadata>();
+
+  let navigate = useNavigate();
+
+  const getListOfFiles = async () => {
+    if (props.plot.plotName) {
+      const response = await fetch(
+        '/api/download?plot=' + props.plot.plotName,
+        {
+          method: 'Get',
+        }
+      );
+      const data = await response.json();
+      return data;
+    } else {
+      console.log('Plot is undefined');
+      return new Error('No plot');
+    }
+  };
 
   useEffect(() => {
     getData().then(
@@ -73,10 +76,19 @@ const Browse = (props: plotProps) => {
         setError(error);
       }
     );
-  });
+  }, []);
 
   if (error) {
-    return <div>Error</div>;
+    return (
+      <>
+        <div>Please choose a plot</div>
+        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
+        <ForestGeoButton
+          label="Return to main page"
+          onClick={() => navigate('/')}
+        />
+      </>
+    );
   } else if (!isLoaded) {
     return (
       <Grid id={'grid1'} container direction="column" sx={{ marginTop: 20 }}>
@@ -101,27 +113,31 @@ const Browse = (props: plotProps) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {Object.entries(rows).map((row, index) => (
-                  <TableRow key={index}>
-                    <TableCell>{index}</TableCell>
-                    <TableCell>{row[0]}</TableCell>
-                    <TableCell>{row[0][0]}</TableCell>
-                    <TableCell>{row[0][1]}</TableCell>
-                    <TableCell align="center">
-                      <Button>
-                        <DownloadIcon></DownloadIcon>
-                      </Button>
-                      <Button>
-                        <EditIcon></EditIcon>
-                      </Button>
-                      <Button
-                        onClick={() => console.log('trying to remove the file')}
-                      >
-                        <DeleteIcon></DeleteIcon>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {Object.entries(rows!).map((row, index) => {
+                  return (
+                    <TableRow key={index}>
+                      <TableCell>{index}</TableCell>
+                      <TableCell>{row[0]}</TableCell>
+                      <TableCell>{row[1]['date']}</TableCell>
+                      <TableCell>{row[1]['user']}</TableCell>
+                      <TableCell align="center">
+                        <Button>
+                          <DownloadIcon></DownloadIcon>
+                        </Button>
+                        <Button>
+                          <EditIcon></EditIcon>
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            console.log('trying to remove the file')
+                          }
+                        >
+                          <DeleteIcon></DeleteIcon>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

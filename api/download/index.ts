@@ -1,5 +1,5 @@
 import { AzureFunction, Context, HttpRequest } from "@azure/functions";
-import { showFiles } from "../components/BlobDownload";
+import showFiles, { FileWithMetadata } from "../components/BlobDownload";
 
 const httpTrigger: AzureFunction = async function (
   context: Context,
@@ -23,7 +23,7 @@ const httpTrigger: AzureFunction = async function (
     } else {
       responseStatusCode = 200;
       responseHeaders = { "Content-Type": "application/json" };
-      responseMessage = <any>{ dataFromBlob: listOfFiles };
+      responseMessage = <any>listOfFiles;
     }
   } else {
     responseStatusCode = 400;

@@ -6,9 +6,9 @@ if (!blobUrl) {
   throw new Error("No string attached!");
 }
 
-interface Blob {
+export interface FileWithMetadata {
   fileName: {
-    metaData?: string
+    metaData: string
   }
 
 }
@@ -17,7 +17,7 @@ const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 
 const containers: { name: string; nameShort: string }[] = [];
 
-let blobData: = {};
+let blobData = {};
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {
@@ -59,4 +59,4 @@ const showFiles = async (plot: string) => {
   }
 };
 
-export { showFiles };
+export default showFiles;
