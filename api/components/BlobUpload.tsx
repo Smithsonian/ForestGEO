@@ -49,7 +49,7 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
             date: (new Date()).toDateString(),
           },
           tags: {
-            uploadedBy: userInfo.userDetails,
+            plot: plot,
             uploadedOn: (new Date()).toDateString(),
           }
         }
