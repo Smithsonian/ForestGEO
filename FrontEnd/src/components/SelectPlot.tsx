@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, SetStateAction, useEffect } from 'react';
 import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
 import FormHelperText from '@mui/material/FormHelperText';
@@ -69,7 +69,6 @@ export default function SelectPlot(props: plotProps) {
       plotNumber: chosenPlotNumber,
     };
     props.setPlot(newPlot);
-    localStorage.setItem('localPlot', JSON.stringify(props.plot));
   };
   let value;
   props.plot.plotNumber === 0

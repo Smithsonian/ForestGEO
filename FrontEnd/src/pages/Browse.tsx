@@ -61,7 +61,7 @@ const Browse = (props: plotProps) => {
       return data;
     } else {
       console.log('Plot is undefined');
-      return new Error('No plot');
+      setError(new Error('No plot'));
     }
   };
 
@@ -73,10 +73,10 @@ const Browse = (props: plotProps) => {
       },
       (error) => {
         setIsLoaded(true);
-        setError(error);
       }
     );
   }, []);
+  console.log(rows);
 
   if (error) {
     return (
@@ -84,8 +84,14 @@ const Browse = (props: plotProps) => {
         <div>Please choose a plot</div>
         <SelectPlot plot={props.plot} setPlot={props.setPlot} />
         <ForestGeoButton
-          label="Return to main page"
-          onClick={() => navigate('/')}
+          label="Load files"
+          onClick={() => {
+            getData().then((data: any) => {
+              setIsLoaded(true);
+              setRows(data);
+              setError(undefined);
+            });
+          }}
         />
       </>
     );
@@ -99,7 +105,6 @@ const Browse = (props: plotProps) => {
   } else {
     return (
       <>
-        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
         <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
           <TableContainer id={'tableContainer'}>
             <Table aria-label="simple table" stickyHeader>
