@@ -17,8 +17,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import '../CSS/Browse.css';
 import SelectPlot from '../components/SelectPlot';
 import { plotProps } from '../components/SelectPlot';
-import { useNavigate } from 'react-router-dom';
-import ForestGeoButton from '../components/Button';
 
 interface FileWithMetadata {
   fileName: {
@@ -27,23 +25,13 @@ interface FileWithMetadata {
 }
 
 const Browse = (props: plotProps) => {
+  // @TODO - implement remove and download files
   // let handleRemove = (i: any) => {
   //   const newRows = [...rows];
   //   const index = rows.findIndex((row) => row.file === i);
   //   newRows.splice(index, 1);
   //   setRows(newRows);
   // };
-
-  let navigate = useNavigate();
-
-  async function getData() {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        resolve(getListOfFiles);
-        reject('Failed to load');
-      }, 2000);
-    });
-  }
 
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
@@ -69,30 +57,18 @@ const Browse = (props: plotProps) => {
   useEffect(() => {
     getListOfFiles();
   }, [getListOfFiles]);
-  console.log(rows);
+
+  useEffect(() => {
+    props.setPlot(props.plot);
+    setError(undefined);
+    setIsLoaded(true);
+  }, [props, error, isLoaded]);
 
   if (error) {
     return (
       <>
-        <div>No plot</div>
-        <ForestGeoButton
-          label="Return to home"
-          onClick={() => {
-            navigate('/');
-          }}
-        />
-      </>
-    );
-  } else if (rows === undefined) {
-    return (
-      <>
-        <div>No data for {props.plot.plotName}</div>
-        <ForestGeoButton
-          label="Return to home"
-          onClick={() => {
-            navigate('/');
-          }}
-        />
+        <div>Error while loading data. Please select plot</div>
+        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
       </>
     );
   } else if (!isLoaded) {
@@ -101,6 +77,13 @@ const Browse = (props: plotProps) => {
         <Box id={'box'}>Loading Files...</Box>
         <CircularProgress size={60}></CircularProgress>
       </Grid>
+    );
+  } else if (rows === undefined) {
+    return (
+      <>
+        <div>Please select plot</div>
+        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
+      </>
     );
   } else {
     return (
@@ -119,8 +102,7 @@ const Browse = (props: plotProps) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {Object.entries(rows).map((row, index) => {
-                  console.log(row[0], row[1].date, row[1].user);
+                {Object.entries(rows!).map((row, index) => {
                   return (
                     <TableRow key={index}>
                       <TableCell>{index}</TableCell>
