@@ -22,7 +22,7 @@ const listContainers = async () => {
   for await (const container of blobServiceClient.listContainers()) {
     // figure out how to use metadata, for now using names to compare
     const containerName = container.name;
-    const containerNameShort = container.name.replace(/[^a-z0-9]/gi, '');
+    const containerNameShort = containerName.replace(/[^a-z0-9]/gi, '');
 
     containers.push(
       { name: containerName, nameShort: containerNameShort });
@@ -33,7 +33,7 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
   try {
     await listContainers();
     const plotReplaced = plot.replace(/[^a-z0-9]/gi, '').toLowerCase();
-    const found = containers.find((container) => container.name === plotReplaced);
+    const found = containers.find((container) => container.nameShort === plotReplaced);
     if (found) {
       const containerForUpload = found.name;
     
@@ -49,7 +49,8 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
             date: (new Date()).toDateString(),
           },
           tags: {
-            uploadedBy: userInfo.userDetails,
+            plot: plot,
+            uploadedBy: userInfo.userDetails.replace(/[@]/, '_at_'),
             uploadedOn: (new Date()).toDateString(),
           }
         }
