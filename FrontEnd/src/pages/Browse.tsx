@@ -46,8 +46,8 @@ const Browse = (props: plotProps) => {
         }
       );
       const data = await response.json();
-      setIsLoaded(true);
       setRows(data);
+      setIsLoaded(true);
     } else {
       console.log('Plot is undefined');
       setError(new Error('No plot'));
@@ -60,30 +60,30 @@ const Browse = (props: plotProps) => {
 
   useEffect(() => {
     props.setPlot(props.plot);
-    setError(undefined);
     setIsLoaded(true);
+    setError(undefined);
   }, [props, error, isLoaded]);
 
-  if (error) {
+  if (!props.plot.plotName) {
+    return (
+      <>
+        <div>Please select plot</div>
+        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
+      </>
+    );
+  } else if (error) {
     return (
       <>
         <div>Error while loading data. Please select plot</div>
         <SelectPlot plot={props.plot} setPlot={props.setPlot} />
       </>
     );
-  } else if (!isLoaded) {
+  } else if (!isLoaded || !rows) {
     return (
       <Grid id={'grid1'} container direction="column" sx={{ marginTop: 20 }}>
         <Box id={'box'}>Loading Files...</Box>
         <CircularProgress size={60}></CircularProgress>
       </Grid>
-    );
-  } else if (rows === undefined) {
-    return (
-      <>
-        <div>Please select plot</div>
-        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
-      </>
     );
   } else {
     return (
@@ -102,7 +102,7 @@ const Browse = (props: plotProps) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {Object.entries(rows!).map((row, index) => {
+                {Object.entries(rows).map((row, index) => {
                   return (
                     <TableRow key={index}>
                       <TableCell>{index + 1}</TableCell>
