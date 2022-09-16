@@ -105,7 +105,7 @@ const Browse = (props: plotProps) => {
                 {Object.entries(rows!).map((row, index) => {
                   return (
                     <TableRow key={index}>
-                      <TableCell>{index}</TableCell>
+                      <TableCell>{index + 1}</TableCell>
                       <TableCell>{row[0]}</TableCell>
                       <TableCell>{row[1].date}</TableCell>
                       <TableCell>{row[1].user}</TableCell>
