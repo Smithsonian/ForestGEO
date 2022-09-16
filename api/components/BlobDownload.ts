@@ -17,8 +17,6 @@ const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 
 const containers: { name: string; nameShort: string }[] = [];
 
-let blobData = {};
-
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {
   for await (const container of blobServiceClient.listContainers()) {
@@ -31,6 +29,7 @@ const listContainers = async () => {
 };
 
 const showFiles = async (plot: string) => {
+  let blobData = {};
   try {
     await listContainers();
     const plotReplaced = plot.replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -48,6 +47,7 @@ const showFiles = async (plot: string) => {
       })) {
         blobData[blob.name] = blob.metadata;
       }
+      console.log('Backend blobData',blobData);
       return blobData;
     } else {
       console.log("Plot ", plot, "does not exist");

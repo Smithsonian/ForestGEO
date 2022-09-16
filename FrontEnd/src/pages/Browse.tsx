@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   TableContainer,
   Table,
@@ -34,6 +34,8 @@ const Browse = (props: plotProps) => {
   //   setRows(newRows);
   // };
 
+  let navigate = useNavigate();
+
   async function getData() {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
@@ -47,9 +49,7 @@ const Browse = (props: plotProps) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [rows, setRows] = useState<FileWithMetadata>();
 
-  let navigate = useNavigate();
-
-  const getListOfFiles = async () => {
+  const getListOfFiles = useCallback(async () => {
     if (props.plot.plotName) {
       const response = await fetch(
         '/api/download?plot=' + props.plot.plotName,
@@ -58,39 +58,39 @@ const Browse = (props: plotProps) => {
         }
       );
       const data = await response.json();
-      return data;
+      setIsLoaded(true);
+      setRows(data);
     } else {
       console.log('Plot is undefined');
       setError(new Error('No plot'));
     }
-  };
+  }, [props.plot.plotName]);
 
   useEffect(() => {
-    getData().then(
-      (data: any) => {
-        setIsLoaded(true);
-        setRows(data);
-      },
-      (error) => {
-        setIsLoaded(true);
-      }
-    );
-  }, []);
+    getListOfFiles();
+  }, [getListOfFiles]);
   console.log(rows);
 
   if (error) {
     return (
       <>
-        <div>Please choose a plot</div>
-        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
+        <div>No plot</div>
         <ForestGeoButton
-          label="Load files"
+          label="Return to home"
           onClick={() => {
-            getData().then((data: any) => {
-              setIsLoaded(true);
-              setRows(data);
-              setError(undefined);
-            });
+            navigate('/');
+          }}
+        />
+      </>
+    );
+  } else if (rows === undefined) {
+    return (
+      <>
+        <div>No data for {props.plot.plotName}</div>
+        <ForestGeoButton
+          label="Return to home"
+          onClick={() => {
+            navigate('/');
           }}
         />
       </>
@@ -105,6 +105,7 @@ const Browse = (props: plotProps) => {
   } else {
     return (
       <>
+        <SelectPlot plot={props.plot} setPlot={props.setPlot} />
         <Grid id={'grid2'} container direction="row" sx={{ marginTop: 10 }}>
           <TableContainer id={'tableContainer'}>
             <Table aria-label="simple table" stickyHeader>
@@ -118,13 +119,14 @@ const Browse = (props: plotProps) => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {Object.entries(rows!).map((row, index) => {
+                {Object.entries(rows).map((row, index) => {
+                  console.log(row[0], row[1].date, row[1].user);
                   return (
                     <TableRow key={index}>
                       <TableCell>{index}</TableCell>
                       <TableCell>{row[0]}</TableCell>
-                      <TableCell>{row[1]['date']}</TableCell>
-                      <TableCell>{row[1]['user']}</TableCell>
+                      <TableCell>{row[1].date}</TableCell>
+                      <TableCell>{row[1].user}</TableCell>
                       <TableCell align="center">
                         <Button>
                           <DownloadIcon></DownloadIcon>
