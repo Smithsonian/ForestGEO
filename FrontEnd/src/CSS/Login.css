@@ -4,7 +4,7 @@
   width: 50%;
   margin-top: 10px;
   display: flex;
-  align-items: center;
+  align-items:flex-start;
 }
 
 img {
@@ -15,12 +15,11 @@ img {
 #loginForm {
   border: solid;
   border-color: #0f5530;
-  borderradius: 2;
-  flex: 1;
-  height: 400px;
-  width: 300px;
+  border-radius: 2;
+  height: 250px;
+  width: 400px;
   padding: 10px;
-  text-algin: center;
+  text-align: center;
 }
 
 #loginTitle {

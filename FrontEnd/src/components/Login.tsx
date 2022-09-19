@@ -24,7 +24,7 @@ export default function Login() {
           <img src={image} alt="ForestGeo Logo" />
         </div>
         <div id={'loginForm'}>
-          <h1 id={'loginTitle'}>Login to save the environment!</h1>
+          <h1 id={'loginTitle'}>Login Page</h1>
           <form id="form" noValidate>
             <Link key={'microsoft'} id={'microsoftButton'} href={`/login`}>
               Login with Microsoft
