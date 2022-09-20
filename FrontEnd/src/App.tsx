@@ -5,8 +5,12 @@ import Report from './pages/Report';
 import Login from './components/Login';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import { Plot } from './components/SelectPlot';
 
 function App() {
+  const initialState: Plot = { plotName: '', plotNumber: 0 };
+  const [localPlot, setLocalPlot] = useState(initialState);
+
   const [userInfo, setUserInfo] = useState<any>();
 
   useEffect(() => {
@@ -31,8 +35,14 @@ function App() {
       {userInfo ? <Navbar /> : <p></p>}
       <Routes>
         <Route path="/" element={<Login />} />
-        <Route path="/validate" element={<Validate />} />
-        <Route path="/browse" element={<Browse />} />
+        <Route
+          path="/validate"
+          element={<Validate plot={localPlot} setPlot={setLocalPlot} />}
+        />
+        <Route
+          path="/browse"
+          element={<Browse plot={localPlot} setPlot={setLocalPlot} />}
+        />
         <Route path="/report" element={<Report />} />
       </Routes>
     </Router>

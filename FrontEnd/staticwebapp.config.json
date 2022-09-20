@@ -31,6 +31,15 @@
       ]
     },
     {
+      "route": "/api/download",
+      "methods": [
+        "GET"
+      ],
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
       "route": "/login",
       "rewrite": "/.auth/login/aad?post_login_redirect_uri=validate"
     },

@@ -10,15 +10,12 @@ export interface Plot {
   plotNumber: number;
 }
 
-type plotProps = {
+export interface plotProps {
   plot: Plot;
   setPlot: Dispatch<SetStateAction<Plot>>;
-};
+}
 
 export default function SelectPlot(props: plotProps) {
-  // const initialState: Plot = { plotName: '', plotNumber: 0 };
-  // const [plot, setPlot] = React.useState(initialState);
-
   const plots: Plot[] = [];
 
   const plotsObjects: { [key: string]: number }[] = [
@@ -65,35 +62,32 @@ export default function SelectPlot(props: plotProps) {
 
   const handleChange = (event: SelectChangeEvent) => {
     const chosenPlotNumber = parseInt(event.target.value);
-    console.log(chosenPlotNumber);
-    const setNumberPlot = plots.find(
-      (e) => e.plotNumber === chosenPlotNumber
-    ) || {
-      plotName: '',
-      plotNumber: 0,
-    };
-    const chosenPlotName = setNumberPlot.plotName;
+    const setNumberPlot = plots.find((e) => e.plotNumber === chosenPlotNumber);
+    const chosenPlotName = setNumberPlot!.plotName;
     const newPlot: Plot = {
       plotName: chosenPlotName,
       plotNumber: chosenPlotNumber,
     };
-    console.log(newPlot);
     props.setPlot(newPlot);
   };
-
+  let value;
+  props.plot.plotNumber === 0
+    ? (value = '')
+    : (value = props.plot.plotNumber.toString());
   return (
     <FormControl sx={{ m: 1, minWidth: 180 }} required>
-      <InputLabel id="demo-simple-select-required-label">Plot</InputLabel>
+      <InputLabel id="simple">Plot</InputLabel>
       <Select
-        labelId="demo-simple-select-required-label"
-        id="demo-simple-select-required"
-        value={props.plot.plotNumber.toString()}
+        labelId="simple"
+        id="simple-select-required"
+        value={value}
         label="Plot *"
         onChange={handleChange}
       >
-        <MenuItem value="0">
+        <MenuItem value="">
           <em>None</em>
         </MenuItem>
+
         {plots.map((plot: Plot, i) => {
           return (
             <MenuItem value={plot.plotNumber.toString()} key={i}>
