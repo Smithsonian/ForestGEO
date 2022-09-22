@@ -79,22 +79,22 @@ export default function PageMenu() {
         }}
       >
         <Button
-          id="lock-button"
+          id="open-menu-button"
           aria-haspopup="listbox"
-          aria-controls="lock-menu"
-          aria-label="when device is locked"
+          aria-controls="nav-menu"
+          aria-label="opens menu"
           aria-expanded={open ? 'true' : undefined}
           onClick={handleClickListItem}
         >
           {OPTIONS[selectedIndex]}
         </Button>
         <Menu
-          id="lock-menu"
+          id="nav-menu"
           anchorEl={anchorEl}
           open={open}
           onClose={handleClose}
           MenuListProps={{
-            'aria-labelledby': 'lock-button',
+            'aria-labelledby': 'open-menu-button',
             role: 'listbox',
           }}
         >
