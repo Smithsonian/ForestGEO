@@ -3,33 +3,36 @@ import Box from '@mui/material/Box';
 import Toolbar from '@mui/material/Toolbar';
 import IconButton from '@mui/material/IconButton';
 import AccountCircle from '@mui/icons-material/AccountCircle';
-import PageMenu from './PageMenu';
-import { useNavigate } from 'react-router-dom';
+import PageMenu from '../PageMenu';
 import Link from '@mui/material/Link';
 import { Typography } from '@mui/material';
-import GetUser, { clientPrincipal } from './GetUser';
+import GetUser, { clientPrincipal } from '../GetUser';
+
+export interface NavbarProps {
+  userDetails?: string;
+}
 
 export default function Navbar() {
-  let navigate = useNavigate();
+  const user: clientPrincipal | undefined = GetUser();
+  return <NavbarPure userDetails={user?.userDetails} />;
+}
 
-  const userInfo: clientPrincipal | undefined = GetUser();
-
+export function NavbarPure({ userDetails }: NavbarProps) {
   return (
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
           <PageMenu />
-          {userInfo ? (
+          {userDetails ? (
             <>
               <Typography
                 aria-label="menu"
                 sx={{ color: 'white', ml: 'auto', mr: '10px' }}
               >
-                {userInfo.userDetails}
+                {userDetails}
               </Typography>
               <Link
                 sx={{ textDecoration: 'underline', color: 'white' }}
-                onClick={() => navigate('/logout')}
                 href={`/logout`}
               >
                 Logout
