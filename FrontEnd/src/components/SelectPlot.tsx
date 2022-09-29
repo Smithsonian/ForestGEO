@@ -10,12 +10,12 @@ export interface Plot {
   plotNumber: number;
 }
 
-export interface plotProps {
+export interface SelectPlotProps {
   plot: Plot;
   setPlot: Dispatch<SetStateAction<Plot>>;
 }
 
-export default function SelectPlot(props: plotProps) {
+export default function SelectPlot(props: SelectPlotProps) {
   const plots: Plot[] = [];
 
   const plotsObjects: { [key: string]: number }[] = [
