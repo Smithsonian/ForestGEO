@@ -2,14 +2,14 @@ import Dropzone from '../components/Dropzone';
 import FileList from '../components/FileList';
 import { Button } from '@mui/material';
 import { FileWithPath } from 'react-dropzone';
-import SelectPlot, { plotProps } from '../components/SelectPlot';
+import SelectPlot, { SelectPlotProps } from '../components/SelectPlot';
 
 import React, { useState } from 'react';
 import ValidationTable from '../components/ValidationTable';
 import Container from '@mui/material/Container';
 import { CircularProgress } from '@mui/material';
 
-const Validate = (props: plotProps) => {
+const Validate = (props: SelectPlotProps) => {
   const initialState: Array<FileWithPath> = [];
   const [acceptedFilesList, setAcceptedFilesList] = useState(initialState);
   const filesWithErrorsList: FileWithPath[] = [];
