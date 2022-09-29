@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Validate from './pages/Validate';
-import Browse from './pages/Browse';
+import Browse from './components/Browse';
 import Report from './pages/Report';
 import Login from './components/Login';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
