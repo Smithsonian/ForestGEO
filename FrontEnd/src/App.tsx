@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import Validate from './pages/Validate';
+import Validate from './components/Validate';
 import Browse from './components/Browse';
 import Report from './pages/Report';
 import Login from './components/Login';

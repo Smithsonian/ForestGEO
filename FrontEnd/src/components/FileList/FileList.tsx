@@ -14,16 +14,16 @@ interface FileSize {
   [otherFields: string]: any;
 }
 export interface FileListProps {
-  acceptedFilesList: FileSize[];
+  acceptedFiles: FileSize[];
 }
 
 /**
  * A simple list of files with their sizes.
  */
-export default function FileList({ acceptedFilesList }: FileListProps) {
-  return acceptedFilesList.length > 0 ? (
+export default function FileList({ acceptedFiles }: FileListProps) {
+  return acceptedFiles.length > 0 ? (
     <List>
-      {acceptedFilesList.map((file: FileSize) => (
+      {acceptedFiles.map((file: FileSize) => (
         <ListItem>
           <ListItemText
             key={file.path}

@@ -11,7 +11,7 @@ const Template: Story<FileListProps> = (args) => <FileList {...args} />;
 
 export const SomeFiles = Template.bind({});
 SomeFiles.args = {
-  acceptedFilesList: [
+  acceptedFiles: [
     { path: 'meow.csv', size: 22 },
     { path: 'what-does-the-fox-say.csv', size: 243344444442 },
   ],
@@ -19,5 +19,5 @@ SomeFiles.args = {
 
 export const NoFiles = Template.bind({});
 NoFiles.args = {
-  acceptedFilesList: [],
+  acceptedFiles: [],
 };
