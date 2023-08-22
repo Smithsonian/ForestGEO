@@ -68,9 +68,18 @@ export function ValidatePure({
       return (
         <>
           <ValidationTable
-            error={true}
             errorMessage={errorsData}
             uploadedData={filesWithErrorsList}
+            headers={[
+              // @todo: these are hardcoded.
+              { label: 'Tag' },
+              { label: 'Subquadrat' },
+              { label: 'SpCode' },
+              { label: 'DBH' },
+              { label: 'Htmeas' },
+              { label: 'Codes' },
+              { label: 'Comments' },
+            ]}
           />
         </>
       );
