@@ -7,22 +7,19 @@ import {
   TableCell,
   Typography,
   Paper,
-  TableFooter,
 } from '@mui/material';
 import { parse } from 'papaparse';
 import { useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { useNavigate } from 'react-router-dom';
-import Button from '../Button';
 import './ValidationTable.css';
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */
   uploadedData: FileWithPath[];
-  /** If there is an error this is true. */
-  error: boolean;
   /** If there are errors, these errors are indexed into the uploadedData field. */
   errorMessage: { [fileName: string]: { [currentRow: string]: string } };
+  /** The headers for the table. */
+  headers: { label: string }[];
   children?: React.ReactNode | React.ReactNode[];
 }
 
@@ -30,27 +27,14 @@ export interface dataStructure {
   [key: string]: string;
 }
 
-// @todo: are these headers really fixed?
-// @todo: Maybe these headers should be passed in as a prop?
-const HEADERS = [
-  { label: 'Tag' },
-  { label: 'Subquadrat' },
-  { label: 'SpCode' },
-  { label: 'DBH' },
-  { label: 'Htmeas' },
-  { label: 'Codes' },
-  { label: 'Comments' },
-];
-
 /**
  * Shows a data table with the possibility of showing errors.
  */
 export default function ValidationTable({
   uploadedData,
-  error,
   errorMessage,
+  headers,
 }: ValidationTableProps): JSX.Element {
-  let navigate = useNavigate();
   let tempData: { fileName: string; data: dataStructure[] }[] = [];
   const initState: { fileName: string; data: dataStructure[] }[] = [];
   const [data, setData] = useState(initState);
@@ -94,49 +78,45 @@ export default function ValidationTable({
                 <>
                   <TableHead>
                     <TableRow>
-                      {HEADERS.map((row, index) => {
+                      {headers.map((row, index) => {
                         return <TableCell key={index}>{row.label}</TableCell>;
                       })}
                     </TableRow>
                   </TableHead>
+                  <TableBody>
+                    {fileData!.data.map((data: dataStructure, rowIdx) => {
+                      return (
+                        <>
+                          <TableRow>
+                            {headers.map((header, i) => (
+                              <TableCell key={i}>
+                                {data[header.label]}
+                              </TableCell>
+                            ))}
+                          </TableRow>
 
-                  {fileData!.data.map((data: dataStructure) => {
-                    return (
-                      <TableBody>
-                        <TableRow>
-                          {HEADERS.map((header, i) => (
-                            <TableCell key={i}>{data[header.label]}</TableCell>
-                          ))}
-                        </TableRow>
-                      </TableBody>
-                    );
-                  })}
+                          {errorMessage[fileName][rowIdx] && (
+                            <TableRow className="errorMessage">
+                              <TableCell colSpan={headers.length}>
+                                <Typography
+                                  className="errorMessage"
+                                  component={'span'}
+                                >
+                                  ^ {errorMessage[fileName][rowIdx]}
+                                </Typography>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </>
+                      );
+                    })}
+                  </TableBody>
                 </>
-              )}
-              {errorMessage && (
-                <TableFooter>
-                  <TableRow className="errorMessage">
-                    <TableCell colSpan={HEADERS.length}>
-                      <Typography className="errorMessage" component={'span'}>
-                        <ul>
-                          {Object.keys(errorMessage[fileName]).map((row) => {
-                            return (
-                              <li key={parseInt(row[0])}>
-                                Row {row}: {errorMessage[fileName][row]}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                </TableFooter>
               )}
             </Table>
           </TableContainer>
         );
       })}
-      <Button label="Return to main page" onClick={() => navigate('/')} />
     </>
   );
 }
