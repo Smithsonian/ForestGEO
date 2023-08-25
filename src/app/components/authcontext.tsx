@@ -1,7 +1,10 @@
 "use client";
 import { SessionProvider } from "next-auth/react";
 import { Session } from "next-auth";
-import React from "react";
+import React, {useState} from "react";
+import NavBar from "@/app/components/navbar";
+import {NextUIProvider} from "@nextui-org/react";
+import {Plot} from "@/app/components/plotselection";
 
 export interface AuthContextProps {
   children: React.ReactNode;
@@ -9,5 +12,14 @@ export interface AuthContextProps {
 }
 
 export default function AuthContext({ children }: AuthContextProps) {
-  return <SessionProvider>{children}</SessionProvider>
+  const initialState: Plot = { key: "", count: 0};
+  const [plot, setPlot] = useState(initialState);
+  return (
+    <NextUIProvider>
+      <SessionProvider>
+        <NavBar plot={plot} setPlot={setPlot}/>
+        {children}
+      </SessionProvider>
+    </NextUIProvider>
+  );
 }

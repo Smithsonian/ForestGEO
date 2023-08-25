@@ -1,11 +1,9 @@
 import './globals.css';
 import {Inter} from 'next/font/google';
-import NavBar from "@/app/components/navbar";
 import React from "react";
 import AuthContext from "@/app/components/authcontext";
 import {Session} from "next-auth";
 import {headers} from "next/headers";
-import {NextUIProvider} from "@nextui-org/react";
 
 async function getSession(cookie: string) : Promise<Session> {
   const response = await fetch(`http://localhost:3000/api/auth/session`);
@@ -21,13 +19,10 @@ export default async function RootLayout({
 }) {
   const session = await getSession(headers().get('cookie') ?? '');
   return (
-    <html lang="en">
+    <html lang="en" className={"dark"}>
       <body className={inter.className}>
         <AuthContext session={session}>
-          <NextUIProvider>
-            <NavBar/>
-            {children}
-          </NextUIProvider>
+          {children}
         </AuthContext>
       </body>
     </html>

@@ -1,7 +1,7 @@
-import NextAuth, { AuthOptions } from "next-auth";
+import NextAuth from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 
-export const authOptions: AuthOptions = {
+const handler = NextAuth({
   providers: [
     AzureADProvider({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
@@ -11,18 +11,19 @@ export const authOptions: AuthOptions = {
     }),
   ],
   session: {
-    strategy: "jwt"
+    strategy: "jwt",
   },
   callbacks: {
     async jwt({ token, account }) {
-      if (account) {
+      if(account) {
         token.idToken = account.id_token;
       }
       return token;
     },
   },
+});
+
+export {
+  handler as GET,
+  handler as POST
 };
-
-const handler = NextAuth(authOptions);
-
-export {handler as GET, handler as POST};

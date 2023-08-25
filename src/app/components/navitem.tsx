@@ -3,12 +3,14 @@ import Link from "next/link";
 export interface NavProps {
     text: string,
     href: string,
-    active: boolean
+    active: boolean,
+    plotName: string,
 };
 // @ts-ignore
-const NavItem = ({ text, href, active }: NavProps) => {
+const NavItem = (props: NavProps) => {
+    
     return (
-        <Link href={href} className={`nav__link`}>{text}</Link>
+        <Link href={`${props.href}/${props.plotName}`} className={`nav__link`}>{props.text}</Link>
     );
 };
 
