@@ -1,18 +1,25 @@
-import React, {Dispatch, SetStateAction} from "react";
-import {Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Button} from "@nextui-org/react";
-
-export interface Plot {
-  key: string;
-  count: number;
-}
-export interface SelectPlotProps {
-  plot: Plot;
-  setPlot: Dispatch<SetStateAction<Plot>>;
-}
-
-export default function SelectPlot(props: SelectPlotProps) {
-  const plots: Plot[] = [];
-  const items = [
+export const siteConfig = {
+	name: "ForestGEO",
+	description: "Census data entry and validation",
+	navItems: [
+		{
+			label: "Home",
+			href: "/",
+		},
+    {
+      label: "Browse",
+      href: "/browse",
+    },
+    {
+      label: "Reporting",
+      href: "/reporting",
+    },
+    {
+      label: "Validation",
+      href: "/validation",
+    }
+	],
+  plotItems: [
     { key: "Amacayacu", count: 16 },
     { key: "BCI", count: 40 },
     { key: "bukittimah", count: 22 },
@@ -47,31 +54,5 @@ export default function SelectPlot(props: SelectPlotProps) {
     { key: "Vandermeer", count: 14 },
     { key: "wanang", count: 21 },
     { key: "Yosemite", count: 33 },
-  ];
-  items.forEach((e) => {
-    const obj = Object.entries(e);
-    plots.push({key: obj[0][0], count: obj[0][1]} as Plot);
-  });
-  return (
-    <Dropdown backdrop="blur">
-      <DropdownTrigger>
-        <Button
-          variant="bordered"
-        >
-          Open Menu
-        </Button>
-      </DropdownTrigger>
-      <DropdownMenu variant={"faded"} aria-label="Dynamic Actions" items={items} onAction={(key) => alert(key)}>
-        {items.map((item) => (
-          <DropdownItem
-            key={item.key}
-            color={"default"}
-            className={""}
-          >
-            {item.key}
-          </DropdownItem>
-        ))}
-      </DropdownMenu>
-    </Dropdown>
-  );
-}
+  ]
+};

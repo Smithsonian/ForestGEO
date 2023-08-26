@@ -1,6 +1,6 @@
 {
-  "name": "customnextjs",
-  "version": "0.1.0",
+  "name": "next-app-template",
+  "version": "0.0.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,24 +9,35 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@hapi/iron": "6.0.0",
-    "@headlessui/react": "*",
+    "@nextui-org/button": "2.0.9",
+    "@nextui-org/code": "2.0.7",
+    "@nextui-org/input": "2.0.10",
+    "@nextui-org/kbd": "2.0.8",
+    "@nextui-org/link": "2.0.9",
+    "@nextui-org/navbar": "2.0.9",
     "@nextui-org/react": "^2.1.5",
-    "@types/node": "20.5.1",
+    "@nextui-org/snippet": "2.0.10",
+    "@nextui-org/switch": "2.0.9",
+    "@nextui-org/system": "2.0.5",
+    "@nextui-org/theme": "2.0.4",
+    "@react-aria/ssr": "^3.7.1",
+    "@react-aria/visually-hidden": "^3.8.3",
+    "@types/node": "20.4.9",
     "@types/react": "18.2.20",
     "@types/react-dom": "18.2.7",
-    "cookie": "0.4.1",
-    "eslint": "8.47.0",
-    "eslint-config-next": "13.4.19",
-    "framer-motion": "^10.16.1",
-    "next": "13.4.19",
-    "next-auth": "^4.23.1",
+    "autoprefixer": "10.4.14",
+    "clsx": "^2.0.0",
+    "eslint": "8.41.0",
+    "eslint-config-next": "13.4.4",
+    "framer-motion": "^10.15.1",
+    "intl-messageformat": "^10.1.0",
+    "next": "^13.4.19",
+    "next-themes": "^0.2.1",
+    "postcss": "8.4.27",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "swr": "^2.0.0",
-    "typescript": "5.1.6"
-  },
-  "devDependencies": {
-    "tailwindcss": "^3.3.3"
+    "tailwind-variants": "^0.1.13",
+    "tailwindcss": "3.3.3",
+    "typescript": "5.0.4"
   }
 }
