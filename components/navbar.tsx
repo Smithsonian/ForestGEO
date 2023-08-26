@@ -11,20 +11,39 @@ import {siteConfig} from "@/config/site";
 import NextLink from "next/link";
 import clsx from "clsx";
 import {Logo} from "@/components/icons";
-import React, {useState} from "react";
+import React, {Dispatch, SetStateAction, useState} from "react";
+import { useRouter } from "next/navigation";
+
 export interface Plot {
-  name: string;
+  key: string;
   num: number;
 }
 
-export const Navbar = () => {
+export interface SelectPlotProps {
+  plot: Plot;
+  setPlot: Dispatch<SetStateAction<Plot>>;
+}
+
+export const Navbar = (props: SelectPlotProps) => {
+  const router = useRouter();
+  const plots: Plot[] = [];
+  siteConfig.plotItems.forEach((e) => {
+    plots.push({ key: e.key, num: e.count } as Plot);
+  });
   const [value, setValue] = useState<Selection>(new Set([]));
-  const initialState: Plot = {name: '', num: 0};
-  const [currentPlot, setCurrentPlot] = useState(initialState);
   const handleSelectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setValue(new Set([e.target.value]));
-    setCurrentPlot({name: e.target.value, num: siteConfig.plotItems.find(e.target.value)?.count?});
+    props.setPlot(plots.find((plot) => {
+      if(plot.key === e.target.value) return plot;
+    }) as Plot);
   };
+  
+  const onClick = async (event: { preventDefault: () => void; }) => {
+    event.preventDefault();
+    if(props.plot === undefined || props.plot.key === undefined) {
+      alert("You must select a plot before continuing!");
+    }
+  }
   return (
     <NextUINavbar maxWidth="xl" position="sticky">
       <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
@@ -42,7 +61,8 @@ export const Navbar = () => {
                 "data-[active=true]:text-primary data-[active=true]:font-medium"
               )}
               color="foreground"
-              href={`/browse/${currentPlot}`}>
+              href={`/browse/${props.plot.key}`}
+              onClick={onClick}>
               Browse
             </NextLink>
           </NavbarItem>
@@ -53,7 +73,8 @@ export const Navbar = () => {
                 "data-[active=true]:text-primary data-[active=true]:font-medium"
               )}
               color="foreground"
-              href={`/reporting/${currentPlot}`}>
+              href={`/reporting/${props.plot.key}`}
+              onClick={onClick}>
               Reporting
             </NextLink>
           </NavbarItem>
@@ -64,7 +85,8 @@ export const Navbar = () => {
                 "data-[active=true]:text-primary data-[active=true]:font-medium"
               )}
               color="foreground"
-              href={`/validation/${currentPlot}`}>
+              href={`/validation/${props.plot.key}`}
+              onClick={onClick}>
               Validation
             </NextLink>
           </NavbarItem>
@@ -90,7 +112,7 @@ export const Navbar = () => {
           variant="bordered"
           placeholder="Select a plot: "
           isRequired={true}
-          defaultSelectedKeys={["Amacayacu"]}
+          defaultSelectedKeys={[props.plot.key]}
           selectedKeys={value}
           className="max-w-xs"
           onChange={handleSelectionChange}
