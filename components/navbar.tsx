@@ -5,45 +5,33 @@ import {
   NavbarBrand,
   NavbarItem,
 } from "@nextui-org/navbar";
-import {Select, SelectItem, Selection} from "@nextui-org/react";
+import {
+  Select,
+  SelectItem,
+  Selection
+} from "@nextui-org/react";
 import {link as linkStyles} from "@nextui-org/theme";
-import {siteConfig} from "@/config/site";
+import {Plot, plots} from "@/config/site";
 import NextLink from "next/link";
 import clsx from "clsx";
 import {Logo} from "@/components/icons";
-import React, {Dispatch, SetStateAction, useState} from "react";
-import { useRouter } from "next/navigation";
+import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
+import {LoginLogout} from "@/components/loginlogout";
 
-export interface Plot {
-  key: string;
-  num: number;
-}
-
-export interface SelectPlotProps {
-  plot: Plot;
-  setPlot: Dispatch<SetStateAction<Plot>>;
-}
-
-export const Navbar = (props: SelectPlotProps) => {
-  const router = useRouter();
-  const plots: Plot[] = [];
-  siteConfig.plotItems.forEach((e) => {
-    plots.push({ key: e.key, num: e.count } as Plot);
+export const Navbar = () => {
+  const keys = plots.map(plot => {
+    return {
+      key: plot.key
+    };
   });
-  const [value, setValue] = useState<Selection>(new Set([]));
-  const handleSelectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setValue(new Set([e.target.value]));
-    props.setPlot(plots.find((plot) => {
-      if(plot.key === e.target.value) return plot;
-    }) as Plot);
-  };
+  const initialState: Plot = {key: '', num: 0};
+  const [localPlot, setLocalPlot] = useState(initialState);
+  const [selection, setSelection] = useState<Selection>(new Set([]));
   
-  const onClick = async (event: { preventDefault: () => void; }) => {
-    event.preventDefault();
-    if(props.plot === undefined || props.plot.key === undefined) {
-      alert("You must select a plot before continuing!");
-    }
-  }
+  useEffect(() => {
+    setLocalPlot(plots.find((plot) => (plot.key === Array.from(selection)[0])) as Plot);
+  }, [selection]);
+  
   return (
     <NextUINavbar maxWidth="xl" position="sticky">
       <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
@@ -61,8 +49,7 @@ export const Navbar = (props: SelectPlotProps) => {
                 "data-[active=true]:text-primary data-[active=true]:font-medium"
               )}
               color="foreground"
-              href={`/browse/${props.plot.key}`}
-              onClick={onClick}>
+              href={`/browse/${(localPlot !== undefined) ? localPlot.key : ""}`}>
               Browse
             </NextLink>
           </NavbarItem>
@@ -73,8 +60,7 @@ export const Navbar = (props: SelectPlotProps) => {
                 "data-[active=true]:text-primary data-[active=true]:font-medium"
               )}
               color="foreground"
-              href={`/reporting/${props.plot.key}`}
-              onClick={onClick}>
+              href={`/reporting/${(localPlot !== undefined) ? localPlot.key : ""}`}>
               Reporting
             </NextLink>
           </NavbarItem>
@@ -85,8 +71,7 @@ export const Navbar = (props: SelectPlotProps) => {
                 "data-[active=true]:text-primary data-[active=true]:font-medium"
               )}
               color="foreground"
-              href={`/validation/${props.plot.key}`}
-              onClick={onClick}>
+              href={`/validation/${(localPlot !== undefined) ? localPlot.key : ""}`}>
               Validation
             </NextLink>
           </NavbarItem>
@@ -108,21 +93,20 @@ export const Navbar = (props: SelectPlotProps) => {
         justify="end"
       >
         <Select
-          label="Current Plot"
+          label="Select Plot"
           variant="bordered"
-          placeholder="Select a plot: "
-          isRequired={true}
-          defaultSelectedKeys={[props.plot.key]}
-          selectedKeys={value}
+          placeholder="Select a plot"
           className="max-w-xs"
-          onChange={handleSelectionChange}
+          items={keys}
+          selectedKeys={selection}
+          onSelectionChange={setSelection}
         >
-          {siteConfig.plotItems.map((plot) => (
-            <SelectItem key={plot.key} value={plot.key}>
-              {plot.key}
-            </SelectItem>
-          ))}
+          {(plotKey) => <SelectItem key={plotKey.key}>{plotKey.key}</SelectItem> }
         </Select>
+      </NavbarContent>
+      <NavbarContent as={"div"}
+                     justify="end">
+        <LoginLogout />
       </NavbarContent>
     </NextUINavbar>
   );
