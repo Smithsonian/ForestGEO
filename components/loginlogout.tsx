@@ -13,10 +13,13 @@ export const LoginLogout = () => {
             <User
               as="button"
               avatarProps={{
+                src: 'https://images.unsplash.com/broken', // BROKEN SRC
                 isBordered: true,
-                icon: <UserIconXMarked/>,
+                icon: <UserIconXMarked />,
                 size: "md",
-                color: "secondary"
+                color: "secondary",
+                showFallback: true,
+                fallback: <UserIconXMarked />
               }}
               className="transition-transform"
               description="Please click to log in"
@@ -46,10 +49,13 @@ export const LoginLogout = () => {
             <User
               as="button"
               avatarProps={{
+                src: 'https://images.unsplash.com/broken', // BROKEN SRC
                 isBordered: true,
-                icon: <UserIconChecked/>,
+                icon: <UserIconChecked />,
                 size: "md",
-                color: "secondary"
+                color: "secondary",
+                showFallback: true,
+                fallback: <UserIconChecked />
               }}
               className="transition-transform"
               description={session?.user?.email}
