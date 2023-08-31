@@ -66,3 +66,18 @@ In order from left to right, please note the following points of interest:
 - `[plotNum]`: second required variable when accessing this endpoint - your resulting endpoint 
   will look like (example) `http://localhost:3000/browse/plotKey/plotNum`. 
 ---
+### Release Notes (v0.1.0):
+- endpoints have been added and routed to require a plot key/number combination for access 
+  - initial state has been converted to new `Plot {key: 'none', num: 0}` instead of `''`
+- MUI JoyUI has been partially implemented as a replacement for MaterialUI. However, due to time 
+  limitations, MaterialUI has still been incorporated into converted sections from ForestGeoHack 
+  - The current plan is to solely implement either NextUI or ChakraUI instead of either of these options, and future updates will include this information.
+- `SelectPlotProps` has been removed and replaced with NextJS dynamic routing (each endpoint will 
+    dynamically retrieve plot information). Endpoints have been updated to reflect dynamic param-based retrieval
+  - The navigation bar has been updated to use useEffect to push live endpoint updates when the 
+      plot is changed (if you are at an endpoint and the plot is changed, the page will be reloaded to reflect that)
+- New components/moved-over information:
+  - `Dropzone` --> css code has been udpated to be dark theme-friendly
+  - `FileList` --> moved over 
+  - `Loginlogout` --> created component, login/logout process has been relegated to avatar icon dropdown menu 
+  - `Plotselection` --> partially created from SelectPlot, changed to utilize dynamic routing/selection instead of requiring a new dropdown in each page
