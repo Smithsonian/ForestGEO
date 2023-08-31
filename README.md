@@ -4,7 +4,8 @@ A cloud-native web application built to accelerate the pace of research for the 
 Institution's Forest Global Earth Observatory (ForestGEO). ForestGEO is a global forest research 
 network, unparalleled in size and scope, comprised of ecologists and research sites dedicated to 
 advancing long-term study of the world's forests. The ForestGEO app aims to empower researchers with
-an efficient means of recording, validating, and publishing forest health data.
+an efficient means of recording, validating, and publishing forest health data.  
+Learn more about ForestGEO [at their website](https://www.forestgeo.si.edu/).
 
 This application was built using Next.js 13 (app directory) and NextUI (v2).
 
@@ -22,6 +23,20 @@ Please see the documentation [here](https://github.com/ForestGeoHack/ForestGEO/w
   interface, etc.
 - `styles/`: tailwindcss formatting files and dropzone/validation table custom formatting files
 - `types/`: additional set up for SVG formatting
+
+### Running the project
+1. Before running the project, you must create an `.env.local` file in the overhead directory 
+   with the following values:
+   - `AZURE_AD_CLIENT_ID`
+   - `AZURE_AD_CLIENT_SECRET`
+   - `AZURE_AD_TENANT_ID`
+   - `NEXTAUTH_SECRET`
+   - `NEXTAUTH_URL`
+   - all `AZURE_` values must be created/populated from Azure's App Registration portal
+2. Once `.env.local` is made, run `npm install` from the overhead directory to install dependencies
+3. Run `npm run build` to compile/optimize the application for running
+4. Run `npm run dev` to create a dev instance of the application locally on your machine
+5. Navigate to `http://localhost:3000` to access the application
 
 ---
 ### Understanding Next.JS Dynamic Routing
