@@ -1,7 +1,40 @@
-# The ForestGEO App
+# Next.js & NextUI Template
 
-A cloud-native web application built to accelerate the pace of research for the Smithsonian Institution's Forest Global Earth Observatory (ForestGEO). ForestGEO is a global forest research network, unparalleled in size and scope, comprised of ecologists and research sites dedicated to advancing long-term study of the world's forests. The ForestGEO app aims to empower researchers with an efficient means of recording, validating, and publishing forest health data.
+This is a template for creating applications using Next.js 13 (app directory) and NextUI (v2).
 
-See our [technical specification](https://github.com/ForestGeoHack/ForestGEO/wiki/ForestGEO-App-Specification) to learn more.
+## Technologies Used
 
-Learn more about ForestGEO [at their website.](https://www.forestgeo.si.edu/).
+- [Next.js 13](https://nextjs.org/docs/getting-started)
+- [NextUI v2](https://nextui.org/)
+- [Tailwind CSS](https://tailwindcss.com/)
+- [Tailwind Variants](https://tailwind-variants.org)
+- [TypeScript](https://www.typescriptlang.org/)
+- [Framer Motion](https://www.framer.com/motion/)
+- [next-themes](https://github.com/pacocoursey/next-themes)
+
+## How to Use
+
+
+### Use the template with create-next-app
+
+To create a new project based on this template using `create-next-app`, run the following command:
+
+```bash
+npx create-next-app -e https://github.com/nextui-org/next-app-template
+```
+
+### Install dependencies
+
+```bash
+npm install
+```
+
+### Run the development server
+
+```bash
+npm run dev
+```
+
+## License
+
+Licensed under the [MIT license](https://github.com/nextui-org/next-app-template/blob/main/LICENSE).
