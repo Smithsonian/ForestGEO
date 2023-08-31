@@ -1,5 +1,5 @@
 import {signIn, signOut, useSession} from "next-auth/react";
-import {Avatar, Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner} from "@nextui-org/react";
+import {Dropdown, DropdownItem, DropdownMenu, DropdownTrigger, Spinner, User} from "@nextui-org/react";
 import React from "react";
 import {UserIconChecked, UserIconXMarked} from "@/components/icons";
 
@@ -10,14 +10,17 @@ export const LoginLogout = () => {
       <>
         <Dropdown placement="bottom-end">
           <DropdownTrigger>
-            <Avatar
-              isBordered
+            <User
               as="button"
+              avatarProps={{
+                isBordered: true,
+                icon: <UserIconXMarked/>,
+                size: "md",
+                color: "secondary"
+              }}
               className="transition-transform"
-              color="secondary"
-              name="Unknown User"
-              size="sm"
-              icon={<UserIconXMarked />}
+              description="Please click to log in"
+              name="Log In"
             />
           </DropdownTrigger>
           <DropdownMenu
@@ -40,14 +43,17 @@ export const LoginLogout = () => {
       <>
         <Dropdown placement="bottom-end">
           <DropdownTrigger>
-            <Avatar
-              isBordered
+            <User
               as="button"
+              avatarProps={{
+                isBordered: true,
+                icon: <UserIconChecked/>,
+                size: "md",
+                color: "secondary"
+              }}
               className="transition-transform"
-              color="secondary"
-              name={session?.user?.name as string}
-              size="sm"
-              icon={<UserIconChecked />}
+              description={session?.user?.email}
+              name={session?.user?.name}
             />
           </DropdownTrigger>
           <DropdownMenu

@@ -3,6 +3,13 @@ export interface Plot {
   num: number;
 }
 
+export const fileColumns = [
+  { key: 'fn', label: 'File Name'},
+  { key: 'de', label: 'Date Entered'},
+  { key: 'ub', label: 'Uploaded By'},
+  { key: 'a', label: 'Actions'},
+]
+
 export const plots: Plot[] = [
   { key: "Amacayacu", num: 16 },
   { key: "BCI", num: 40 },
@@ -45,7 +52,7 @@ export const siteConfig = {
 	navItems: [
 		{
 			label: "Home",
-			href: "/",
+			href: "/home",
 		},
     {
       label: "Browse",
