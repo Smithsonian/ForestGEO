@@ -13,9 +13,9 @@ const handler = NextAuth({
     strategy: "jwt"
   },
   callbacks: {
-    async jwt({ token, account }) {
+    async jwt({  token, account}) {
       if (account) {
-        token.idToken = account.id_token;
+        token.idtoken = account.id_token;
       }
       return token;
     },

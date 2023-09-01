@@ -42,7 +42,16 @@ interface BrowsePureProps {
 	plotRows?: PlotRows;
 }
 export default function Page({ params }: { params: { plotKey: string, plotNum: string } }) {
-	const {data: session} = useSession();
+	useSession({
+		required: true,
+		onUnauthenticated() {
+			return (
+				<>
+					<h3 className={title()}>You must log in to view this page.</h3>
+				</>
+			);
+		},
+	});
 	let localPlot: Plot = {
 		key: (params.plotKey === 'none') ? '' : params.plotKey,
 		num: parseInt(params!.plotNum)
@@ -96,12 +105,6 @@ export default function Page({ params }: { params: { plotKey: string, plotNum: s
 		return (
 			<>
 				<h1 className={title()}>Please select a plot to continue.</h1>
-			</>
-		);
-	} else if (!session) {
-		return (
-			<>
-				<h1 className={title()}>You must be logged in to use this feature.</h1>
 			</>
 		);
 	} else {

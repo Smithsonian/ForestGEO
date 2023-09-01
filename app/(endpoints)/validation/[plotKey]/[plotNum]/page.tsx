@@ -114,14 +114,16 @@ export default function Validation({ params }: { params: { plotKey: string, plot
 	const [isUploading, setisUploading] = useState(false);
 	const [errorsData, setErrorsData] = useState<FileErrors>({});
 	const [uploadDone, setUploadDone] = useState(false);
-	const {data: session} = useSession();
-	if(!session) {
-		return (
-			<>
-				<h3 className={title()}>You must log in to view this page.</h3>
-			</>
-		);
-	}
+	useSession({
+		required: true,
+		onUnauthenticated() {
+			return (
+				<>
+					<h3 className={title()}>You must log in to view this page.</h3>
+				</>
+			);
+		},
+	});
 	if(!params || !params.plotKey || !params.plotNum){
 		return (
 			<>
