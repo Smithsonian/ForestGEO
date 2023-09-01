@@ -150,9 +150,10 @@ export default function Validation({ params }: { params: { plotKey: string, plot
 				setisUploading(true);
 				
 				// @todo: wrap this in a try/catch, and set an error state.
-				const response = await fetch('/api/upload?plot=' + currentPlot.num, {
-					method: 'Post',
-					body: fileToFormData,
+				const response = await fetch(`http://localhost:3000/api/upload?plot=${currentPlot.key}`,
+					{
+						method: "POST",
+						body: fileToFormData,
 				});
 				const data = await response.json();
 				setErrorsData(data.errors);
