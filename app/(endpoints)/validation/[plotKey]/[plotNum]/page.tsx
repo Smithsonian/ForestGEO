@@ -5,7 +5,6 @@ import { FileWithPath } from 'react-dropzone';
 
 import Dropzone from "@/components/dropzone";
 import FileList from "@/components/filelist";
-import ValidationTable from "@/components/validationtable";
 import {Plot} from "@/config/site";
 import {useSession} from "next-auth/react";
 import {title} from "@/components/primitives";
@@ -48,45 +47,51 @@ function ValidationPure({
 															 plot,
 														 }: ValidationPureProps) {
 	if (uploadDone) {
-		if (Object.keys(errorsData).length === 0) {
-			return (
-				<Container fixed>
-					<Typography variant="h1" mt={2}>
-						Successfully uploaded.
-					</Typography>
-				</Container>
-			);
-		} else {
-			const filesWithErrorsList: FileWithPath[] = [];
-			
-			if (Object.keys(errorsData).length) {
-				acceptedFiles.forEach((file: FileWithPath) => {
-					if (Object.keys(errorsData).includes(file.name.toString())) {
-						filesWithErrorsList.push(file);
-					}
-				});
-			}
-			
-			// Show errors with the data that were uploaded
-			return (
-				<>
-					<ValidationTable
-						errorMessage={errorsData}
-						uploadedData={filesWithErrorsList}
-						headers={[
-							// @todo: these are hardcoded.
-							{ label: 'Tag' },
-							{ label: 'Subquadrat' },
-							{ label: 'SpCode' },
-							{ label: 'DBH' },
-							{ label: 'Htmeas' },
-							{ label: 'Codes' },
-							{ label: 'Comments' },
-						]}
-					/>
-				</>
-			);
-		}
+		// if (errorsData && Object.keys(errorsData).length === 0) {
+		// 	return (
+		// 		<Container fixed>
+		// 			<Typography variant="h1" mt={2}>
+		// 				Successfully uploaded.
+		// 			</Typography>
+		// 		</Container>
+		// 	);
+		// } else {
+		// 	const filesWithErrorsList: FileWithPath[] = [];
+		// 	if (Object.keys(errorsData).length) {
+		// 		acceptedFiles.forEach((file: FileWithPath) => {
+		// 			if (Object.keys(errorsData).includes(file.name.toString())) {
+		// 				filesWithErrorsList.push(file);
+		// 			}
+		// 		});
+		// 	}
+		//
+		// 	// Show errors with the data that were uploaded
+		// 	return (
+		// 		<>
+		// 			<ValidationTable
+		// 				errorMessage={errorsData}
+		// 				uploadedData={filesWithErrorsList}
+		// 				headers={[
+		// 					// @todo: these are hardcoded.
+		// 					{ label: 'Tag' },
+		// 					{ label: 'Subquadrat' },
+		// 					{ label: 'SpCode' },
+		// 					{ label: 'DBH' },
+		// 					{ label: 'Htmeas' },
+		// 					{ label: 'Codes' },
+		// 					{ label: 'Comments' },
+		// 				]}
+		// 			/>
+		// 		</>
+		// 	);
+		// }
+		return (
+			<Container fixed>
+				<Typography variant="h1" mt={2}>
+					Successfully uploaded.
+				</Typography>
+			</Container>
+		);
 	}
 	
 	return (

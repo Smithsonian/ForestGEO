@@ -1,19 +1,11 @@
 import { ParsedFile } from '@anzp/azure-function-multipart/dist/types/parsed-file.type';
 import { BlobServiceClient } from '@azure/storage-blob';
 require('dotenv').config();
-const blobUrl: string | undefined = process.env.AZURE_STORAGE_CONNECTION_STRING || undefined;
+const blobUrl: string = process.env.AZURE_STORAGE_CONNECTION_STRING!;
 if (!blobUrl) {
   throw new Error('No string attached!');
 }
 
-// user info interface (received from the 'x-ms-client-principal' cookie in the upload function)
-export interface clientPrincipal {
-  userId: string;
-  userRoles: string[];
-  claims: string[];
-  identityProvider: string;
-  userDetails: string;
-}
 
 const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
 const containers: {name: string; nameShort: string}[] = [];
@@ -28,7 +20,7 @@ const listContainers = async () => {
   }
 };
 
-const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userInfo: clientPrincipal) => {
+const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string) => {
   try {
     await listContainers();
     const plotReplaced = plot.replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -44,12 +36,10 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
         
         const uploadOptions = {
           metadata: {
-            user: userInfo.userDetails,
             date: (new Date()).toDateString(),
           },
           tags: {
             plot: plot,
-            uploadedBy: userInfo.userDetails.replace(/@/, '_at_'),
             uploadedOn: (new Date()).toDateString(),
           }
         }

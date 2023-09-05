@@ -1,52 +1,120 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { Context, HttpRequest } from "@azure/functions";
+import { uploadFiles } from "@/components/blobupload";
+import parseMultipartFormData from "@anzp/azure-function-multipart";
+import { parse, ParseConfig } from "papaparse";
 
-export async function POST(request: NextRequest) {
-  try {
-    const json = await request.json();
-    console.log(json);
-    let json_response = {
-      status: "success",
+export async function POST(context: Context, req: HttpRequest): Promise<void> {
+  let responseStatusCode: number;
+  let responseMessage: string;
+  
+  if (req.body) {
+    const { fields, files } = await parseMultipartFormData(req);
+    const plot = req.query.plot;
+    
+    // simple validation here
+    const headers = [
+      "Tag",
+      "Subquadrat",
+      "SpCode",
+      "DBH",
+      "Htmeas",
+      "Codes",
+      "Comments",
+    ];
+    
+    // array for collected errors
+    const errors: { [fileName: string]: { [currentRow: string]: string } } = {};
+    
+    const createFileEntry = (parsedFileName: string) => {
+      if (errors[parsedFileName] == undefined) {
+        errors[parsedFileName] = {};
+      }
     };
-    return new NextResponse(JSON.stringify(json_response), {
-      status: 201,
-      headers: { "Content-Type": "text/csv" },
-    });
-  } catch (error: any) {
-    if (error.code === "P2002") {
-      let error_response = {
-        status: "fail",
-        message: "Feedback with title already exists",
+    
+    for (const parsedFile of files) {
+      // without the transformHeader parameter first header is parsed with quotes
+      
+      const config: ParseConfig = {
+        delimiter: ",",
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim(),
       };
-      return new NextResponse(JSON.stringify(error_response), {
-        status: 409,
-        headers: { "Content-Type": "text/csv" },
+      const results = parse(parsedFile.bufferFile.toString("utf-8"), config);
+      
+      // If there is no data, send response immediately
+      if (!results.data.length) {
+        console.log("No data for upload!");
+        createFileEntry(parsedFile.filename);
+        errors[parsedFile.filename]["error"] = "Empty file";
+        return;
+      }
+      
+      results.data.map((csv, index) => {
+        const csvHeaders = Object.keys(csv);
+        const currentRow = index + 1;
+        
+        if (!csvHeaders.every((entry) => headers.includes(entry))) {
+          createFileEntry(parsedFile.filename);
+          console.log("Headers test failed!");
+          errors[parsedFile.filename]["headers"] = "Missing Headers";
+        }
+        
+        csvHeaders.map((key) => {
+          if (csv[key] === "" || undefined) {
+            createFileEntry(parsedFile.filename);
+            errors[parsedFile.filename][currentRow] = "Missing value";
+            console.log(errors[parsedFile.filename][currentRow]);
+          } else if (key === "DBH" && parseInt(csv[key]) < 1) {
+            createFileEntry(parsedFile.filename);
+            errors[parsedFile.filename][currentRow] = "Check the value of DBH";
+            console.log(errors[parsedFile.filename][currentRow]);
+          }
+        });
       });
+      if (results.errors.length) {
+        createFileEntry(parsedFile.filename);
+        console.log(
+          `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`
+        );
+        errors[parsedFile.filename][results.errors[0].row] =
+          results.errors[0].message;
+      }
     }
     
-    let error_response = {
-      status: "error",
-      message: error.message,
-    };
-    return new NextResponse(JSON.stringify(error_response), {
-      status: 500,
-      headers: { "Content-Type": "text/csv" },
-    });
+    if (Object.keys(errors).length === 0) {
+      uploadFiles(files, plot);
+      context.res = {
+        status: 201,
+        body: {
+          responseMessage: "File(s) uploaded to the cloud successfully",
+          errors: {},
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      };
+      return;
+    } else {
+      context.res = {
+        status: 400,
+        body: {
+          responseMessage: "Error(s)",
+          errors: errors,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      };
+      return;
+    }
+  } else {
+    responseStatusCode = 400;
+    responseMessage = "Something went wrong";
   }
-  // const data = await request.formData()
-  // const file: File | null = data.get('file') as unknown as File
-  //
-  // if (!file) {
-  //   return NextResponse.json({ success: false })
-  // }
-  //
-  // const bytes = await file.arrayBuffer()
-  // const buffer = Buffer.from(bytes)
-  //
-  // // With the file data in the buffer, you can do whatever you want with it.
-  // // For this, we'll just write it to the filesystem in a new location
-  // const path = `/tmp/${file.name}`
-  // await writeFile(path, buffer)
-  // console.log(`open ${path} to see the uploaded file`)
-  //
-  // return NextResponse.json({ success: true })
-}
+  
+  context.res = {
+    status: responseStatusCode,
+    body: responseMessage,
+  };
+};
