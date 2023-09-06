@@ -108,8 +108,8 @@ export default function Dropzone({ onChange }: DropzoneProps) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'text/csv': ['.csv'],
-      'application/vnd.ms-excel': ['.xlsx']
+      'text/csv': [],
+      'application/json': [],
     }
   });
   

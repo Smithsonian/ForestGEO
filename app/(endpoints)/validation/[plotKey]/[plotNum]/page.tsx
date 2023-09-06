@@ -161,7 +161,8 @@ export default function Validation({ params }: { params: { plotKey: string, plot
 						body: fileToFormData,
 				});
 				const data = await response.json();
-				setErrorsData(data.errors);
+				console.log(data);
+				// setErrorsData(data.errors);
 				
 				setisUploading(false);
 				setUploadDone(true);
