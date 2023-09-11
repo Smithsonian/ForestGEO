@@ -1,4 +1,4 @@
-import {  Listbox,   ListboxItem} from "@nextui-org/react";
+import {Listbox, ListboxItem} from "@nextui-org/react";
 import Typography from '@mui/joy/Typography';
 import React from "react";
 

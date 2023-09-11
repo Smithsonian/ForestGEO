@@ -1,8 +1,8 @@
-import React, { useCallback } from 'react';
-import { useDropzone, FileWithPath, FileRejection } from 'react-dropzone';
-import { parse, ParseConfig } from 'papaparse';
+import React, {useCallback} from 'react';
+import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
+import {parse, ParseConfig} from 'papaparse';
 import {FileUploadIcon} from "@/components/icons";
-import { Typography, Stack, Box} from '@mui/joy';
+import {Box, Stack, Typography} from '@mui/joy';
 import '@/styles/dropzone.css';
 
 export interface DropzonePureProps {
@@ -105,13 +105,9 @@ export default function Dropzone({ onChange }: DropzoneProps) {
     },
     [onChange]
   );
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      'text/csv': [],
-      'application/json': [],
-    }
-  });
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({onDrop, accept: {
+    'text/csv': ['.csv'],
+    }});
   
   return (
     <DropzonePure

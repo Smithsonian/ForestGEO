@@ -1,10 +1,5 @@
 "use client";
-import {
-  Navbar as NextUINavbar,
-  NavbarContent,
-  NavbarBrand,
-  NavbarItem,
-} from "@nextui-org/navbar";
+import {Navbar as NextUINavbar, NavbarBrand, NavbarContent, NavbarItem,} from "@nextui-org/navbar";
 import {link as linkStyles} from "@nextui-org/theme";
 import {Plot, siteConfig} from "@/config/site";
 import NextLink from "next/link";
@@ -24,8 +19,6 @@ export const Navbar = () => {
     // navbar-centralized route updating needed to keep the pages updated when user selects a new plot while at an endpoint
     if(localPlot && localPlot.key){
       let pathPieces = pathname.split('/');
-      console.log(`current path pieces: ${pathPieces.toString()}`);
-      console.log(`current localPlot: ${localPlot.key},${localPlot.num}`);
       if(pathPieces.length === 2){
         // navigated to an endpoint but no local plot was selected
         router.push(`/${pathPieces[1]}/${localPlot.key}/${localPlot.num.toString()}`);

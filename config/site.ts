@@ -1,3 +1,5 @@
+import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
+import sql from "mssql";
 export interface Plot {
   key: string;
   num: number;
@@ -45,7 +47,7 @@ export const plots: Plot[] = [
   { key: "Vandermeer", num: 14 },
   { key: "wanang", num: 21 },
   { key: "Yosemite", num: 33 },
-]
+];
 export const siteConfig = {
 	name: "ForestGEO",
 	description: "Census data entry and validation",
@@ -68,3 +70,50 @@ export const siteConfig = {
     }
 	]
 };
+
+export const headers = [
+  "Tag",
+  "Subquadrat",
+  "SpCode",
+  "DBH",
+  "Htmeas",
+  "Codes",
+  "Comments",
+];
+
+export const config: any = {
+  server: process.env.AZURE_SQL_SERVER!,
+  options: {},
+  authentication: {
+    type: "default",
+    options: {
+      userName: process.env.AZURE_SQL_USER!,
+      password: process.env.AZURE_SQL_PASSWORD!,
+    }
+  }
+}
+
+export async function getContainerClient(plot: string) {
+  const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (!accountName || !storageAccountConnectionString) return;
+  console.log(`storage acct created`);
+  // create client pointing to AZ storage system from connection string from Azure portal
+  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
+  if (!blobServiceClient) return;
+  console.log(`blob service client created.`);
+  // attempt connection to pre-existing container --> additional check to see if container was found
+  const containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
+  console.log(`container created @ ${containerClient.containerName}`);
+  await containerClient.createIfNotExists();
+  return containerClient;
+}
+
+export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  console.log(`blob name: ${file.name}`);
+  // create connection & client facing new blob
+  const blockBlobClient = containerClient.getBlockBlobClient(file.name);
+  // async command to upload buffer via client, waiting for response
+  return await blockBlobClient.uploadData(buffer);
+}

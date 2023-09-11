@@ -1,14 +1,16 @@
 "use client";
-import { useState } from 'react';
-import { Button, CircularProgress, Container, Typography } from '@mui/material';
-import { FileWithPath } from 'react-dropzone';
+import * as React from 'react';
+import {useState} from 'react';
+import {Button, CircularProgress, Container, Typography} from '@mui/material';
+import {FileWithPath} from 'react-dropzone';
 
 import Dropzone from "@/components/dropzone";
 import FileList from "@/components/filelist";
-import {Plot} from "@/config/site";
 import {useSession} from "next-auth/react";
 import {title} from "@/components/primitives";
-import * as React from "react";
+import {Plot} from "@/config/site";
+import {BlobServiceClient} from "@azure/storage-blob";
+import ValidationTable from "@/components/validationtable";
 
 interface FileErrors {
 	[fileName: string]: { [currentRow: string]: string };
@@ -47,51 +49,44 @@ function ValidationPure({
 															 plot,
 														 }: ValidationPureProps) {
 	if (uploadDone) {
-		// if (errorsData && Object.keys(errorsData).length === 0) {
-		// 	return (
-		// 		<Container fixed>
-		// 			<Typography variant="h1" mt={2}>
-		// 				Successfully uploaded.
-		// 			</Typography>
-		// 		</Container>
-		// 	);
-		// } else {
-		// 	const filesWithErrorsList: FileWithPath[] = [];
-		// 	if (Object.keys(errorsData).length) {
-		// 		acceptedFiles.forEach((file: FileWithPath) => {
-		// 			if (Object.keys(errorsData).includes(file.name.toString())) {
-		// 				filesWithErrorsList.push(file);
-		// 			}
-		// 		});
-		// 	}
-		//
-		// 	// Show errors with the data that were uploaded
-		// 	return (
-		// 		<>
-		// 			<ValidationTable
-		// 				errorMessage={errorsData}
-		// 				uploadedData={filesWithErrorsList}
-		// 				headers={[
-		// 					// @todo: these are hardcoded.
-		// 					{ label: 'Tag' },
-		// 					{ label: 'Subquadrat' },
-		// 					{ label: 'SpCode' },
-		// 					{ label: 'DBH' },
-		// 					{ label: 'Htmeas' },
-		// 					{ label: 'Codes' },
-		// 					{ label: 'Comments' },
-		// 				]}
-		// 			/>
-		// 		</>
-		// 	);
-		// }
-		return (
-			<Container fixed>
-				<Typography variant="h1" mt={2}>
-					Successfully uploaded.
-				</Typography>
-			</Container>
-		);
+		if (errorsData && Object.keys(errorsData).length === 0) {
+			return (
+				<Container fixed>
+					<Typography variant="h6" mt={2}>
+						Successfully uploaded.
+					</Typography>
+				</Container>
+			);
+		} else {
+			const filesWithErrorsList: FileWithPath[] = [];
+			if (Object.keys(errorsData).length) {
+				acceptedFiles.forEach((file: FileWithPath) => {
+					if (Object.keys(errorsData).includes(file.name.toString())) {
+						filesWithErrorsList.push(file);
+					}
+				});
+			}
+
+			// Show errors with the data that were uploaded
+			return (
+				<>
+					<ValidationTable
+						errorMessage={errorsData}
+						uploadedData={filesWithErrorsList}
+						headers={[
+							// @todo: these are hardcoded.
+							{ label: 'Tag' },
+							{ label: 'Subquadrat' },
+							{ label: 'SpCode' },
+							{ label: 'DBH' },
+							{ label: 'Htmeas' },
+							{ label: 'Codes' },
+							{ label: 'Comments' },
+						]}
+					/>
+				</>
+			);
+		}
 	}
 	
 	return (
@@ -145,25 +140,23 @@ export default function Validation({ params }: { params: { plotKey: string, plot
 			plot={currentPlot}
 			acceptedFiles={acceptedFiles}
 			handleUpload={async () => {
+				setisUploading(true);
+				setUploadDone(false);
+				if (acceptedFiles.length === 0 || acceptedFiles) {
+					console.log("accepted files is empty for some reason??");
+				}
 				const fileToFormData = new FormData();
 				let i = 0;
 				for (const file of acceptedFiles) {
 					fileToFormData.append(`file_${i}`, file);
 					i++;
 				}
-				
-				setisUploading(true);
-				
-				// @todo: wrap this in a try/catch, and set an error state.
-				const response = await fetch(`http://localhost:3000/api/upload?plot=${currentPlot.key}`,
-					{
-						method: "POST",
-						body: fileToFormData,
+				const response = await fetch('/api/upload?plot=' + currentPlot.key, {
+					method: 'POST',
+					body: fileToFormData,
 				});
 				const data = await response.json();
-				console.log(data);
-				// setErrorsData(data.errors);
-				
+				setErrorsData(data.errors);
 				setisUploading(false);
 				setUploadDone(true);
 			}}
