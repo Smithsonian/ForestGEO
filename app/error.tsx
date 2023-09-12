@@ -1,6 +1,8 @@
 'use client'
 
-import {useEffect} from 'react'
+import React, {useEffect} from 'react'
+import {Card, CardBody, Divider} from "@nextui-org/react";
+import {CardHeader} from "@nextui-org/card";
 
 export default function Error({
   error,
@@ -27,4 +29,25 @@ export default function Error({
       </button>
     </div>
   )
+}
+
+export function BrowseError() {
+  return (
+    <>
+      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+        <CardHeader>
+          <div className="flex flex-col">
+            <h5 className="text-md">Error while loading data.</h5>
+          </div>
+        </CardHeader>
+        <Divider />
+        <CardBody>
+          <div className="flex flex-col">
+            <h6 className="text-md">Perhaps try reloading the page. If it still doesn&apos;t work, please again
+              a bit later.</h6>
+          </div>
+        </CardBody>
+      </Card>
+    </>
+  );
 }

@@ -1,8 +1,8 @@
 "use client";
 import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
 import {
-	Button,
-	CircularProgress,
+	Button, Card, CardBody,
+	CircularProgress, Divider, getKeyValue,
 	Table,
 	TableBody,
 	TableCell,
@@ -11,27 +11,15 @@ import {
 	TableRow,
 } from '@nextui-org/react';
 import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
-import {fileColumns, Plot} from "@/config/site";
-import Grid from '@mui/joy/Grid';
-import Box from '@mui/joy/Box';
-import {Typography} from "@mui/joy";
+import {fileColumns, Plot, UploadedFileRows} from "@/config/site";
 import {useSession} from "next-auth/react";
 import {title} from "@/components/primitives";
+import {CardHeader} from "@nextui-org/card";
+import {BrowseError} from "@/app/error"
 
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 //        https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
-
-/**
- * Keyed by csv filename, valued by date and user that uploaded it.
- */
-interface PlotRows {
-	[fileName: string]: {
-		date: string;
-		user: string;
-	};
-}
-
 interface BrowsePureProps {
 	plot: Plot;
 	setPlot: Dispatch<SetStateAction<Plot>>;
@@ -39,8 +27,9 @@ interface BrowsePureProps {
 	/** True when plot data has finished loading. */
 	isLoaded: boolean;
 	/** All the rows of data for the plot. */
-	plotRows?: PlotRows;
+	fileRows?: UploadedFileRows[];
 }
+
 export default function Page({ params }: { params: { plotKey: string, plotNum: string } }) {
 	useSession({
 		required: true,
@@ -61,14 +50,13 @@ export default function Page({ params }: { params: { plotKey: string, plotNum: s
 	
 	const [error, setError] = useState<Error>();
 	const [isLoaded, setIsLoaded] = useState(false);
-	const [plotRows, setRows] = useState<PlotRows>();
-	
+	const [fileRows, setFileRows] = useState<UploadedFileRows[]>();
 	const getListOfFiles = useCallback(async () => {
 		if (currentPlot && currentPlot.key !== undefined) {
 			let response = null;
 			try {
 				response = await fetch('/api/download?plot=' + currentPlot.key, {
-					method: 'Get',
+					method: 'GET',
 				});
 				
 				if (!response.ok) {
@@ -81,8 +69,8 @@ export default function Page({ params }: { params: { plotKey: string, plotNum: s
 			}
 			
 			if (response) {
-				const data = await response.json();
-				setRows(data);
+				let data = await response.json();
+				setFileRows(data.blobData);
 				setIsLoaded(true);
 			}
 		} else {
@@ -113,119 +101,67 @@ export default function Page({ params }: { params: { plotKey: string, plotNum: s
 				plot={currentPlot}
 				setPlot={setCurrentPlot}
 				error={error}
-				plotRows={plotRows}
+				fileRows={fileRows}
 				isLoaded={isLoaded}
 			/>
 		);
 	}
 }
-
 /**
- * A container for layout.
+ * Plot selection is already done in navbar, show data for plot
  */
-function Container({ children }: { children?: React.ReactNode }) {
-	return (
-		<Grid
-			container
-			direction="column"
-			sx={{
-				marginTop: 20,
-				justifyContent: 'center',
-				alignItems: 'center',
-			}}
-		>
-			<Box
-				sx={{
-					fontWeight: 'bold',
-					fontSize: 35,
-					marginBottom: 30,
-				}}
-			>
-				{children}
-			</Box>
-		</Grid>
-	);
-}
-
-/**
- * Allows selecting from a list of plots, then shows the data for that plot.
- */
-function BrowsePure({error, isLoaded, plotRows, plot}: BrowsePureProps) {
-	if (!plot.key) {
+function BrowsePure({error, isLoaded, fileRows}: BrowsePureProps) {
+	if (error) {
 		return (
-			<Container>
-				<Typography level="h2" mt={2}>
-					Please select plot
-				</Typography>
-			</Container>
+			<>
+				{BrowseError()}
+			</>
 		);
-	} else if (error) {
+	} else if (!isLoaded || !fileRows) {
 		return (
-			<Container>
-				<Typography level="h2" mt={2}>
-					Error while loading data.
-				</Typography>
-				<Typography mt={2} mb={2}>
-					Perhaps try reloading the page. If it still doesn&apos;t work, please again
-					a bit later.
-				</Typography>
-			</Container>
-		);
-	} else if (!isLoaded || !plotRows) {
-		return (
-			<Container>
-				<Typography level="h2" mt={2}>
-					Loading Files...
-				</Typography>
-				<CircularProgress value={60} size={"lg"}></CircularProgress>
-			</Container>
+			<>
+				<Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+					<CardHeader>
+						<div className="flex flex-col">
+							<h5 className="text-md">Loading Files...</h5>
+						</div>
+					</CardHeader>
+					<Divider />
+					<CardBody>
+						<div className="flex flex-col">
+							<CircularProgress value={60} size={"lg"} label={"Uploading..."}/>
+						</div>
+					</CardBody>
+				</Card>
+			</>
 		);
 	} else {
 		return (
 			<>
-				<Typography level="h2" mt={2}>
-					Files for `${plot.key}`
-				</Typography>
-				<Grid
-					container
-					direction="row"
-					sx={{
-						marginTop: 10,
-						justifyContent: 'center',
-						alignItems: 'center',
-					}}
-				>
-					<Table aria-label="simple table"
-						className={"max-h-fit max-w-fit border-solid border-emerald-400 rounded-sm "}>
-						<TableHeader>
-							<TableHeader className={"font-bold"} columns={fileColumns}>
-								{(column) => <TableColumn key={column.key}>{column.label}</TableColumn>}
-							</TableHeader>
-						</TableHeader>
-						<TableBody>
-							{Object.keys(plotRows).map((fileName) => {
-								return (
-									<TableRow key={fileName}>
-										<TableCell>{fileName}</TableCell>
-										<TableCell>{plotRows[fileName].date}</TableCell>
-										<TableCell>{plotRows[fileName].user}</TableCell>
-										<TableCell align={"center"}>
-											<Button>
-												<DownloadIcon />
-											</Button>
-											<Button>
-												<EditIcon />
-											</Button>
-											<Button onClick={() => console.log('trying to delete file')}>
-												<DeleteIcon />
-											</Button>
-										</TableCell>
-									</TableRow>
-								);
-							})}
-						</TableBody>
-					</Table>
-				</Grid>
+				<Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+					<CardHeader>
+						<div className="flex flex-col">
+							<h5 className="text-md">Uploaded Files</h5>
+						</div>
+					</CardHeader>
+					<Divider />
+					<CardBody>
+						<div className="flex flex-col">
+							<Table aria-label={"Uploaded files"}>
+								<TableHeader columns={fileColumns}>
+									{(column) => <TableColumn key={column.key}>{column.label}</TableColumn>}
+								</TableHeader>
+								<TableBody items={fileRows}>
+									{(fileItem) => ( // fileRows = fileItem[]; fileItem: {key, name, user, date}
+										<TableRow key={fileItem.key}>
+											{(columnKey) => <TableCell>{getKeyValue(fileItem, columnKey)}</TableCell>}
+										</TableRow>
+									)}
+								</TableBody>
+							</Table>
+						</div>
+					</CardBody>
+				</Card>
 			</>
 		);
 	}

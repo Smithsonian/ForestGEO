@@ -5,11 +5,17 @@ export interface Plot {
   num: number;
 }
 
+export interface UploadedFileRows {
+  key: number;
+  name: string;
+  user: string;
+  date: Date;
+}
 export const fileColumns = [
-  { key: 'fn', label: 'File Name'},
-  { key: 'de', label: 'Date Entered'},
-  { key: 'ub', label: 'Uploaded By'},
-  { key: 'a', label: 'Actions'},
+  { key: 'name', label: 'File Name'},
+  { key: 'date', label: 'Date Entered'},
+  { key: 'user', label: 'Uploaded By'},
+  { key: 'actions', label: 'Actions'},
 ]
 
 export const plots: Plot[] = [
@@ -109,11 +115,16 @@ export async function getContainerClient(plot: string) {
   return containerClient;
 }
 
-export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File) {
+export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
   const buffer = Buffer.from(await file.arrayBuffer());
   console.log(`blob name: ${file.name}`);
+  let metadata = {
+    user: user,
+  };
   // create connection & client facing new blob
-  const blockBlobClient = containerClient.getBlockBlobClient(file.name);
   // async command to upload buffer via client, waiting for response
-  return await blockBlobClient.uploadData(buffer);
+  let uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer);
+  let metadataResults = await containerClient.getBlobClient(file.name).setMetadata(metadata);
+  if (metadataResults.errorCode) throw new Error('metadata set failed.');
+  return uploadResponse;
 }

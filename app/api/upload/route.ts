@@ -1,12 +1,35 @@
 import {NextRequest, NextResponse} from "next/server";
 import Papa, {ParseConfig} from "papaparse";
-import {headers} from "@/config/site";
+import {getContainerClient, headers, uploadFileAsBuffer} from "@/config/site";
 import sql from "mssql";
 require("dotenv").config();
+const sqlConfig: any = {
+  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
+  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
+  server: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
+  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
+  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
+  authentication: {
+    type: 'default'
+  },
+  options: {
+    encrypt: true
+  }
+}
 
-export async function POST(request: NextRequest, response: NextResponse) {
+export async function POST(request: NextRequest) {
+  function updateOrInsert(row: any) {
+    return `
+      IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])})
+        UPDATE [plot_${plot.toLowerCase()}]
+        SET Subquadrat = ${parseInt(row['Subquadrat'])}, SpCode = ${parseInt(row['SpCode'])}, DBH = ${parseFloat(row['DBH'])}, Htmeas = ${parseFloat(row['Htmeas'])}, Codes = '${row['Codes']}', Comments = '${row['Comments']}'
+        WHERE Tag = ${parseInt(row['Tag'])};
+      ELSE
+        SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])};
+    `;
+  }
   async function getSqlConnection() {
-    return await sql.connect(process.env.AZURE_SQL_CONNECTION_STRING!);
+    return await sql.connect(sqlConfig);
   }
   
   async function runQuery(conn: sql.ConnectionPool, query: string) {
@@ -22,7 +45,7 @@ export async function POST(request: NextRequest, response: NextResponse) {
   const formData = await request.formData();
   const files = [];
   const plot = request.nextUrl.searchParams.get('plot')!;
-  // console.log(plot);
+  const user = request.nextUrl.searchParams.get('user')!;
   for (const key of Array.from(formData.keys())) {
     const file = formData.get(key) as File | null;
     if (!file) return NextResponse.json({success: false});
@@ -47,49 +70,62 @@ export async function POST(request: NextRequest, response: NextResponse) {
     results.data.forEach((row, i) => {
       let keys: string[] = Object.keys(row);
       let values: string[] = Object.values(row);
-      // console.log(`index: ${index}, row: ${row}`);
       keys.forEach((item, index) => {
-        // console.log(`comparison: row key item: ${item}, headers[index]: ${headers[index]}`);
         if (item !== headers[index]) {
           createFileEntry(file.name);
-          // console.log("Headers test failed!");
+          console.log("Headers test failed!");
           errors[file.name]["headers"] = "Missing Headers";
         }
         if (values[index] === "" || undefined) {
           createFileEntry(file.name);
+          console.log(errors[file.name][i + 1]);
           errors[file.name][i + 1] = "Missing value";
-          // console.log(errors[file.name][i + 1]);
         }
         if (item === "DBH" && parseInt(values[index]) < 1) {
           createFileEntry(file.name);
+          console.log(errors[file.name][i + 1]);
           errors[file.name][i + 1] = "Check the value of DBH";
-          // console.log(errors[file.name][i + 1]);
         }
       });
     });
     if (!results.data.length) {
-      // console.log("No data for upload!");
+      console.log("No data for upload!");
       createFileEntry(file.name);
       errors[file.name]["error"] = "Empty file";
       return;
     }
-
     if (results.errors.length) {
       createFileEntry(file.name);
-      // console.log(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
-      errors[file.name][results.errors[0].row] =
-        results.errors[0].message;
+      console.log(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
+      errors[file.name][results.errors[0].row] =  results.errors[0].message;
     }
   }
-  // sql testing
-  let conn = await getSqlConnection();
-  if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, 'SELECT * FROM ${plot.toLowercase()}');
-  if(!results) console.log(`results undefined`);
-  console.log(`${results!.output}`);
-  await conn.close();
   // return/EOF
   if (Object.keys(errors).length === 0) {
+    // sql testing
+    let conn = await getSqlConnection();
+    if (!conn) throw new Error('sql connection failed');
+    const containerClient = await getContainerClient(plot);
+    if (!containerClient) return NextResponse.json({success: false});
+    else console.log(`container client created`);
+    for (const file of files) {
+      let uploadResponse = await uploadFileAsBuffer(containerClient, file, user);
+      console.log(`upload complete: ${uploadResponse.requestId}`);
+      if (uploadResponse._response.status === 200 || uploadResponse._response.status === 201) {
+        // upload complete:
+        const results = Papa.parse(await file.text(), config);
+        for (const row of results.data) {
+          if (row['Tag']) { // sample test to make sure that values are NOT NULL
+            let result = await runQuery(conn, updateOrInsert(row));
+            if(!result) console.log('results undefined');
+            else {
+              console.log(`row ${row['Tag']} of file ${file.name} submitted to db`);
+            }
+          }
+        }
+      }
+    }
+    await conn.close();
     // console.log('no errors. uploading file');
     return new NextResponse(
       JSON.stringify({
@@ -105,12 +141,7 @@ export async function POST(request: NextRequest, response: NextResponse) {
         responseMessage: "Error(s)",
         errors: errors,
       }),
-      {status: 400}
+      {status: 403}
     );
   }
-// const containerClient = await getContainerClient(plot);
-// if (!containerClient) return NextResponse.json({success: false});
-// else console.log(`container client created`);
-// let uploadResponse = await uploadFileAsBuffer(containerClient, file);
-// console.log(`upload complete: ${uploadResponse.requestId}`);
 }

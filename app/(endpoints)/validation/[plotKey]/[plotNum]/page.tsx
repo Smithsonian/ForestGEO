@@ -114,6 +114,7 @@ export default function Validation({ params }: { params: { plotKey: string, plot
 	const [isUploading, setisUploading] = useState(false);
 	const [errorsData, setErrorsData] = useState<FileErrors>({});
 	const [uploadDone, setUploadDone] = useState(false);
+	const { data: session } = useSession();
 	useSession({
 		required: true,
 		onUnauthenticated() {
@@ -151,7 +152,7 @@ export default function Validation({ params }: { params: { plotKey: string, plot
 					fileToFormData.append(`file_${i}`, file);
 					i++;
 				}
-				const response = await fetch('/api/upload?plot=' + currentPlot.key, {
+				const response = await fetch('/api/upload?plot=' + currentPlot.key + '&user=' + session!.user!.name!, {
 					method: 'POST',
 					body: fileToFormData,
 				});
