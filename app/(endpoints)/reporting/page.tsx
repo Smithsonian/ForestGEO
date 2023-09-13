@@ -2,8 +2,9 @@
 import {subtitle, title} from "@/components/primitives";
 import * as React from "react";
 import {useSession} from "next-auth/react";
+import {usePlotContext} from "@/app/plotcontext";
 
-export default function Page({params}: { params: { plotKey: string, plotNum: string } }) {
+export default function Page() {
   useSession({
     required: true,
     onUnauthenticated() {
@@ -14,10 +15,11 @@ export default function Page({params}: { params: { plotKey: string, plotNum: str
       );
     },
   });
+  const currentPlot = usePlotContext();
   return (
     <>
       <h3 className={subtitle()}>Currently at reporting page,
-        viewing {params.plotKey ? params.plotKey : "error: no plot selected"}</h3>
+        viewing {currentPlot!.key ? currentPlot!.key : "error: no plot selected"}</h3>
     </>
   );
 }

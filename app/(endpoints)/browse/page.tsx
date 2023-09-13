@@ -1,5 +1,5 @@
 "use client";
-import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   Card,
   CardBody,
@@ -18,13 +18,13 @@ import {useSession} from "next-auth/react";
 import {title} from "@/components/primitives";
 import {CardHeader} from "@nextui-org/card";
 import {BrowseError} from "@/app/error"
+import {usePlotContext} from "@/app/plotcontext";
 
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 //        https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
 interface BrowsePureProps {
   plot: Plot;
-  setPlot: Dispatch<SetStateAction<Plot>>;
   error?: Error;
   /** True when plot data has finished loading. */
   isLoaded: boolean;
@@ -32,7 +32,7 @@ interface BrowsePureProps {
   fileRows?: UploadedFileData[];
 }
 
-export default function Page({params}: { params: { plotKey: string, plotNum: string } }) {
+export default function Browse() {
   useSession({
     required: true,
     onUnauthenticated() {
@@ -43,21 +43,17 @@ export default function Page({params}: { params: { plotKey: string, plotNum: str
       );
     },
   });
-  let localPlot: Plot = {
-    key: (params.plotKey === 'none') ? '' : params.plotKey,
-    num: parseInt(params!.plotNum)
-  };
-  const [currentPlot, setCurrentPlot] = useState(localPlot);
+  let localPlot = usePlotContext();
   // @TODO - implement remove and download files
   
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   const getListOfFiles = useCallback(async () => {
-    if (currentPlot && currentPlot.key !== undefined) {
+    if (localPlot && localPlot.key !== undefined) {
       let response = null;
       try {
-        response = await fetch('/api/download?plot=' + currentPlot.key, {
+        response = await fetch('/api/download?plot=' + localPlot.key, {
           method: 'GET',
         });
         
@@ -79,19 +75,13 @@ export default function Page({params}: { params: { plotKey: string, plotNum: str
       console.log('Plot is undefined');
       setError(new Error('No plot'));
     }
-  }, [currentPlot]);
+  }, [localPlot]);
   
   useEffect(() => {
     getListOfFiles();
   }, [getListOfFiles]);
   
-  useEffect(() => {
-    setCurrentPlot(currentPlot);
-    setIsLoaded(true);
-    setError(undefined);
-  }, [currentPlot, setCurrentPlot, error, isLoaded]);
-  
-  if ((!currentPlot || !currentPlot.key) || (currentPlot.key === 'none' || currentPlot.num === 0)) {
+  if ((!localPlot || !localPlot.key)) {
     return (
       <>
         <h1 className={title()}>Please select a plot to continue.</h1>
@@ -100,8 +90,7 @@ export default function Page({params}: { params: { plotKey: string, plotNum: str
   } else {
     return (
       <BrowsePure
-        plot={currentPlot}
-        setPlot={setCurrentPlot}
+        plot={localPlot}
         error={error}
         fileRows={fileRows}
         isLoaded={isLoaded}

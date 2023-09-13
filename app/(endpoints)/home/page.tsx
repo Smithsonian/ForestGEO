@@ -2,8 +2,9 @@
 import * as React from "react";
 import {subtitle, title} from "@/components/primitives";
 import {useSession} from "next-auth/react";
+import {usePlotContext} from "@/app/plotcontext";
 
-export default function Page({params}: { params: { plotKey: string, plotNum: string } }) {
+export default function Page() {
   useSession({
     required: true,
     onUnauthenticated() {
@@ -20,6 +21,7 @@ export default function Page({params}: { params: { plotKey: string, plotNum: str
       );
     },
   });
+  const currentPlot = usePlotContext();
   return (
     <>
       <h1 className={title()}>Welcome to &nbsp;</h1>
@@ -29,7 +31,7 @@ export default function Page({params}: { params: { plotKey: string, plotNum: str
       <h2 className={subtitle({class: "mt-4"})}>
         A data entry and validation system for your convenience.
       </h2>
-      <p>You have selected {params.plotKey ? params.plotKey : "nothing"}</p>
+      <p>You have selected {currentPlot?.key ? currentPlot!.key : "nothing"}</p>
     </>
   );
 }

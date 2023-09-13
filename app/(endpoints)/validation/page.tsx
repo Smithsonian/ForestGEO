@@ -10,6 +10,7 @@ import {useSession} from "next-auth/react";
 import {title} from "@/components/primitives";
 import {Plot} from "@/config/site";
 import ValidationTable from "@/components/validationtable";
+import {usePlotContext} from "@/app/plotcontext";
 
 interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
@@ -107,7 +108,7 @@ function ValidationPure({
   );
 }
 
-export default function Validation({params}: { params: { plotKey: string, plotNum: string } }) {
+export default function Validation() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   const [isUploading, setisUploading] = useState(false);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
@@ -123,14 +124,14 @@ export default function Validation({params}: { params: { plotKey: string, plotNu
       );
     },
   });
-  if (!params || !params.plotKey || !params.plotNum) {
+  let currentPlot = usePlotContext();
+  if (!currentPlot || !currentPlot.key || !currentPlot.num) {
     return (
       <>
         <p>params doesn&apos;t exist OR plotkey doesn&apos;t exist OR plotnum doesn&apos;t exist</p>
       </>
     );
   }
-  const currentPlot: Plot = {key: params.plotKey, num: parseInt(params.plotNum)};
   return (
     <ValidationPure
       uploadDone={uploadDone}
@@ -150,7 +151,7 @@ export default function Validation({params}: { params: { plotKey: string, plotNu
           fileToFormData.append(`file_${i}`, file);
           i++;
         }
-        const response = await fetch('/api/upload?plot=' + currentPlot.key + '&user=' + session!.user!.name!, {
+        const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
           method: 'POST',
           body: fileToFormData,
         });

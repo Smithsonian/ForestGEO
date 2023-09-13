@@ -1,24 +1,24 @@
 "use client";
 import {Select, Selection, SelectItem} from "@nextui-org/react";
-import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
-import {Plot, plots} from "@/config/site";
+import React, {useEffect, useState} from "react";
+import {plots} from "@/config/site";
+import {usePlotDispatch} from "@/app/plotcontext";
 
-export interface PlotProps {
-  plot: Plot;
-  setPlot: Dispatch<SetStateAction<Plot>>;
-}
-
-export const SelectPlot = ({plot, setPlot}: PlotProps) => {
+export const SelectPlot = () => {
+  const dispatch = usePlotDispatch();
   const keys = plots.map(plot => {
     return {
       key: plot.key
     };
   });
   const [selection, setSelection] = useState<Selection>(new Set([]));
-  
   useEffect(() => {
-    setPlot(plots.find((plot) => (plot.key === Array.from(selection)[0])) as Plot);
-  }, [selection, setPlot]);
+    if (dispatch) {
+      dispatch({
+        plotKey: Array.from(selection)[0] as string,
+      });
+    }
+  }, [dispatch, selection]);
   return (
     <>
       <Select
