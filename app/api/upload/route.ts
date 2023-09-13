@@ -2,6 +2,7 @@ import {NextRequest, NextResponse} from "next/server";
 import Papa, {ParseConfig} from "papaparse";
 import {getContainerClient, headers, uploadFileAsBuffer} from "@/config/site";
 import sql from "mssql";
+
 require("dotenv").config();
 const sqlConfig: any = {
   user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
         SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])};
     `;
   }
+  
   async function getSqlConnection() {
     return await sql.connect(sqlConfig);
   }
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
       console.error(err.message);
     }
   }
+  
   const formData = await request.formData();
   const files = [];
   const plot = request.nextUrl.searchParams.get('plot')!;
@@ -53,18 +56,20 @@ export async function POST(request: NextRequest) {
     files.push(file);
   }
   const errors: { [fileName: string]: { [currentRow: string]: string } } = {};
+  
   function createFileEntry(parsedFileName: string) {
     if (errors[parsedFileName] == undefined) {
       errors[parsedFileName] = {};
     }
   }
+  
   const config: ParseConfig = {
     delimiter: ",",
     header: true,
     skipEmptyLines: true,
     transformHeader: (h) => h.trim(),
   };
-
+  
   for (const file of files) {
     const results = Papa.parse(await file.text(), config);
     results.data.forEach((row, i) => {
@@ -97,7 +102,7 @@ export async function POST(request: NextRequest) {
     if (results.errors.length) {
       createFileEntry(file.name);
       console.log(`Error on row: ${results.errors[0].row}. ${results.errors[0].message}`);
-      errors[file.name][results.errors[0].row] =  results.errors[0].message;
+      errors[file.name][results.errors[0].row] = results.errors[0].message;
     }
   }
   // return/EOF
@@ -117,7 +122,7 @@ export async function POST(request: NextRequest) {
         for (const row of results.data) {
           if (row['Tag']) { // sample test to make sure that values are NOT NULL
             let result = await runQuery(conn, updateOrInsert(row));
-            if(!result) console.log('results undefined');
+            if (!result) console.log('results undefined');
             else {
               console.log(`row ${row['Tag']} of file ${file.name} submitted to db`);
             }
@@ -132,7 +137,7 @@ export async function POST(request: NextRequest) {
         responseMessage: "File(s) uploaded to the cloud successfully",
         errors: {},
       }),
-      { status: 201 }
+      {status: 201}
     );
   } else {
     // console.log('error found. sending 400');

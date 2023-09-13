@@ -8,7 +8,7 @@ table {
     width: auto;
 }
 
-.tablecontainer{
+.tablecontainer {
     border-collapse: separate; /** border-spacing is allow only if border-collapse is separate */
     border-spacing: 0 20px;
     margin-left: auto;

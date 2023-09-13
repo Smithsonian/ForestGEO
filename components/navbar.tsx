@@ -1,6 +1,6 @@
 "use client";
-import {Navbar as NextUINavbar, NavbarBrand, NavbarContent, NavbarItem,} from "@nextui-org/navbar";
-import {link as linkStyles} from "@nextui-org/theme";
+import {Navbar as NextUINavbar, NavbarBrand, NavbarContent, NavbarItem,} from "@nextui-org/react";
+import {link as linkStyles} from "@nextui-org/react";
 import {Plot, siteConfig} from "@/config/site";
 import NextLink from "next/link";
 import clsx from "clsx";
@@ -17,9 +17,9 @@ export const Navbar = () => {
   const router = useRouter();
   useEffect(() => {
     // navbar-centralized route updating needed to keep the pages updated when user selects a new plot while at an endpoint
-    if(localPlot && localPlot.key){
+    if (localPlot && localPlot.key) {
       let pathPieces = pathname.split('/');
-      if(pathPieces.length === 2){
+      if (pathPieces.length === 2) {
         // navigated to an endpoint but no local plot was selected
         router.push(`/${pathPieces[1]}/${localPlot.key}/${localPlot.num.toString()}`);
       } else if (pathPieces.length === 4 && (pathPieces[2] !== localPlot.key || pathPieces[3] !== localPlot.num.toString())) {
@@ -48,7 +48,7 @@ export const Navbar = () => {
                   "data-[active=true]:text-primary data-[active=true]:font-medium"
                 )}
                 color="foreground"
-                href={`${item.href}/${!localPlot ? 'none': localPlot.key}/${!localPlot ? '0' : localPlot.num.toString()}`}>
+                href={`${item.href}/${!localPlot ? 'none' : localPlot.key}/${!localPlot ? '0' : localPlot.num.toString()}`}>
                 {item.label}
               </NextLink>
             </NavbarItem>
@@ -70,11 +70,11 @@ export const Navbar = () => {
         className="hidden sm:flex basis-1/5 sm:basis-full"
         justify="end"
       >
-      <SelectPlot plot={localPlot} setPlot={setLocalPlot} />
+        <SelectPlot plot={localPlot} setPlot={setLocalPlot}/>
       </NavbarContent>
       <NavbarContent className="hidden sm:flex basis-2/5 sm:basis-full"
                      justify="end">
-        <LoginLogout />
+        <LoginLogout/>
       </NavbarContent>
     </NextUINavbar>
   );

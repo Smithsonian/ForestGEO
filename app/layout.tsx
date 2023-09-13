@@ -11,6 +11,7 @@ export async function getSqlConnection() {
     console.log('conn fucked it');
   }
 }
+
 export default function RootLayout({
                                      children,
                                    }: {
@@ -19,9 +20,9 @@ export default function RootLayout({
   return (
     <>
       <html lang="en">
-        <Providers themeProps={{attribute: "class", defaultTheme: "dark"}}>
-          {children}
-        </Providers>
+      <Providers themeProps={{attribute: "class", defaultTheme: "dark"}}>
+        {children}
+      </Providers>
       </html>
     </>
   );

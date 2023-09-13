@@ -7,6 +7,7 @@ export interface PlotProps {
   plot: Plot;
   setPlot: Dispatch<SetStateAction<Plot>>;
 }
+
 export const SelectPlot = ({plot, setPlot}: PlotProps) => {
   const keys = plots.map(plot => {
     return {
@@ -29,7 +30,7 @@ export const SelectPlot = ({plot, setPlot}: PlotProps) => {
         selectedKeys={selection}
         onSelectionChange={setSelection}
       >
-        {(plotKey) => <SelectItem key={plotKey.key}>{plotKey.key}</SelectItem> }
+        {(plotKey) => <SelectItem key={plotKey.key}>{plotKey.key}</SelectItem>}
       </Select>
     </>
   );

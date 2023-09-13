@@ -35,17 +35,17 @@ export function DropzonePure({
       }}
       {...getRootProps()}
     >
-      <Typography sx={{ textAlign: 'center'}}>
+      <Typography sx={{textAlign: 'center'}}>
         {' '}
-        <FileUploadIcon color="primary" size={80} />{' '}
+        <FileUploadIcon color="primary" size={80}/>{' '}
       </Typography>
       <input {...getInputProps()} />
       {isDragActive ? (
-        <Typography color="primary" sx={{ textAlign: 'center'}}>
+        <Typography color="primary" sx={{textAlign: 'center'}}>
           Drop file here...
         </Typography>
       ) : (
-        <Typography color="primary" sx={{ textAlign: 'center'}}>
+        <Typography color="primary" sx={{textAlign: 'center'}}>
           <b>Choose a CSV file</b> or drag it here.
         </Typography>
       )}
@@ -68,7 +68,7 @@ export interface DropzoneProps {
 /**
  * A drop zone for CSV file uploads.
  */
-export default function Dropzone({ onChange }: DropzoneProps) {
+export default function Dropzone({onChange}: DropzoneProps) {
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
@@ -79,7 +79,7 @@ export default function Dropzone({ onChange }: DropzoneProps) {
         reader.onload = () => {
           // Do whatever you want with the file contents
           const binaryStr = reader.result as string;
-          const config: ParseConfig = { delimiter: ',' };
+          const config: ParseConfig = {delimiter: ','};
           const results = parse(binaryStr, config);
           
           //console.log(JSON.stringify(results.data));
@@ -105,9 +105,11 @@ export default function Dropzone({ onChange }: DropzoneProps) {
     },
     [onChange]
   );
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({onDrop, accept: {
-    'text/csv': ['.csv'],
-    }});
+  const {getRootProps, getInputProps, isDragActive} = useDropzone({
+    onDrop, accept: {
+      'text/csv': ['.csv'],
+    }
+  });
   
   return (
     <DropzonePure

@@ -4,7 +4,7 @@ import React from "react";
 import {UserIconChecked, UserIconXMarked} from "@/components/icons";
 
 export const LoginLogout = () => {
-  const { data: session, status} = useSession();
+  const {data: session, status} = useSession();
   if (status === "unauthenticated") {
     return (
       <>
@@ -15,11 +15,11 @@ export const LoginLogout = () => {
               avatarProps={{
                 src: 'https://images.unsplash.com/broken', // BROKEN SRC
                 isBordered: true,
-                icon: <UserIconXMarked />,
+                icon: <UserIconXMarked/>,
                 size: "md",
                 color: "secondary",
                 showFallback: true,
-                fallback: <UserIconXMarked />
+                fallback: <UserIconXMarked/>
               }}
               className="transition-transform"
               description="Please click to log in"
@@ -51,11 +51,11 @@ export const LoginLogout = () => {
               avatarProps={{
                 src: 'https://images.unsplash.com/broken', // BROKEN SRC
                 isBordered: true,
-                icon: <UserIconChecked />,
+                icon: <UserIconChecked/>,
                 size: "md",
                 color: "secondary",
                 showFallback: true,
-                fallback: <UserIconChecked />
+                fallback: <UserIconChecked/>
               }}
               className="transition-transform"
               description={session?.user?.email}

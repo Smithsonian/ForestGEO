@@ -1,17 +1,10 @@
-import {
-  TableContainer,
-  Typography,
-  Paper,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@mui/material';
-import { parse } from 'papaparse';
-import { useState } from 'react';
-import { FileWithPath } from 'react-dropzone';
+// import {Table, TableBody, TableCell, TableRow} from "@nextui-org/react";
+import Table from '@mui/joy/Table';
+import {parse} from 'papaparse';
+import {useState} from 'react';
+import {FileWithPath} from 'react-dropzone';
 import '@/styles/validationtable.css';
+import Typography from "@mui/joy/Typography";
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */
@@ -77,41 +70,41 @@ export default function ValidationTable({
               <></>
             ) : (
               <>
-                <TableHead>
-                  <TableRow>
+                <thead>
+                  <tr>
                     {headers.map((row, index) => {
-                      return <TableCell colSpan={headers.length} key={index}>{row.label}</TableCell>;
+                      return <th colSpan={headers.length} key={index}>{row.label}</th>;
                     })}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
+                  </tr>
+                </thead>
+                <tbody>
                   {fileData!.data.map((data: dataStructure, rowIdx) => {
                     return (
                       <>
-                        <TableRow>
+                        <tr>
                           {headers.map((header, i) => (
-                            <TableCell colSpan={headers.length} key={i}>
+                            <td colSpan={headers.length} key={i}>
                               {data[header.label]}
-                            </TableCell>
+                            </td>
                           ))}
-                        </TableRow>
+                        </tr>
                         
                         {errorMessage[fileName][rowIdx] && (
-                          <TableRow className="errorMessage">
-                            <TableCell colSpan={headers.length}>
+                          <tr className="errorMessage">
+                            <td colSpan={headers.length}>
                               <Typography
                                 className="errorMessage"
                                 component={'span'}
                               >
                                 ^ {errorMessage[fileName][rowIdx]}
                               </Typography>
-                            </TableCell>
-                          </TableRow>
+                            </td>
+                          </tr>
                         )}
                       </>
                     );
                   })}
-                </TableBody>
+                </tbody>
               </>
             )}
           </Table></>

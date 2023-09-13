@@ -1,3 +1,3 @@
 export default function Page() {
-	return <>Accidentally reached root page, yikes :/</>;
+  return <>Accidentally reached root page, yikes :/</>;
 }
