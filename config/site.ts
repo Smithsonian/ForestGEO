@@ -16,7 +16,6 @@ export const fileColumns = [
   {key: 'name', label: 'File Name'},
   {key: 'date', label: 'Date Entered'},
   {key: 'user', label: 'Uploaded By'},
-  {key: 'actions', label: 'Actions'},
 ]
 
 export const plots: Plot[] = [
@@ -57,24 +56,21 @@ export const plots: Plot[] = [
 ];
 export const siteConfig = {
   name: "ForestGEO",
-  description: "Census data entry and validation",
+  description: "Census data entry and uploadfiles",
   navItems: [
     {
-      label: "Home",
-      href: "/home",
+      label: "Upload Files",
+      href: "/uploadfiles",
     },
     {
-      label: "Browse",
-      href: "/browse",
+      label: "Browse Files",
+      href: "/viewfiles",
     },
     {
-      label: "Reporting",
+      label: "Error Reporting",
       href: "/reporting",
     },
-    {
-      label: "Validation",
-      href: "/validation",
-    }
+  
   ]
 };
 

@@ -1,9 +1,79 @@
-import React, {useCallback} from 'react';
+"use client";
+import React, {useCallback, useEffect} from 'react';
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
 import {FileUploadIcon} from "@/components/icons";
 import {Box, Stack, Typography} from '@mui/joy';
 import '@/styles/dropzone.css';
+import {Pagination, Button, CardBody, Card} from "@nextui-org/react";
+
+/**
+ * These are the only FileWithPath attributes we use.
+ * // import { FileWithPath } from 'react-dropzone';
+ */
+interface FileSize {
+  path?: string;
+  size: number;
+  
+  /** Can contain other fields, which we don't care about. */
+  [otherFields: string]: any;
+}
+
+export interface FileListProps {
+  acceptedFiles: FileSize[];
+}
+
+/**
+ * A simple list of files with their sizes.
+ */
+export function FileList({acceptedFiles}: FileListProps) {
+  const [currentPage, setCurrentPage] = React.useState(1);
+  useEffect(() => {
+  
+  }, []);
+  return acceptedFiles.length > 0 ? (
+    <>
+      <div className={"flex flex-col gap-5"}>
+        <Card>
+          <CardBody>
+          
+          </CardBody>
+        </Card>
+        <Pagination total={acceptedFiles.length} color={"secondary"} page={currentPage} onChange={setCurrentPage}/>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="flat"
+            color="secondary"
+            onPress={() => setCurrentPage((prev) => (prev > 1 ? prev - 1 : prev))}
+          >
+            Previous
+          </Button>
+          <Button
+            size="sm"
+            variant="flat"
+            color="secondary"
+            onPress={() => setCurrentPage((prev) => (prev < 10 ? prev + 1 : prev))}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+      {/*<Listbox>*/}
+      {/*  {acceptedFiles.map((file: FileSize) => (*/}
+      {/*    <ListboxItem*/}
+      {/*      key={file.path as string}*/}
+      {/*      textValue={`${file.path} - ${file.size} bytes`}>*/}
+      {/*    </ListboxItem>*/}
+      {/*  ))}*/}
+      {/*</Listbox>*/}
+    </>
+  ) : (
+    <>
+      <Typography variant={"solid"}>No files added</Typography>
+    </>
+  );
+}
 
 export interface DropzonePureProps {
   /** Is someone dragging file(s) onto the dropzone? */
@@ -57,7 +127,7 @@ export interface DropzoneProps {
   /**
    * A callback function which is called when files given for upload.
    * Files can be given by the user either by dropping the files
-   * with drag and drop, or by using the file browse button.
+   * with drag and drop, or by using the file viewfiles button.
    *
    * @param acceptedFiles - files which were accepted for upload.
    * @param rejectedFiles - files which are denied uploading.
@@ -68,7 +138,7 @@ export interface DropzoneProps {
 /**
  * A drop zone for CSV file uploads.
  */
-export default function Dropzone({onChange}: DropzoneProps) {
+export function Dropzone({onChange}: DropzoneProps) {
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {

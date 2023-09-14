@@ -15,7 +15,7 @@ export const Navbar = ({children,} : {children: React.ReactNode}) => {
         <NextUINavbar maxWidth="xl" position="sticky">
           <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
             <NavbarBrand as="li" className="gap-3 max-w-fit">
-              <NextLink className="flex justify-start items-center gap-1" href="/home/none/0">
+              <NextLink className="flex justify-start items-center gap-1" href="/home/">
                 <Logo/>
                 <p className="font-bold text-inherit">ForestGEO</p>
               </NextLink>

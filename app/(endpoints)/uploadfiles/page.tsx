@@ -4,19 +4,19 @@ import {useState} from 'react';
 import {Button, CircularProgress, Container, Typography} from '@mui/joy';
 import {FileWithPath} from 'react-dropzone';
 
-import Dropzone from "@/components/dropzone";
-import FileList from "@/components/filelist";
+import {Dropzone} from "@/components/dropzone";
 import {useSession} from "next-auth/react";
-import {title} from "@/components/primitives";
+import {subtitle, title} from "@/components/primitives";
 import {Plot} from "@/config/site";
 import ValidationTable from "@/components/validationtable";
 import {usePlotContext} from "@/app/plotcontext";
+import {Card, CardHeader, CardBody, CardFooter, Divider} from "@nextui-org/react";
 
 interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
 }
 
-interface ValidationPureProps {
+interface UploadValidationProps {
   /** true when the upload is done,
    * false when it's not done.
    * Also false when upload hasn't started.
@@ -39,7 +39,7 @@ interface ValidationPureProps {
 /**
  * For uploading and validating drag and dropped CSV files.
  */
-function ValidationPure({
+function UploadAndValidateFiles({
                           uploadDone,
                           isUploading,
                           errorsData,
@@ -47,7 +47,7 @@ function ValidationPure({
                           handleUpload,
                           handleAcceptedFiles,
                           plot,
-                        }: ValidationPureProps) {
+                        }: UploadValidationProps) {
   if (uploadDone) {
     if (errorsData && Object.keys(errorsData).length === 0) {
       return (
@@ -91,29 +91,42 @@ function ValidationPure({
   
   return (
     <>
+      <Card>
+        <CardHeader>
+          <h3 className={title()}>Upload files here</h3>
+        </CardHeader>
+        <Divider />
+        <CardBody>
+          <p className={subtitle()}>Drag and drop files into the box to upload them to storage</p>
+          {isUploading && <CircularProgress/>}
+          <Dropzone onChange={handleAcceptedFiles}/>
+        </CardBody>
+        <Divider />
+        <CardFooter>
+          {/*{acceptedFiles?.length && <FileList acceptedFiles={acceptedFiles}/>}*/}
+          {acceptedFiles?.length > 0 && plot.num > 0 && (
+            <Button
+              disabled={isUploading}
+              onClick={handleUpload}
+            >
+              Upload to server
+            </Button>
+          )}
+        </CardFooter>
+      </Card>
       <Container fixed>
-        {isUploading && <CircularProgress/>}
-        <Dropzone onChange={handleAcceptedFiles}/>
-        {acceptedFiles?.length && <FileList acceptedFiles={acceptedFiles}/>}
-        {acceptedFiles?.length > 0 && plot.num > 0 && (
-          <Button
-            disabled={isUploading}
-            onClick={handleUpload}
-          >
-            Upload to server
-          </Button>
-        )}
       </Container>
     </>
   );
 }
 
-export default function Validation() {
+export default function UploadFilesToPlot() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   const [isUploading, setisUploading] = useState(false);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
   const [uploadDone, setUploadDone] = useState(false);
   const {data: session} = useSession();
+  let currentPlot = usePlotContext();
   useSession({
     required: true,
     onUnauthenticated() {
@@ -124,7 +137,27 @@ export default function Validation() {
       );
     },
   });
-  let currentPlot = usePlotContext();
+  async function handleUpload() {
+    setisUploading(true);
+    setUploadDone(false);
+    if (acceptedFiles.length === 0 || acceptedFiles) {
+      console.log("accepted files is empty for some reason??");
+    }
+    const fileToFormData = new FormData();
+    let i = 0;
+    for (const file of acceptedFiles) {
+      fileToFormData.append(`file_${i}`, file);
+      i++;
+    }
+    const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
+      method: 'POST',
+      body: fileToFormData,
+    });
+    const data = await response.json();
+    setErrorsData(data.errors);
+    setisUploading(false);
+    setUploadDone(true);
+  }
   if (!currentPlot || !currentPlot.key || !currentPlot.num) {
     return (
       <>
@@ -133,33 +166,13 @@ export default function Validation() {
     );
   }
   return (
-    <ValidationPure
+    <UploadAndValidateFiles
       uploadDone={uploadDone}
       isUploading={isUploading}
       errorsData={errorsData}
       plot={currentPlot}
       acceptedFiles={acceptedFiles}
-      handleUpload={async () => {
-        setisUploading(true);
-        setUploadDone(false);
-        if (acceptedFiles.length === 0 || acceptedFiles) {
-          console.log("accepted files is empty for some reason??");
-        }
-        const fileToFormData = new FormData();
-        let i = 0;
-        for (const file of acceptedFiles) {
-          fileToFormData.append(`file_${i}`, file);
-          i++;
-        }
-        const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
-          method: 'POST',
-          body: fileToFormData,
-        });
-        const data = await response.json();
-        setErrorsData(data.errors);
-        setisUploading(false);
-        setUploadDone(true);
-      }}
+      handleUpload={handleUpload}
       handleAcceptedFiles={(acceptedFiles: FileWithPath[]) => {
         // @todo: what about rejectedFiles?
         setAcceptedFiles((files) => [...acceptedFiles, ...files]);
