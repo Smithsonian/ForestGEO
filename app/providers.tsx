@@ -3,11 +3,9 @@ import * as React from "react";
 import {NextUIProvider} from "@nextui-org/react";
 import {ThemeProvider as NextThemesProvider} from "next-themes";
 import {ThemeProviderProps} from "next-themes/dist/types";
-import {Navbar} from "@/components/navbar";
 import {SessionProvider} from "next-auth/react";
-import clsx from "clsx";
-import {fontSans} from "@/config/fonts";
 import {PlotsProvider} from "@/app/plotcontext";
+import {Navbar} from "@/components/navbar";
 
 export interface ProvidersProps {
   children: React.ReactNode;
@@ -15,29 +13,27 @@ export interface ProvidersProps {
 }
 
 export function Providers({children, themeProps}: ProvidersProps) {
+  
   return (
     <>
       <head>
         <title>ForestGEO Data Entry</title>
       </head>
-      <body
-        className={clsx(
-          "min-h-screen bg-background font-sans antialiased",
-          fontSans.variable
-        )}
-      >
       <SessionProvider>
         <NextUIProvider>
           <NextThemesProvider {...themeProps}>
             <PlotsProvider>
-              <Navbar>
-                {children}
-              </Navbar>
+              <body>
+              <div className={`relative flex flex-col h-screen w-screen`}>
+                <Navbar>
+                  {children}
+                </Navbar>
+              </div>
+              </body>
             </PlotsProvider>
           </NextThemesProvider>
         </NextUIProvider>
       </SessionProvider>
-      </body>
     </>
   );
 }

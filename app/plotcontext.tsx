@@ -1,6 +1,6 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
-import {Plot, plots} from "@/config/site";
+import {Plot, plots} from "@/config/macros";
 
 const initialState: Plot = {key: 'none', num: 0};
 export const PlotsContext = createContext<Plot | null>(null);

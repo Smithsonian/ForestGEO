@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getContainerClient} from "@/config/site";
+import {getContainerClient} from "@/config/macros";
 
 const listOptions = {
   includeMetadata: true,

@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@nextui-org/react';
-import {fileColumns, Plot, UploadedFileData} from "@/config/site";
+import {fileColumns, Plot, UploadedFileData} from "@/config/macros";
 import {useSession} from "next-auth/react";
 import {title} from "@/components/primitives";
 import {CardHeader} from "@nextui-org/card";
@@ -35,13 +35,13 @@ interface ViewUploadedFilesProp {
 function LoadingFiles() {
   return (
     <>
-      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10" radius={"none"}>
         <CardHeader>
           <div className="flex flex-col">
             <h5 className="text-md">Loading Files...</h5>
           </div>
         </CardHeader>
-        <Divider/>
+        <Divider className={"mt-6 mb-6"}/>
         <CardBody>
           <div className="flex flex-col">
             <CircularProgress value={60} size={"lg"} label={"Retrieving files..."}/>
@@ -55,13 +55,13 @@ function LoadingFiles() {
 function DisplayFiles({fileRows}: ViewUploadedFilesProp) {
   return (
     <>
-      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10" radius={"sm"}>
         <CardHeader>
           <div className="flex flex-col">
             <h5 className="text-md">Uploaded Files</h5>
           </div>
         </CardHeader>
-        <Divider/>
+        <Divider className={"mt-6 mb-6"}/>
         <CardBody>
           <div className="flex flex-col">
             <Table aria-label={"Stored files"}>

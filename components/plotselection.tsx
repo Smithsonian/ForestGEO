@@ -1,7 +1,7 @@
 "use client";
 import {Select, Selection, SelectItem} from "@nextui-org/react";
 import React, {useEffect, useState} from "react";
-import {plots} from "@/config/site";
+import {plots} from "@/config/macros";
 import {usePlotDispatch} from "@/app/plotcontext";
 
 export const SelectPlot = () => {
