@@ -14,7 +14,6 @@ import React, {useCallback} from 'react';
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
 import {FileUploadIcon} from "@/components/icons";
-import {Typography} from '@mui/joy';
 import '@/styles/dropzone.css';
 import {
   Pagination,
@@ -27,6 +26,8 @@ import {
   Spinner,
   CardFooter
 } from "@nextui-org/react";
+import {Chip} from "@nextui-org/chip";
+import {subtitle} from "@/components/primitives";
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
  *
@@ -45,30 +46,34 @@ export function FileList({acceptedFiles}: FileListProps) {
   const [currentPage, setCurrentPage] = React.useState(1);
   return (
     <>
-      <Card className={"flex justify-center"} radius={"lg"}>
+      <Card className={"flex flex-1 justify-center w-auto"} radius={"lg"}>
         <CardHeader>
           File Preview:
         </CardHeader>
         <CardBody>
           <Skeleton isLoaded={acceptedFiles?.length > 0} className={"rounded-lg"}>
-            <div className={"h-24 rounded-lg"}>
-              File Name: {(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}
-              File Size: {(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size! : ''} bytes
+            <div className={"flex flex-1 flex-col h-auto rounded-lg"}>
+              <div>
+                File Name: <br />
+                <Chip color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}</Chip>
+              </div>
+              <Divider className={"my-2"} />
+              <div>
+                File Size: <br />
+                <Chip color={"secondary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size! : ''} bytes</Chip>
+              </div>
             </div>
           </Skeleton>
         </CardBody>
-        <Divider className={"my-4"} />
         <CardFooter>
           <div className={"flex justify-center"} >
-            <Pagination total={acceptedFiles.length} color={"secondary"} page={currentPage} onChange={setCurrentPage}/>
+            {acceptedFiles.length > 1 && <Pagination total={acceptedFiles.length} color={"secondary"} page={currentPage} onChange={setCurrentPage}/>}
           </div>
         </CardFooter>
       </Card>
     </>
   );
 }
-
-
 
 /**
  * This is the presentation component for Fileuploadcomponents.
@@ -79,19 +84,19 @@ export function DropzonePure({ getRootProps, getInputProps, isDragActive, }: Dro
     <>
       <div id={"outerBox"} {...getRootProps()} className={"m-auto mt-8 border-sky-500 flex flex-col w-4/5 h-64 justify-center bg-[#46424f] align-middle"}>
         <div />
-        <Typography sx={{textAlign: 'center'}}>
+        <p className={subtitle()} style={{textAlign: 'center'}}>
           {' '}
           <FileUploadIcon color="primary" size={80}/>{' '}
-        </Typography>
+        </p>
         <input {...getInputProps()} />
         {isDragActive ? (
-          <Typography color="primary" sx={{textAlign: 'center'}}>
+          <p className={subtitle()} color="primary" style={{textAlign: 'center'}}>
             Drop file here...
-          </Typography>
+          </p>
         ) : (
-          <Typography color="primary" sx={{textAlign: 'center'}}>
+          <p className={subtitle()} color="primary" style={{textAlign: 'center'}}>
             <b>Choose a CSV file</b> or drag it here.
-          </Typography>
+          </p>
         )}
         <div />
       </div>
@@ -163,9 +168,9 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
     if (errorsData && Object.keys(errorsData).length === 0) {
       return (
         <div>
-          <Typography mt={2}>
+          <p className={subtitle()}>
             Successfully uploaded.
-          </Typography>
+          </p>
         </div>
       );
     } else {
@@ -208,7 +213,7 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
         <div>
           <Dropzone onChange={handleAcceptedFiles}/>
         </div>
-        <div className={"border-dashed border flex flex-col m-auto"}>
+        <div className={"flex flex-col m-auto"}>
           <div className={"flex justify-center"}>
             <FileList acceptedFiles={acceptedFiles}/>
           </div>
@@ -270,7 +275,7 @@ export function FileUploader() {
         handleUpload={handleUpload}
         handleAcceptedFiles={(acceptedFiles: FileWithPath[]) => {
           // @todo: what about rejectedFiles?
-          setAcceptedFiles((files) => [...acceptedFiles, ...files]);
+          setAcceptedFiles((files) => acceptedFiles.concat(files));
         }}
       />
     </>
