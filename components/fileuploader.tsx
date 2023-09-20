@@ -5,10 +5,10 @@ import {
   DropzoneProps,
   DropzonePureProps,
   FileErrors,
-  FileListProps,
+  FileListProps, ReviewValidationProps,
   UploadValidationProps
 } from "@/config/macros";
-import ValidationTable from "@/components/validationtable";
+import ValidationTable, {dataStructure} from "@/components/validationtable";
 import {usePlotContext} from "@/app/plotcontext";
 import React, {useCallback} from 'react';
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
@@ -28,6 +28,7 @@ import {
 } from "@nextui-org/react";
 import {Chip} from "@nextui-org/chip";
 import {subtitle} from "@/components/primitives";
+import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography} from "@mui/material";
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
  *
@@ -42,7 +43,7 @@ import {subtitle} from "@/components/primitives";
 /**
  * A simple list of files with their sizes.
  */
-export function FileList({acceptedFiles}: FileListProps) {
+export function FileDisplay({acceptedFiles}: FileListProps) {
   const [currentPage, setCurrentPage] = React.useState(1);
   return (
     <>
@@ -79,7 +80,7 @@ export function FileList({acceptedFiles}: FileListProps) {
  * This is the presentation component for Fileuploadcomponents.
  * It should be free of logic, and concentrate on the presentation.
  */
-export function DropzonePure({ getRootProps, getInputProps, isDragActive, }: DropzonePureProps) {
+export function DropzoneCoreDisplay({ getRootProps, getInputProps, isDragActive, }: DropzonePureProps) {
   return (
     <>
       <div id={"outerBox"} {...getRootProps()} className={"m-auto mt-8 border-sky-500 flex flex-col w-4/5 h-64 justify-center bg-[#46424f] align-middle"}>
@@ -108,7 +109,7 @@ export function DropzonePure({ getRootProps, getInputProps, isDragActive, }: Dro
 /**
  * A drop zone for CSV file uploads.
  */
-export function Dropzone({onChange}: DropzoneProps) {
+export function DropzoneLogic({onChange}: DropzoneProps) {
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
@@ -152,7 +153,7 @@ export function Dropzone({onChange}: DropzoneProps) {
   });
   
   return (
-    <DropzonePure
+    <DropzoneCoreDisplay
       isDragActive={isDragActive}
       getRootProps={getRootProps}
       getInputProps={getInputProps}
@@ -168,6 +169,7 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
     if (errorsData && Object.keys(errorsData).length === 0) {
       return (
         <div>
+          {/*REVIEW UPLOAD CONTENT HERE*/}
           <p className={subtitle()}>
             Successfully uploaded.
           </p>
@@ -211,11 +213,11 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
     <>
       <div className={"grid grid-cols-2"}>
         <div>
-          <Dropzone onChange={handleAcceptedFiles}/>
+          <DropzoneLogic onChange={handleAcceptedFiles}/>
         </div>
         <div className={"flex flex-col m-auto"}>
           <div className={"flex justify-center"}>
-            <FileList acceptedFiles={acceptedFiles}/>
+            <FileDisplay acceptedFiles={acceptedFiles}/>
           </div>
           <Divider className={"my-4"} />
           <div className={"flex justify-center"}>
@@ -231,13 +233,13 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
 
 export function FileUploader() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
-  const [isUploading, setisUploading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
   const [uploadDone, setUploadDone] = useState(false);
-  const {data: session} = useSession();
   let currentPlot = usePlotContext();
+  const {data: session} = useSession();
   async function handleUpload() {
-    setisUploading(true);
+    setIsUploading(true);
     setUploadDone(false);
     if (acceptedFiles.length === 0 || acceptedFiles) {
       console.log("accepted files is empty for some reason??");
@@ -248,13 +250,14 @@ export function FileUploader() {
       fileToFormData.append(`file_${i}`, file);
       i++;
     }
+    
     const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
       method: 'POST',
       body: fileToFormData,
     });
     const data = await response.json();
     setErrorsData(data.errors);
-    setisUploading(false);
+    setIsUploading(false);
     setUploadDone(true);
   }
   if (!currentPlot || !currentPlot.key || !currentPlot.num) {

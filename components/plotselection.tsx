@@ -3,8 +3,10 @@ import {Select, Selection, SelectItem} from "@nextui-org/react";
 import React, {useEffect, useState} from "react";
 import {plots} from "@/config/macros";
 import {usePlotDispatch} from "@/app/plotcontext";
+import {useSession} from "next-auth/react";
 
 export const SelectPlot = () => {
+  const {status} = useSession();
   const dispatch = usePlotDispatch();
   const keys = plots.map(plot => {
     return {
@@ -29,6 +31,7 @@ export const SelectPlot = () => {
         items={keys}
         selectedKeys={selection}
         onSelectionChange={setSelection}
+        isDisabled={status !== "authenticated"}
       >
         {(plotKey) => <SelectItem key={plotKey.key}>{plotKey.key}</SelectItem>}
       </Select>

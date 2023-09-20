@@ -1,24 +1,14 @@
 "use client";
-import {subtitle, title} from "@/components/primitives";
+import {subtitle} from "@/components/primitives";
 import * as React from "react";
-import {useSession} from "next-auth/react";
-import {usePlotContext} from "@/app/plotcontext";
-import {Tabs, Tab, Divider} from "@nextui-org/react";
+import {Tabs, Tab} from "@nextui-org/react";
 import {FileUploader} from "@/components/fileuploader";
 import ViewUploadedFiles from "@/components/viewuploadedfiles";
 
 // File Hub
 export default function Files() {
-  useSession({
-    required: true,
-    onUnauthenticated() {
-      return (
-        <>
-          <h3 className={title()}>You must log in to view this page.</h3>
-        </>
-      );
-    },
-  });
+  
+  
   // Tab system -- Browse page, Upload page
   return (
     <>
@@ -33,7 +23,6 @@ export default function Files() {
           </Tab>
         </Tabs>
       </div>
-      
     </>
   );
 }

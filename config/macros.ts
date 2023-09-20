@@ -55,6 +55,24 @@ export interface UploadValidationProps {
   handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
 }
 
+export interface ReviewValidationProps {
+  /**
+   * true when review is done
+   * false when not done
+   * also false when review is not started
+   */
+  
+  reviewDone: boolean;
+  isReviewing: boolean;
+  parsed: boolean;
+  isParsing: boolean;
+  resultsData: any[];
+  errorsData: FileErrors;
+  acceptedFiles: FileWithPath[];
+  handleReview: () => Promise<void>;
+  handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
+}
+
 export interface DropzonePureProps {
   /** Is someone dragging file(s) onto the dropzone? */
   isDragActive: boolean;
