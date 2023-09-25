@@ -12,6 +12,7 @@ import { parse } from 'papaparse';
 import React, { useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import '@/styles/validationtable.css';
+import {tableHeaders} from "@/config/macros";
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */
@@ -23,16 +24,16 @@ export interface ValidationTableProps {
   children?: React.ReactNode | React.ReactNode[];
 }
 
-export interface dataStructure {
+export interface DataStructure {
   [key: string]: string;
 }
 
 /**
  * Shows a data table with the possibility of showing errors.
  */
-export default function ValidationTable({ uploadedData, errorMessage, headers, }: ValidationTableProps) {
-  let tempData: { fileName: string; data: dataStructure[] }[] = [];
-  const initState: { fileName: string; data: dataStructure[] }[] = [];
+export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: ValidationTableProps) {
+  let tempData: { fileName: string; data: DataStructure[] }[] = [];
+  const initState: { fileName: string; data: DataStructure[] }[] = [];
   const [data, setData] = useState(initState);
   
   const display = () => {
@@ -54,7 +55,7 @@ export default function ValidationTable({ uploadedData, errorMessage, headers, }
     });
   };
   display();
-  let fileData: { fileName: string; data: dataStructure[] };
+  let fileData: { fileName: string; data: DataStructure[] };
   
   return (
     <>
@@ -80,7 +81,7 @@ export default function ValidationTable({ uploadedData, errorMessage, headers, }
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {fileData!.data.map((data: dataStructure, rowIdx) => {
+                    {fileData!.data.map((data: DataStructure, rowIdx) => {
                       return (
                         <>
                           <TableRow>
@@ -113,6 +114,39 @@ export default function ValidationTable({ uploadedData, errorMessage, headers, }
           </TableContainer>
         );
       })}
+    </>
+  );
+}
+
+export function DisplayParsedData(fileData: { fileName: string; data: DataStructure[] }) {
+  return (
+    <>
+      <TableContainer component={Paper} key={fileData.fileName}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              {tableHeaders.map((row, index) => {
+                return <TableCell key={index}>{row.label}</TableCell>;
+              })}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {fileData!.data.map((data: DataStructure) => {
+              return (
+                <>
+                  <TableRow>
+                    {tableHeaders.map((header, i) => (
+                      <TableCell key={i}>
+                        {data[header.label]}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </>
   );
 }

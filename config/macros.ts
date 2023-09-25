@@ -1,5 +1,7 @@
 import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
+import {dataStructure} from "@/components/validationtable";
+import sql from "mssql";
 
 // INTERFACES
 export interface Plot {
@@ -55,22 +57,26 @@ export interface UploadValidationProps {
   handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
 }
 
+export enum ReviewStates {
+  PARSE = "parse",
+  REVIEW = "review",
+  UPLOAD = "upload",
+  UPLOADED = "uploaded",
+  ERRORS = "errors"
+}
+
 export interface ReviewValidationProps {
   /**
-   * true when review is done
-   * false when not done
-   * also false when review is not started
+   * review process has 3 parts:
+   * 1. parse uploaded files into output
+   * 2. display rows to be uploaded and get user confirmation
+   * 3a. error step: if there are errors, update table to show errors and STOP
+   * 3b. upload step: if no errors, upload data and button to show data table
    */
-  
-  reviewDone: boolean;
-  isReviewing: boolean;
-  parsed: boolean;
-  isParsing: boolean;
-  resultsData: any[];
-  errorsData: FileErrors;
+  reviewState: ReviewStates;
+  errorsData: FileErrors; // error data --> will be empty/null if no errors
+  parsedData: { fileName: string; data: dataStructure[] }[]; // parsed data
   acceptedFiles: FileWithPath[];
-  handleReview: () => Promise<void>;
-  handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
 }
 
 export interface DropzonePureProps {
@@ -155,6 +161,19 @@ export const siteConfig = {
     },
   ]
 };
+export const sqlConfig: any = {
+  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
+  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
+  server: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
+  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
+  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
+  authentication: {
+    type: 'default'
+  },
+  options: {
+    encrypt: true
+  }
+}
 
 export const headers = [
   "Tag",
@@ -166,43 +185,57 @@ export const headers = [
   "Comments",
 ];
 
+export const tableHeaders = [
+  // @todo: these are hardcoded.
+  {key: 0, label: 'Tag'},
+  {key: 1, label: 'Subquadrat'},
+  {key: 2, label: 'SpCode'},
+  {key: 3, label: 'DBH'},
+  {key: 4, label: 'Htmeas'},
+  {key: 5, label: 'Codes'},
+  {key: 6, label: 'Comments'},
+]
+
 export const backgrounds = [
   "background-1.jpg",
   "background-2.jpg",
   "background-3.jpg",
   "background-4.jpg",
 ]
-// API FUNCTIONS/MACROS
 
-export const config: any = {
-  server: process.env.AZURE_SQL_SERVER!,
-  options: {},
-  authentication: {
-    type: "default",
-    options: {
-      userName: process.env.AZURE_SQL_USER!,
-      password: process.env.AZURE_SQL_PASSWORD!,
-    }
-  }
+/**
+ * SQL FUNCTIONS
+ */
+export function updateOrInsert(row: any, plot: string) {
+  return `
+      IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])})
+        UPDATE [plot_${plot.toLowerCase()}]
+        SET Subquadrat = ${parseInt(row['Subquadrat'])}, SpCode = ${parseInt(row['SpCode'])}, DBH = ${parseFloat(row['DBH'])}, Htmeas = ${parseFloat(row['Htmeas'])}, Codes = '${row['Codes']}', Comments = '${row['Comments']}'
+        WHERE Tag = ${parseInt(row['Tag'])};
+      ELSE
+        SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])};
+    `;
 }
+
+export function selectAllRows(plot: string) {
+  return `SELECT * FROM [plot_${plot.toLowerCase()}]`;
+}
+
+
+/**
+ * CONTAINER STORAGE FUNCTIONS
+ */
+
 
 export async function getContainerClient(plot: string) {
   const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!accountName || !storageAccountConnectionString) return;
-  console.log(`storage acct created`);
+  if (!accountName || !storageAccountConnectionString) throw new Error("process envs failed");
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) return;
-  console.log(`blob service client created.`);
+  if (!blobServiceClient) throw new Error("blob service client creation failed");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  const containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
-  console.log(`container created @ ${containerClient.containerName}`);
-  if (!await containerClient.exists()){
-    console.log(`container does not exist`);
-    await containerClient.create();
-  }
-  return containerClient;
+  return blobServiceClient.getContainerClient(plot.toLowerCase());
 }
 
 export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
