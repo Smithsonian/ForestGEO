@@ -5,10 +5,10 @@ import {
   DropzoneProps,
   DropzonePureProps,
   FileErrors,
-  FileListProps, ReviewValidationProps,
+  FileListProps,
   UploadValidationProps
 } from "@/config/macros";
-import ValidationTable, {dataStructure} from "@/components/validationtable";
+import {ValidationErrorTable} from "@/components/validationtable";
 import {usePlotContext} from "@/app/plotcontext";
 import React, {useCallback} from 'react';
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
@@ -189,7 +189,7 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
       return (
         <>
           <div className={"flex flex-col gap-5 w-3/5 h-3/5 justify-center"}>
-            <ValidationTable
+            <ValidationErrorTable
               errorMessage={errorsData}
               uploadedData={filesWithErrorsList}
               headers={[
