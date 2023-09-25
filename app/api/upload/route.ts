@@ -97,7 +97,6 @@ export async function POST(request: NextRequest) {
       console.log("No data for upload!");
       createFileEntry(file.name);
       errors[file.name]["error"] = "Empty file";
-      return;
     }
     if (results.errors.length) {
       createFileEntry(file.name);
@@ -111,7 +110,7 @@ export async function POST(request: NextRequest) {
     let conn = await getSqlConnection();
     if (!conn) throw new Error('sql connection failed');
     const containerClient = await getContainerClient(plot);
-    if (!containerClient) return NextResponse.json({success: false});
+    if (!containerClient) throw new Error(`container client connection failed`);
     else console.log(`container client created`);
     for (const file of files) {
       let uploadResponse = await uploadFileAsBuffer(containerClient, file, user);

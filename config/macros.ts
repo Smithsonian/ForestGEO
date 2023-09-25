@@ -198,7 +198,10 @@ export async function getContainerClient(plot: string) {
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
   console.log(`container created @ ${containerClient.containerName}`);
-  await containerClient.createIfNotExists();
+  if (!await containerClient.exists()){
+    console.log(`container does not exist`);
+    await containerClient.create();
+  }
   return containerClient;
 }
 
