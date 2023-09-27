@@ -1,7 +1,5 @@
 import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
-import {dataStructure} from "@/components/validationtable";
-import sql from "mssql";
 
 // INTERFACES
 export interface Plot {
@@ -13,6 +11,7 @@ export interface UploadedFileData {
   key: number;
   name: string;
   user: string;
+  errors: string;
   date: Date;
 }
 
@@ -37,10 +36,11 @@ export interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
 }
 
+
 export interface UploadValidationProps {
   /** true when the upload is done,
    * false when it's not done.
-   * Also false when upload hasn't started.
+   * Also, false when upload hasn't started.
    */
   plot: Plot;
   
@@ -65,20 +65,18 @@ export enum ReviewStates {
   ERRORS = "errors"
 }
 
-export interface ReviewValidationProps {
-  /**
-   * review process has 3 parts:
-   * 1. parse uploaded files into output
-   * 2. display rows to be uploaded and get user confirmation
-   * 3a. error step: if there are errors, update table to show errors and STOP
-   * 3b. upload step: if no errors, upload data and button to show data table
-   */
-  reviewState: ReviewStates;
-  errorsData: FileErrors; // error data --> will be empty/null if no errors
-  parsedData: { fileName: string; data: dataStructure[] }[]; // parsed data
-  acceptedFiles: FileWithPath[];
+export enum HTTPResponses {
+  NO_ERRORS = 201,
+  EMPTY_FILE = 204,
+  ERRORS_IN_FILE = 206,
+  STORAGE_CONNECTION_FAILURE = 503,
+  SQL_CONNECTION_TIMEOUT = 504,
 }
 
+export const tableHeaderSettings = {
+  fontWeight: 'bold',
+  fontSize: 16,
+}
 export interface DropzonePureProps {
   /** Is someone dragging file(s) onto the dropzone? */
   isDragActive: boolean;
@@ -86,6 +84,16 @@ export interface DropzonePureProps {
   getRootProps: any;
   /** From react-dropzone, function which gets properties for the input field. */
   getInputProps: any;
+}
+
+export interface RowDataStructure {
+  tag: string,
+  subquadrat: string,
+  spcode: string,
+  dbh: string,
+  htmeas: string,
+  codes: string,
+  comments: string
 }
 
 export interface DropzoneProps {
@@ -186,34 +194,23 @@ export const headers = [
 ];
 
 export const tableHeaders = [
-  // @todo: these are hardcoded.
-  {key: 0, label: 'Tag'},
-  {key: 1, label: 'Subquadrat'},
-  {key: 2, label: 'SpCode'},
-  {key: 3, label: 'DBH'},
-  {key: 4, label: 'Htmeas'},
-  {key: 5, label: 'Codes'},
-  {key: 6, label: 'Comments'},
+  {key: 'tag', label: 'Tag'},
+  {key: 'subquadrat', label: 'Subquadrat'},
+  {key: 'spcode', label: 'SpCode'},
+  {key: 'dbh', label: 'DBH'},
+  {key: 'htmeas', label: 'Htmeas'},
+  {key: 'codes', label: 'Codes'},
+  {key: 'comments', label: 'Comments'},
 ]
-
-export const backgrounds = [
-  "background-1.jpg",
-  "background-2.jpg",
-  "background-3.jpg",
-  "background-4.jpg",
-]
-
-/**
- * SQL FUNCTIONS
- */
-export function updateOrInsert(row: any, plot: string) {
+export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
   return `
-      IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])})
+      IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row.tag)})
         UPDATE [plot_${plot.toLowerCase()}]
-        SET Subquadrat = ${parseInt(row['Subquadrat'])}, SpCode = ${parseInt(row['SpCode'])}, DBH = ${parseFloat(row['DBH'])}, Htmeas = ${parseFloat(row['Htmeas'])}, Codes = '${row['Codes']}', Comments = '${row['Comments']}'
-        WHERE Tag = ${parseInt(row['Tag'])};
+        SET Subquadrat = ${parseInt(row.subquadrat)}, SpCode = ${parseInt(row.spcode)}, DBH = ${parseFloat(row.dbh)}, Htmeas = ${parseFloat(row.htmeas)}, Codes = '${row.codes}', Comments = '${row.comments}'
+        WHERE Tag = ${parseInt(row.tag)};
       ELSE
-        SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row['Tag'])};
+        INSERT INTO [plot_${plot.toLowerCase()}] (Tag, Subquadrat, SpCode, DBH, Htmeas, Codes, Comments)
+        VALUES (${parseInt(row.tag)}, ${parseInt(row.subquadrat)}, ${parseInt(row.spcode)}, ${parseFloat(row.dbh)}, ${parseFloat(row.htmeas)}, '${row.codes}', '${row.comments}');
     `;
 }
 
@@ -221,12 +218,9 @@ export function selectAllRows(plot: string) {
   return `SELECT * FROM [plot_${plot.toLowerCase()}]`;
 }
 
-
 /**
  * CONTAINER STORAGE FUNCTIONS
  */
-
-
 export async function getContainerClient(plot: string) {
   const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -238,16 +232,17 @@ export async function getContainerClient(plot: string) {
   return blobServiceClient.getContainerClient(plot.toLowerCase());
 }
 
-export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
+export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string, errors: boolean) {
   const buffer = Buffer.from(await file.arrayBuffer());
   console.log(`blob name: ${file.name}`);
   let metadata = {
     user: user,
-  };
+    errors: `${errors}`
+  }
   // create connection & client facing new blob
   // async command to upload buffer via client, waiting for response
   let uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer);
   let metadataResults = await containerClient.getBlobClient(file.name).setMetadata(metadata);
   if (metadataResults.errorCode) throw new Error('metadata set failed.');
-  return uploadResponse;
+  return uploadResponse
 }

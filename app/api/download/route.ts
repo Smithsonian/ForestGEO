@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   for await (const blob of containerClient.listBlobsFlat(listOptions)) {
     if (!blob) console.error('blob is undefined');
     // blobData.push({ key: i.toString(), filename: blob.name, metadata: blob.metadata! });
-    blobData.push({key: ++i, name: blob.name, user: blob.metadata!.user, date: blob.properties.lastModified});
+    blobData.push({key: ++i, name: blob.name, user: blob.metadata!.user, errors: blob.metadata!.errors, date: blob.properties.lastModified});
   }
   return new NextResponse(
     JSON.stringify({

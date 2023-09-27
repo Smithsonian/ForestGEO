@@ -1,34 +1,35 @@
 "use client";
-import {useState} from 'react';
+import React, {useCallback, useState} from 'react';
 import {useSession} from "next-auth/react";
 import {
   DropzoneProps,
   DropzonePureProps,
   FileErrors,
   FileListProps,
+  RowDataStructure, tableHeaders,
   UploadValidationProps
 } from "@/config/macros";
 import {ValidationErrorTable} from "@/components/validationtable";
 import {usePlotContext} from "@/app/plotcontext";
-import React, {useCallback} from 'react';
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
 import {FileUploadIcon} from "@/components/icons";
+
 import '@/styles/dropzone.css';
 import {
-  Pagination,
-  Button,
-  CardBody,
   Card,
-  Divider,
+  CardBody,
+  CardFooter,
   CardHeader,
+  Divider,
+  Pagination,
   Skeleton,
-  Spinner,
-  CardFooter
+  Spinner
 } from "@nextui-org/react";
 import {Chip} from "@nextui-org/chip";
 import {subtitle} from "@/components/primitives";
-import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography} from "@mui/material";
+import {Button, getKeyValue, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow} from "@nextui-org/react";
+import {IRecordSet} from "mssql";
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
  *
@@ -37,7 +38,7 @@ import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
  * - DropzonePure: presentation side of dropzone box
  * - Dropzone: dropzone box upload logic/file type validation
  * - UploadAndValidateFiles: error display/upload completion display
- * - FileUploader: core logic for file upload/api fire
+ * - Filehandling: core logic for file upload/api fire
  */
 
 /**
@@ -55,20 +56,23 @@ export function FileDisplay({acceptedFiles}: FileListProps) {
           <Skeleton isLoaded={acceptedFiles?.length > 0} className={"rounded-lg"}>
             <div className={"flex flex-1 flex-col h-auto rounded-lg"}>
               <div>
-                File Name: <br />
-                <Chip color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}</Chip>
+                File Name: <br/>
+                <Chip
+                  color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}</Chip>
               </div>
-              <Divider className={"my-2"} />
+              <Divider className={"my-2"}/>
               <div>
-                File Size: <br />
-                <Chip color={"secondary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size! : ''} bytes</Chip>
+                File Size: <br/>
+                <Chip
+                  color={"secondary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size! : ''} bytes</Chip>
               </div>
             </div>
           </Skeleton>
         </CardBody>
         <CardFooter>
-          <div className={"flex justify-center"} >
-            {acceptedFiles.length > 1 && <Pagination total={acceptedFiles.length} color={"secondary"} page={currentPage} onChange={setCurrentPage}/>}
+          <div className={"flex justify-center"}>
+            {acceptedFiles.length > 1 && <Pagination total={acceptedFiles.length} color={"secondary"} page={currentPage}
+                                                     onChange={setCurrentPage}/>}
           </div>
         </CardFooter>
       </Card>
@@ -80,11 +84,12 @@ export function FileDisplay({acceptedFiles}: FileListProps) {
  * This is the presentation component for Fileuploadcomponents.
  * It should be free of logic, and concentrate on the presentation.
  */
-export function DropzoneCoreDisplay({ getRootProps, getInputProps, isDragActive, }: DropzonePureProps) {
+export function DropzoneCoreDisplay({getRootProps, getInputProps, isDragActive,}: DropzonePureProps) {
   return (
     <>
-      <div id={"outerBox"} {...getRootProps()} className={"m-auto mt-8 border-sky-500 flex flex-col w-4/5 h-64 justify-center bg-[#46424f] align-middle"}>
-        <div />
+      <div id={"outerBox"} {...getRootProps()}
+           className={"m-auto mt-8 border-sky-500 flex flex-col w-4/5 h-64 justify-center bg-[#46424f] align-middle"}>
+        <div/>
         <p className={subtitle()} style={{textAlign: 'center'}}>
           {' '}
           <FileUploadIcon color="primary" size={80}/>{' '}
@@ -99,7 +104,7 @@ export function DropzoneCoreDisplay({ getRootProps, getInputProps, isDragActive,
             <b>Choose a CSV file</b> or drag it here.
           </p>
         )}
-        <div />
+        <div/>
       </div>
     </>
   );
@@ -164,7 +169,7 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
 /**
  * For uploading and validating drag and dropped CSV files.
  */
-function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedFiles, handleUpload, handleAcceptedFiles,}: UploadValidationProps) {
+function UploadAndValidateFiles({uploadDone, isUploading, errorsData, acceptedFiles, handleUpload, handleAcceptedFiles,}: UploadValidationProps) {
   if (uploadDone) {
     if (errorsData && Object.keys(errorsData).length === 0) {
       return (
@@ -219,9 +224,10 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
           <div className={"flex justify-center"}>
             <FileDisplay acceptedFiles={acceptedFiles}/>
           </div>
-          <Divider className={"my-4"} />
+          <Divider className={"my-4"}/>
           <div className={"flex justify-center"}>
-            <Button isDisabled={acceptedFiles.length <= 0} isLoading={isUploading} onClick={handleUpload} spinnerPlacement={"start"} spinner={<Spinner color={"primary"} size={"sm"} />}>
+            <Button isDisabled={acceptedFiles.length <= 0} isLoading={isUploading} onClick={handleUpload}
+                    spinnerPlacement={"start"} spinner={<Spinner color={"primary"} size={"sm"}/>}>
               Upload to server
             </Button>
           </div>
@@ -231,13 +237,14 @@ function UploadAndValidateFiles({ uploadDone, isUploading, errorsData, acceptedF
   );
 }
 
-export function FileUploader() {
+export function Filehandling() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
   const [uploadDone, setUploadDone] = useState(false);
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
+  
   async function handleUpload() {
     setIsUploading(true);
     setUploadDone(false);
@@ -260,6 +267,7 @@ export function FileUploader() {
     setIsUploading(false);
     setUploadDone(true);
   }
+  
   if (!currentPlot || !currentPlot.key || !currentPlot.num) {
     return (
       <>

@@ -49,12 +49,12 @@ documentation [here](https://github.com/ForestGeoHack/ForestGEO/wiki/ForestGEO-A
 Next.js's dynamic routing setup allows for built-in endpoint data processing. By using this, passing
 data from a component or root layout to a page/endpoint is simplified (rather than using useCallback
 or a React function). As a brief reminder, remember that when using Next.js 13, writing something
-like `app/example/fileuploader.tsx` will generate a route pointing to `... /example` instead
+like `app/example/filehandling.tsx` will generate a route pointing to `... /example` instead
 of `.../example/page`, and nesting successive folders will create a route with those
-folders: `app/example1/example2/example3/fileuploader.tsx` has the route `... /example1/example2/example3/`.
+folders: `app/example1/example2/example3/filehandling.tsx` has the route `... /example1/example2/example3/`.
 
 For a better explanation of how this works, please observe the browse
-endpoint: `app/(endpoints)/browse/[plotKey]/[plotNum]/fileuploader.tsx`<br />
+endpoint: `app/(endpoints)/browse/[plotKey]/[plotNum]/filehandling.tsx`<br />
 In order from left to right, please note the following points of interest:
 
 - `(endpoints)`: wrapping a folder in parentheses allows for better organization w/o using the

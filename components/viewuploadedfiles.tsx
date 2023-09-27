@@ -5,33 +5,25 @@ import {
   CardBody,
   CircularProgress,
   Divider,
-  getKeyValue,
-  Table,
-  TableBody,
-  TableCell,
-  TableColumn,
-  TableHeader,
-  TableRow,
 } from '@nextui-org/react';
-import {fileColumns, Plot, UploadedFileData} from "@/config/macros";
-import {useSession} from "next-auth/react";
+import {fileColumns, tableHeaderSettings, UploadedFileData} from "@/config/macros";
 import {title} from "@/components/primitives";
 import {CardHeader} from "@nextui-org/card";
 import {BrowseError} from "@/app/error"
 import {usePlotContext} from "@/app/plotcontext";
+import {Button, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow} from "@mui/material";
+import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
+import {createTheme, ThemeProvider} from "@mui/material/styles";
+import {router} from "next/client";
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+  },
+});
 
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
-//        https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
-interface ViewUploadedFilesProp {
-  plot: Plot;
-  error?: Error;
-  /** True when plot data has finished loading. */
-  isLoaded: boolean;
-  /** All the rows of data for the plot. */
-  fileRows?: UploadedFileData[];
-}
-
+// https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
 function LoadingFiles() {
   return (
     <>
@@ -52,44 +44,12 @@ function LoadingFiles() {
   );
 }
 
-function DisplayFiles({fileRows}: ViewUploadedFilesProp) {
-  return (
-    <>
-      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10" radius={"sm"}>
-        <CardHeader>
-          <div className="flex flex-col">
-            <h5 className="text-md">Uploaded Files</h5>
-          </div>
-        </CardHeader>
-        <Divider className={"mt-6 mb-6"}/>
-        <CardBody>
-          <div className="flex flex-col">
-            <Table aria-label={"Stored files"}>
-              <TableHeader columns={fileColumns}>
-                {(column) => <TableColumn key={column.key}>{column.label}</TableColumn>}
-              </TableHeader>
-              <TableBody items={fileRows}>
-                {(fileItem) => ( // fileRows = fileItem[]; fileItem: {key, name, user, date}
-                  <TableRow key={fileItem.key}>
-                    {(columnKey) => <TableCell>{getKeyValue(fileItem, columnKey)}</TableCell>}
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardBody>
-      </Card>
-    </>
-  );
-}
-
 export default function ViewUploadedFiles() {
   let localPlot = usePlotContext();
-  // @TODO - implement remove and download files
-  
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
+  // const [deleteFile, setDeleteFile] = useState("");
   const getListOfFiles = useCallback(async () => {
     if (localPlot && localPlot.key !== undefined) {
       let response = null;
@@ -122,6 +82,28 @@ export default function ViewUploadedFiles() {
     getListOfFiles().then();
   }, [getListOfFiles]);
   
+  // File Deletion system --> need to reformat the table for selection, etc.
+  // const deleteFileByName = useCallback(async () => {
+  //   if (deleteFile !== '') {
+  //     const response = await fetch('/api/deletefilebyname?plot=' + localPlot!.key + '&filename=' + deleteFile, {
+  //       method: 'DELETE',
+  //     });
+  //     let data = await response.json();
+  //     const blobResponse = data.blobResponse;
+  //     if (!blobResponse.errorCode) {
+  //       console.log(`deleted blob ${deleteFile}`);
+  //     }
+  //   }
+  // }, [deleteFile, localPlot]);
+  //
+  // useEffect(() => {
+  //   if (deleteFile != '') {
+  //     deleteFileByName()
+  //       .catch(console.error)
+  //       .then(() => setDeleteFile(''));
+  //   }
+  // }, [deleteFile, setDeleteFile, deleteFileByName]);
+  
   if ((!localPlot || !localPlot.key)) {
     return (
       <>
@@ -133,6 +115,67 @@ export default function ViewUploadedFiles() {
   } else if (!isLoaded || !fileRows) {
     return <LoadingFiles />
   } else {
-    return <DisplayFiles error={error} isLoaded={isLoaded} fileRows={fileRows}  plot={localPlot!}/>
+    let sortedFileData = fileRows!.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    let i = 1;
+    sortedFileData.forEach((row) => {
+      row.key = i;
+      i++;
+    })
+    return (
+      <>
+        <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10" radius={"sm"}>
+          <CardBody>
+            <div className="flex flex-col">
+              <h5 className="text-md">Uploaded Files</h5>
+            </div>
+            <Divider className={"mt-6 mb-6"}/>
+            <div className="flex flex-col">
+              <ThemeProvider theme={darkTheme}>
+                <TableContainer component={Paper}>
+                  <Table aria-label={"Stored files"} stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={tableHeaderSettings}>File Count</TableCell>
+                        {fileColumns.map((item, index) => (
+                          <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
+                        ))}
+                        <TableCell sx={tableHeaderSettings}>Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {sortedFileData!.map((row, index) => {
+                        let errs = JSON.parse(row.errors);
+                        return (
+                          <>
+                            <TableRow key={index} sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>
+                              <TableCell>{row.key}</TableCell>
+                              <TableCell>{row.name}</TableCell>
+                              <TableCell>{new Date(row.date).toString()}</TableCell>
+                              <TableCell>{row.user}</TableCell>
+                              <TableCell align="center">
+                                <Button>
+                                  <DownloadIcon />
+                                </Button>
+                                <Button>
+                                  <EditIcon />
+                                </Button>
+                                <Button>
+                                  {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                                  <DeleteIcon />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          </>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </ThemeProvider>
+            </div>
+          </CardBody>
+        </Card>
+      </>
+    );
   }
 }

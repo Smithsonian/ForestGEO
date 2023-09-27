@@ -4,6 +4,7 @@ import {NextUIProvider} from "@nextui-org/react";
 import {ThemeProvider as NextThemesProvider} from "next-themes";
 import {ThemeProviderProps} from "next-themes/dist/types";
 import {SessionProvider} from "next-auth/react";
+import { CssBaseline } from "@mui/material";
 
 export interface ProvidersProps {
   children: React.ReactNode;
@@ -16,6 +17,7 @@ export function Providers({children, themeProps}: ProvidersProps) {
       <SessionProvider>
         <NextUIProvider>
           <NextThemesProvider {...themeProps}>
+            <CssBaseline />
             <body>
             {children}
             </body>

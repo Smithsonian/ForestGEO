@@ -26,7 +26,6 @@ export async function GET(request: NextRequest) {
   if (!conn) throw new Error('sql connection failed');
   let results = await runQuery(conn, selectAllRows(plot));
   if (!results) throw new Error("call failed");
-  let temp = results.recordsets;
   return new NextResponse(
     JSON.stringify({
       responseMessage: "Rows",
