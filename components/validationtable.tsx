@@ -12,7 +12,7 @@ import { parse } from 'papaparse';
 import React, { useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import '@/styles/validationtable.css';
-import {tableHeaders} from "@/config/macros";
+import {FileErrors, tableHeaders} from "@/config/macros";
 import {createTheme, ThemeProvider} from "@mui/material/styles";
 const darkTheme = createTheme({
   palette: {
@@ -30,8 +30,90 @@ export interface ValidationTableProps {
   children?: React.ReactNode | React.ReactNode[];
 }
 
+export interface DisplayErrorTableProps {
+  fileName: string;
+  fileData: { fileName: string; data: DataStructure[] };
+  errorMessage: FileErrors;
+}
+
 export interface DataStructure {
   [key: string]: string;
+}
+
+export function DisplayErrorTable({fileName, fileData, errorMessage} : DisplayErrorTableProps) {
+  return (
+    <>
+      <TableContainer component={Paper}>
+        <h3>file: {fileName}</h3>
+        
+        <Table>
+          {errorMessage[fileName]['headers'] ? (
+            <></>
+          ) : (
+            <>
+              <TableHead>
+                <TableRow>
+                  {tableHeaders.map((row, index) => {
+                    return <TableCell key={index}>{row.label}</TableCell>;
+                  })}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {fileData!.data.map((data: DataStructure, rowIdx) => {
+                  return (
+                    <>
+                      <TableRow>
+                        {tableHeaders.map((header, i) => {
+                          if (errorMessage[fileName][rowIdx]) {
+                            let errInfo = errorMessage[fileName][rowIdx].split('::');
+                            console.log(errInfo);
+                            if (errInfo[1] == header.label && errInfo[0] == 'MValue') {
+                              return (
+                                <>
+                                  <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
+                                    Missing Value!
+                                  </TableCell>
+                                </>
+                              );
+                            } else if (errInfo[1] == header.label && errInfo[0] == 'WFormat') {
+                              return (
+                                <>
+                                  <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
+                                    {data[header.label]} <br />
+                                    Wrong Format!
+                                  </TableCell>
+                                </>
+                              );
+                            } else {
+                              return (
+                                <>
+                                  <TableCell key={i} sx={{color: 'red'}}>
+                                    {data[header.label]}
+                                  </TableCell>
+                                </>
+                              );
+                            }
+                          } else {
+                            return (
+                              <>
+                                <TableCell key={i}>
+                                  {data[header.label]}
+                                </TableCell>
+                              </>
+                            );
+                          }
+                        })}
+                      </TableRow>
+                    </>
+                  );
+                })}
+              </TableBody>
+            </>
+          )}
+        </Table>
+      </TableContainer>
+    </>
+  );
 }
 
 /**
@@ -66,12 +148,12 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
   return (
     <>
       {Object.keys(errorMessage).map((fileName) => {
-        fileData = data.find((file) => file.fileName === fileName) || {
+        fileData = data.find((file) => file.fileName == fileName) || {
           fileName: '',
           data: [],
         };
         return (
-          <ThemeProvider theme={darkTheme} key={fileName}>
+          <>
             <TableContainer component={Paper}>
               <h3>file: {fileName}</h3>
               
@@ -96,7 +178,7 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
                                 if (errorMessage[fileName][rowIdx]) {
                                   let errInfo = errorMessage[fileName][rowIdx].split('::');
                                   console.log(errInfo);
-                                  if (errInfo[1] === header.label && errInfo[0] === 'MValue') {
+                                  if (errInfo[1] == header.label && errInfo[0] == 'MValue') {
                                     return (
                                       <>
                                         <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
@@ -104,7 +186,7 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
                                         </TableCell>
                                       </>
                                     );
-                                  } else if (errInfo[1] === header.label && errInfo[0] === 'WFormat') {
+                                  } else if (errInfo[1] == header.label && errInfo[0] == 'WFormat') {
                                     return (
                                       <>
                                         <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
@@ -141,7 +223,7 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
                 )}
               </Table>
             </TableContainer>
-          </ThemeProvider>
+          </>
         );
       })}
     </>
@@ -151,34 +233,32 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
 export function DisplayParsedData(fileData: { fileName: string; data: DataStructure[] }) {
   return (
     <>
-      <ThemeProvider theme={darkTheme}>
-        <TableContainer component={Paper} key={fileData.fileName}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                {tableHeaders.map((row, index) => {
-                  return <TableCell key={index}>{row.label}</TableCell>;
-                })}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {fileData!.data.map((data: DataStructure) => {
-                return (
-                  <>
-                    <TableRow>
-                      {tableHeaders.map((header, i) => (
-                        <TableCell key={i}>
-                          {data[header.label]}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </>
-                );
+      <TableContainer component={Paper} key={fileData.fileName}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              {tableHeaders.map((row, index) => {
+                return <TableCell key={index}>{row.label}</TableCell>;
               })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </ThemeProvider>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {fileData!.data.map((data: DataStructure) => {
+              return (
+                <>
+                  <TableRow>
+                    {tableHeaders.map((header, i) => (
+                      <TableCell key={i}>
+                        {data[header.label]}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </>
   );
 }

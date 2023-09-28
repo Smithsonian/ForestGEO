@@ -3,9 +3,9 @@ import {getContainerClient} from "@/config/macros";
 
 const listOptions = {
   includeMetadata: true,
+  includeVersions: true,
 };
 
-// key: lastModified, [fileName]: url string
 export async function GET(request: NextRequest) {
   const plot = request.nextUrl.searchParams.get('plot')!;
   const blobData: any = [];
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   for await (const blob of containerClient.listBlobsFlat(listOptions)) {
     if (!blob) console.error('blob is undefined');
     // blobData.push({ key: i.toString(), filename: blob.name, metadata: blob.metadata! });
-    blobData.push({key: ++i, name: blob.name, user: blob.metadata!.user, errors: blob.metadata!.errors, date: blob.properties.lastModified});
+    blobData.push({key: ++i, name: blob.name, user: blob.metadata!.user, errors: blob.metadata!.errors, version: blob.versionId!, isCurrentVersion: blob.isCurrentVersion!, date: blob.properties.lastModified});
   }
   return new NextResponse(
     JSON.stringify({

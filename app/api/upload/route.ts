@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
   }
   const errors: { [fileName: string]: { [currentRow: string]: string } } = {};
   const uploadableRows: { [fileName: string]: RowDataStructure[]} = {};
+  const errorRows: { [fileName: string]: RowDataStructure[] } = {};
   
   function createFileEntry(parsedFileName: string) {
     if (errors[parsedFileName] == undefined) {
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         responseMessage: "SQL connection failed",
         errors: errors,
+        errorRows: errorRows,
       }),
       {status: HTTPResponses.SQL_CONNECTION_TIMEOUT}
     );
@@ -63,6 +65,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Container Client connection failed",
         errors: errors,
+        errorRows: errorRows,
       }),
       {status: HTTPResponses.STORAGE_CONNECTION_FAILURE}
     );
@@ -71,6 +74,7 @@ export async function POST(request: NextRequest) {
   
   for (const file of files) {
     uploadableRows[file.name] = [];
+    errorRows[file.name] = [];
     const results = Papa.parse(await file.text(), config);
     results.data.forEach((row, i) => {
       let uploadable = true;
@@ -83,13 +87,13 @@ export async function POST(request: NextRequest) {
           errors[file.name]["headers"] = "Missing Headers";
           uploadable = false;
         }
-        if (values[index] === "" || undefined) {
+        if (values[index] == "" || undefined) {
           createFileEntry(file.name);
           console.log(errors[file.name][i]);
           errors[file.name][i] = `MValue::${item}`;
           uploadable = false;
         }
-        if (item === "DBH" && parseInt(values[index]) < 1) {
+        if (item == "DBH" && parseInt(values[index]) < 1) {
           createFileEntry(file.name);
           console.log(errors[file.name][i]);
           errors[file.name][i] = `WFormat::${item}`;
@@ -97,7 +101,7 @@ export async function POST(request: NextRequest) {
         }
       });
       if (uploadable) {
-        let r: RowDataStructure = {codes: "", comments: "", dbh: "", htmeas: "", spcode: "", subquadrat: "", tag: ""};
+        let r: RowDataStructure = {tag: "", subquadrat: "", spcode: "", dbh: "", htmeas: "", codes: "", comments: ""};
         keys.forEach((key) => {
           switch (key) {
             case 'Tag':
@@ -124,6 +128,34 @@ export async function POST(request: NextRequest) {
           }
         });
         uploadableRows[file.name].push(r);
+      } else {
+        let r: RowDataStructure = {codes: "", comments: "", dbh: "", htmeas: "", spcode: "", subquadrat: "", tag: ""};
+        keys.forEach((key) => {
+          switch (key) {
+            case 'Tag':
+              r.tag = row[key];
+              break;
+            case 'Subquadrat':
+              r.subquadrat = row[key];
+              break;
+            case 'SpCode':
+              r.spcode = row[key];
+              break;
+            case 'DBH':
+              r.dbh = row[key];
+              break;
+            case 'Htmeas':
+              r.htmeas = row[key];
+              break;
+            case 'Codes':
+              r.codes = row[key];
+              break;
+            case 'Comments':
+              r.comments = row[key];
+              break;
+          }
+        });
+        errorRows[file.name].push(r);
       }
     });
     if (!results.data.length) {
@@ -134,6 +166,7 @@ export async function POST(request: NextRequest) {
         JSON.stringify({
           responseMessage: "Empty File",
           errors: errors,
+          errorRows: errorRows,
         }),
         {status: HTTPResponses.EMPTY_FILE}
       );
@@ -144,33 +177,27 @@ export async function POST(request: NextRequest) {
       errors[file.name][results.errors[0].row] = results.errors[0].type + ',' + results.errors[0].code + ',' + results.errors[0].message;
     }
   }
-  for (const file of files) {
-    let uploadResponse;
-    uploadResponse = await uploadFileAsBuffer(containerClient, file, user, (Object.keys(errors).length === 0));
-    console.log(`upload complete: ${uploadResponse!.requestId}`);
-    if (uploadResponse!._response.status === 200 || uploadResponse._response.status === 201) {
-      // upload complete:
-      for (const row of uploadableRows[file.name]) {
-        let result = await runQuery(conn, updateOrInsertRDS(row, plot));
-        if (!result) console.error('results undefined');
-        else console.log(`tag ${row.tag} of file ${file.name} submitted to db`);
-      }
-      // for (const row in uploadableRows[file.name]) {
-      //   let result = await runQuery(conn, updateOrInsert(row, plot));
-      //   if (!result) console.error('results undefined');
-      //   else {
-      //     console.log(`row ${row} of file ${file.name} submitted to db`);
-      //   }
-      // }
-    }
-  }
+  // for (const file of files) {
+  //   let uploadResponse;
+  //   uploadResponse = await uploadFileAsBuffer(containerClient, file, user, (Object.keys(errors).length == 0));
+  //   console.log(`upload complete: ${uploadResponse!.requestId}`);
+  //   if (uploadResponse!._response.status >= 200 && uploadResponse!._response.status <= 299) {
+  //     // upload complete:
+  //     for (const row of uploadableRows[file.name]) {
+  //       let result = await runQuery(conn, updateOrInsertRDS(row, plot));
+  //       if (!result) console.error('results undefined');
+  //       else console.log(`tag ${row.tag} of file ${file.name} submitted to db`);
+  //     }
+  //   }
+  // }
   await conn.close();
   // console.log('no errors. uploading file');
-  if (Object.keys(errors).length === 0) {
+  if (Object.keys(errors).length == 0) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: "Files uploaded successfully. No errors in file",
         errors: errors,
+        errorRows: errorRows,
       }),
       {status: HTTPResponses.NO_ERRORS}
     );
@@ -179,6 +206,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Files uploaded successfully. Errors in file",
         errors: errors,
+        errorRows: errorRows,
       }),
       {status: HTTPResponses.ERRORS_IN_FILE}
     );

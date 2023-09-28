@@ -12,6 +12,8 @@ export interface UploadedFileData {
   name: string;
   user: string;
   errors: string;
+  version: string;
+  isCurrentVersion: boolean;
   date: Date;
 }
 
@@ -111,8 +113,10 @@ export interface DropzoneProps {
 // CONSTANT MACROS
 export const fileColumns = [
   {key: 'name', label: 'File Name'},
-  {key: 'date', label: 'Date Entered'},
   {key: 'user', label: 'Uploaded By'},
+  {key: 'date', label: 'Date Entered'},
+  {key: 'version', label: 'Version'},
+  {key: 'isCurrentVersion', label: 'Is Current Version?'},
 ]
 
 export const plots: Plot[] = [
@@ -229,7 +233,9 @@ export async function getContainerClient(plot: string) {
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
   if (!blobServiceClient) throw new Error("blob service client creation failed");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  return blobServiceClient.getContainerClient(plot.toLowerCase());
+  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
+  await containerClient.createIfNotExists();
+  return containerClient;
 }
 
 export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string, errors: boolean) {
@@ -241,8 +247,6 @@ export async function uploadFileAsBuffer(containerClient: ContainerClient, file:
   }
   // create connection & client facing new blob
   // async command to upload buffer via client, waiting for response
-  let uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer);
-  let metadataResults = await containerClient.getBlobClient(file.name).setMetadata(metadata);
-  if (metadataResults.errorCode) throw new Error('metadata set failed.');
+  let uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata});
   return uploadResponse
 }

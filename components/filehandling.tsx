@@ -171,7 +171,7 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
  */
 function UploadAndValidateFiles({uploadDone, isUploading, errorsData, acceptedFiles, handleUpload, handleAcceptedFiles,}: UploadValidationProps) {
   if (uploadDone) {
-    if (errorsData && Object.keys(errorsData).length === 0) {
+    if (errorsData && Object.keys(errorsData).length == 0) {
       return (
         <div>
           {/*REVIEW UPLOAD CONTENT HERE*/}
@@ -248,7 +248,7 @@ export function Filehandling() {
   async function handleUpload() {
     setIsUploading(true);
     setUploadDone(false);
-    if (acceptedFiles.length === 0 || acceptedFiles) {
+    if (acceptedFiles.length == 0 || acceptedFiles) {
       console.log("accepted files is empty for some reason??");
     }
     const fileToFormData = new FormData();

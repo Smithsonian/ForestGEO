@@ -5,7 +5,7 @@ import {UserIconChecked, UserIconXMarked} from "@/components/icons";
 
 export const LoginLogout = () => {
   const {data: session, status} = useSession();
-  if (status === "unauthenticated") {
+  if (status == "unauthenticated") {
     return (
       <>
         <Dropdown placement="bottom-end">
@@ -29,7 +29,7 @@ export const LoginLogout = () => {
           <DropdownMenu
             aria-label="Profile Actions"
             variant="flat"
-            onAction={(key) => (key === "login") ? void signIn("azure-ad", {callbackUrl: '/dashboard'}) : alert(key)}
+            onAction={(key) => (key == "login") ? void signIn("azure-ad", {callbackUrl: '/dashboard'}) : alert(key)}
           >
             <DropdownItem key="profile" className="h-14 gap-2">
               <p className="font-semibold">You are not logged in.</p>
@@ -41,7 +41,7 @@ export const LoginLogout = () => {
         </Dropdown>
       </>
     );
-  } else if (status === "authenticated") {
+  } else if (status == "authenticated") {
     return (
       <>
         <Dropdown placement="bottom-end">
@@ -65,7 +65,7 @@ export const LoginLogout = () => {
           <DropdownMenu
             aria-label="Profile Actions"
             variant="flat"
-            onAction={(key) => (key === "logout") ? void signOut({callbackUrl: '/login'}) : alert(key)}
+            onAction={(key) => (key == "logout") ? void signOut({callbackUrl: '/login'}) : alert(key)}
           >
             <DropdownItem key="profile" className="h-14 gap-2">
               <p className="font-semibold">Signed in as</p>

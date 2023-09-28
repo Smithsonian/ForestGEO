@@ -35,12 +35,12 @@ export function PlotsProvider({ children }: {children: React.ReactNode}) {
 }
 
 function plotsReducer(currentPlot: any, action: {plotKey: string}) {
-  if (plots.find((p) => p.key === action.plotKey)) return plots.find((p) => p.key === action.plotKey);
+  if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
   else return currentPlot;
 }
 
 function carouselReducer(currentCarouselState: boolean, action: {toggle: string}) {
-  return (action.toggle === "toggle") ? !currentCarouselState : currentCarouselState;
+  return (action.toggle == "toggle") ? !currentCarouselState : currentCarouselState;
 }
 
 export function usePlotContext() {

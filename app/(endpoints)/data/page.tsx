@@ -37,28 +37,26 @@ export default function Page() {
       <>
         <Button onClick={getData} isLoading={loading}>Reload Data</Button>
         <div>
-          <ThemeProvider theme={darkTheme}>
-            <TableContainer component={Paper}>
-              {recordsets && <Table sx={{minWidth: 650}}>
-                <TableHead>
-                  <TableRow>
-                    {tableHeaders.map((item, index) => (
-                      <TableCell sx={tableHeaderSettings} key={index}>{item.label}</TableCell>
+          <TableContainer component={Paper}>
+            {recordsets && <Table sx={{minWidth: 650}}>
+              <TableHead>
+                <TableRow>
+                  {tableHeaders.map((item, index) => (
+                    <TableCell sx={tableHeaderSettings} key={index}>{item.label}</TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {data.map((row, rowIndex) => (
+                  <TableRow key={rowIndex}>
+                    {Object.values(row).map((rowEntry, rowEntryIndex) => (
+                      <TableCell key={rowEntryIndex}>{rowEntry}</TableCell>
                     ))}
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {data.map((row, rowIndex) => (
-                    <TableRow key={rowIndex}>
-                      {Object.values(row).map((rowEntry, rowEntryIndex) => (
-                        <TableCell key={rowEntryIndex}>{rowEntry}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>}
-            </TableContainer>
-          </ThemeProvider>
+                ))}
+              </TableBody>
+            </Table>}
+          </TableContainer>
         </div>
       </>
     );

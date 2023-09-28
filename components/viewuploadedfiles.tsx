@@ -14,7 +14,6 @@ import {usePlotContext} from "@/app/plotcontext";
 import {Button, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow} from "@mui/material";
 import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
 import {createTheme, ThemeProvider} from "@mui/material/styles";
-import {router} from "next/client";
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
@@ -54,7 +53,7 @@ export default function ViewUploadedFiles() {
     if (localPlot && localPlot.key !== undefined) {
       let response = null;
       try {
-        response = await fetch('/api/download?plot=' + localPlot.key, {
+        response = await fetch('/api/downloadallfiles?plot=' + localPlot.key, {
           method: 'GET',
         });
         
@@ -130,48 +129,47 @@ export default function ViewUploadedFiles() {
             </div>
             <Divider className={"mt-6 mb-6"}/>
             <div className="flex flex-col">
-              <ThemeProvider theme={darkTheme}>
-                <TableContainer component={Paper}>
-                  <Table aria-label={"Stored files"} stickyHeader>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell sx={tableHeaderSettings}>File Count</TableCell>
-                        {fileColumns.map((item, index) => (
-                          <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
-                        ))}
-                        <TableCell sx={tableHeaderSettings}>Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {sortedFileData!.map((row, index) => {
-                        let errs = JSON.parse(row.errors);
-                        return (
-                          <>
-                            <TableRow key={index} sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>
-                              <TableCell>{row.key}</TableCell>
-                              <TableCell>{row.name}</TableCell>
-                              <TableCell>{new Date(row.date).toString()}</TableCell>
-                              <TableCell>{row.user}</TableCell>
-                              <TableCell align="center">
-                                <Button>
-                                  <DownloadIcon />
-                                </Button>
-                                <Button>
-                                  <EditIcon />
-                                </Button>
-                                <Button>
-                                  {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
-                                  <DeleteIcon />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          </>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </ThemeProvider>
+              <TableContainer component={Paper}>
+                <Table aria-label={"Stored files"} stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={tableHeaderSettings}>File Count</TableCell>
+                      {fileColumns.map((item, index) => (
+                        <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
+                      ))}
+                      <TableCell sx={tableHeaderSettings}>Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {sortedFileData!.map((row, index) => {
+                      let errs = row.errors == "false";
+                      return (
+                        <>
+                          <TableRow key={index}>
+                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
+                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
+                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
+                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.date).toString()}</TableCell>
+                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.version).toString()}</TableCell>
+                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                            <TableCell align="center">
+                              <Button>
+                                <DownloadIcon />
+                              </Button>
+                              <Button>
+                                <EditIcon />
+                              </Button>
+                              <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                                <DeleteIcon />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        </>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </div>
           </CardBody>
         </Card>

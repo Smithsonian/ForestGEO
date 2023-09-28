@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   async function getSqlConnection(tries: number) {
     return await sql.connect(sqlConfig).catch((err) => {
       console.error(err);
-      if (tries === 5) {
+      if (tries == 5) {
         throw new Error("Connection failure");
       }
       console.log("conn failed --> trying again!");
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     return await conn.request().query(query);
   }
   const plot = request.nextUrl.searchParams.get('plot')!;
-  if(plot === 'none' || '') throw new Error("blank plot rn");
+  if(plot == 'none' || '') throw new Error("blank plot rn");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');

@@ -1,15 +1,14 @@
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {FileErrors, ReviewStates, tableHeaders} from "@/config/macros";
+import {FileErrors, ReviewStates, RowDataStructure} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DataStructure, DisplayParsedData, ValidationErrorTable} from "@/components/validationtable";
+import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/validationtable";
 import {parse} from "papaparse";
-import {Button as NextUIButton, Divider, Pagination, Spinner} from "@nextui-org/react";
+import {Divider, Pagination} from "@nextui-org/react";
 import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
 import {usePlotContext} from "@/app/plotcontext";
 import {useSession} from "next-auth/react";
 import {
-  Button,
   Card,
   CardContent,
   Dialog,
@@ -17,10 +16,18 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  LinearProgress,
   Typography
 } from "@mui/material";
+import Button from '@mui/joy/Button';
+import MenuButton from '@mui/joy/MenuButton';
+import Menu from '@mui/joy/Menu';
+import MenuItem from '@mui/joy/MenuItem';
+import Dropdown from '@mui/joy/Dropdown';
+import ListItemDecorator from '@mui/joy/ListItemDecorator';
+import LinearProgress from '@mui/joy/LinearProgress';
 import {createTheme, ThemeProvider} from "@mui/material/styles";
+import {ClickAwayListener} from '@mui/base/ClickAwayListener';
+import {CssVarsProvider} from "@mui/joy";
 
 const darkTheme = createTheme({
   palette: {
@@ -42,18 +49,25 @@ export function UploadAndReviewProcess() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   // validated error storage
   const [errorsData, setErrorsData] = useState<FileErrors>({});
+  // validated error storage by row
+  const [errorRows, setErrorRows] = useState<{ [fileName: string]: RowDataStructure[] }>({})
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
   const [parsedData, setParsedData] = useState(initState);
+  // Error report generation menu states:
+  const [errDropdown, setErrDropdown] = useState(false);
+  const [errMenuSelected, setErrMenuSelected] = useState("");
+  // Confirmation menu states:
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  // etc.
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
-  const [open, setOpen] = React.useState(false);
+  
   
   const handleUpload = useCallback(async () => {
-    setOpen(false);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    if (acceptedFiles.length === 0) {
+    setDialogOpen(false);
+    if (acceptedFiles.length == 0) {
       console.log("accepted files is empty for some reason??");
     }
     const fileToFormData = new FormData();
@@ -62,18 +76,18 @@ export function UploadAndReviewProcess() {
       fileToFormData.append(`file_${i}`, file);
       i++;
     }
-    
     const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
       method: 'POST',
       body: fileToFormData,
     });
     const data = await response.json();
     setErrorsData(await data.errors);
+    setErrorRows(await data.errorRows);
     setUploaded(true);
   }, [acceptedFiles, currentPlot, session]);
   
   useEffect(() => {
-    if (reviewState === ReviewStates.UPLOAD) {
+    if (reviewState == ReviewStates.UPLOAD) {
       if (!uploaded) {
         handleUpload().then();
       } else {
@@ -84,7 +98,7 @@ export function UploadAndReviewProcess() {
         }
       }
     }
-  }, [errorsData, handleUpload, reviewState, uploaded]);
+  }, [errorsData, handleUpload, reviewState, uploaded]);0
   
   async function handleInitialSubmit() {
     setParsing(true);
@@ -108,17 +122,35 @@ export function UploadAndReviewProcess() {
   }
   
   async function handleApproval() {
-    setOpen(true);
+    setDialogOpen(true);
   }
   
   async function handleCancel() {
-    setOpen(false);
+    setDialogOpen(false);
   }
   
   async function handleConfirm() {
-    setOpen(false);
+    setDialogOpen(false);
     setReviewState(ReviewStates.UPLOAD);
   }
+  
+  async function handleOpenErrDropdown() {
+    setErrDropdown(true);
+  }
+  
+  async function handleCloseErrDropdown() {
+    setErrDropdown(false);
+  }
+  const createHandleCloseErrDropdown = (selectedItem: string) => () => {
+    setErrMenuSelected(selectedItem);
+    setErrDropdown(false);
+  };
+  
+  // useEffect(() => {
+  //   if (errMenuSelected != '') {
+  //
+  //   }
+  // }, [errMenuSelected]);
   
   switch (reviewState) {
     case ReviewStates.PARSE:
@@ -137,10 +169,9 @@ export function UploadAndReviewProcess() {
               </div>
               <Divider className={"my-4"}/>
               <div className={"flex justify-center"}>
-                <NextUIButton isDisabled={acceptedFiles.length <= 0} isLoading={parsing} onClick={handleInitialSubmit}
-                              spinnerPlacement={"start"} spinner={<Spinner color={"primary"} size={"sm"}/>}>
+                <Button disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
                   Review Files
-                </NextUIButton>
+                </Button>
               </div>
             </div>
           </div>
@@ -152,21 +183,21 @@ export function UploadAndReviewProcess() {
         <>
           <div className={"grid grid-cols-2"}>
             <div className={"mr-4"}>
-              {DisplayParsedData(parsedData.find((file) => file.fileName === acceptedFiles[dataViewActive - 1].name) || {
+              {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
                 fileName: '',
                 data: [],
               })}
               <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
             </div>
             <div className={"flex justify-center w-2/4"}>
-              <Button variant={"outlined"} onClick={handleApproval}>
+              <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/6 h-1/6 justify-center"}>
                 Confirm Changes
               </Button>
             </div>
           </div>
           <div>
             <Dialog
-              open={open}
+              open={dialogOpen}
               onClose={handleCancel}
               aria-labelledby="alert-dialog-title"
               aria-describedby="alert-dialog-description"
@@ -192,17 +223,14 @@ export function UploadAndReviewProcess() {
     case ReviewStates.UPLOAD:
       return (
         <>
-          <div className={"grid grid-cols-2"}>
-            <div className={"mr-4"}>
-              {DisplayParsedData(parsedData.find((file) => file.fileName === acceptedFiles[dataViewActive - 1].name) || {
-                fileName: '',
-                data: [],
-              })}
-              <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
-            </div>
-            <div className={"flex justify-center"}>
-              <LinearProgress color="secondary" />
-            </div>
+          <div>
+            <LinearProgress
+              size="md"
+              variant={"plain"}
+              color={"primary"}
+              aria-label="Uploading..."
+              className="w-auto"
+            />
           </div>
         </>
       );
@@ -219,24 +247,43 @@ export function UploadAndReviewProcess() {
       // Show errors with the data that were uploaded
       return (
         <>
-          <div className={"flex flex-col gap-5 w-3/5 h-3/5 justify-center"}>
-            <ValidationErrorTable
-              errorMessage={errorsData}
-              uploadedData={filesWithErrorsList}
-              headers={tableHeaders}
-            />
-            {reviewState === ReviewStates.ERRORS && <div className={"flex justify-center"}>
-              <ThemeProvider theme={darkTheme}>
+          <div className={"flex flex-row gap-5 w-auto h-auto justify-center"}>
+            <div className={"grid grid-cols-2"}>
+              <div className={"flex flex-col flex-1 gap-5 w-auto h-auto justify-left"}>
+                <DisplayErrorTable
+                  fileName={filesWithErrorsList[dataViewActive - 1].name}
+                  fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
+                    fileName: '',
+                    data: [],
+                  }}
+                  errorMessage={errorsData} />
+                <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
+              </div>
+              <div>
+                <ClickAwayListener onClickAway={handleCloseErrDropdown}>
+                  <Dropdown onOpenChange={handleOpenErrDropdown}>
+                    <MenuButton size="sm">Generate Error Report</MenuButton>
+                    <Menu size="sm">
+                      <MenuItem selected={errMenuSelected == "downloadall"} onClick={createHandleCloseErrDropdown("downloadall")}>
+                        <ListItemDecorator/>
+                        Download All Rows
+                      </MenuItem>
+                    </Menu>
+                  </Dropdown>
+                </ClickAwayListener>
                 <Card>
                   <CardContent>
                     <Typography sx={{fontSize: 16, color: 'red', fontWeight: 'bold'}}>WARNING!</Typography>
-                    <Typography sx={{fontSize: 14, color: 'red'}}>Errors were found in your file (highlighted in red).</Typography>
-                    <Typography sx={{fontSize: 14, color: 'red'}}>All rows not highlighted red were successfully uploaded to storage.</Typography>
-                    <Typography sx={{fontSize: 14, color: 'red'}}>The submitted file was saved to storage and has been marked as containing errors.</Typography>
+                    <Typography sx={{fontSize: 14, color: 'red'}}>Errors were found in your file (highlighted in
+                      red).</Typography>
+                    <Typography sx={{fontSize: 14, color: 'red'}}>All rows not highlighted red were successfully
+                      uploaded to storage.</Typography>
+                    <Typography sx={{fontSize: 14, color: 'red'}}>The submitted file was saved to storage and has been
+                      marked as containing errors.</Typography>
                   </CardContent>
                 </Card>
-              </ThemeProvider>
-            </div>}
+              </div>
+            </div>
           </div>
         </>
       );
@@ -245,7 +292,7 @@ export function UploadAndReviewProcess() {
         <>
           <div className={"grid grid-cols-2"}>
             <div className={"mr-4"}>
-              {DisplayParsedData(parsedData.find((file) => file.fileName === acceptedFiles[dataViewActive - 1].name) || {
+              {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
                 fileName: '',
                 data: [],
               })}

@@ -21,7 +21,7 @@ export default function LoginLayout({ children, }: { children: React.ReactNode; 
     leave: { opacity: 0 },
     config: { duration: 5000 },
     onRest: (_a, _b, item) => {
-      if (index === item) {
+      if (index == item) {
         setIndex(state => (state + 1) % slides.length)
       }
     },

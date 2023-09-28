@@ -41,10 +41,10 @@ export function Navbar () {
       }}>
         <NavbarContent className="basis-1/5 sm:basis-full" justify="start">
           <NavbarBrand as="li" className="gap-3 max-w-fit">
-            <Link href={(status === "unauthenticated") ? "#" : "/dashboard"} className="flex justify-start items-center gap-1">
+            <Link href={(status == "unauthenticated") ? "#" : "/dashboard"} className="flex justify-start items-center gap-1">
               <Logo/>
               <p className={clsx(
-                linkStyles({color: (status === "unauthenticated" ? "danger" : "foreground"), size: "lg"}))}>
+                linkStyles({color: (status == "unauthenticated" ? "danger" : "foreground"), size: "lg"}))}>
                 ForestGEO</p>
             </Link>
           </NavbarBrand>
@@ -52,10 +52,10 @@ export function Navbar () {
             {siteConfig.navItems.map((item) => {
               return (
                 <>
-                  <NavbarItem key={item.label} isActive={(pathname === item.href)}>
+                  <NavbarItem key={item.label} isActive={(pathname == item.href)}>
                     <Link
                       className={clsx(
-                        linkStyles({color: (status === "unauthenticated" ? "danger" : "foreground"), size: "lg"}),
+                        linkStyles({color: (status == "unauthenticated" ? "danger" : "foreground"), size: "lg"}),
                         "data-[active=true]:text-primary data-[active=true]:font-medium"
                       )}
                       href={(currentPlot?.key != 'none') ? item.href : '#'}>
