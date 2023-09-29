@@ -5,12 +5,12 @@ import {PlotsProvider} from "@/app/plotcontext";
 export default function RootLayout({ children, }: { children: React.ReactNode; }) {
   return (
     <>
-      <html lang="en">
+      <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
       <head>
         <title>ForestGEO Data Entry</title>
       </head>
       <PlotsProvider>
-        <Providers themeProps={{attribute: "class", defaultTheme: "dark"}}>
+        <Providers>
           {children}
         </Providers>
       </PlotsProvider>
