@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       errors[parsedFileName] = {};
     }
   }
-  
+
   const config: ParseConfig = {
     delimiter: ",",
     header: true,

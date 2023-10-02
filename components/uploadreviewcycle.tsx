@@ -16,25 +16,13 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Typography
+  Typography,
+  Button,
+  LinearProgress, ClickAwayListener,
 } from "@mui/material";
-import Button from '@mui/joy/Button';
-import MenuButton from '@mui/joy/MenuButton';
-import Menu from '@mui/joy/Menu';
-import MenuItem from '@mui/joy/MenuItem';
-import Dropdown from '@mui/joy/Dropdown';
-import ListItemDecorator from '@mui/joy/ListItemDecorator';
-import LinearProgress from '@mui/joy/LinearProgress';
-import {createTheme, ThemeProvider} from "@mui/material/styles";
-import {ClickAwayListener} from '@mui/base/ClickAwayListener';
-import {CssVarsProvider} from "@mui/joy";
-
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
-
+import LoadingButton from '@mui/lab/LoadingButton';
+import {Dropdown, MenuButton, Menu, MenuItem, menuItemClasses} from "@mui/base";
+import { styled } from '@mui/system';
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
@@ -64,6 +52,11 @@ export function UploadAndReviewProcess() {
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
   
+  const createHandleMenuClick = (menuItem: string) => {
+    return () => {
+      console.log(`Clicked on ${menuItem}`);
+    };
+  };
   
   const handleUpload = useCallback(async () => {
     setDialogOpen(false);
@@ -169,9 +162,9 @@ export function UploadAndReviewProcess() {
               </div>
               <Divider className={"my-4"}/>
               <div className={"flex justify-center"}>
-                <Button disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
+                <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
                   Review Files
-                </Button>
+                </LoadingButton>
               </div>
             </div>
           </div>
@@ -225,8 +218,6 @@ export function UploadAndReviewProcess() {
         <>
           <div>
             <LinearProgress
-              size="md"
-              variant={"plain"}
               color={"primary"}
               aria-label="Uploading..."
               className="w-auto"
@@ -262,12 +253,17 @@ export function UploadAndReviewProcess() {
               <div>
                 <ClickAwayListener onClickAway={handleCloseErrDropdown}>
                   <Dropdown onOpenChange={handleOpenErrDropdown}>
-                    <MenuButton size="sm">Generate Error Report</MenuButton>
-                    <Menu size="sm">
-                      <MenuItem selected={errMenuSelected == "downloadall"} onClick={createHandleCloseErrDropdown("downloadall")}>
-                        <ListItemDecorator/>
-                        Download All Rows
-                      </MenuItem>
+                    <TriggerButton>Dashboard</TriggerButton>
+                    <Menu slots={{ listbox: StyledListbox }}>
+                      <StyledMenuItem onClick={createHandleMenuClick('Profile')}>
+                        Profile
+                      </StyledMenuItem>
+                      <StyledMenuItem onClick={createHandleMenuClick('My account')}>
+                        My account
+                      </StyledMenuItem>
+                      <StyledMenuItem onClick={createHandleMenuClick('Log out')}>
+                        Log out
+                      </StyledMenuItem>
                     </Menu>
                   </Dropdown>
                 </ClickAwayListener>
@@ -307,3 +303,105 @@ export function UploadAndReviewProcess() {
       );
   }
 }
+
+const blue = {
+  50: '#F0F7FF',
+  100: '#DAECFF',
+  200: '#99CCF3',
+  300: '#66B2FF',
+  400: '#3399FF',
+  500: '#007FFF',
+  600: '#0072E5',
+  900: '#003A75',
+};
+
+const grey = {
+  50: '#f6f8fa',
+  100: '#eaeef2',
+  200: '#d0d7de',
+  300: '#afb8c1',
+  400: '#8c959f',
+  500: '#6e7781',
+  600: '#57606a',
+  700: '#424a53',
+  800: '#32383f',
+  900: '#24292f',
+};
+
+const StyledListbox = styled('ul')(
+  ({ theme }) => `
+  font-family: IBM Plex Sans, sans-serif;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+  padding: 6px;
+  margin: 12px 0;
+  min-width: 200px;
+  border-radius: 12px;
+  overflow: auto;
+  outline: 0px;
+  background: ${theme.palette.mode === 'dark' ? grey[900] : '#fff'};
+  border: 1px solid ${theme.palette.mode === 'dark' ? grey[700] : grey[200]};
+  color: ${theme.palette.mode === 'dark' ? grey[300] : grey[900]};
+  box-shadow: 0px 2px 16px ${theme.palette.mode === 'dark' ? grey[900] : grey[200]};
+  z-index: 1;
+  `,
+);
+
+const StyledMenuItem = styled(MenuItem)(
+  ({ theme }) => `
+  list-style: none;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: default;
+  user-select: none;
+
+  &:last-of-type {
+    border-bottom: none;
+  }
+
+  &.${menuItemClasses.focusVisible} {
+    outline: 3px solid ${theme.palette.mode === 'dark' ? blue[600] : blue[200]};
+    background-color: ${theme.palette.mode === 'dark' ? grey[800] : grey[100]};
+    color: ${theme.palette.mode === 'dark' ? grey[300] : grey[900]};
+  }
+
+  &.${menuItemClasses.disabled} {
+    color: ${theme.palette.mode === 'dark' ? grey[700] : grey[400]};
+  }
+
+  &:hover:not(.${menuItemClasses.disabled}) {
+    background-color: ${theme.palette.mode === 'dark' ? grey[800] : grey[100]};
+    color: ${theme.palette.mode === 'dark' ? grey[300] : grey[900]};
+  }
+  `,
+);
+
+const TriggerButton = styled(MenuButton)(
+  ({ theme }) => `
+  font-family: IBM Plex Sans, sans-serif;
+  font-weight: 600;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+  border-radius: 8px;
+  padding: 8px 16px;
+  line-height: 1.5;
+  background: transparent;
+  border: 1px solid ${theme.palette.mode === 'dark' ? grey[800] : grey[200]};
+  color: ${theme.palette.mode === 'dark' ? blue[300] : blue[500]};
+  cursor: pointer;
+
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 120ms;
+
+  &:hover {
+    background: ${theme.palette.mode === 'dark' ? grey[800] : grey[50]};
+    border-color: ${theme.palette.mode === 'dark' ? grey[600] : grey[300]};
+  }
+
+  &:focus-visible {
+    border-color: ${blue[400]};
+    outline: 3px solid ${theme.palette.mode === 'dark' ? blue[500] : blue[200]};
+  }
+  `,
+);

@@ -5,7 +5,7 @@ import {PlotsProvider} from "@/app/plotcontext";
 export default function RootLayout({ children, }: { children: React.ReactNode; }) {
   return (
     <>
-      <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
+      <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"} >
       <head>
         <title>ForestGEO Data Entry</title>
       </head>
