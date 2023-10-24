@@ -177,19 +177,19 @@ export async function POST(request: NextRequest) {
       errors[file.name][results.errors[0].row] = results.errors[0].type + ',' + results.errors[0].code + ',' + results.errors[0].message;
     }
   }
-  // for (const file of files) {
-  //   let uploadResponse;
-  //   uploadResponse = await uploadFileAsBuffer(containerClient, file, user, (Object.keys(errors).length == 0));
-  //   console.log(`upload complete: ${uploadResponse!.requestId}`);
-  //   if (uploadResponse!._response.status >= 200 && uploadResponse!._response.status <= 299) {
-  //     // upload complete:
-  //     for (const row of uploadableRows[file.name]) {
-  //       let result = await runQuery(conn, updateOrInsertRDS(row, plot));
-  //       if (!result) console.error('results undefined');
-  //       else console.log(`tag ${row.tag} of file ${file.name} submitted to db`);
-  //     }
-  //   }
-  // }
+  for (const file of files) {
+    let uploadResponse;
+    uploadResponse = await uploadFileAsBuffer(containerClient, file, user, (Object.keys(errors).length == 0));
+    console.log(`upload complete: ${uploadResponse!.requestId}`);
+    if (uploadResponse!._response.status >= 200 && uploadResponse!._response.status <= 299) {
+      // upload complete:
+      for (const row of uploadableRows[file.name]) {
+        let result = await runQuery(conn, updateOrInsertRDS(row, plot));
+        if (!result) console.error('results undefined');
+        else console.log(`tag ${row.tag} of file ${file.name} submitted to db`);
+      }
+    }
+  }
   await conn.close();
   // console.log('no errors. uploading file');
   if (Object.keys(errors).length == 0) {

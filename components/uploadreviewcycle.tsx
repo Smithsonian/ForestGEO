@@ -134,12 +134,7 @@ export function UploadAndReviewProcess() {
   async function handleCloseErrDropdown() {
     setErrDropdown(false);
   }
-  const createHandleCloseErrDropdown = (selectedItem: string) => () => {
-    setErrMenuSelected(selectedItem);
-    setErrDropdown(false);
-  };
-  
-  // useEffect(() => {
+// useEffect(() => {
   //   if (errMenuSelected != '') {
   //
   //   }
@@ -183,7 +178,7 @@ export function UploadAndReviewProcess() {
               <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
             </div>
             <div className={"flex justify-center w-2/4"}>
-              <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/6 h-1/6 justify-center"}>
+              <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/4 h-1/6 justify-center"}>
                 Confirm Changes
               </Button>
             </div>
