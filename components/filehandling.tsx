@@ -27,7 +27,7 @@ import {
   Spinner
 } from "@nextui-org/react";
 import {Chip} from "@nextui-org/chip";
-import {subtitle} from "@/components/primitives";
+import {subtitle} from "@/config/primitives";
 import {Button, getKeyValue, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow} from "@nextui-org/react";
 import {IRecordSet} from "mssql";
 

@@ -1,5 +1,5 @@
 "use client";
-import {subtitle} from "@/components/primitives";
+import {subtitle} from "@/config/primitives";
 import * as React from "react";
 import {Tabs, Tab} from "@nextui-org/react";
 import ViewUploadedFiles from "@/components/viewuploadedfiles";

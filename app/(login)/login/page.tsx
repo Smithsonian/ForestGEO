@@ -1,5 +1,5 @@
 "use client";
-import {subtitle, title} from "@/components/primitives";
+import {subtitle, title} from "@/config/primitives";
 import {Divider} from "@nextui-org/react";
 import React from "react";
 import {useSession} from "next-auth/react";

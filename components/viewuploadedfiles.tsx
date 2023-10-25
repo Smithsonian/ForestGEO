@@ -7,7 +7,7 @@ import {
   Divider,
 } from '@nextui-org/react';
 import {fileColumns, tableHeaderSettings, UploadedFileData} from "@/config/macros";
-import {title} from "@/components/primitives";
+import {title} from "@/config/primitives";
 import {CardHeader} from "@nextui-org/card";
 import {BrowseError} from "@/app/error"
 import {usePlotContext} from "@/app/plotcontext";

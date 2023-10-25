@@ -1,7 +1,7 @@
 "use client";
 import {Navbar} from "@/components/navbar";
 import * as React from "react";
-import {subtitle, title} from "@/components/primitives";
+import {subtitle, title} from "@/config/primitives";
 import {Divider} from "@nextui-org/react";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
