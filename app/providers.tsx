@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import {SessionProvider} from "next-auth/react";
-import ThemeRegistry from "@/components/ThemeRegistry/ThemeRegistry";
+import Themeregistry from "@/components/ThemeRegistry/themeregistry";
 
 export interface ProvidersProps {
   children: React.ReactNode;
@@ -11,11 +11,11 @@ export function Providers({children}: ProvidersProps) {
   return (
     <>
       <SessionProvider>
-        <ThemeRegistry>
+        <Themeregistry>
           <body>
           {children}
           </body>
-        </ThemeRegistry>
+        </Themeregistry>
       </SessionProvider>
     </>
   );

@@ -5,7 +5,7 @@ import Sheet from '@mui/joy/Sheet';
 import IconButton from '@mui/joy/IconButton';
 import MenuIcon from '@mui/icons-material/Menu';
 
-import { toggleSidebar } from './utils';
+import { toggleSidebar } from '../config/utils';
 
 export default function Header() {
   return (

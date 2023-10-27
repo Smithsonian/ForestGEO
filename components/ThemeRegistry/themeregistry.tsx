@@ -1,7 +1,7 @@
 'use client';
 import * as React from 'react';
 import CssBaseline from '@mui/joy/CssBaseline';
-import NextAppDirEmotionCacheProvider from './EmotionCache';
+import NextAppDirEmotionCacheProvider from './emotioncache';
 import {
   experimental_extendTheme as materialExtendTheme,
   Experimental_CssVarsProvider as MaterialCssVarsProvider,
@@ -9,7 +9,7 @@ import {
 } from '@mui/material/styles';
 import { CssVarsProvider as JoyCssVarsProvider } from '@mui/joy/styles';
 const materialTheme = materialExtendTheme();
-export default function ThemeRegistry({ children }: { children: React.ReactNode }) {
+export default function Themeregistry({ children }: { children: React.ReactNode }) {
   
   return (
     <NextAppDirEmotionCacheProvider options={{ key: 'joy' }}>

@@ -31,7 +31,7 @@ import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import BrightnessAutoRoundedIcon from '@mui/icons-material/BrightnessAutoRounded';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
-import { closeSidebar } from './utils';
+import { closeSidebar } from '../config/utils';
 
 function Toggler({
   defaultExpanded = false,
