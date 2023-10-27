@@ -1,17 +1,11 @@
 "use client";
 
 import React, {useState} from "react";
-import {Button} from "@nextui-org/react";
 import {usePlotContext} from "@/app/plotcontext";
 import {IRecordSet} from "mssql";
 import {RowDataStructure, tableHeaders, tableHeaderSettings} from "@/config/macros";
-import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow} from "@mui/material";
-import {createTheme, ThemeProvider} from "@mui/material/styles";
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
+import {Table} from "@mui/joy";
+import Button from "@mui/joy/Button";
 
 export default function Page() {
   const plot = usePlotContext()!;
@@ -35,35 +29,33 @@ export default function Page() {
     })
     return (
       <>
-        <Button onClick={getData} isLoading={loading}>Reload Data</Button>
+        <Button onClick={getData} loading={loading}>Reload Data</Button>
         <div>
-          <TableContainer component={Paper}>
-            {recordsets && <Table sx={{minWidth: 650}}>
-              <TableHead>
-                <TableRow>
-                  {tableHeaders.map((item, index) => (
-                    <TableCell sx={tableHeaderSettings} key={index}>{item.label}</TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {data.map((row, rowIndex) => (
-                  <TableRow key={rowIndex}>
-                    {Object.values(row).map((rowEntry, rowEntryIndex) => (
-                      <TableCell key={rowEntryIndex}>{rowEntry}</TableCell>
-                    ))}
-                  </TableRow>
+          {recordsets && <Table>
+            <thead>
+            <tr>
+              {tableHeaders.map((item, index) => (
+                <th style={tableHeaderSettings} key={index}>{item.label}</th>
                 ))}
-              </TableBody>
-            </Table>}
-          </TableContainer>
+            </tr>
+            </thead>
+            <tbody>
+            {data.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {Object.values(row).map((rowEntry, rowEntryIndex) => (
+                  <td key={rowEntryIndex}>{rowEntry}</td>
+                ))}
+              </tr>
+              ))}
+            </tbody>
+          </Table>}
         </div>
       </>
     );
   } else {
     return (
       <>
-        <Button onClick={getData} isLoading={loading}>Reload Data</Button>
+        <Button onClick={getData} loading={loading}>Reload Data</Button>
       </>
     );
   }

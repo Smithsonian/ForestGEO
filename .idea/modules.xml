@@ -3,7 +3,6 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/customnextjs.iml" filepath="$PROJECT_DIR$/.idea/customnextjs.iml" />
-      <module fileurl="file://$PROJECT_DIR$/../joy-ui-nextjs-ts/.idea/joy-ui-nextjs-ts.iml" filepath="$PROJECT_DIR$/../joy-ui-nextjs-ts/.idea/joy-ui-nextjs-ts.iml" />
     </modules>
   </component>
 </project>

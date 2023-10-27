@@ -5,7 +5,6 @@ import {
   TableBody,
   TableRow,
   TableCell,
-  Typography,
   Paper,
 } from '@mui/material';
 import { parse } from 'papaparse';
@@ -13,12 +12,6 @@ import React, { useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import '@/styles/validationtable.css';
 import {FileErrors, tableHeaders} from "@/config/macros";
-import {createTheme, ThemeProvider} from "@mui/material/styles";
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */

@@ -2,9 +2,9 @@
 import {Navbar} from "@/components/navbar";
 import * as React from "react";
 import {subtitle, title} from "@/config/primitives";
-import {Divider} from "@nextui-org/react";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
+import Divider from "@mui/joy/Divider";
 
 export default function EndpointLayout({ children, }: { children: React.ReactNode }){
   useSession({
@@ -43,7 +43,6 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
   let pathname = usePathname();
   return (
     <>
-      <Navbar />
       <main className="container mx-auto max-w-7xl pt-6 px-6 flex-grow">
         {renderSwitch(pathname)}
         <Divider className={"mt-6 mb-6"}/>

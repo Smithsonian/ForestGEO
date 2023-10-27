@@ -1,43 +1,44 @@
 "use client";
 import React, {useCallback, useEffect, useState} from 'react';
-import {
-  Card,
-  CardBody,
-  CircularProgress,
-  Divider,
-} from '@nextui-org/react';
 import {fileColumns, tableHeaderSettings, UploadedFileData} from "@/config/macros";
 import {title} from "@/config/primitives";
-import {CardHeader} from "@nextui-org/card";
 import {BrowseError} from "@/app/error"
 import {usePlotContext} from "@/app/plotcontext";
-import {Button, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow} from "@mui/material";
+import {
+  Button,
+  Card, CardContent,
+  CardHeader,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow
+} from "@mui/material";
 import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
-import {createTheme, ThemeProvider} from "@mui/material/styles";
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
-
+import Divider from "@mui/joy/Divider";
+import CircularProgress from "@mui/joy/CircularProgress";
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
 function LoadingFiles() {
   return (
     <>
-      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10" radius={"none"}>
+      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
         <CardHeader>
           <div className="flex flex-col">
             <h5 className="text-md">Loading Files...</h5>
           </div>
         </CardHeader>
         <Divider className={"mt-6 mb-6"}/>
-        <CardBody>
+        <CardContent>
           <div className="flex flex-col">
-            <CircularProgress value={60} size={"lg"} label={"Retrieving files..."}/>
+            <CircularProgress value={60} size={"lg"}>
+              Retrieving files...
+            </CircularProgress>
           </div>
-        </CardBody>
+        </CardContent>
       </Card>
     </>
   );
@@ -122,8 +123,8 @@ export default function ViewUploadedFiles() {
     })
     return (
       <>
-        <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10" radius={"sm"}>
-          <CardBody>
+        <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+          <CardContent>
             <div className="flex flex-col">
               <h5 className="text-md">Uploaded Files</h5>
             </div>
@@ -171,7 +172,7 @@ export default function ViewUploadedFiles() {
                 </Table>
               </TableContainer>
             </div>
-          </CardBody>
+          </CardContent>
         </Card>
       </>
     );

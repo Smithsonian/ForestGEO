@@ -16,20 +16,13 @@ import {parse, ParseConfig} from 'papaparse';
 import {FileUploadIcon} from "@/components/icons";
 
 import '@/styles/dropzone.css';
-import {
-  Card,
-  CardBody,
-  CardFooter,
-  CardHeader,
-  Divider,
-  Pagination,
-  Skeleton,
-  Spinner
-} from "@nextui-org/react";
-import {Chip} from "@nextui-org/chip";
 import {subtitle} from "@/config/primitives";
-import {Button, getKeyValue, Table, TableBody, TableCell, TableColumn, TableHeader, TableRow} from "@nextui-org/react";
-import {IRecordSet} from "mssql";
+import {Card, CardContent, CardHeader, Pagination} from "@mui/material";
+import {Skeleton} from "@mui/joy";
+import Chip from "@mui/joy/Chip";
+import Divider from "@mui/joy/Divider";
+import Button from "@mui/joy/Button";
+import LoadingButton from "@mui/lab/LoadingButton";
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
  *
@@ -46,14 +39,17 @@ import {IRecordSet} from "mssql";
  */
 export function FileDisplay({acceptedFiles}: FileListProps) {
   const [currentPage, setCurrentPage] = React.useState(1);
+  const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
+    setCurrentPage(value);
+  };
   return (
     <>
-      <Card className={"flex flex-1 justify-center w-auto"} radius={"lg"}>
+      <Card className={"flex flex-1 justify-center w-auto"}>
         <CardHeader>
           File Preview:
         </CardHeader>
-        <CardBody>
-          <Skeleton isLoaded={acceptedFiles?.length > 0} className={"rounded-lg"}>
+        <CardContent>
+          <Skeleton loading={acceptedFiles?.length > 0} className={"rounded-lg"}>
             <div className={"flex flex-1 flex-col h-auto rounded-lg"}>
               <div>
                 File Name: <br/>
@@ -64,17 +60,15 @@ export function FileDisplay({acceptedFiles}: FileListProps) {
               <div>
                 File Size: <br/>
                 <Chip
-                  color={"secondary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size! : ''} bytes</Chip>
+                  color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size! : ''} bytes</Chip>
               </div>
             </div>
           </Skeleton>
-        </CardBody>
-        <CardFooter>
-          <div className={"flex justify-center"}>
-            {acceptedFiles.length > 1 && <Pagination total={acceptedFiles.length} color={"secondary"} page={currentPage}
-                                                     onChange={setCurrentPage}/>}
-          </div>
-        </CardFooter>
+        </CardContent>
+        <div className={"flex justify-center"}>
+          {acceptedFiles.length > 1 && <Pagination count={acceptedFiles.length} color={"secondary"} page={currentPage}
+                                                   onChange={handleChange}/>}
+        </div>
       </Card>
     </>
   );
@@ -226,10 +220,9 @@ function UploadAndValidateFiles({uploadDone, isUploading, errorsData, acceptedFi
           </div>
           <Divider className={"my-4"}/>
           <div className={"flex justify-center"}>
-            <Button isDisabled={acceptedFiles.length <= 0} isLoading={isUploading} onClick={handleUpload}
-                    spinnerPlacement={"start"} spinner={<Spinner color={"primary"} size={"sm"}/>}>
+            <LoadingButton disabled={acceptedFiles.length <= 0} loading={isUploading} onClick={handleUpload}>
               Upload to server
-            </Button>
+            </LoadingButton>
           </div>
         </div>
       </div>

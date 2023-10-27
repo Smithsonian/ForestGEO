@@ -4,7 +4,6 @@ import {FileErrors, ReviewStates, RowDataStructure} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/validationtable";
 import {parse} from "papaparse";
-import {Divider, Pagination} from "@nextui-org/react";
 import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
 import {usePlotContext} from "@/app/plotcontext";
 import {useSession} from "next-auth/react";
@@ -18,11 +17,12 @@ import {
   DialogTitle,
   Typography,
   Button,
-  LinearProgress, ClickAwayListener,
+  LinearProgress, ClickAwayListener, Pagination,
 } from "@mui/material";
 import LoadingButton from '@mui/lab/LoadingButton';
 import {Dropdown, MenuButton, Menu, MenuItem, menuItemClasses} from "@mui/base";
 import { styled } from '@mui/system';
+import Divider from "@mui/joy/Divider";
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
@@ -134,6 +134,9 @@ export function UploadAndReviewProcess() {
   async function handleCloseErrDropdown() {
     setErrDropdown(false);
   }
+  const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
+    setDataViewActive(value);
+  };
 // useEffect(() => {
   //   if (errMenuSelected != '') {
   //
@@ -175,7 +178,7 @@ export function UploadAndReviewProcess() {
                 fileName: '',
                 data: [],
               })}
-              <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
+              <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
             </div>
             <div className={"flex justify-center w-2/4"}>
               <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/4 h-1/6 justify-center"}>
@@ -243,7 +246,7 @@ export function UploadAndReviewProcess() {
                     data: [],
                   }}
                   errorMessage={errorsData} />
-                <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
+                <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
               </div>
               <div>
                 <ClickAwayListener onClickAway={handleCloseErrDropdown}>
@@ -287,7 +290,7 @@ export function UploadAndReviewProcess() {
                 fileName: '',
                 data: [],
               })}
-              <Pagination total={acceptedFiles.length} page={dataViewActive} onChange={setDataViewActive}/>
+              <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
             </div>
             <div className={"flex justify-center"}>
               Data was successfully uploaded! <br/>

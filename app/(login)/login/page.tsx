@@ -1,9 +1,9 @@
 "use client";
 import {subtitle, title} from "@/config/primitives";
-import {Divider} from "@nextui-org/react";
 import React from "react";
 import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
+import Divider from "@mui/joy/Divider";
 
 export default function Page() {
   const {data: session} = useSession();

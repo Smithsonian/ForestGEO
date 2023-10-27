@@ -1,10 +1,11 @@
 "use client";
-import { Spinner} from "@nextui-org/react";
+
+import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function Loading() {
   return (
     <>
-      <Spinner color={"default"} size={"lg"} />
+      <CircularProgress color={"primary"} size={"lg"} />
     </>
   );
 }

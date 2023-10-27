@@ -1,10 +1,10 @@
 "use client";
 import React, {useEffect, useState} from "react";
 import {Navbar} from "@/components/navbar";
-import {Divider} from "@nextui-org/react";
 import {subtitle, title} from "@/config/primitives";
 import {useTransition, animated} from "@react-spring/web";
 import styles from '@/styles/styles.module.css';
+import Divider from "@mui/joy/Divider";
 
 const slides = [
   'background-1.jpg',

@@ -1,4 +1,3 @@
-import {nextui} from '@nextui-org/theme'
 import theme from "tailwindcss/defaultTheme";
 
 const colors = require('tailwindcss/colors')
@@ -7,7 +6,6 @@ module.exports = {
   content: [
     './components/**/*.{js,ts,jsx,tsx,mdx}',
     './app/**/*.{js,ts,jsx,tsx,mdx}',
-    './node_modules/@nextui-org/theme/dist/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
@@ -22,7 +20,7 @@ module.exports = {
   },
   darkMode: "class",
   variants: {},
-  plugins: [nextui()],
+  plugins: [],
   xwind: {
     mode: 'objectstyles',
   },

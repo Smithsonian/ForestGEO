@@ -1,8 +1,8 @@
 'use client'
 
 import React, {useEffect} from 'react'
-import {Card, CardBody, Divider} from "@nextui-org/react";
-import {CardHeader} from "@nextui-org/card";
+import Divider from "@mui/joy/Divider";
+import {Card, CardContent, CardHeader} from "@mui/material";
 
 export default function Error({
                                 error,
@@ -43,12 +43,12 @@ export function BrowseError() {
           </div>
         </CardHeader>
         <Divider/>
-        <CardBody>
+        <CardContent>
           <div className="flex flex-col">
             <h6 className="text-md">Perhaps try reloading the page. If it still doesn&apos;t work, please again
               a bit later.</h6>
           </div>
-        </CardBody>
+        </CardContent>
       </Card>
     </>
   );
