@@ -9,7 +9,6 @@
     "lint": "next lint",
     "bs": "next build; next start",
     "clean": "rm -rf .next node_modules package-lock.json; npm install",
-
     "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest"
   },
   "dependencies": {
@@ -17,13 +16,14 @@
     "@emotion/cache": "latest",
     "@emotion/react": "latest",
     "@emotion/styled": "latest",
+    "@mui/base": "^5.0.0-beta.21",
     "@mui/icons-material": "^5.14.15",
     "@mui/joy": "latest",
     "@mui/lab": "^5.0.0-alpha.150",
     "@mui/material": "latest",
-    "@mui/base": "^5.0.0-beta.21",
     "@mui/system": "^5.14.15",
     "@react-spring/web": "^9.7.3",
+    "autoprefixer": "^10.4.16",
     "clsx": "^2.0.0",
     "dotenv": "^16.3.1",
     "eslint": "latest",
