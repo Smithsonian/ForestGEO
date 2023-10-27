@@ -1,10 +1,18 @@
 "use client";
 import React, {useEffect, useState} from "react";
-import {Navbar} from "@/components/navbar";
-import {subtitle, title} from "@/config/primitives";
 import {useTransition, animated} from "@react-spring/web";
 import styles from '@/styles/styles.module.css';
-import Divider from "@mui/joy/Divider";
+import Header from "@/components/header";
+import Sidebar from "@/components/sidebar";
+import {Box, Breadcrumbs, Link as JoyLink} from "@mui/joy";
+import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
+import Link from "next/link";
+import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
+import Typography from "@mui/joy/Typography";
+import Button from "@mui/joy/Button";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import OrderTable from "@/components/ordertable";
+import OrderList from "@/components/orderlist";
 
 const slides = [
   'background-1.jpg',
@@ -38,19 +46,7 @@ export default function LoginLayout({ children, }: { children: React.ReactNode; 
             backgroundImage: `url(${slides[i]})`,
           }} />
       ))}
-      <Navbar />
-      <main className="container mx-auto max-w-7xl pt-6 px-6 flex-grow">
-        {children}
-      </main>
-      <div className={"sub_div flex flex-row h-5 items-center justify-center space-x-4 text-small self-center"}>
-        <div>
-          <h1 className={title({color: "violet"})}>ForestGEO&nbsp;</h1>
-        </div>
-        <Divider orientation={"vertical"} />
-        <div>
-          <p className={subtitle({color: "red"})}>A data entry and validation system for your convenience.</p>
-        </div>
-      </div>
+      {children}
     </>
   );
 }

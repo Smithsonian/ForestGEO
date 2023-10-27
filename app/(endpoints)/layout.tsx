@@ -5,6 +5,7 @@ import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
 import Divider from "@mui/joy/Divider";
+import {Box} from "@mui/joy";
 
 export default function EndpointLayout({ children, }: { children: React.ReactNode }){
   useSession({
@@ -43,20 +44,21 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
   let pathname = usePathname();
   return (
     <>
-      <main className="container mx-auto max-w-7xl pt-6 px-6 flex-grow">
-        {renderSwitch(pathname)}
-        <Divider className={"mt-6 mb-6"}/>
-        {children}
-      </main>
-      <div className={"sub_div flex flex-row h-5 items-center justify-center space-x-4 text-small self-center"}>
-        <div>
-          <h1 className={title({color: "violet"})}>ForestGEO&nbsp;</h1>
-        </div>
-        <Divider orientation={"vertical"} />
-        <div>
-          <p className={subtitle({color: "cyan"})}>A data entry and validation system for your convenience.</p>
-        </div>
-      </div>
+      {renderSwitch(pathname)}
+      {children}
+      {/*<Box sx={{ display: 'flex', minHeight: '100dvh' }}>*/}
+      {/*  <Divider className={"mt-6 mb-6"}/>*/}
+      {/*  */}
+      {/*</Box>*/}
+      {/*<div className={"sub_div flex flex-row h-5 items-center justify-center space-x-4 text-small self-center"}>*/}
+      {/*  <div>*/}
+      {/*    <h1 className={title({color: "violet"})}>ForestGEO&nbsp;</h1>*/}
+      {/*  </div>*/}
+      {/*  <Divider orientation={"vertical"} />*/}
+      {/*  <div>*/}
+      {/*    <p className={subtitle({color: "cyan"})}>A data entry and validation system for your convenience.</p>*/}
+      {/*  </div>*/}
+      {/*</div>*/}
     </>
   );
 }

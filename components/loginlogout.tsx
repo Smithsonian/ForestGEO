@@ -1,97 +1,63 @@
 import {signIn, signOut, useSession} from "next-auth/react";
 import React from "react";
-import {UserIconChecked, UserIconXMarked} from "@/components/icons";
+import Avatar from "@mui/joy/Avatar";
+import Box from "@mui/joy/Box";
+import Typography from "@mui/joy/Typography";
+import IconButton from "@mui/joy/IconButton";
+import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import LoginRoundedIcon from "@mui/icons-material/LoginRounded";
+import CircularProgress from "@mui/joy/CircularProgress";
 
 export const LoginLogout = () => {
   const {data: session, status} = useSession();
+  const handleLogin = (event: React.ChangeEvent<unknown>) => {
+    signIn().then();
+  };
+  const handleLogout = (event: React.ChangeEvent<unknown>) => {
+    signOut().then();
+  }
   if (status == "unauthenticated") {
     return (
       <>
-        {/*<Dropdown placement="bottom-end">*/}
-        {/*  <DropdownTrigger>*/}
-        {/*    <User*/}
-        {/*      as="button"*/}
-        {/*      avatarProps={{*/}
-        {/*        src: 'https://images.unsplash.com/broken', // BROKEN SRC*/}
-        {/*        isBordered: true,*/}
-        {/*        icon: <UserIconXMarked/>,*/}
-        {/*        size: "md",*/}
-        {/*        color: "secondary",*/}
-        {/*        showFallback: true,*/}
-        {/*        fallback: <UserIconXMarked/>*/}
-        {/*      }}*/}
-        {/*      className="transition-transform"*/}
-        {/*      description="Please click to log in"*/}
-        {/*      name="Log In"*/}
-        {/*    />*/}
-        {/*  </DropdownTrigger>*/}
-        {/*  <DropdownMenu*/}
-        {/*    aria-label="Profile Actions"*/}
-        {/*    variant="flat"*/}
-        {/*    onAction={(key) => (key == "login") ? void signIn("azure-ad", {callbackUrl: '/dashboard'}) : alert(key)}*/}
-        {/*  >*/}
-        {/*    <DropdownItem key="profile" className="h-14 gap-2">*/}
-        {/*      <p className="font-semibold">You are not logged in.</p>*/}
-        {/*    </DropdownItem>*/}
-        {/*    <DropdownItem key="login" color="danger">*/}
-        {/*      Log In*/}
-        {/*    </DropdownItem>*/}
-        {/*  </DropdownMenu>*/}
-        {/*</Dropdown>*/}
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Avatar
+            variant="outlined"
+            size="sm"
+          >
+            UNK
+          </Avatar>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography level="title-sm">Login to access</Typography>
+            <Typography level="body-xs">your information</Typography>
+          </Box>
+          <IconButton size="sm" variant="plain" color="neutral" onClick={handleLogin}>
+            <LoginRoundedIcon />
+          </IconButton>
+        </Box>
       </>
     );
   } else if (status == "authenticated") {
     return (
       <>
-        {/*<Dropdown placement="bottom-end">*/}
-        {/*  <DropdownTrigger>*/}
-        {/*    <User*/}
-        {/*      as="button"*/}
-        {/*      avatarProps={{*/}
-        {/*        src: 'https://images.unsplash.com/broken', // BROKEN SRC*/}
-        {/*        isBordered: true,*/}
-        {/*        icon: <UserIconChecked/>,*/}
-        {/*        size: "md",*/}
-        {/*        color: "secondary",*/}
-        {/*        showFallback: true,*/}
-        {/*        fallback: <UserIconChecked/>*/}
-        {/*      }}*/}
-        {/*      className="transition-transform"*/}
-        {/*      description={session?.user?.email}*/}
-        {/*      name={session?.user?.name}*/}
-        {/*    />*/}
-        {/*  </DropdownTrigger>*/}
-        {/*  <DropdownMenu*/}
-        {/*    aria-label="Profile Actions"*/}
-        {/*    variant="flat"*/}
-        {/*    onAction={(key) => (key == "logout") ? void signOut({callbackUrl: '/login'}) : alert(key)}*/}
-        {/*  >*/}
-        {/*    <DropdownItem key="profile" className="h-14 gap-2">*/}
-        {/*      <p className="font-semibold">Signed in as</p>*/}
-        {/*      <p className="font-semibold">{session?.user?.name}</p>*/}
-        {/*      <p className="font-semibold"> with email {session?.user?.email}</p>*/}
-        {/*    </DropdownItem>*/}
-        {/*    <DropdownItem key="settings">*/}
-        {/*      My Settings*/}
-        {/*    </DropdownItem>*/}
-        {/*    <DropdownItem key="team_settings">Team Settings</DropdownItem>*/}
-        {/*    <DropdownItem key="analytics">*/}
-        {/*      Analytics*/}
-        {/*    </DropdownItem>*/}
-        {/*    <DropdownItem key="system">System</DropdownItem>*/}
-        {/*    <DropdownItem key="configurations">Configurations</DropdownItem>*/}
-        {/*    <DropdownItem key="help_and_feedback">*/}
-        {/*      Help & Feedback*/}
-        {/*    </DropdownItem>*/}
-        {/*    <DropdownItem key="logout" color="danger">*/}
-        {/*      Log Out*/}
-        {/*    </DropdownItem>*/}
-        {/*  </DropdownMenu>*/}
-        {/*</Dropdown>*/}
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Avatar
+            variant="outlined"
+            size="sm"
+            src='/broken-image.jpg'
+          />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography level="title-sm">{session?.user?.name}</Typography>
+            <Typography level="body-xs">{session?.user?.email}</Typography>
+          </Box>
+          <IconButton size="sm" variant="plain" color="neutral" onClick={handleLogout}>
+            <LogoutRoundedIcon />
+          </IconButton>
+        </Box>
       </>
     );
   } else {
     // Loading State
+    return <CircularProgress />;
     // return <Spinner label={"Loading..."} color={"primary"} labelColor="primary"/>;
   }
 }

@@ -26,14 +26,13 @@ import QuestionAnswerRoundedIcon from '@mui/icons-material/QuestionAnswerRounded
 import GroupRoundedIcon from '@mui/icons-material/GroupRounded';
 import SupportRoundedIcon from '@mui/icons-material/SupportRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
-import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
-import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import BrightnessAutoRoundedIcon from '@mui/icons-material/BrightnessAutoRounded';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
-import { closeSidebar } from '../config/utils';
+import { closeSidebar } from '@/config/utils';
+import {LoginLogout} from "@/components/loginlogout";
 
-function Toggler({
+function Toggle({
   defaultExpanded = false,
   renderToggle,
   children,
@@ -176,7 +175,7 @@ export default function Sidebar() {
           </ListItem>
 
           <ListItem nested>
-            <Toggler
+            <Toggle
               renderToggle={({ open, setOpen }) => (
                 <ListItemButton onClick={() => setOpen(!open)}>
                   <AssignmentRoundedIcon />
@@ -203,7 +202,7 @@ export default function Sidebar() {
                   <ListItemButton>Done</ListItemButton>
                 </ListItem>
               </List>
-            </Toggler>
+            </Toggle>
           </ListItem>
 
           <ListItem>
@@ -223,7 +222,7 @@ export default function Sidebar() {
           </ListItem>
 
           <ListItem nested>
-            <Toggler
+            <Toggle
               renderToggle={({ open, setOpen }) => (
                 <ListItemButton onClick={() => setOpen(!open)}>
                   <GroupRoundedIcon />
@@ -253,7 +252,7 @@ export default function Sidebar() {
                   <ListItemButton>Roles & permission</ListItemButton>
                 </ListItem>
               </List>
-            </Toggler>
+            </Toggle>
           </ListItem>
         </List>
 
@@ -280,43 +279,9 @@ export default function Sidebar() {
             </ListItemButton>
           </ListItem>
         </List>
-        <Card
-          invertedColors
-          variant="soft"
-          color="warning"
-          size="sm"
-          sx={{ boxShadow: 'none' }}
-        >
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <Typography level="title-sm">Used space</Typography>
-            <IconButton size="sm">
-              <CloseRoundedIcon />
-            </IconButton>
-          </Stack>
-          <Typography level="body-xs">
-            Your team has used 80% of your available space. Need more?
-          </Typography>
-          <LinearProgress variant="outlined" value={80} determinate sx={{ my: 1 }} />
-          <Button size="sm" variant="solid">
-            Upgrade plan
-          </Button>
-        </Card>
       </Box>
       <Divider />
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-        <Avatar
-          variant="outlined"
-          size="sm"
-          src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=286"
-        />
-        <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography level="title-sm">Siriwat K.</Typography>
-          <Typography level="body-xs">siriwatk@test.com</Typography>
-        </Box>
-        <IconButton size="sm" variant="plain" color="neutral">
-          <LogoutRoundedIcon />
-        </IconButton>
-      </Box>
+      <LoginLogout />
     </Sheet>
   );
 }

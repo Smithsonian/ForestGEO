@@ -9,7 +9,7 @@ import {
 } from '@mui/material/styles';
 import { CssVarsProvider as JoyCssVarsProvider } from '@mui/joy/styles';
 const materialTheme = materialExtendTheme();
-export default function Themeregistry({ children }: { children: React.ReactNode }) {
+export default function ThemeRegistry({ children }: { children: React.ReactNode }) {
   
   return (
     <NextAppDirEmotionCacheProvider options={{ key: 'joy' }}>
