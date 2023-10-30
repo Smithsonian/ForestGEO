@@ -5,7 +5,11 @@ import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
 import Divider from "@mui/joy/Divider";
-import {Box} from "@mui/joy";
+import {Box, Breadcrumbs, Link as JoyLink} from "@mui/joy";
+import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
+import Link from "next/link";
+import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
+import Typography from "@mui/joy/Typography";
 
 export default function EndpointLayout({ children, }: { children: React.ReactNode }){
   useSession({
@@ -44,21 +48,37 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
   let pathname = usePathname();
   return (
     <>
-      {renderSwitch(pathname)}
-      {children}
-      {/*<Box sx={{ display: 'flex', minHeight: '100dvh' }}>*/}
-      {/*  <Divider className={"mt-6 mb-6"}/>*/}
-      {/*  */}
-      {/*</Box>*/}
-      {/*<div className={"sub_div flex flex-row h-5 items-center justify-center space-x-4 text-small self-center"}>*/}
-      {/*  <div>*/}
-      {/*    <h1 className={title({color: "violet"})}>ForestGEO&nbsp;</h1>*/}
-      {/*  </div>*/}
-      {/*  <Divider orientation={"vertical"} />*/}
-      {/*  <div>*/}
-      {/*    <p className={subtitle({color: "cyan"})}>A data entry and validation system for your convenience.</p>*/}
-      {/*  </div>*/}
-      {/*</div>*/}
+      <Box
+        component="main"
+        className="MainContent"
+        sx={{
+          px: {
+            xs: 2,
+            md: 6,
+          },
+          pt: {
+            xs: 'calc(12px + var(--Header-height))',
+            sm: 'calc(12px + var(--Header-height))',
+            md: 3,
+          },
+          pb: {
+            xs: 2,
+            sm: 2,
+            md: 3,
+          },
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          height: '100dvh',
+          gap: 1,
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {renderSwitch(pathname)}
+          {children}
+        </Box>
+      </Box>
     </>
   );
 }
