@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.sub_div {
+    position: absolute;
+    bottom: 5%;
+    left: 35%;
+}
