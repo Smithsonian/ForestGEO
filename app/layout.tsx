@@ -14,9 +14,8 @@ export default function RootLayout({ children, }: { children: React.ReactNode; }
       </head>
       <PlotsProvider>
         <Providers>
-          <Box sx={{ display: 'flex', minHeight: '100dvh' }}>
-            <Header />
-            <Sidebar />
+          <Sidebar />
+          <Box sx={{ display: 'flex', minHeight: '100vh', minWidth: '100vh' }}>
             {children}
           </Box>
         </Providers>
