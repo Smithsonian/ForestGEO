@@ -8,20 +8,22 @@ import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
 import {usePlotContext} from "@/app/plotcontext";
 import {useSession} from "next-auth/react";
 import {
+  Button,
   Card,
   CardContent,
+  ClickAwayListener,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
+  LinearProgress,
+  Pagination,
   Typography,
-  Button,
-  LinearProgress, ClickAwayListener, Pagination,
 } from "@mui/material";
 import LoadingButton from '@mui/lab/LoadingButton';
-import {Dropdown, MenuButton, Menu, MenuItem, menuItemClasses} from "@mui/base";
-import { styled } from '@mui/system';
+import {Dropdown, Menu, MenuButton, MenuItem, menuItemClasses} from "@mui/base";
+import {styled} from '@mui/system';
 import Divider from "@mui/joy/Divider";
 
 export function UploadAndReviewProcess() {

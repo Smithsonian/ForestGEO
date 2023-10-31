@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable jsx-a11y/anchor-is-valid */
 import * as React from 'react';
-import { ColorPaletteProp } from '@mui/joy/styles';
+import {ColorPaletteProp} from '@mui/joy/styles';
 import Avatar from '@mui/joy/Avatar';
 import Box from '@mui/joy/Box';
 import Button from '@mui/joy/Button';
@@ -19,7 +19,7 @@ import Option from '@mui/joy/Option';
 import Table from '@mui/joy/Table';
 import Sheet from '@mui/joy/Sheet';
 import Checkbox from '@mui/joy/Checkbox';
-import IconButton, { iconButtonClasses } from '@mui/joy/IconButton';
+import IconButton, {iconButtonClasses} from '@mui/joy/IconButton';
 import Typography from '@mui/joy/Typography';
 import Menu from '@mui/joy/Menu';
 import MenuButton from '@mui/joy/MenuButton';

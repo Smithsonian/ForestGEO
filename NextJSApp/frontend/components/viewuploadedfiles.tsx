@@ -6,7 +6,8 @@ import {BrowseError} from "@/app/error"
 import {usePlotContext} from "@/app/plotcontext";
 import {
   Button,
-  Card, CardContent,
+  Card,
+  CardContent,
   CardHeader,
   Paper,
   Table,

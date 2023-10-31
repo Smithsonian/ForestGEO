@@ -1,15 +1,10 @@
 "use client";
-import {Navbar} from "@/components/navbar";
 import * as React from "react";
-import {subtitle, title} from "@/config/primitives";
+import {title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
-import Divider from "@mui/joy/Divider";
-import {Box, Breadcrumbs, Link as JoyLink} from "@mui/joy";
-import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
-import Link from "next/link";
-import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
-import Typography from "@mui/joy/Typography";
+import {Box} from "@mui/joy";
+import Sidebar from "@/components/sidebar";
 
 export default function EndpointLayout({ children, }: { children: React.ReactNode }){
   useSession({

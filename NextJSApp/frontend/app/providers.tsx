@@ -10,13 +10,13 @@ export interface ProvidersProps {
 export function Providers({children}: ProvidersProps) {
   return (
     <>
-      <SessionProvider>
-        <ThemeRegistry>
+      <ThemeRegistry>
+        <SessionProvider>
           <body>
           {children}
           </body>
-        </ThemeRegistry>
-      </SessionProvider>
+        </SessionProvider>
+      </ThemeRegistry>
     </>
   );
 }

@@ -1,5 +1,5 @@
-import { extendTheme } from '@mui/joy/styles';
-import { Inter, Source_Code_Pro } from 'next/font/google';
+import {extendTheme} from '@mui/joy/styles';
+import {Inter, Source_Code_Pro} from 'next/font/google';
 
 const inter = Inter({
   subsets: ['latin'],

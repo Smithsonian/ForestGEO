@@ -3,55 +3,24 @@ import * as React from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
-import IconButton from '@mui/joy/IconButton';
-import Input from '@mui/joy/Input';
 import List from '@mui/joy/List';
 import ListItem from '@mui/joy/ListItem';
-import ListItemButton, { listItemButtonClasses } from '@mui/joy/ListItemButton';
+import ListItemButton, {listItemButtonClasses} from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import Sheet from '@mui/joy/Sheet';
-import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
-import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
-import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded';
-import ShoppingCartRoundedIcon from '@mui/icons-material/ShoppingCartRounded';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import FolderIcon from '@mui/icons-material/Folder';
+import DataObjectIcon from '@mui/icons-material/DataObject';
 
-import { closeSidebar } from '@/config/utils';
+import {closeSidebar} from '@/config/utils';
 import {LoginLogout} from "@/components/loginlogout";
-
-function Toggle({
-  defaultExpanded = false,
-  renderToggle,
-  children,
-}: {
-  defaultExpanded?: boolean;
-  children: React.ReactNode;
-  renderToggle: (params: {
-    open: boolean;
-    setOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  }) => React.ReactNode;
-}) {
-  const [open, setOpen] = React.useState(defaultExpanded);
-  return (
-    <React.Fragment>
-      {renderToggle({ open, setOpen })}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateRows: open ? '1fr' : '0fr',
-          transition: '0.2s ease',
-          '& > *': {
-            overflow: 'hidden',
-          },
-        }}
-      >
-        {children}
-      </Box>
-    </React.Fragment>
-  );
-}
+import {useSession} from "next-auth/react";
+import {PlotSelection} from "@/components/plotselection";
 
 export default function Sidebar() {
+  const {status} = useSession();
+  const [index, setIndex] = React.useState(0);
   return (
     <Sheet
       className="Sidebar"
@@ -81,9 +50,9 @@ export default function Sidebar() {
       <GlobalStyles
         styles={(theme) => ({
           ':root': {
-            '--Sidebar-width': '220px',
+            '--Sidebar-width': '300px',
             [theme.breakpoints.up('lg')]: {
-              '--Sidebar-width': '240px',
+              '--Sidebar-width': '320px',
             },
           },
         })}
@@ -107,7 +76,9 @@ export default function Sidebar() {
         }}
         onClick={() => closeSidebar()}
       />
-      <Input size="sm" startDecorator={<SearchRoundedIcon />} placeholder="Search" />
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Typography level="title-lg">ForestGEO</Typography>
+      </Box>
       <Box
         sx={{
           minHeight: 0,
@@ -129,8 +100,8 @@ export default function Sidebar() {
           }}
         >
           <ListItem>
-            <ListItemButton>
-              <HomeRoundedIcon />
+            <ListItemButton selected={index === 0} color={index === 0 ? 'primary' : undefined} onClick={() => setIndex(0)}>
+              <DashboardIcon />
               <ListItemContent>
                 <Typography level="title-sm">Dashboard</Typography>
               </ListItemContent>
@@ -138,8 +109,8 @@ export default function Sidebar() {
           </ListItem>
 
           <ListItem>
-            <ListItemButton>
-              <DashboardRoundedIcon />
+            <ListItemButton selected={index === 1} color={index === 1 ? 'primary' : undefined} onClick={() => setIndex(1)}>
+              <FolderIcon />
               <ListItemContent>
                 <Typography level="title-sm">Files</Typography>
               </ListItemContent>
@@ -147,18 +118,23 @@ export default function Sidebar() {
           </ListItem>
 
           <ListItem>
-            <ListItemButton selected>
-              <ShoppingCartRoundedIcon />
+            <ListItemButton selected={index === 2} color={index === 2 ? 'primary' : undefined} onClick={() => setIndex(2)}>
+              <DataObjectIcon />
               <ListItemContent>
                 <Typography level="title-sm">Data</Typography>
               </ListItemContent>
             </ListItemButton>
           </ListItem>
         </List>
-
       </Box>
+      {status === "authenticated" && <>
+        <Divider />
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <PlotSelection />
+        </Box>
+      </>}
       <Divider />
-      {/*<LoginLogout />*/}
+      <LoginLogout />
     </Sheet>
   );
 }

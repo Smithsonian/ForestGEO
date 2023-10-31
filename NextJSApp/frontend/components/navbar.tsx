@@ -1,11 +1,5 @@
 "use client";
-import {siteConfig} from "@/config/macros";
-import Link from "next/link";
-import clsx from "clsx";
-import {Logo} from "@/components/icons";
 import React from "react";
-import {LoginLogout} from "@/components/loginlogout";
-import {SelectPlot} from "@/components/plotselection";
 import {usePathname} from "next/navigation";
 import {usePlotContext} from "@/app/plotcontext";
 import {useSession} from "next-auth/react";

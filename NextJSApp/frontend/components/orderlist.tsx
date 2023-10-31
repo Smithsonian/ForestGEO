@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable jsx-a11y/anchor-is-valid */
 import * as React from 'react';
-import { ColorPaletteProp } from '@mui/joy/styles';
+import {ColorPaletteProp} from '@mui/joy/styles';
 import Box from '@mui/joy/Box';
 import Avatar from '@mui/joy/Avatar';
 import Chip from '@mui/joy/Chip';

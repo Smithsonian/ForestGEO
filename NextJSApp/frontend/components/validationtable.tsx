@@ -1,15 +1,7 @@
-import {
-  TableContainer,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Paper,
-} from '@mui/material';
-import { parse } from 'papaparse';
-import React, { useState } from 'react';
-import { FileWithPath } from 'react-dropzone';
+import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,} from '@mui/material';
+import {parse} from 'papaparse';
+import React, {useState} from 'react';
+import {FileWithPath} from 'react-dropzone';
 import '@/styles/validationtable.css';
 import {FileErrors, tableHeaders} from "@/config/macros";
 

@@ -3,8 +3,8 @@ import {Providers} from "./providers";
 import React from "react";
 import {PlotsProvider} from "@/app/plotcontext";
 import Sidebar from "@/components/sidebar";
-import Header from "@/components/header";
-import {Box} from "@mui/joy";
+import { Box } from "@mui/joy";
+
 export default function RootLayout({ children, }: { children: React.ReactNode; }) {
   return (
     <>
@@ -14,8 +14,8 @@ export default function RootLayout({ children, }: { children: React.ReactNode; }
       </head>
       <PlotsProvider>
         <Providers>
-          <Sidebar />
           <Box sx={{ display: 'flex', minHeight: '100vh', minWidth: '100vh' }}>
+            <Sidebar />
             {children}
           </Box>
         </Providers>

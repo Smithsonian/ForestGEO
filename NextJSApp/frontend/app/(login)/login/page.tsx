@@ -1,22 +1,49 @@
 "use client";
-import React from "react";
+import React, {useEffect, useState} from "react";
 import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
+import {animated, useTransition} from "@react-spring/web";
+import styles from "@/styles/styles.module.css";
 
-
+const slides = [
+  'background-1.jpg',
+  'background-2.jpg',
+  'background-3.jpg',
+  'background-4.jpg',
+]
 
 export default function Page() {
-  const {data: session} = useSession();
-  if (session) redirect('/dashboard');
+  const [index, setIndex] = useState(0);
+  const transitions = useTransition(index, {
+    key: index,
+    from: { opacity: 0 },
+    enter: { opacity: 0.5 },
+    leave: { opacity: 0 },
+    config: { duration: 5000 },
+    onRest: (_a, _b, item) => {
+      if (index == item) {
+        setIndex(state => (state + 1) % slides.length)
+      }
+    },
+    exitBeforeEnter: true,
+  })
+  useEffect(() => void setInterval(() => setIndex(state => (state + 1) % slides.length), 5000), [])
+  const { status } = useSession({
+    required: true,
+    onUnauthenticated() {
+      redirect('/dashboard')
+    },
+  })
   return (
     <>
-      
-      {/*<h1 className={title()}>Welcome to &nbsp;</h1>*/}
-      {/*<h1 className={title({color: "violet"})}>ForestGEO</h1>*/}
-      {/*<Divider className={"mt-6 mb-6"}/>*/}
-      {/*<h2 className={subtitle({class: "mt-4"})}>*/}
-      {/*  A data entry and validation system for your convenience.*/}
-      {/*</h2>*/}
+      {transitions((style, i) => (
+        <animated.div
+          className={styles.bg}
+          style={{
+            ...style,
+            backgroundImage: `url(${slides[i]})`,
+          }} />
+      ))}
     </>
   );
 }
