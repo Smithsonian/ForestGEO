@@ -12,11 +12,47 @@ import Sheet from '@mui/joy/Sheet';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import FolderIcon from '@mui/icons-material/Folder';
 import DataObjectIcon from '@mui/icons-material/DataObject';
+import AssignmentRoundedIcon from '@mui/icons-material/AssignmentRounded';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
 import {closeSidebar} from '@/config/utils';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
 import {PlotSelection} from "@/components/plotselection";
+import Option from "@mui/joy/Option";
+import Select from "@mui/joy/Select";
+
+function Toggler({
+                   defaultExpanded = false,
+                   renderToggle,
+                   children,
+                 }: {
+  defaultExpanded?: boolean;
+  children: React.ReactNode;
+  renderToggle: (params: {
+    open: boolean;
+    setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  }) => React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(defaultExpanded);
+  return (
+    <React.Fragment>
+      {renderToggle({ open, setOpen })}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateRows: open ? '1fr' : '0fr',
+          transition: '0.2s ease',
+          '& > *': {
+            overflow: 'hidden',
+          },
+        }}
+      >
+        {children}
+      </Box>
+    </React.Fragment>
+  );
+}
 
 export default function Sidebar() {
   const {status} = useSession();
@@ -125,14 +161,45 @@ export default function Sidebar() {
               </ListItemContent>
             </ListItemButton>
           </ListItem>
+          
+          <ListItem nested>
+            <Toggler
+              renderToggle={({ open, setOpen }) => (
+                <ListItemButton onClick={() => setOpen(!open)}>
+                  <AssignmentRoundedIcon />
+                  <ListItemContent>
+                    <Typography level="title-sm">Tasks</Typography>
+                  </ListItemContent>
+                  <KeyboardArrowDownIcon
+                    sx={{ transform: open ? 'rotate(180deg)' : 'none' }}
+                  />
+                </ListItemButton>
+              )}
+            >
+              <List sx={{ gap: 0.5 }}>
+                <ListItem sx={{ mt: 0.5 }}>
+                  <ListItemButton>All tasks</ListItemButton>
+                </ListItem>
+                <ListItem>
+                  <ListItemButton>Backlog</ListItemButton>
+                </ListItem>
+                <ListItem>
+                  <ListItemButton>In progress</ListItemButton>
+                </ListItem>
+                <ListItem>
+                  <ListItemButton>Done</ListItemButton>
+                </ListItem>
+              </List>
+            </Toggler>
+          </ListItem>
         </List>
       </Box>
-      {status === "authenticated" && <>
-        <Divider />
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <PlotSelection />
-        </Box>
-      </>}
+      {/*{status === "authenticated" && <>*/}
+      {/*  <Divider />*/}
+      {/*  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>*/}
+      {/*    <PlotSelection />*/}
+      {/*  </Box>*/}
+      {/*</>}*/}
       <Divider />
       <LoginLogout />
     </Sheet>

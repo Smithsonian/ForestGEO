@@ -71,6 +71,8 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           {renderSwitch(pathname)}
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
           {children}
         </Box>
       </Box>

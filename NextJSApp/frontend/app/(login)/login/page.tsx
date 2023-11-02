@@ -28,12 +28,9 @@ export default function Page() {
     exitBeforeEnter: true,
   })
   useEffect(() => void setInterval(() => setIndex(state => (state + 1) % slides.length), 5000), [])
-  const { status } = useSession({
-    required: true,
-    onUnauthenticated() {
-      redirect('/dashboard')
-    },
-  })
+  const { status } = useSession();
+  if (status == "authenticated") redirect('/dashboard');
+  else
   return (
     <>
       {transitions((style, i) => (

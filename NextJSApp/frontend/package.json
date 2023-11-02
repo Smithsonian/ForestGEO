@@ -24,10 +24,7 @@
     "@mui/system": "^5.14.15",
     "@react-spring/web": "^9.7.3",
     "autoprefixer": "^10.4.16",
-    "clsx": "^2.0.0",
     "dotenv": "^16.3.1",
-    "eslint": "latest",
-    "eslint-config-next": "latest",
     "mssql": "^10.0.0",
     "next": "latest",
     "next-auth": "^4.23.1",
@@ -36,8 +33,7 @@
     "react-dom": "latest",
     "react-dropzone": "^14.2.3",
     "tailwind-variants": "^0.1.17",
-    "tailwindcss": "3.3.3",
-    "typescript": "latest"
+    "tailwindcss": "3.3.3"
   },
   "devDependencies": {
     "@types/mssql": "^8.1.2",
