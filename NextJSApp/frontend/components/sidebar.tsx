@@ -21,6 +21,10 @@ import {useSession} from "next-auth/react";
 import {PlotSelection} from "@/components/plotselection";
 import Option from "@mui/joy/Option";
 import Select from "@mui/joy/Select";
+import { Card, CardContent } from '@mui/joy';
+import {plots} from "@/config/macros";
+import {usePlotContext, usePlotDispatch} from "@/app/plotcontext";
+import {useEffect, useState} from "react";
 
 function Toggler({
                    defaultExpanded = false,
@@ -57,20 +61,29 @@ function Toggler({
 export default function Sidebar() {
   const {status} = useSession();
   const [index, setIndex] = React.useState(0);
+  const dispatch = usePlotDispatch();
+  const currentPlot = usePlotContext();
+  const [value, setValue] = useState<string>("");
+  const [selected, setSelected] = useState(false);
+  useEffect(() => {
+    if (dispatch && value != "") {
+      dispatch({
+        plotKey: value,
+      });
+    }
+  }, [dispatch, value]);
+  const keys = plots.map(plot => {
+    return {
+      key: plot.key
+    };
+  });
   return (
     <Sheet
       className="Sidebar"
       sx={{
         position: {
-          xs: 'fixed',
           md: 'sticky',
         },
-        transform: {
-          xs: 'translateX(calc(100% * (var(--SideNavigation-slideIn, 0) - 1)))',
-          md: 'none',
-        },
-        transition: 'transform 0.4s, width 0.4s',
-        zIndex: 10000,
         height: '100dvh',
         width: 'var(--Sidebar-width)',
         top: 0,
@@ -92,25 +105,6 @@ export default function Sidebar() {
             },
           },
         })}
-      />
-      <Box
-        className="Sidebar-overlay"
-        sx={{
-          position: 'fixed',
-          zIndex: 9998,
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          opacity: 'var(--SideNavigation-slideIn)',
-          backgroundColor: 'var(--joy-palette-background-backdrop)',
-          transition: 'opacity 0.4s',
-          transform: {
-            xs: 'translateX(calc(100% * (var(--SideNavigation-slideIn, 0) - 1) + var(--SideNavigation-slideIn, 0) * var(--Sidebar-width, 0px)))',
-            lg: 'translateX(-100%)',
-          },
-        }}
-        onClick={() => closeSidebar()}
       />
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
         <Typography level="title-lg">ForestGEO</Typography>
@@ -168,7 +162,9 @@ export default function Sidebar() {
                 <ListItemButton onClick={() => setOpen(!open)}>
                   <AssignmentRoundedIcon />
                   <ListItemContent>
-                    <Typography level="title-sm">Tasks</Typography>
+                    {value == "" ?
+                      <Typography level="title-sm">Plots</Typography> :
+                      <Typography level={"title-sm"}>Now Viewing: {value}</Typography>}
                   </ListItemContent>
                   <KeyboardArrowDownIcon
                     sx={{ transform: open ? 'rotate(180deg)' : 'none' }}
@@ -178,28 +174,28 @@ export default function Sidebar() {
             >
               <List sx={{ gap: 0.5 }}>
                 <ListItem sx={{ mt: 0.5 }}>
-                  <ListItemButton>All tasks</ListItemButton>
+                  <ListItemButton selected={value == ""} onClick={() => setValue("")}>
+                    None
+                  </ListItemButton>
                 </ListItem>
-                <ListItem>
-                  <ListItemButton>Backlog</ListItemButton>
-                </ListItem>
-                <ListItem>
-                  <ListItemButton>In progress</ListItemButton>
-                </ListItem>
-                <ListItem>
-                  <ListItemButton>Done</ListItemButton>
-                </ListItem>
+                {keys.map((keyItem, keyIndex) => (
+                  <ListItem key={keyIndex}>
+                    <ListItemButton selected={value == keyItem.key} onClick={() => setValue(keyItem.key)}>
+                      {keyItem.key}
+                    </ListItemButton>
+                  </ListItem>
+                ))}
               </List>
             </Toggler>
           </ListItem>
         </List>
+        {/*{status === "authenticated" && <>*/}
+        {/*  <Divider />*/}
+        {/*  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>*/}
+        {/*    <PlotSelection />*/}
+        {/*  </Box>*/}
+        {/*</>}*/}
       </Box>
-      {/*{status === "authenticated" && <>*/}
-      {/*  <Divider />*/}
-      {/*  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>*/}
-      {/*    <PlotSelection />*/}
-      {/*  </Box>*/}
-      {/*</>}*/}
       <Divider />
       <LoginLogout />
     </Sheet>

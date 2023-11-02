@@ -4,6 +4,7 @@ import React from "react";
 import {PlotsProvider} from "@/app/plotcontext";
 import Sidebar from "@/components/sidebar";
 import { Box } from "@mui/joy";
+import DrawerNav from "@/components/drawer";
 
 export default function RootLayout({ children, }: { children: React.ReactNode; }) {
   return (
@@ -14,8 +15,10 @@ export default function RootLayout({ children, }: { children: React.ReactNode; }
       </head>
       <PlotsProvider>
         <Providers>
+          {/*<DrawerNav />*/}
           <Box sx={{ display: 'flex', minHeight: '100vh', minWidth: '100vh' }}>
-            {/*<Sidebar />*/}
+            <Sidebar />
+            {/*<DrawerNav />*/}
             {children}
           </Box>
         </Providers>

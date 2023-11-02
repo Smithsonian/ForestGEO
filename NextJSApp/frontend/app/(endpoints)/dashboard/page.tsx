@@ -8,9 +8,9 @@ export default function Page() {
   const currentPlot = usePlotContext();
   return (
     <>
-      {/*<p>You have selected {currentPlot?.key ? currentPlot!.key : "nothing"}</p>*/}
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-        <PlotSelection />
+        <p>You have selected {currentPlot?.key ? currentPlot!.key : "nothing"}</p>
+        {/*<PlotSelection />*/}
       </Box>
     </>
   );
