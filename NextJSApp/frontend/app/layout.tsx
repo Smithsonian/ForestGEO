@@ -17,7 +17,6 @@ export default function RootLayout({ children, }: { children: React.ReactNode; }
         <Providers>
           {/*<DrawerNav />*/}
           <Box sx={{ display: 'flex', minHeight: '100vh', minWidth: '100vh' }}>
-            <Sidebar />
             {/*<DrawerNav />*/}
             {children}
           </Box>

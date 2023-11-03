@@ -4,6 +4,7 @@ import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
+import Sidebar from "@/components/sidebar";
 
 const slides = [
   'background-1.jpg',
@@ -41,6 +42,7 @@ export default function Page() {
             backgroundImage: `url(${slides[i]})`,
           }} />
       ))}
+      <Sidebar />
     </>
   );
 }
