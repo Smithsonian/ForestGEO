@@ -10,7 +10,6 @@ export default function Page() {
     <>
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
         <p>You have selected {currentPlot?.key ? currentPlot!.key : "nothing"}</p>
-        {/*<PlotSelection />*/}
       </Box>
     </>
   );

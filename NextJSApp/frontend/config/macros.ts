@@ -120,6 +120,7 @@ export const fileColumns = [
 ]
 
 export const plots: Plot[] = [
+  {key: "None", num: 0},
   {key: "Amacayacu", num: 16},
   {key: "BCI", num: 40},
   {key: "bukittimah", num: 22},

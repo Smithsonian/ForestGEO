@@ -25,6 +25,7 @@ import { Card, CardContent } from '@mui/joy';
 import {plots} from "@/config/macros";
 import {usePlotContext, usePlotDispatch} from "@/app/plotcontext";
 import {useEffect, useState} from "react";
+import {usePathname, useRouter} from "next/navigation";
 
 function Toggler({
                    defaultExpanded = false,
@@ -59,14 +60,12 @@ function Toggler({
 }
 
 export default function Sidebar() {
-  const {status} = useSession();
-  const [index, setIndex] = React.useState(0);
   const dispatch = usePlotDispatch();
-  const currentPlot = usePlotContext();
   const [value, setValue] = useState<string>("");
-  const [selected, setSelected] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
   useEffect(() => {
-    if (dispatch && value != "") {
+    if (dispatch) {
       dispatch({
         plotKey: value,
       });
@@ -130,7 +129,7 @@ export default function Sidebar() {
           }}
         >
           <ListItem>
-            <ListItemButton selected={index === 0} color={index === 0 ? 'primary' : undefined} onClick={() => setIndex(0)}>
+            <ListItemButton selected={pathname === '/dashboard'} color={pathname === '/dashboard' ? 'primary' : undefined} onClick={() => router.push('/dashboard')}>
               <DashboardIcon />
               <ListItemContent>
                 <Typography level="title-sm">Dashboard</Typography>
@@ -139,7 +138,7 @@ export default function Sidebar() {
           </ListItem>
 
           <ListItem>
-            <ListItemButton selected={index === 1} color={index === 1 ? 'primary' : undefined} onClick={() => setIndex(1)}>
+            <ListItemButton selected={pathname === '/files'} color={pathname === '/files' ? 'primary' : undefined} onClick={() => router.push('/files')}>
               <FolderIcon />
               <ListItemContent>
                 <Typography level="title-sm">Files</Typography>
@@ -148,7 +147,7 @@ export default function Sidebar() {
           </ListItem>
 
           <ListItem>
-            <ListItemButton selected={index === 2} color={index === 2 ? 'primary' : undefined} onClick={() => setIndex(2)}>
+            <ListItemButton selected={pathname === '/data'} color={pathname === '/data' ? 'primary' : undefined} onClick={() => router.push('/data')}>
               <DataObjectIcon />
               <ListItemContent>
                 <Typography level="title-sm">Data</Typography>
@@ -162,7 +161,7 @@ export default function Sidebar() {
                 <ListItemButton onClick={() => setOpen(!open)}>
                   <AssignmentRoundedIcon />
                   <ListItemContent>
-                    {value == "" ?
+                    {value == "None" || value == "" ?
                       <Typography level="title-sm">Plots</Typography> :
                       <Typography level={"title-sm"}>Now Viewing: {value}</Typography>}
                   </ListItemContent>
@@ -173,11 +172,6 @@ export default function Sidebar() {
               )}
             >
               <List sx={{ gap: 0.5 }}>
-                <ListItem sx={{ mt: 0.5 }}>
-                  <ListItemButton selected={value == ""} onClick={() => setValue("")}>
-                    None
-                  </ListItemButton>
-                </ListItem>
                 {keys.map((keyItem, keyIndex) => (
                   <ListItem key={keyIndex}>
                     <ListItemButton selected={value == keyItem.key} onClick={() => setValue(keyItem.key)}>
