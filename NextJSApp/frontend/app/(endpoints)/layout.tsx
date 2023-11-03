@@ -43,6 +43,7 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
   let pathname = usePathname();
   return (
     <>
+      <Sidebar />
       <Box
         component="main"
         className="MainContent"
