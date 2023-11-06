@@ -1,10 +1,11 @@
 "use client";
 import * as React from "react";
-import {title} from "@/config/primitives";
+import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
 import {Box} from "@mui/joy";
 import Sidebar from "@/components/sidebar";
+import Divider from "@mui/joy/Divider";
 
 export default function EndpointLayout({ children, }: { children: React.ReactNode }){
   useSession({
@@ -75,6 +76,15 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           {children}
+          <Box mt={3} position="absolute" bottom="10px" right="calc(40% - var(--Sidebar-width))" sx={{display: 'flex', alignItems: 'center', flexDirection: 'row'}}>
+            <Box>
+              <h1 className={title({color: "violet"})}>ForestGEO&nbsp;</h1>
+            </Box>
+            <Divider orientation={"vertical"} sx={{marginRight: 2}} />
+            <Box>
+              <p className={subtitle({color: "cyan"})}>A data entry and validation system for your convenience.</p>
+            </Box>
+          </Box>
         </Box>
       </Box>
     </>

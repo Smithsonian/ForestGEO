@@ -25,6 +25,7 @@ export function PlotsProvider({ children }: {children: React.ReactNode}) {
 
 function plotsReducer(currentPlot: any, action: {plotKey: string}) {
   if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
+  else if (action.plotKey == "") return null;
   else return currentPlot;
 }
 
