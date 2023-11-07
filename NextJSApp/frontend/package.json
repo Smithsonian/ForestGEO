@@ -22,6 +22,7 @@
     "@mui/lab": "^5.0.0-alpha.150",
     "@mui/material": "^5.14.16",
     "@mui/system": "^5.14.15",
+    "@mui/x-data-grid": "^6.18.0",
     "@react-spring/web": "^9.7.3",
     "autoprefixer": "^10.4.16",
     "dotenv": "^16.3.1",

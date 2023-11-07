@@ -20,6 +20,8 @@ import {
 import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
 import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
+import Box from "@mui/joy/Box";
+import Typography from "@mui/joy/Typography";
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
@@ -124,57 +126,57 @@ export default function ViewUploadedFiles() {
     })
     return (
       <>
-        <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
-          <CardContent>
-            <div className="flex flex-col">
-              <h5 className="text-md">Uploaded Files</h5>
-            </div>
-            <Divider className={"mt-6 mb-6"}/>
-            <div className="flex flex-col">
-              <TableContainer component={Paper}>
-                <Table aria-label={"Stored files"} stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={tableHeaderSettings}>File Count</TableCell>
-                      {fileColumns.map((item, index) => (
-                        <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
-                      ))}
-                      <TableCell sx={tableHeaderSettings}>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {sortedFileData!.map((row, index) => {
-                      let errs = row.errors == "false";
-                      return (
-                        <>
-                          <TableRow key={index}>
-                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
-                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
-                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.date).toString()}</TableCell>
-                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.version).toString()}</TableCell>
-                            <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
-                            <TableCell align="center">
-                              <Button>
-                                <DownloadIcon />
-                              </Button>
-                              <Button>
-                                <EditIcon />
-                              </Button>
-                              <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
-                                <DeleteIcon />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        </>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <Box sx={{display: 'flex', flexDirection: "column"}}>
+          <Box sx={{display: 'flex', flexDirection: "column"}}>
+            <Typography level={"title-lg"}>
+              Uploaded Files
+            </Typography>
+          </Box>
+          <Divider className={"mt-6 mb-6"}/>
+          <Box sx={{display: 'flex', flexDirection: "column"}}>
+            <TableContainer component={Paper}>
+              <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={tableHeaderSettings}>File Count</TableCell>
+                    {fileColumns.map((item, index) => (
+                      <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
+                    ))}
+                    <TableCell sx={tableHeaderSettings}>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sortedFileData!.map((row, index) => {
+                    let errs = row.errors == "false";
+                    return (
+                      <>
+                        <TableRow key={index}>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.date).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.version).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                          <TableCell align="center">
+                            <Button>
+                              <DownloadIcon />
+                            </Button>
+                            <Button>
+                              <EditIcon />
+                            </Button>
+                            <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                              <DeleteIcon />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Box>
       </>
     );
   }

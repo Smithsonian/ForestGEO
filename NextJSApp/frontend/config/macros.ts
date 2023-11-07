@@ -1,5 +1,6 @@
 import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
+import {GridColDef} from "@mui/x-data-grid";
 
 // INTERFACES
 export interface Plot {
@@ -97,6 +98,16 @@ export interface RowDataStructure {
   codes: string,
   comments: string
 }
+
+export const gridColumns: GridColDef[] = [
+  { field: 'tag', headerName: 'Tag', width: 150 },
+  { field: 'subquadrat', headerName: 'Subquadrat', width: 150 },
+  { field: 'spcode', headerName: 'Species Code', width: 150 },
+  { field: 'dbh', headerName: 'DBH', width: 150 },
+  { field: 'htmeas', headerName: 'HTMEAS', width: 150 },
+  { field: 'codes', headerName: 'Codes', width: 150 },
+  { field: 'comments', headerName: 'Comments', width: 150 },
+];
 
 export interface DropzoneProps {
   /**
@@ -247,6 +258,5 @@ export async function uploadFileAsBuffer(containerClient: ContainerClient, file:
   }
   // create connection & client facing new blob
   // async command to upload buffer via client, waiting for response
-  let uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata});
-  return uploadResponse
+  return await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata})
 }

@@ -3,10 +3,10 @@
 import React, {useState} from "react";
 import {usePlotContext} from "@/app/plotcontext";
 import {IRecordSet} from "mssql";
-import {RowDataStructure, tableHeaders, tableHeaderSettings} from "@/config/macros";
-import {Table} from "@mui/joy";
+import {gridColumns, RowDataStructure, tableHeaders, tableHeaderSettings} from "@/config/macros";
 import Button from "@mui/joy/Button";
 import Box from "@mui/joy/Box";
+import { DataGrid, GridRowsProp, GridColDef } from '@mui/x-data-grid';
 
 export default function Page() {
   const plot = usePlotContext()!;
@@ -38,28 +38,32 @@ export default function Page() {
         let temp: RowDataStructure = {tag: row['Tag'], subquadrat: row['Subquadrat'], spcode: row['SpCode'], dbh: (row['DBH'] as number).toFixed(2), htmeas: (row['Htmeas'] as number).toFixed(2), codes: row['Codes'], comments: row['Comments']}
         data.push(temp);
       })
+      let gridRows : GridRowsProp = data;
       return (
         <>
           <Button onClick={getData} loading={loading}>Reload Data</Button>
+          <Box>
+            <DataGrid columns={gridColumns} rows={gridRows} />
+          </Box>
           <div>
-            {recordsets && <Table>
-              <thead>
-              <tr>
-                {tableHeaders.map((item, index) => (
-                  <th style={tableHeaderSettings} key={index}>{item.label}</th>
-                ))}
-              </tr>
-              </thead>
-              <tbody>
-              {data.map((row, rowIndex) => (
-                <tr key={rowIndex}>
-                  {Object.values(row).map((rowEntry, rowEntryIndex) => (
-                    <td key={rowEntryIndex}>{rowEntry}</td>
-                  ))}
-                </tr>
-              ))}
-              </tbody>
-            </Table>}
+            {/*{recordsets && <Table>*/}
+            {/*  <thead>*/}
+            {/*  <tr>*/}
+            {/*    {tableHeaders.map((item, index) => (*/}
+            {/*      <th style={tableHeaderSettings} key={index}>{item.label}</th>*/}
+            {/*    ))}*/}
+            {/*  </tr>*/}
+            {/*  </thead>*/}
+            {/*  <tbody>*/}
+            {/*  {data.map((row, rowIndex) => (*/}
+            {/*    <tr key={rowIndex}>*/}
+            {/*      {Object.values(row).map((rowEntry, rowEntryIndex) => (*/}
+            {/*        <td key={rowEntryIndex}>{rowEntry}</td>*/}
+            {/*      ))}*/}
+            {/*    </tr>*/}
+            {/*  ))}*/}
+            {/*  </tbody>*/}
+            {/*</Table>}*/}
           </div>
         </>
       );
@@ -71,5 +75,4 @@ export default function Page() {
       );
     }
   }
-  
 }
