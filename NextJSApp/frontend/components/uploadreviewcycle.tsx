@@ -93,7 +93,8 @@ export function UploadAndReviewProcess() {
         }
       }
     }
-  }, [errorsData, handleUpload, reviewState, uploaded]);0
+  }, [errorsData, handleUpload, reviewState, uploaded]);
+  0
   
   async function handleInitialSubmit() {
     setParsing(true);
@@ -136,6 +137,7 @@ export function UploadAndReviewProcess() {
   async function handleCloseErrDropdown() {
     setErrDropdown(false);
   }
+  
   const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
     setDataViewActive(value);
   };
@@ -247,14 +249,14 @@ export function UploadAndReviewProcess() {
                     fileName: '',
                     data: [],
                   }}
-                  errorMessage={errorsData} />
+                  errorMessage={errorsData}/>
                 <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
               </div>
               <div>
                 <ClickAwayListener onClickAway={handleCloseErrDropdown}>
                   <Dropdown onOpenChange={handleOpenErrDropdown}>
                     <TriggerButton>Dashboard</TriggerButton>
-                    <Menu slots={{ listbox: StyledListbox }}>
+                    <Menu slots={{listbox: StyledListbox}}>
                       <StyledMenuItem onClick={createHandleMenuClick('Profile')}>
                         Profile
                       </StyledMenuItem>
@@ -329,7 +331,7 @@ const grey = {
 };
 
 const StyledListbox = styled('ul')(
-  ({ theme }) => `
+  ({theme}) => `
   font-family: IBM Plex Sans, sans-serif;
   font-size: 0.875rem;
   box-sizing: border-box;
@@ -348,7 +350,7 @@ const StyledListbox = styled('ul')(
 );
 
 const StyledMenuItem = styled(MenuItem)(
-  ({ theme }) => `
+  ({theme}) => `
   list-style: none;
   padding: 8px;
   border-radius: 8px;
@@ -377,7 +379,7 @@ const StyledMenuItem = styled(MenuItem)(
 );
 
 const TriggerButton = styled(MenuButton)(
-  ({ theme }) => `
+  ({theme}) => `
   font-family: IBM Plex Sans, sans-serif;
   font-weight: 600;
   font-size: 0.875rem;

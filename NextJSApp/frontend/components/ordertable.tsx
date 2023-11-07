@@ -263,16 +263,16 @@ function RowMenu() {
   return (
     <Dropdown>
       <MenuButton
-        slots={{ root: IconButton }}
-        slotProps={{ root: { variant: 'plain', color: 'neutral', size: 'sm' } }}
+        slots={{root: IconButton}}
+        slotProps={{root: {variant: 'plain', color: 'neutral', size: 'sm'}}}
       >
-        <MoreHorizRoundedIcon />
+        <MoreHorizRoundedIcon/>
       </MenuButton>
-      <Menu size="sm" sx={{ minWidth: 140 }}>
+      <Menu size="sm" sx={{minWidth: 140}}>
         <MenuItem>Edit</MenuItem>
         <MenuItem>Rename</MenuItem>
         <MenuItem>Move</MenuItem>
-        <Divider />
+        <Divider/>
         <MenuItem color="danger">Delete</MenuItem>
       </Menu>
     </Dropdown>
@@ -290,7 +290,7 @@ export default function Ordertable() {
         <Select
           size="sm"
           placeholder="Filter by status"
-          slotProps={{ button: { sx: { whiteSpace: 'nowrap' } } }}
+          slotProps={{button: {sx: {whiteSpace: 'nowrap'}}}}
         >
           <Option value="paid">Paid</Option>
           <Option value="pending">Pending</Option>
@@ -298,7 +298,7 @@ export default function Ordertable() {
           <Option value="cancelled">Cancelled</Option>
         </Select>
       </FormControl>
-
+      
       <FormControl size="sm">
         <FormLabel>Category</FormLabel>
         <Select size="sm" placeholder="All">
@@ -308,7 +308,7 @@ export default function Ordertable() {
           <Option value="debit">Debit</Option>
         </Select>
       </FormControl>
-
+      
       <FormControl size="sm">
         <FormLabel>Customer</FormLabel>
         <Select size="sm" placeholder="All">
@@ -339,8 +339,8 @@ export default function Ordertable() {
         <Input
           size="sm"
           placeholder="Search"
-          startDecorator={<SearchIcon />}
-          sx={{ flexGrow: 1 }}
+          startDecorator={<SearchIcon/>}
+          sx={{flexGrow: 1}}
         />
         <IconButton
           size="sm"
@@ -348,16 +348,16 @@ export default function Ordertable() {
           color="neutral"
           onClick={() => setOpen(true)}
         >
-          <FilterAltIcon />
+          <FilterAltIcon/>
         </IconButton>
         <Modal open={open} onClose={() => setOpen(false)}>
           <ModalDialog aria-labelledby="filter-modal" layout="fullscreen">
-            <ModalClose />
+            <ModalClose/>
             <Typography id="filter-modal" level="h2">
               Filters
             </Typography>
-            <Divider sx={{ my: 2 }} />
-            <Sheet sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Divider sx={{my: 2}}/>
+            <Sheet sx={{display: 'flex', flexDirection: 'column', gap: 2}}>
               {renderFilters()}
               <Button color="primary" onClick={() => setOpen(false)}>
                 Submit
@@ -385,9 +385,9 @@ export default function Ordertable() {
           },
         }}
       >
-        <FormControl sx={{ flex: 1 }} size="sm">
+        <FormControl sx={{flex: 1}} size="sm">
           <FormLabel>Search for order</FormLabel>
-          <Input size="sm" placeholder="Search" startDecorator={<SearchIcon />} />
+          <Input size="sm" placeholder="Search" startDecorator={<SearchIcon/>}/>
         </FormControl>
         {renderFilters()}
       </Box>
@@ -395,7 +395,7 @@ export default function Ordertable() {
         className="OrderTableContainer"
         variant="outlined"
         sx={{
-          display: { xs: 'none', sm: 'initial' },
+          display: {xs: 'none', sm: 'initial'},
           width: '100%',
           borderRadius: 'sm',
           flexShrink: 1,
@@ -416,118 +416,118 @@ export default function Ordertable() {
           }}
         >
           <thead>
-            <tr>
-              <th style={{ width: 48, textAlign: 'center', padding: '12px 6px' }}>
-                <Checkbox
-                  size="sm"
-                  indeterminate={
-                    selected.length > 0 && selected.length !== rows.length
-                  }
-                  checked={selected.length === rows.length}
-                  onChange={(event) => {
-                    setSelected(
-                      event.target.checked ? rows.map((row) => row.id) : [],
-                    );
-                  }}
-                  color={
-                    selected.length > 0 || selected.length === rows.length
-                      ? 'primary'
-                      : undefined
-                  }
-                  sx={{ verticalAlign: 'text-bottom' }}
-                />
-              </th>
-              <th style={{ width: 120, padding: '12px 6px' }}>
-                <Link
-                  underline="none"
-                  color="primary"
-                  component="button"
-                  onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}
-                  fontWeight="lg"
-                  endDecorator={<ArrowDropDownIcon />}
-                  sx={{
-                    '& svg': {
-                      transition: '0.2s',
-                      transform:
-                        order === 'desc' ? 'rotate(0deg)' : 'rotate(180deg)',
-                    },
-                  }}
-                >
-                  Invoice
-                </Link>
-              </th>
-              <th style={{ width: 140, padding: '12px 6px' }}>Date</th>
-              <th style={{ width: 140, padding: '12px 6px' }}>Status</th>
-              <th style={{ width: 240, padding: '12px 6px' }}>Customer</th>
-              <th style={{ width: 140, padding: '12px 6px' }}> </th>
-            </tr>
+          <tr>
+            <th style={{width: 48, textAlign: 'center', padding: '12px 6px'}}>
+              <Checkbox
+                size="sm"
+                indeterminate={
+                  selected.length > 0 && selected.length !== rows.length
+                }
+                checked={selected.length === rows.length}
+                onChange={(event) => {
+                  setSelected(
+                    event.target.checked ? rows.map((row) => row.id) : [],
+                  );
+                }}
+                color={
+                  selected.length > 0 || selected.length === rows.length
+                    ? 'primary'
+                    : undefined
+                }
+                sx={{verticalAlign: 'text-bottom'}}
+              />
+            </th>
+            <th style={{width: 120, padding: '12px 6px'}}>
+              <Link
+                underline="none"
+                color="primary"
+                component="button"
+                onClick={() => setOrder(order === 'asc' ? 'desc' : 'asc')}
+                fontWeight="lg"
+                endDecorator={<ArrowDropDownIcon/>}
+                sx={{
+                  '& svg': {
+                    transition: '0.2s',
+                    transform:
+                      order === 'desc' ? 'rotate(0deg)' : 'rotate(180deg)',
+                  },
+                }}
+              >
+                Invoice
+              </Link>
+            </th>
+            <th style={{width: 140, padding: '12px 6px'}}>Date</th>
+            <th style={{width: 140, padding: '12px 6px'}}>Status</th>
+            <th style={{width: 240, padding: '12px 6px'}}>Customer</th>
+            <th style={{width: 140, padding: '12px 6px'}}></th>
+          </tr>
           </thead>
           <tbody>
-            {stableSort(rows, getComparator(order, 'id')).map((row) => (
-              <tr key={row.id}>
-                <td style={{ textAlign: 'center', width: 120 }}>
-                  <Checkbox
-                    size="sm"
-                    checked={selected.includes(row.id)}
-                    color={selected.includes(row.id) ? 'primary' : undefined}
-                    onChange={(event) => {
-                      setSelected((ids) =>
-                        event.target.checked
-                          ? ids.concat(row.id)
-                          : ids.filter((itemId) => itemId !== row.id),
-                      );
-                    }}
-                    slotProps={{ checkbox: { sx: { textAlign: 'left' } } }}
-                    sx={{ verticalAlign: 'text-bottom' }}
-                  />
-                </td>
-                <td>
-                  <Typography level="body-xs">{row.id}</Typography>
-                </td>
-                <td>
-                  <Typography level="body-xs">{row.date}</Typography>
-                </td>
-                <td>
-                  <Chip
-                    variant="soft"
-                    size="sm"
-                    startDecorator={
-                      {
-                        Paid: <CheckRoundedIcon />,
-                        Refunded: <AutorenewRoundedIcon />,
-                        Cancelled: <BlockIcon />,
-                      }[row.status]
-                    }
-                    color={
-                      {
-                        Paid: 'success',
-                        Refunded: 'neutral',
-                        Cancelled: 'danger',
-                      }[row.status] as ColorPaletteProp
-                    }
-                  >
-                    {row.status}
-                  </Chip>
-                </td>
-                <td>
-                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <Avatar size="sm">{row.customer.initial}</Avatar>
-                    <div>
-                      <Typography level="body-xs">{row.customer.name}</Typography>
-                      <Typography level="body-xs">{row.customer.email}</Typography>
-                    </div>
-                  </Box>
-                </td>
-                <td>
-                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <Link level="body-xs" component="button">
-                      Download
-                    </Link>
-                    <RowMenu />
-                  </Box>
-                </td>
-              </tr>
-            ))}
+          {stableSort(rows, getComparator(order, 'id')).map((row) => (
+            <tr key={row.id}>
+              <td style={{textAlign: 'center', width: 120}}>
+                <Checkbox
+                  size="sm"
+                  checked={selected.includes(row.id)}
+                  color={selected.includes(row.id) ? 'primary' : undefined}
+                  onChange={(event) => {
+                    setSelected((ids) =>
+                      event.target.checked
+                        ? ids.concat(row.id)
+                        : ids.filter((itemId) => itemId !== row.id),
+                    );
+                  }}
+                  slotProps={{checkbox: {sx: {textAlign: 'left'}}}}
+                  sx={{verticalAlign: 'text-bottom'}}
+                />
+              </td>
+              <td>
+                <Typography level="body-xs">{row.id}</Typography>
+              </td>
+              <td>
+                <Typography level="body-xs">{row.date}</Typography>
+              </td>
+              <td>
+                <Chip
+                  variant="soft"
+                  size="sm"
+                  startDecorator={
+                    {
+                      Paid: <CheckRoundedIcon/>,
+                      Refunded: <AutorenewRoundedIcon/>,
+                      Cancelled: <BlockIcon/>,
+                    }[row.status]
+                  }
+                  color={
+                    {
+                      Paid: 'success',
+                      Refunded: 'neutral',
+                      Cancelled: 'danger',
+                    }[row.status] as ColorPaletteProp
+                  }
+                >
+                  {row.status}
+                </Chip>
+              </td>
+              <td>
+                <Box sx={{display: 'flex', gap: 2, alignItems: 'center'}}>
+                  <Avatar size="sm">{row.customer.initial}</Avatar>
+                  <div>
+                    <Typography level="body-xs">{row.customer.name}</Typography>
+                    <Typography level="body-xs">{row.customer.email}</Typography>
+                  </div>
+                </Box>
+              </td>
+              <td>
+                <Box sx={{display: 'flex', gap: 2, alignItems: 'center'}}>
+                  <Link level="body-xs" component="button">
+                    Download
+                  </Link>
+                  <RowMenu/>
+                </Box>
+              </td>
+            </tr>
+          ))}
           </tbody>
         </Table>
       </Sheet>
@@ -536,7 +536,7 @@ export default function Ordertable() {
         sx={{
           pt: 2,
           gap: 1,
-          [`& .${iconButtonClasses.root}`]: { borderRadius: '50%' },
+          [`& .${iconButtonClasses.root}`]: {borderRadius: '50%'},
           display: {
             xs: 'none',
             md: 'flex',
@@ -547,12 +547,12 @@ export default function Ordertable() {
           size="sm"
           variant="outlined"
           color="neutral"
-          startDecorator={<KeyboardArrowLeftIcon />}
+          startDecorator={<KeyboardArrowLeftIcon/>}
         >
           Previous
         </Button>
-
-        <Box sx={{ flex: 1 }} />
+        
+        <Box sx={{flex: 1}}/>
         {['1', '2', '3', '…', '8', '9', '10'].map((page) => (
           <IconButton
             key={page}
@@ -563,13 +563,13 @@ export default function Ordertable() {
             {page}
           </IconButton>
         ))}
-        <Box sx={{ flex: 1 }} />
-
+        <Box sx={{flex: 1}}/>
+        
         <Button
           size="sm"
           variant="outlined"
           color="neutral"
-          endDecorator={<KeyboardArrowRightIcon />}
+          endDecorator={<KeyboardArrowRightIcon/>}
         >
           Next
         </Button>

@@ -25,7 +25,7 @@ export interface DataStructure {
   [key: string]: string;
 }
 
-export function DisplayErrorTable({fileName, fileData, errorMessage} : DisplayErrorTableProps) {
+export function DisplayErrorTable({fileName, fileData, errorMessage}: DisplayErrorTableProps) {
   return (
     <>
       <TableContainer component={Paper}>
@@ -64,7 +64,7 @@ export function DisplayErrorTable({fileName, fileData, errorMessage} : DisplayEr
                               return (
                                 <>
                                   <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
-                                    {data[header.label]} <br />
+                                    {data[header.label]} <br/>
                                     Wrong Format!
                                   </TableCell>
                                 </>
@@ -104,7 +104,7 @@ export function DisplayErrorTable({fileName, fileData, errorMessage} : DisplayEr
 /**
  * Shows a data table with the possibility of showing errors.
  */
-export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: ValidationTableProps) {
+export function ValidationErrorTable({uploadedData, errorMessage, headers,}: ValidationTableProps) {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
   const initState: { fileName: string; data: DataStructure[] }[] = [];
   const [data, setData] = useState(initState);
@@ -118,7 +118,7 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
         complete: function (results: any) {
           try {
             // eslint-disable-next-line array-callback-return
-            tempData.push({ fileName: file.name, data: results.data });
+            tempData.push({fileName: file.name, data: results.data});
             setData(tempData);
           } catch (e) {
             console.log(e);
@@ -175,7 +175,7 @@ export function ValidationErrorTable({ uploadedData, errorMessage, headers, }: V
                                     return (
                                       <>
                                         <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
-                                          {data[header.label]} <br />
+                                          {data[header.label]} <br/>
                                           Wrong Format!
                                         </TableCell>
                                       </>

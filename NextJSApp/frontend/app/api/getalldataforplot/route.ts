@@ -13,14 +13,16 @@ export async function GET(request: NextRequest) {
       getSqlConnection(tries + 1);
     });
   }
+  
   async function runQuery(conn: sql.ConnectionPool, query: string) {
     if (!conn) {
       throw new Error("invalid ConnectionPool object. check connection string settings.")
     }
     return await conn.request().query(query);
   }
+  
   const plot = request.nextUrl.searchParams.get('plot')!;
-  if(plot == 'none' || '') throw new Error("blank plot rn");
+  if (plot == 'none' || '') throw new Error("blank plot rn");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');

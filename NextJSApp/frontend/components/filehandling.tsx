@@ -155,7 +155,14 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
 /**
  * For uploading and validating drag and dropped CSV files.
  */
-function UploadAndValidateFiles({uploadDone, isUploading, errorsData, acceptedFiles, handleUpload, handleAcceptedFiles,}: UploadValidationProps) {
+function UploadAndValidateFiles({
+                                  uploadDone,
+                                  isUploading,
+                                  errorsData,
+                                  acceptedFiles,
+                                  handleUpload,
+                                  handleAcceptedFiles,
+                                }: UploadValidationProps) {
   if (uploadDone) {
     if (errorsData && Object.keys(errorsData).length == 0) {
       return (

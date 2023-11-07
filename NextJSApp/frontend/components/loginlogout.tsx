@@ -14,19 +14,20 @@ export const LoginLogout = () => {
   if (status == "unauthenticated") {
     return (
       <>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
           <Avatar
             variant="outlined"
             size="sm"
           >
             UNK
           </Avatar>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Box sx={{minWidth: 0, flex: 1}}>
             <Typography level="title-sm">Login to access</Typography>
             <Typography level="body-xs">your information</Typography>
           </Box>
-          <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signIn("azure-ad", {callbackUrl: '/dashboard'})}>
-            <LoginRoundedIcon />
+          <IconButton size="sm" variant="plain" color="neutral"
+                      onClick={() => void signIn("azure-ad", {callbackUrl: '/dashboard'})}>
+            <LoginRoundedIcon/>
           </IconButton>
         </Box>
       </>
@@ -34,7 +35,7 @@ export const LoginLogout = () => {
   } else {
     return (
       <>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
           <Avatar
             variant="outlined"
             size="sm"
@@ -43,7 +44,7 @@ export const LoginLogout = () => {
               {typeof session?.user?.name == "string" ? session!.user!.name!.replace(/[^a-zA-Z- ]/g, "").match(/\b\w/g)?.join('') : ''}
             </Skeleton>
           </Avatar>
-          <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Box sx={{minWidth: 0, flex: 1}}>
             <Typography level="title-sm">
               <Skeleton loading={status == "loading"}>
                 {session?.user?.name!}
@@ -56,7 +57,7 @@ export const LoginLogout = () => {
             </Typography>
           </Box>
           <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({callbackUrl: '/login'})}>
-            {status == "loading" ? <CircularProgress /> : <LogoutRoundedIcon />}
+            {status == "loading" ? <CircularProgress/> : <LogoutRoundedIcon/>}
           </IconButton>
         </Box>
       </>

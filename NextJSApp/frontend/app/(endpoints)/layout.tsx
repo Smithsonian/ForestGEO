@@ -7,13 +7,14 @@ import {Box} from "@mui/joy";
 import Sidebar from "@/components/sidebar";
 import Divider from "@mui/joy/Divider";
 
-export default function EndpointLayout({ children, }: { children: React.ReactNode }){
+export default function EndpointLayout({children,}: { children: React.ReactNode }) {
   useSession({
     required: true,
     onUnauthenticated() {
       redirect('/login');
     },
   });
+  
   function renderSwitch(endpoint: string) {
     switch (endpoint) {
       case '/dashboard':
@@ -41,10 +42,11 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
         );
     }
   }
+  
   let pathname = usePathname();
   return (
     <>
-      <Sidebar />
+      <Sidebar/>
       <Box
         component="main"
         className="MainContent"
@@ -71,16 +73,17 @@ export default function EndpointLayout({ children, }: { children: React.ReactNod
           gap: 1,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{display: 'flex', alignItems: 'center'}}>
           {renderSwitch(pathname)}
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{display: 'flex', alignItems: 'center'}}>
           {children}
-          <Box mt={3} position="absolute" bottom="10px" right="calc(40% - var(--Sidebar-width))" sx={{display: 'flex', alignItems: 'center', flexDirection: 'row'}}>
+          <Box mt={3} position="absolute" bottom="10px" right="calc(40% - var(--Sidebar-width))"
+               sx={{display: 'flex', alignItems: 'center', flexDirection: 'row'}}>
             <Box>
               <h1 className={title({color: "violet"})}>ForestGEO&nbsp;</h1>
             </Box>
-            <Divider orientation={"vertical"} sx={{marginRight: 2}} />
+            <Divider orientation={"vertical"} sx={{marginRight: 2}}/>
             <Box>
               <p className={subtitle({color: "cyan"})}>A data entry and validation system for your convenience.</p>
             </Box>

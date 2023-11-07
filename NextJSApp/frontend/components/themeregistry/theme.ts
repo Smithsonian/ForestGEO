@@ -34,7 +34,7 @@ const theme = extendTheme({
   components: {
     JoyButton: {
       styleOverrides: {
-        root: ({ ownerState }) => ({
+        root: ({ownerState}) => ({
           ...(ownerState.color === 'primary' && {
             backgroundColor: '#4338ca',
           }),

@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     files.push(file);
   }
   const errors: { [fileName: string]: { [currentRow: string]: string } } = {};
-  const uploadableRows: { [fileName: string]: RowDataStructure[]} = {};
+  const uploadableRows: { [fileName: string]: RowDataStructure[] } = {};
   const errorRows: { [fileName: string]: RowDataStructure[] } = {};
   
   function createFileEntry(parsedFileName: string) {
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       errors[parsedFileName] = {};
     }
   }
-
+  
   const config: ParseConfig = {
     delimiter: ",",
     header: true,
@@ -72,8 +72,7 @@ export async function POST(request: NextRequest) {
       }),
       {status: HTTPResponses.STORAGE_CONNECTION_FAILURE}
     );
-  }
-  else console.log(`container client created`);
+  } else console.log(`container client created`);
   
   for (const file of files) {
     uploadableRows[file.name] = [];

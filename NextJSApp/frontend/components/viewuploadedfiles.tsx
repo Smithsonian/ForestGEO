@@ -114,9 +114,9 @@ export default function ViewUploadedFiles() {
       </>
     );
   } else if (error) {
-    return <BrowseError />
+    return <BrowseError/>
   } else if (!isLoaded || !fileRows) {
-    return <LoadingFiles />
+    return <LoadingFiles/>
   } else {
     let sortedFileData = fileRows!.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     let i = 1;
@@ -154,18 +154,27 @@ export default function ViewUploadedFiles() {
                           <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
                           <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
                           <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.date).toString()}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{new Date(row.version).toString()}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.date).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.version).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                           <TableCell align="center">
                             <Button>
-                              <DownloadIcon />
+                              <DownloadIcon/>
                             </Button>
                             <Button>
-                              <EditIcon />
+                              <EditIcon/>
                             </Button>
                             <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
-                              <DeleteIcon />
+                              <DeleteIcon/>
                             </Button>
                           </TableCell>
                         </TableRow>

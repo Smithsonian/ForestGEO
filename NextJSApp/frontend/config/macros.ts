@@ -80,6 +80,7 @@ export const tableHeaderSettings = {
   fontWeight: 'bold',
   fontSize: 16,
 }
+
 export interface DropzonePureProps {
   /** Is someone dragging file(s) onto the dropzone? */
   isDragActive: boolean;
@@ -99,14 +100,24 @@ export interface RowDataStructure {
   comments: string
 }
 
+export interface GridRowDataStructure {
+  id: string,
+  subquadrat: string,
+  spcode: string,
+  dbh: string,
+  htmeas: string,
+  codes: string,
+  comments: string
+}
+
 export const gridColumns: GridColDef[] = [
-  { field: 'tag', headerName: 'Tag', width: 150 },
-  { field: 'subquadrat', headerName: 'Subquadrat', width: 150 },
-  { field: 'spcode', headerName: 'Species Code', width: 150 },
-  { field: 'dbh', headerName: 'DBH', width: 150 },
-  { field: 'htmeas', headerName: 'HTMEAS', width: 150 },
-  { field: 'codes', headerName: 'Codes', width: 150 },
-  { field: 'comments', headerName: 'Comments', width: 150 },
+  {field: 'id', headerName: 'Tag', width: 150},
+  {field: 'subquadrat', headerName: 'Subquadrat', width: 150},
+  {field: 'spcode', headerName: 'Species Code', width: 150},
+  {field: 'dbh', headerName: 'DBH', width: 150},
+  {field: 'htmeas', headerName: 'HTMEAS', width: 150},
+  {field: 'codes', headerName: 'Codes', width: 150},
+  {field: 'comments', headerName: 'Comments', width: 150},
 ];
 
 export interface DropzoneProps {
@@ -217,6 +228,7 @@ export const tableHeaders = [
   {key: 'codes', label: 'Codes'},
   {key: 'comments', label: 'Comments'},
 ]
+
 export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
   return `
       IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row.tag)})

@@ -26,9 +26,9 @@ export default function DrawerNav() {
     };
   
   return (
-    <Box sx={{ display: 'flex' }}>
+    <Box sx={{display: 'flex'}}>
       <Button variant="outlined" color="neutral" onClick={toggleDrawer(true)}>
-        <MenuIcon />
+        <MenuIcon/>
       </Button>
       <Drawer open={open} onClose={toggleDrawer(false)}>
         <Box
@@ -43,7 +43,7 @@ export default function DrawerNav() {
               </ListItem>
             ))}
           </List>
-          <Divider />
+          <Divider/>
         </Box>
       </Drawer>
     </Box>

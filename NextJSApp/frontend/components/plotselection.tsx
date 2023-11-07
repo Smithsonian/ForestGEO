@@ -3,9 +3,8 @@ import React, {useEffect, useState} from "react";
 import {plots} from "@/config/macros";
 import {usePlotContext, usePlotDispatch} from "@/app/plotcontext";
 import {useSession} from "next-auth/react";
-import Select, {SelectStaticProps} from "@mui/joy/Select";
+import Select from "@mui/joy/Select";
 import Option from "@mui/joy/Option";
-import {Button, Stack} from "@mui/joy";
 
 export const PlotSelection = () => {
   const {status} = useSession();

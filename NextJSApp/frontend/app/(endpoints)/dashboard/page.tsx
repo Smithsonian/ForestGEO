@@ -1,7 +1,6 @@
 "use client";
 import * as React from "react";
 import {usePlotContext} from "@/app/plotcontext";
-import {PlotSelection} from "@/components/plotselection";
 import Box from "@mui/joy/Box";
 
 export default function Page() {
@@ -9,7 +8,7 @@ export default function Page() {
   if (!currentPlot?.key) {
     return (
       <>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
           <p>You must select a plot to continue!</p>
         </Box>
       </>
@@ -17,7 +16,7 @@ export default function Page() {
   } else {
     return (
       <>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
           <p>You have selected {currentPlot?.key ? currentPlot!.key : "nothing"}</p>
         </Box>
       </>

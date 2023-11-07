@@ -51,7 +51,8 @@ data from a component or root layout to a page/endpoint is simplified (rather th
 or a React function). As a brief reminder, remember that when using Next.js 13, writing something
 like `app/example/filehandling.tsx` will generate a route pointing to `... /example` instead
 of `.../example/page`, and nesting successive folders will create a route with those
-folders: `app/example1/example2/example3/filehandling.tsx` has the route `... /example1/example2/example3/`.
+folders: `app/example1/example2/example3/filehandling.tsx` has the
+route `... /example1/example2/example3/`.
 
 For a better explanation of how this works, please observe the browse
 endpoint: `app/(endpoints)/browse/[plotKey]/[plotNum]/filehandling.tsx`<br />

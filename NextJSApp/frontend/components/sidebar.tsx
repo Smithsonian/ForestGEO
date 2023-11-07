@@ -1,5 +1,6 @@
 "use client";
 import * as React from 'react';
+import {useEffect, useState} from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -14,17 +15,10 @@ import FolderIcon from '@mui/icons-material/Folder';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import AssignmentRoundedIcon from '@mui/icons-material/AssignmentRounded';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-
-import {closeSidebar} from '@/config/utils';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
-import {PlotSelection} from "@/components/plotselection";
-import Option from "@mui/joy/Option";
-import Select from "@mui/joy/Select";
-import { Card, CardContent } from '@mui/joy';
 import {plots} from "@/config/macros";
-import {usePlotContext, usePlotDispatch} from "@/app/plotcontext";
-import {useEffect, useState} from "react";
+import {usePlotDispatch} from "@/app/plotcontext";
 import {usePathname, useRouter} from "next/navigation";
 
 function Toggler({
@@ -42,7 +36,7 @@ function Toggler({
   const [open, setOpen] = React.useState(defaultExpanded);
   return (
     <React.Fragment>
-      {renderToggle({ open, setOpen })}
+      {renderToggle({open, setOpen})}
       <Box
         sx={{
           display: 'grid',
@@ -106,7 +100,7 @@ export default function Sidebar() {
           },
         })}
       />
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+      <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
         <Typography level="title-lg">ForestGEO</Typography>
       </Box>
       <Box
@@ -130,8 +124,10 @@ export default function Sidebar() {
           }}
         >
           <ListItem>
-            <ListItemButton selected={pathname === '/dashboard'} color={pathname === '/dashboard' ? 'primary' : undefined} onClick={() => status == "authenticated" ? router.push('/dashboard') : router.push('#')}>
-              <DashboardIcon />
+            <ListItemButton selected={pathname === '/dashboard'}
+                            color={pathname === '/dashboard' ? 'primary' : undefined}
+                            onClick={() => status == "authenticated" ? router.push('/dashboard') : router.push('#')}>
+              <DashboardIcon/>
               <ListItemContent>
                 <Typography level="title-sm">Dashboard</Typography>
               </ListItemContent>
@@ -139,8 +135,9 @@ export default function Sidebar() {
           </ListItem>
           
           <ListItem>
-            <ListItemButton selected={pathname === '/files'} color={pathname === '/files' ? 'primary' : undefined} onClick={() => status == "authenticated" ? router.push('/files') : router.push('#')}>
-              <FolderIcon />
+            <ListItemButton selected={pathname === '/files'} color={pathname === '/files' ? 'primary' : undefined}
+                            onClick={() => status == "authenticated" ? router.push('/files') : router.push('#')}>
+              <FolderIcon/>
               <ListItemContent>
                 <Typography level="title-sm">Files</Typography>
               </ListItemContent>
@@ -148,8 +145,9 @@ export default function Sidebar() {
           </ListItem>
           
           <ListItem>
-            <ListItemButton selected={pathname === '/data'} color={pathname === '/data' ? 'primary' : undefined} onClick={() => status == "authenticated" ? router.push('/data') : router.push('#')}>
-              <DataObjectIcon />
+            <ListItemButton selected={pathname === '/data'} color={pathname === '/data' ? 'primary' : undefined}
+                            onClick={() => status == "authenticated" ? router.push('/data') : router.push('#')}>
+              <DataObjectIcon/>
               <ListItemContent>
                 <Typography level="title-sm">Data</Typography>
               </ListItemContent>
@@ -158,22 +156,22 @@ export default function Sidebar() {
           
           <ListItem nested>
             <Toggler
-              renderToggle={({ open, setOpen }) => (
+              renderToggle={({open, setOpen}) => (
                 <ListItemButton onClick={() => setOpen(!open)}>
-                  <AssignmentRoundedIcon />
+                  <AssignmentRoundedIcon/>
                   <ListItemContent>
                     {value == "None" || value == "" ?
                       <Typography level="title-sm">Plots</Typography> :
                       <Typography level={"title-sm"}>Now Viewing: {value}</Typography>}
                   </ListItemContent>
                   <KeyboardArrowDownIcon
-                    sx={{ transform: open ? 'rotate(180deg)' : 'none' }}
+                    sx={{transform: open ? 'rotate(180deg)' : 'none'}}
                   />
                 </ListItemButton>
               )}
             >
-              <List sx={{ gap: 0.5 }}>
-                <ListItem sx={{ mt: 0.5 }}>
+              <List sx={{gap: 0.5}}>
+                <ListItem sx={{mt: 0.5}}>
                   <ListItemButton selected={value == "None" || value == ""} onClick={() => setValue("")}>
                     None
                   </ListItemButton>
@@ -190,8 +188,8 @@ export default function Sidebar() {
           </ListItem>
         </List>
       </Box>
-      <Divider />
-      <LoginLogout />
+      <Divider/>
+      <LoginLogout/>
     </Sheet>
   );
 }

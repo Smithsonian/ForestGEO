@@ -5,9 +5,9 @@ import {Plot, plots} from "@/config/macros";
 const initialState: Plot = {key: 'none', num: 0};
 const initialCarousel = true;
 export const PlotsContext = createContext<Plot | null>(null);
-export const PlotsDispatchContext = createContext<Dispatch<{plotKey: string}> | null>(null);
+export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string }> | null>(null);
 
-export function PlotsProvider({ children }: {children: React.ReactNode}) {
+export function PlotsProvider({children}: { children: React.ReactNode }) {
   const [tasks, dispatch] = useReducer(
     plotsReducer,
     initialState
@@ -23,7 +23,7 @@ export function PlotsProvider({ children }: {children: React.ReactNode}) {
   );
 }
 
-function plotsReducer(currentPlot: any, action: {plotKey: string}) {
+function plotsReducer(currentPlot: any, action: { plotKey: string }) {
   if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
   else if (action.plotKey == "") return null;
   else return currentPlot;

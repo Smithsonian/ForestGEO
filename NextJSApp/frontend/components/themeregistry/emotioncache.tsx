@@ -18,8 +18,8 @@ export type NextAppDirEmotionCacheProviderProps = {
 
 // Adapted from https://github.com/garronej/tss-react/blob/main/src/next/appDir.tsx
 export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionCacheProviderProps) {
-  const { options, CacheProvider = DefaultCacheProvider, children } = props;
-
+  const {options, CacheProvider = DefaultCacheProvider, children} = props;
+  
   const [registry] = React.useState(() => {
     const cache = createCache(options);
     cache.compat = true;
@@ -40,9 +40,9 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
       inserted = [];
       return prevInserted;
     };
-    return { cache, flush };
+    return {cache, flush};
   });
-
+  
   useServerInsertedHTML(() => {
     const inserted = registry.flush();
     if (inserted.length === 0) {
@@ -50,45 +50,45 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
     }
     let styles = '';
     let dataEmotionAttribute = registry.cache.key;
-
+    
     const globals: {
       name: string;
       style: string;
     }[] = [];
-
-    inserted.forEach(({ name, isGlobal }) => {
+    
+    inserted.forEach(({name, isGlobal}) => {
       const style = registry.cache.inserted[name];
-
+      
       if (typeof style !== 'boolean') {
         if (isGlobal) {
-          globals.push({ name, style });
+          globals.push({name, style});
         } else {
           styles += style;
           dataEmotionAttribute += ` ${name}`;
         }
       }
     });
-
+    
     return (
       <React.Fragment>
-        {globals.map(({ name, style }) => (
+        {globals.map(({name, style}) => (
           <style
             key={name}
             data-emotion={`${registry.cache.key}-global ${name}`}
             // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{ __html: style }}
+            dangerouslySetInnerHTML={{__html: style}}
           />
         ))}
         {styles && (
           <style
             data-emotion={dataEmotionAttribute}
             // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{ __html: styles }}
+            dangerouslySetInnerHTML={{__html: styles}}
           />
         )}
       </React.Fragment>
     );
   });
-
+  
   return <CacheProvider value={registry.cache}>{children}</CacheProvider>;
 }

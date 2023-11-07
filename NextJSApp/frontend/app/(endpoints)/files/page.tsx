@@ -5,7 +5,6 @@ import {UploadAndReviewProcess} from "@/components/uploadreviewcycle";
 import {Tab, TabList, TabPanel, Tabs} from "@mui/joy";
 import {usePlotContext} from "@/app/plotcontext";
 import Box from "@mui/joy/Box";
-import Divider from "@mui/joy/Divider";
 import Typography from "@mui/joy/Typography";
 
 // File Hub
@@ -14,7 +13,7 @@ export default function Files() {
   if (!currentPlot?.key) {
     return (
       <>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
           <p>You must select a plot to continue!</p>
         </Box>
       </>
@@ -23,8 +22,8 @@ export default function Files() {
     // Tab system -- Browse page, Upload page
     return (
       <>
-        <Box sx={{ display: 'flex', flexDirection: 'column', marginBottom: 5 }}>
-          <Typography level={"title-lg"} color={"primary"} >
+        <Box sx={{display: 'flex', flexDirection: 'column', marginBottom: 5}}>
+          <Typography level={"title-lg"} color={"primary"}>
             Drag and drop files into the box to upload them to storage
           </Typography>
           <Box sx={{mt: 5}}>
@@ -34,10 +33,10 @@ export default function Files() {
                 <Tab>Upload New Files</Tab>
               </TabList>
               <TabPanel value={0}>
-                <ViewUploadedFiles />
+                <ViewUploadedFiles/>
               </TabPanel>
               <TabPanel value={1}>
-                <UploadAndReviewProcess />
+                <UploadAndReviewProcess/>
               </TabPanel>
             </Tabs>
           </Box>
