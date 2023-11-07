@@ -1,6 +1,8 @@
 import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
-import {GridColDef} from "@mui/x-data-grid";
+import {GridCellParams, GridColDef} from "@mui/x-data-grid";
+import '@/styles/customtablesettings.css'
+import clsx from "clsx";
 
 // INTERFACES
 export interface Plot {
@@ -111,13 +113,36 @@ export interface GridRowDataStructure {
 }
 
 export const gridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'Tag', width: 150},
-  {field: 'subquadrat', headerName: 'Subquadrat', width: 150},
-  {field: 'spcode', headerName: 'Species Code', width: 150},
-  {field: 'dbh', headerName: 'DBH', width: 150},
-  {field: 'htmeas', headerName: 'HTMEAS', width: 150},
-  {field: 'codes', headerName: 'Codes', width: 150},
-  {field: 'comments', headerName: 'Comments', width: 150},
+  {field: 'id', headerName: 'Tag', headerClassName: 'header', width: 150},
+  {field: 'subquadrat', headerName: 'Subquadrat', headerClassName: 'header', width: 150},
+  {field: 'spcode', headerName: 'Species Code', headerClassName: 'header', width: 150},
+  {field: 'dbh', headerName: 'DBH', headerClassName: 'header', width: 150},
+  {field: 'htmeas', headerName: 'HTMEAS', headerClassName: 'header', width: 150},
+  {field: 'codes', headerName: 'Codes', headerClassName: 'header', width: 150},
+  {field: 'comments', headerName: 'Comments', headerClassName: 'header', width: 150},
+];
+
+// conditional CSS logic saved here for future usage
+const columns: GridColDef[] = [
+  {
+    field: 'name',
+    cellClassName: 'super-app-theme--cell',
+  },
+  {
+    field: 'score',
+    type: 'number',
+    width: 140,
+    cellClassName: (params: GridCellParams<any, number>) => {
+      if (params.value == null) {
+        return '';
+      }
+      
+      return clsx('super-app', {
+        negative: params.value < 0,
+        positive: params.value > 0,
+      });
+    },
+  },
 ];
 
 export interface DropzoneProps {

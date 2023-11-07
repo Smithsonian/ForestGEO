@@ -7,6 +7,51 @@ import {gridColumns, GridRowDataStructure, RowDataStructure} from "@/config/macr
 import Button from "@mui/joy/Button";
 import Box from "@mui/joy/Box";
 import {DataGrid, GridRowsProp} from '@mui/x-data-grid';
+import {styled} from "@mui/system";
+
+const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
+  border: 0,
+  color:
+    theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.85)',
+  fontFamily: [
+    '-apple-system',
+    'BlinkMacSystemFont',
+    '"Segoe UI"',
+    'Roboto',
+    '"Helvetica Neue"',
+    'Arial',
+    'sans-serif',
+    '"Apple Color Emoji"',
+    '"Segoe UI Emoji"',
+    '"Segoe UI Symbol"',
+  ].join(','),
+  WebkitFontSmoothing: 'auto',
+  letterSpacing: 'normal',
+  '& .MuiDataGrid-columnsContainer': {
+    backgroundColor: theme.palette.mode === 'light' ? '#fafafa' : '#1d1d1d',
+  },
+  '& .MuiDataGrid-iconSeparator': {
+    display: 'none',
+  },
+  '& .MuiDataGrid-columnHeader, .MuiDataGrid-cell': {
+    borderRight: `1px solid ${
+      theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'
+    }`,
+  },
+  '& .MuiDataGrid-columnsContainer, .MuiDataGrid-cell': {
+    borderBottom: `1px solid ${
+      theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'
+    }`,
+  },
+  '& .MuiDataGrid-cell': {
+    color:
+      theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.65)',
+  },
+  '& .MuiPaginationItem-root': {
+    borderRadius: 0,
+  },
+}));
+
 
 export default function Page() {
   const plot = usePlotContext()!;
@@ -69,29 +114,9 @@ export default function Page() {
               <Button onClick={getData} loading={loading}>Reload Data</Button>
             </Box>
             <Box sx={{display: 'flex'}}>
-              <DataGrid columns={gridColumns} rows={gridRowsProp}/>
+              <StyledDataGrid columns={gridColumns} rows={gridRowsProp}/>
             </Box>
           </Box>
-          {/*<div>*/}
-          {/*  {recordsets && <Table>*/}
-          {/*    <thead>*/}
-          {/*    <tr>*/}
-          {/*      {tableHeaders.map((item, index) => (*/}
-          {/*        <th style={tableHeaderSettings} key={index}>{item.label}</th>*/}
-          {/*      ))}*/}
-          {/*    </tr>*/}
-          {/*    </thead>*/}
-          {/*    <tbody>*/}
-          {/*    {data.map((row, rowIndex) => (*/}
-          {/*      <tr key={rowIndex}>*/}
-          {/*        {Object.values(row).map((rowEntry, rowEntryIndex) => (*/}
-          {/*          <td key={rowEntryIndex}>{rowEntry}</td>*/}
-          {/*        ))}*/}
-          {/*      </tr>*/}
-          {/*    ))}*/}
-          {/*    </tbody>*/}
-          {/*  </Table>}*/}
-          {/*</div>*/}
         </>
       );
     } else {
