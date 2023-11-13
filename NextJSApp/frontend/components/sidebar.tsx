@@ -1,6 +1,5 @@
 "use client";
 import * as React from 'react';
-import {useEffect, useState} from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -18,7 +17,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
 import {plots} from "@/config/macros";
-import {usePlotDispatch} from "@/app/plotcontext";
+import {usePlotContext, usePlotDispatch} from "@/app/plotcontext";
 import {usePathname, useRouter} from "next/navigation";
 
 function Toggler({
@@ -54,23 +53,11 @@ function Toggler({
 }
 
 export default function Sidebar() {
-  const dispatch = usePlotDispatch();
-  const [value, setValue] = useState<string>("");
+  const currentPlot = usePlotContext();
+  const plotDispatch = usePlotDispatch();
   const {status} = useSession();
   const router = useRouter();
   const pathname = usePathname();
-  useEffect(() => {
-    if (dispatch) {
-      dispatch({
-        plotKey: value,
-      });
-    }
-  }, [dispatch, value]);
-  const keys = plots.map(plot => {
-    return {
-      key: plot.key
-    };
-  });
   return (
     <Sheet
       className="Sidebar"
@@ -160,9 +147,9 @@ export default function Sidebar() {
                 <ListItemButton onClick={() => setOpen(!open)}>
                   <AssignmentRoundedIcon/>
                   <ListItemContent>
-                    {value == "None" || value == "" ?
+                    {currentPlot?.key == "None" || currentPlot?.key == "" || currentPlot == null ?
                       <Typography level="title-sm">Plots</Typography> :
-                      <Typography level={"title-sm"}>Now Viewing: {value}</Typography>}
+                      <Typography level={"title-sm"}>Now Viewing: {currentPlot!.key}</Typography>}
                   </ListItemContent>
                   <KeyboardArrowDownIcon
                     sx={{transform: open ? 'rotate(180deg)' : 'none'}}
@@ -172,13 +159,15 @@ export default function Sidebar() {
             >
               <List sx={{gap: 0.5}}>
                 <ListItem sx={{mt: 0.5}}>
-                  <ListItemButton selected={value == "None" || value == ""} onClick={() => setValue("")}>
+                  <ListItemButton selected={currentPlot?.key == "None" || currentPlot?.key == "" || currentPlot == null}
+                                  onClick={() => plotDispatch ? plotDispatch({plotKey: ""}) : null}>
                     None
                   </ListItemButton>
                 </ListItem>
-                {keys.map((keyItem, keyIndex) => (
+                {plots.map((keyItem, keyIndex) => (
                   <ListItem key={keyIndex}>
-                    <ListItemButton selected={value == keyItem.key} onClick={() => setValue(keyItem.key)}>
+                    <ListItemButton selected={(currentPlot != null) && (currentPlot!.key == keyItem.key)}
+                                    onClick={() => plotDispatch ? plotDispatch({plotKey: keyItem.key}) : null}>
                       {keyItem.key}
                     </ListItemButton>
                   </ListItem>

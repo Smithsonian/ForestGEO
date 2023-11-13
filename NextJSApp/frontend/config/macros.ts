@@ -202,6 +202,10 @@ export const plots: Plot[] = [
   {key: "wanang", num: 21},
   {key: "Yosemite", num: 33},
 ];
+
+export const allCensusCount = 9;
+export const allCensus = Array.from({length: allCensusCount}, (_, i) => i + 1)
+
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and data",
