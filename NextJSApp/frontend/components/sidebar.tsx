@@ -16,7 +16,7 @@ import AssignmentRoundedIcon from '@mui/icons-material/AssignmentRounded';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
-import {plots} from "@/config/macros";
+import {plots, siteConfig} from "@/config/macros";
 import {usePlotContext, usePlotDispatch} from "@/app/plotcontext";
 import {usePathname, useRouter} from "next/navigation";
 
@@ -110,36 +110,20 @@ export default function Sidebar() {
             '--ListItem-radius': (theme) => theme.vars.radius.sm,
           }}
         >
-          <ListItem>
-            <ListItemButton selected={pathname === '/dashboard'}
-                            color={pathname === '/dashboard' ? 'primary' : undefined}
-                            onClick={() => status == "authenticated" ? router.push('/dashboard') : router.push('#')}>
-              <DashboardIcon/>
-              <ListItemContent>
-                <Typography level="title-sm">Dashboard</Typography>
-              </ListItemContent>
-            </ListItemButton>
-          </ListItem>
-          
-          <ListItem>
-            <ListItemButton selected={pathname === '/files'} color={pathname === '/files' ? 'primary' : undefined}
-                            onClick={() => status == "authenticated" ? router.push('/files') : router.push('#')}>
-              <FolderIcon/>
-              <ListItemContent>
-                <Typography level="title-sm">Files</Typography>
-              </ListItemContent>
-            </ListItemButton>
-          </ListItem>
-          
-          <ListItem>
-            <ListItemButton selected={pathname === '/data'} color={pathname === '/data' ? 'primary' : undefined}
-                            onClick={() => status == "authenticated" ? router.push('/data') : router.push('#')}>
-              <DataObjectIcon/>
-              <ListItemContent>
-                <Typography level="title-sm">Data</Typography>
-              </ListItemContent>
-            </ListItemButton>
-          </ListItem>
+          {siteConfig.navItems.map((item, index) => (
+            <ListItem>
+              <ListItemButton selected={pathname === item.href}
+                              color={pathname === item.href ? 'primary' : undefined}
+                              onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
+                {item.label === 'Dashboard' && <DashboardIcon />}
+                {item.label === 'Files' && <FolderIcon />}
+                {item.label === 'Data' && <DataObjectIcon />}
+                <ListItemContent>
+                  <Typography level={"title-sm"}>{item.label}</Typography>
+                </ListItemContent>
+              </ListItemButton>
+            </ListItem>
+          ))}
           
           <ListItem nested>
             <Toggler
