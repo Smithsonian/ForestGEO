@@ -125,7 +125,7 @@ export default function Sidebar() {
             </ListItem>
           ))}
           
-          <ListItem nested>
+          {status == "authenticated" && <ListItem nested>
             <Toggler
               renderToggle={({open, setOpen}) => (
                 <ListItemButton onClick={() => setOpen(!open)}>
@@ -158,7 +158,7 @@ export default function Sidebar() {
                 ))}
               </List>
             </Toggler>
-          </ListItem>
+          </ListItem>}
         </List>
       </Box>
       <Divider/>
