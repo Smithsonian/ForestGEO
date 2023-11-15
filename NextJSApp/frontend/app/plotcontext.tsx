@@ -2,28 +2,28 @@
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
 import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
 
-const initialState: Plot = {key: 'none', num: 0};
+const initialState: Plot = {key: '', num: 0};
 const initialCensus = 1;
 const initialQuadrat = 1;
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);
-export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string }> | null>(null);
-export const CensusDispatchContext = createContext<Dispatch<{census: number}> | null>(null);
-export const QuadratDispatchContext = createContext<Dispatch<{quadrat: number}> | null>(null);
+export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
+export const CensusDispatchContext = createContext<Dispatch<{census: number | null}> | null>(null);
+export const QuadratDispatchContext = createContext<Dispatch<{quadrat: number | null}> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
   const [plot, plotDispatch] = useReducer(
     plotsReducer,
-    initialState
+    null
   );
   const [census, censusDispatch] = useReducer(
     censusReducer,
-    initialCensus
+    null
   );
   const [quadrat, quadratDispatch] = useReducer(
     quadratReducer,
-    initialQuadrat
+    null
   )
   
   
@@ -44,21 +44,21 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
   );
 }
 
-function plotsReducer(currentPlot: any, action: { plotKey: string }) {
-  if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
-  else if (action.plotKey == "") return null;
+function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
+  if (action.plotKey == null) return null;
+  else if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
   else return currentPlot;
 }
 
-function censusReducer(currentCensus: any, action: { census: number} ) {
-  if (allCensus.includes(action.census)) return action.census;
-  else if (action.census < 0) return null;
+function censusReducer(currentCensus: any, action: { census: number | null} ) {
+  if (action.census == null) return null;
+  else if (allCensus.includes(action.census)) return action.census;
   else return currentCensus;
 }
 
-function quadratReducer(currentQuadrat: any, action: { quadrat: number } ) {
-  if (allQuadrats.includes(action.quadrat)) return action.quadrat;
-  else if (action.quadrat < 0) return null;
+function quadratReducer(currentQuadrat: any, action: { quadrat: number | null } ) {
+  if (action.quadrat == null) return null;
+  else if (allQuadrats.includes(action.quadrat)) return action.quadrat;
   else return currentQuadrat;
 }
 
