@@ -167,7 +167,11 @@ export default function Sidebar() {
                     <ListItem sx={{mt: 0.5}}>
                       <ListItemButton
                         selected={currentPlot == null}
-                        onClick={() => plotDispatch ? plotDispatch({plotKey: null}) : null}>
+                        onClick={() => {
+                          censusDispatch ? censusDispatch({census: null}) : null;
+                          quadratDispatch ? quadratDispatch({quadrat: null}) : null;
+                          return plotDispatch ? plotDispatch({plotKey: null}) : null;
+                        }}>
                         None
                       </ListItemButton>
                     </ListItem>
