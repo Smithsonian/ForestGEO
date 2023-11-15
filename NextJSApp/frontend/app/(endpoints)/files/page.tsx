@@ -3,18 +3,20 @@ import * as React from "react";
 import ViewUploadedFiles from "@/components/viewuploadedfiles";
 import {UploadAndReviewProcess} from "@/components/uploadreviewcycle";
 import {Tab, TabList, TabPanel, Tabs} from "@mui/joy";
-import {usePlotContext} from "@/app/plotcontext";
+import {useCensusContext, usePlotContext, useQuadratContext} from "@/app/plotcontext";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 
 // File Hub
 export default function Files() {
   const currentPlot = usePlotContext();
-  if (!currentPlot?.key) {
+  const currentCensus = useCensusContext();
+  const currentQuadrat = useQuadratContext();
+  if (!currentPlot && !currentCensus && !currentQuadrat) {
     return (
       <>
         <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-          <p>You must select a plot to continue!</p>
+          <p>You must select a <b>plot</b>, <b>census</b>, and <b>quadrat</b> to continue!</p>
         </Box>
       </>
     );

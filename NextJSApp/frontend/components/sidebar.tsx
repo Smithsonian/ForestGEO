@@ -68,6 +68,7 @@ export default function Sidebar() {
   const censusDispatch = useCensusDispatch();
   const currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
+  
   const {status} = useSession();
   const router = useRouter();
   const pathname = usePathname();
