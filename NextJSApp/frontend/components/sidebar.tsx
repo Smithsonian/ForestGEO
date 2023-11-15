@@ -1,6 +1,6 @@
 "use client";
 import * as React from 'react';
-import {useEffect, useState} from 'react';
+import {useState} from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -29,26 +29,22 @@ import {usePathname, useRouter} from "next/navigation";
 import {Stack} from "@mui/joy";
 import {Slide} from "@mui/material";
 
-function Toggler({
-                   defaultExpanded = false,
-                   renderToggle,
-                   children,
-                 }: {
-  defaultExpanded?: boolean;
+function SimpleToggler({
+                         isOpen,
+                         renderToggle,
+                         children,
+                       }: {
+  isOpen: boolean;
   children: React.ReactNode;
-  renderToggle: (params: {
-    open: boolean;
-    setOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  }) => React.ReactNode;
+  renderToggle: any;
 }) {
-  const [open, setOpen] = React.useState(defaultExpanded);
   return (
     <React.Fragment>
-      {renderToggle({open, setOpen})}
+      {renderToggle}
       <Box
         sx={{
           display: 'grid',
-          gridTemplateRows: open ? '1fr' : '0fr',
+          gridTemplateRows: isOpen ? '1fr' : '0fr',
           transition: '0.2s ease',
           '& > *': {
             overflow: 'hidden',
@@ -68,6 +64,64 @@ export default function Sidebar() {
   const censusDispatch = useCensusDispatch();
   const currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
+  
+  const [p, setP] = useState(false);
+  const [c, setC] = useState(false);
+  const [q, setQ] = useState(false);
+  
+  function plotRenderToggle() {
+    return (
+      <>
+        <ListItemButton onClick={() => setP(!p)}>
+          <AssignmentRoundedIcon/>
+          <ListItemContent>
+            {currentPlot == null ?
+              <Typography level="title-sm">Plots</Typography> :
+              <Typography level={"title-sm"}>Now Viewing: {currentPlot!.key}</Typography>}
+          </ListItemContent>
+          <KeyboardArrowDownIcon
+            sx={{transform: p ? 'rotate(180deg)' : 'none'}}
+          />
+        </ListItemButton>
+      </>
+    );
+  }
+  
+  function censusRenderToggle() {
+    return (
+      <>
+        <ListItemButton onClick={() => setC(!c)}>
+          <AssignmentRoundedIcon/>
+          <ListItemContent>
+            {currentCensus == null ?
+              <Typography level="title-sm">Select Census</Typography> :
+              <Typography level={"title-sm"}>Selected Census: {currentCensus}</Typography>}
+          </ListItemContent>
+          <KeyboardArrowDownIcon
+            sx={{transform: c ? 'rotate(180deg)' : 'none'}}
+          />
+        </ListItemButton>
+      </>
+    );
+  }
+  
+  function quadratRenderToggle() {
+    return (
+      <>
+        <ListItemButton onClick={() => setQ(!q)}>
+          <AssignmentRoundedIcon/>
+          <ListItemContent>
+            {currentQuadrat == null ?
+              <Typography level="title-sm">Select Quadrat</Typography> :
+              <Typography level={"title-sm"}>Selected Quadrat: {currentQuadrat}</Typography>}
+          </ListItemContent>
+          <KeyboardArrowDownIcon
+            sx={{transform: q ? 'rotate(180deg)' : 'none'}}
+          />
+        </ListItemButton>
+      </>
+    );
+  }
   
   const {status} = useSession();
   const router = useRouter();
@@ -145,24 +199,9 @@ export default function Sidebar() {
               ))}
               
               {status == "authenticated" && <ListItem nested>
-                <Toggler
-                  renderToggle={({open, setOpen}) => {
-                    return (
-                      <>
-                        <ListItemButton onClick={() => setOpen(!open)}>
-                          <AssignmentRoundedIcon/>
-                          <ListItemContent>
-                            {currentPlot == null ?
-                              <Typography level="title-sm">Plots</Typography> :
-                              <Typography level={"title-sm"}>Now Viewing: {currentPlot!.key}</Typography>}
-                          </ListItemContent>
-                          <KeyboardArrowDownIcon
-                            sx={{transform: open ? 'rotate(180deg)' : 'none'}}
-                          />
-                        </ListItemButton>
-                      </>
-                    );
-                  }}
+                <SimpleToggler
+                  renderToggle={plotRenderToggle()}
+                  isOpen={p}
                 >
                   <List sx={{gap: 0.5}}>
                     <ListItem sx={{mt: 0.5}}>
@@ -171,6 +210,9 @@ export default function Sidebar() {
                         onClick={() => {
                           censusDispatch ? censusDispatch({census: null}) : null;
                           quadratDispatch ? quadratDispatch({quadrat: null}) : null;
+                          setP(false);
+                          setC(false);
+                          setQ(false);
                           return plotDispatch ? plotDispatch({plotKey: null}) : null;
                         }}>
                         None
@@ -180,6 +222,7 @@ export default function Sidebar() {
                       <ListItem key={keyIndex}>
                         <ListItemButton selected={currentPlot?.key == keyItem.key}
                                         onClick={() => {
+                                          setP(!p);
                                           return plotDispatch ? plotDispatch({plotKey: keyItem.key}) : null
                                         }}>
                           {keyItem.key}
@@ -187,7 +230,7 @@ export default function Sidebar() {
                       </ListItem>
                     ))}
                   </List>
-                </Toggler>
+                </SimpleToggler>
               </ListItem>}
             </List>
           </Box>
@@ -262,29 +305,16 @@ export default function Sidebar() {
                 }}
               >
                 <ListItem nested>
-                  <Toggler
-                    renderToggle={({open, setOpen}) => {
-                      return (
-                        <>
-                          <ListItemButton onClick={() => setOpen(!open)}>
-                            <AssignmentRoundedIcon/>
-                            <ListItemContent>
-                              {currentCensus == null ?
-                                <Typography level="title-sm">Select Census</Typography> :
-                                <Typography level={"title-sm"}>Selected Census: {currentCensus}</Typography>}
-                            </ListItemContent>
-                            <KeyboardArrowDownIcon
-                              sx={{transform: open ? 'rotate(180deg)' : 'none'}}
-                            />
-                          </ListItemButton>
-                        </>);
-                    }}
+                  <SimpleToggler
+                    renderToggle={censusRenderToggle()}
+                    isOpen={c}
                   >
                     <List sx={{gap: 0.5}}>
                       <ListItem sx={{mt: 0.5}}>
                         <ListItemButton
                           selected={currentCensus == null}
                           onClick={() => {
+                            setC(!c);
                             return censusDispatch ? censusDispatch({census: null}) : null
                           }}>
                           None
@@ -294,6 +324,7 @@ export default function Sidebar() {
                         <ListItem key={keyIndex}>
                           <ListItemButton selected={currentCensus == keyItem}
                                           onClick={() => {
+                                            setC(!c);
                                             return censusDispatch ? censusDispatch({census: keyItem}) : null
                                           }}>
                             {keyItem}
@@ -301,34 +332,20 @@ export default function Sidebar() {
                         </ListItem>
                       ))}
                     </List>
-                  </Toggler>
+                  </SimpleToggler>
                 </ListItem>
                 
                 {currentCensus && <ListItem nested>
-                  <Toggler
-                    renderToggle={({open, setOpen}) => {
-                      return (
-                        <>
-                          <ListItemButton onClick={() => setOpen(!open)}>
-                            <AssignmentRoundedIcon/>
-                            <ListItemContent>
-                              {currentQuadrat == null ?
-                                <Typography level="title-sm">Select Quadrat</Typography> :
-                                <Typography level={"title-sm"}>Selected Quadrat: {currentQuadrat}</Typography>}
-                            </ListItemContent>
-                            <KeyboardArrowDownIcon
-                              sx={{transform: open ? 'rotate(180deg)' : 'none'}}
-                            />
-                          </ListItemButton>
-                        </>
-                      );
-                    }}
+                  <SimpleToggler
+                    renderToggle={quadratRenderToggle()}
+                    isOpen={q}
                   >
                     <List sx={{gap: 0.5}}>
                       <ListItem sx={{mt: 0.5}}>
                         <ListItemButton
                           selected={currentQuadrat == null}
                           onClick={() => {
+                            setQ(!q);
                             return quadratDispatch ? quadratDispatch({quadrat: null}) : null
                           }}>
                           None
@@ -338,6 +355,7 @@ export default function Sidebar() {
                         <ListItem key={keyIndex}>
                           <ListItemButton selected={currentQuadrat == keyItem}
                                           onClick={() => {
+                                            setQ(!q);
                                             return quadratDispatch ? quadratDispatch({quadrat: keyItem}) : null
                                           }}>
                             {keyItem}
@@ -345,7 +363,7 @@ export default function Sidebar() {
                         </ListItem>
                       ))}
                     </List>
-                  </Toggler>
+                  </SimpleToggler>
                 </ListItem>}
               </List>
             </Box>

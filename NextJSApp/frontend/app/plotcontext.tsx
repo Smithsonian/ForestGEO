@@ -8,9 +8,11 @@ const initialQuadrat = 1;
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);
+export const FirstLoadContext = createContext<boolean | null>(null);
 export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
 export const CensusDispatchContext = createContext<Dispatch<{census: number | null}> | null>(null);
 export const QuadratDispatchContext = createContext<Dispatch<{quadrat: number | null}> | null>(null);
+export const FirstLoadDispatchContext = createContext<Dispatch<{firstLoad: boolean}> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
   const [plot, plotDispatch] = useReducer(
@@ -25,6 +27,10 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     quadratReducer,
     null
   )
+  const [firstLoad, firstLoadDispatch] = useReducer(
+    firstLoadReducer,
+    true
+  )
   
   
   return (
@@ -34,7 +40,11 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
           <CensusDispatchContext.Provider value={censusDispatch}>
             <QuadratContext.Provider value={quadrat}>
               <QuadratDispatchContext.Provider value={quadratDispatch}>
-                {children}
+                <FirstLoadContext.Provider value={firstLoad}>
+                  <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+                    {children}
+                  </FirstLoadDispatchContext.Provider>
+                </FirstLoadContext.Provider>
               </QuadratDispatchContext.Provider>
             </QuadratContext.Provider>
           </CensusDispatchContext.Provider>
@@ -62,6 +72,11 @@ function quadratReducer(currentQuadrat: any, action: { quadrat: number | null } 
   else return currentQuadrat;
 }
 
+function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null } ) {
+  if (action.firstLoad == false && currentState) return action.firstLoad;
+  else return currentState;
+}
+
 export function usePlotContext() {
   return useContext(PlotsContext);
 }
@@ -84,4 +99,12 @@ export function useQuadratContext() {
 
 export function useQuadratDispatch() {
   return useContext(QuadratDispatchContext);
+}
+
+export function useFirstLoadContext() {
+  return useContext(FirstLoadContext);
+}
+
+export function useFirstLoadDispatch() {
+  return useContext(FirstLoadDispatchContext);
 }
