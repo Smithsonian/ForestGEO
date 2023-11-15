@@ -5,6 +5,7 @@ import {redirect} from "next/navigation";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
 import Sidebar from "@/components/sidebar";
+import Box from "@mui/joy/Box";
 
 const slides = [
   'background-1.jpg',
@@ -34,15 +35,17 @@ export default function Page() {
   else
     return (
       <>
-        {transitions((style, i) => (
-          <animated.div
-            className={styles.bg}
-            style={{
-              ...style,
-              backgroundImage: `url(${slides[i]})`,
-            }}/>
-        ))}
-        <Sidebar/>
+        <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
+          {transitions((style, i) => (
+            <animated.div
+              className={styles.bg}
+              style={{
+                ...style,
+                backgroundImage: `url(${slides[i]})`,
+              }}/>
+          ))}
+          <Sidebar/>
+        </Box>
       </>
     );
 }

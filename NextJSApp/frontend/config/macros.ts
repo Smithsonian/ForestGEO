@@ -203,8 +203,13 @@ export const plots: Plot[] = [
   {key: "Yosemite", num: 33},
 ];
 
+export const drawerWidth = 240;
+
 export const allCensusCount = 9;
-export const allCensus = Array.from({length: allCensusCount}, (_, i) => i + 1)
+export const allCensus = Array.from({length: allCensusCount}, (_, i) => i + 1);
+
+export const allQuadratCount = 50;
+export const allQuadrats = Array.from({length: allQuadratCount}, (_, i) => i + 1);
 
 export const siteConfig = {
   name: "ForestGEO",

@@ -13,11 +13,10 @@ export default function RootLayout({children,}: { children: React.ReactNode; }) 
       </head>
       <ContextsProvider>
         <Providers>
-          {/*<DrawerNav />*/}
           <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
-            {/*<DrawerNav />*/}
             {children}
           </Box>
+          {/*<DrawerNav />*/}
         </Providers>
       </ContextsProvider>
       </html>
