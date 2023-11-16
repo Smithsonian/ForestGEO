@@ -183,9 +183,10 @@ export default function Sidebar() {
                 '--ListItem-radius': (theme) => theme.vars.radius.sm,
               }}
             >
-              {siteConfig.navItems.map((item, index) => (
+              {siteConfig.navItems.map((item) => (
                 <ListItem>
                   <ListItemButton selected={pathname === item.href}
+                                  disabled={!currentPlot}
                                   color={pathname === item.href ? 'primary' : undefined}
                                   onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
                     {item.label === 'Dashboard' && <DashboardIcon/>}
@@ -198,7 +199,7 @@ export default function Sidebar() {
                 </ListItem>
               ))}
               
-              {status == "authenticated" && <ListItem nested>
+              <ListItem nested>
                 <SimpleToggler
                   renderToggle={plotRenderToggle()}
                   isOpen={p}
@@ -231,7 +232,7 @@ export default function Sidebar() {
                     ))}
                   </List>
                 </SimpleToggler>
-              </ListItem>}
+              </ListItem>
             </List>
           </Box>
           <Divider/>
