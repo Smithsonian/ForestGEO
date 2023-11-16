@@ -4,7 +4,7 @@ import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
 import {Box, Stack} from "@mui/joy";
-import Sidebar from "@/components/sidebar";
+import Sidebar from "@/components_deprecated/sidebar";
 import Divider from "@mui/joy/Divider";
 
 export default function EndpointLayout({children,}: { children: React.ReactNode }) {

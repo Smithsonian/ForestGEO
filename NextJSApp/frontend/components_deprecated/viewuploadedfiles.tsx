@@ -17,7 +17,7 @@ import {
   TableHead,
   TableRow
 } from "@mui/material";
-import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
+import {DeleteIcon, DownloadIcon, EditIcon} from "@/components_deprecated/icons";
 import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Box from "@mui/joy/Box";

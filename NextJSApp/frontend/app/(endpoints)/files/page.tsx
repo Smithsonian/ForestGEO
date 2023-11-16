@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
-import ViewUploadedFiles from "@/components/viewuploadedfiles";
-import {UploadAndReviewProcess} from "@/components/uploadreviewcycle";
+import ViewUploadedFiles from "@/components_deprecated/viewuploadedfiles";
+import {UploadAndReviewProcess} from "@/components_deprecated/uploadreviewcycle";
 import {Tab, TabList, TabPanel, Tabs} from "@mui/joy";
 import {useCensusContext, usePlotContext, useQuadratContext} from "@/app/plotcontext";
 import Box from "@mui/joy/Box";

@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import {SessionProvider} from "next-auth/react";
-import ThemeRegistry from "@/components/themeregistry/themeregistry";
+import ThemeRegistry from "@/components_deprecated/themeregistry/themeregistry";
 
 export interface ProvidersProps {
   children: React.ReactNode;

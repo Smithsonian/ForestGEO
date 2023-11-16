@@ -2,9 +2,9 @@
 import React, {useCallback, useEffect, useState} from "react";
 import {FileErrors, ReviewStates, RowDataStructure} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/validationtable";
+import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components_deprecated/validationtable";
 import {parse} from "papaparse";
-import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
+import {DropzoneLogic, FileDisplay} from "@/components_deprecated/filehandling";
 import {usePlotContext} from "@/app/plotcontext";
 import {useSession} from "next-auth/react";
 import {
