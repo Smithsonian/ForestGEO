@@ -14,7 +14,7 @@ import FolderIcon from '@mui/icons-material/Folder';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import AssignmentRoundedIcon from '@mui/icons-material/AssignmentRounded';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import {LoginLogout} from "@/components_deprecated/loginlogout";
+import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
 import {allCensus, allQuadrats, plots, siteConfig} from "@/config/macros";
 import {

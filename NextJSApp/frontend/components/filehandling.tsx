@@ -2,11 +2,11 @@
 import React, {useCallback, useState} from 'react';
 import {useSession} from "next-auth/react";
 import {DropzoneProps, DropzonePureProps, FileErrors, FileListProps, UploadValidationProps} from "@/config/macros";
-import {ValidationErrorTable} from "@/components_deprecated/validationtable";
+import {ValidationErrorTable} from "@/components/validationtable";
 import {usePlotContext} from "@/app/plotcontext";
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
-import {FileUploadIcon} from "@/components_deprecated/icons";
+import {FileUploadIcon} from "@/components/icons";
 
 import '@/styles/dropzone.css';
 import {subtitle} from "@/config/primitives";

@@ -4,7 +4,7 @@ import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
-import Sidebar from "@/components_deprecated/sidebar";
+import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
 
 const slides = [
