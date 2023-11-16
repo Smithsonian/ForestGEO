@@ -81,7 +81,6 @@ export default function Page() {
       </>
     );
   } else {
-    let data: RowDataStructure[] = []
     let gridRows: GridRowDataStructure[] = []
     if (recordsets) {
       Object.values(recordsets[0]).map((row) => {
@@ -103,7 +102,6 @@ export default function Page() {
           codes: row['Codes'],
           comments: row['Comments']
         }
-        data.push(temp);
         gridRows.push(gridTemp);
       })
       // let gridRows : GridRowsProp = data;
