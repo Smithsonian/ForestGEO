@@ -123,27 +123,27 @@ export const gridColumns: GridColDef[] = [
 ];
 
 // conditional CSS logic saved here for future usage
-const columns: GridColDef[] = [
-  {
-    field: 'name',
-    cellClassName: 'super-app-theme--cell',
-  },
-  {
-    field: 'score',
-    type: 'number',
-    width: 140,
-    cellClassName: (params: GridCellParams<any, number>) => {
-      if (params.value == null) {
-        return '';
-      }
-      
-      return clsx('super-app', {
-        negative: params.value < 0,
-        positive: params.value > 0,
-      });
-    },
-  },
-];
+// const columns: GridColDef[] = [
+//   {
+//     field: 'name',
+//     cellClassName: 'super-app-theme--cell',
+//   },
+//   {
+//     field: 'score',
+//     type: 'number',
+//     width: 140,
+//     cellClassName: (params: GridCellParams<any, number>) => {
+//       if (params.value == null) {
+//         return '';
+//       }
+//
+//       return clsx('super-app', {
+//         negative: params.value < 0,
+//         positive: params.value > 0,
+//       });
+//     },
+//   },
+// ];
 
 export interface DropzoneProps {
   /**

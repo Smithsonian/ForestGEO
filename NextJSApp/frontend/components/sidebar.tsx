@@ -126,8 +126,91 @@ export default function Sidebar() {
   const {status} = useSession();
   const router = useRouter();
   const pathname = usePathname();
-  
   const containerRef = React.useRef<HTMLElement>(null);
+  
+  useSession({
+    required: true,
+    onUnauthenticated() {
+      return (
+        <>
+          <Stack direction={"row"} overflow={'hidden'}>
+            <Box
+              className="Sidebar"
+              sx={{
+                position: {
+                  md: 'sticky',
+                },
+                height: '100dvh',
+                width: 'var(--Sidebar-width)',
+                top: 0,
+                p: 2,
+                flexShrink: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                borderRight: '1px solid',
+                borderColor: 'divider',
+              }}
+              ref={containerRef}
+            >
+              <GlobalStyles
+                styles={(theme) => ({
+                  ':root': {
+                    '--Sidebar-width': '300px',
+                    [theme.breakpoints.up('lg')]: {
+                      '--Sidebar-width': '320px',
+                    },
+                  },
+                })}
+              />
+              <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
+                <Typography level="title-lg">ForestGEO</Typography>
+              </Box>
+              <Box
+                sx={{
+                  minHeight: 0,
+                  overflow: 'hidden auto',
+                  flexGrow: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  [`& .${listItemButtonClasses.root}`]: {
+                    gap: 1.5,
+                  },
+                }}
+              >
+                <List
+                  size="sm"
+                  sx={{
+                    gap: 1,
+                    '--List-nestedInsetStart': '30px',
+                    '--ListItem-radius': (theme) => theme.vars.radius.sm,
+                  }}
+                >
+                  {siteConfig.navItems.map((item) => (
+                    <ListItem>
+                      <ListItemButton selected={pathname === item.href}
+                                      disabled={!currentPlot}
+                                      color={pathname === item.href ? 'primary' : undefined}
+                                      onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
+                        {item.label === 'Dashboard' && <DashboardIcon/>}
+                        {item.label === 'Files' && <FolderIcon/>}
+                        {item.label === 'Data' && <DataObjectIcon/>}
+                        <ListItemContent>
+                          <Typography level={"title-sm"}>{item.label}</Typography>
+                        </ListItemContent>
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </Box>
+              <Divider/>
+              <LoginLogout/>
+            </Box>
+          </Stack>
+        </>
+      );
+    }
+  });
   return (
     <>
       <Stack direction={"row"} overflow={'hidden'}>
@@ -238,12 +321,12 @@ export default function Sidebar() {
           <Divider/>
           <LoginLogout/>
         </Box>
-        <Slide in={status == "authenticated" && currentPlot != null && currentPlot.key != ''} direction={"right"}
+        <Slide in={!!currentPlot && pathname == '/dashboard'} direction={"right"}
                container={containerRef.current}>
           <Box
             className="SubSidebar"
             sx={{
-              ...(status == "authenticated" && currentPlot != null && {
+              ...(!!currentPlot && pathname == '/dashboard' && {
                 position: {
                   md: 'sticky',
                 },
@@ -258,7 +341,7 @@ export default function Sidebar() {
                 borderRight: '1px solid',
                 borderColor: 'divider',
               }),
-              ...(!(status == "authenticated" && currentPlot != null) && {
+              ...(!(!!currentPlot && pathname == '/dashboard') && {
                 position: {
                   md: 'sticky',
                 },

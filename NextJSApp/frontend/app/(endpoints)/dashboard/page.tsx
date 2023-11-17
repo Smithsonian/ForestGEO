@@ -7,13 +7,11 @@ import {
   usePlotContext,
   useQuadratContext
 } from "@/app/plotcontext";
-import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
-import {Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack} from "@mui/joy";
-import Chip from "@mui/joy/Chip";
-import {useEffect, useState} from "react";
+import {Button, DialogActions, DialogContent, DialogTitle, Grid, Modal, ModalDialog, Stack} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
+import {AttributesCard, CensusCard, PersonnelCard, QuadratCard, SpeciesCard} from "@/components/iconselections";
 
 export default function Page() {
   const currentPlot = usePlotContext();
@@ -48,24 +46,45 @@ export default function Page() {
     );
   }
   else {
-    if (!currentPlot?.key && !currentCensus && !currentQuadrat) {
-      return (
-        <>
-          <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-            <p>You must select a <b>plot</b>, <b>census</b>, and <b>quadrat</b> to continue!</p>
-          </Box>
-        </>
-      );
-    } else {
-      return (
-        <>
-          <Stack direction={"column"}>
-            <Typography display={"block"}>You have selected {currentPlot ? currentPlot!.key : "no plot"}</Typography>
-            <Typography display={"block"}>You have selected {currentCensus ? currentCensus : "no census"}</Typography>
-            <Typography display={"block"}>You have selected {currentQuadrat ? currentQuadrat : "no quadrat"}</Typography>
-          </Stack>
-        </>
-      );
-    }
+    return (
+      <>
+        <Stack direction={"column"}>
+          <Typography display={"block"}>You have selected {currentPlot ? currentPlot!.key : "no plot"}</Typography>
+          <Typography display={"block"}>You have selected {currentCensus ? currentCensus : "no census"}</Typography>
+          <Typography display={"block"}>You have selected {currentQuadrat ? currentQuadrat : "no quadrat"}</Typography>
+          <Grid container spacing={2} sx={{flexGrow: 1}}>
+            <Grid xs={5}>
+              <PersonnelCard />
+            </Grid>
+            <Grid xs={2}>
+            
+            </Grid>
+            <Grid xs={5}>
+              <AttributesCard />
+            </Grid>
+            
+            <Grid xs={3}>
+            
+            </Grid>
+            <Grid xs={6}>
+              <CensusCard />
+            </Grid>
+            <Grid xs={3}>
+            
+            </Grid>
+            
+            <Grid xs={5}>
+              <QuadratCard />
+            </Grid>
+            <Grid xs={2}>
+            
+            </Grid>
+            <Grid xs={5}>
+              <SpeciesCard />
+            </Grid>
+          </Grid>
+        </Stack>
+      </>
+    );
   }
 }

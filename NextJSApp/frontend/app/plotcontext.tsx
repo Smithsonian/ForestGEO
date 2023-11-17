@@ -2,9 +2,6 @@
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
 import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
 
-const initialState: Plot = {key: '', num: 0};
-const initialCensus = 1;
-const initialQuadrat = 1;
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);

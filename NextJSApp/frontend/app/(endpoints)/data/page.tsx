@@ -58,8 +58,6 @@ export default function Page() {
   const [recordsets, setRecordsets] = useState<IRecordSet<any>[] | null>(null);
   const [loading, setLoading] = useState(false);
   const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
-  const currentQuadrat = useQuadratContext();
   
   async function getData() {
     setLoading(true);
@@ -72,11 +70,11 @@ export default function Page() {
     setLoading(false);
   }
   
-  if (!currentPlot && !currentCensus && !currentQuadrat) {
+  if (!currentPlot) {
     return (
       <>
         <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-          <p>You must select a <b>plot</b>, <b>census</b>, and <b>quadrat</b> to continue!</p>
+          <p>You must select a <b>plot</b> to continue!</p>
         </Box>
       </>
     );

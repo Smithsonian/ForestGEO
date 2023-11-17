@@ -10,13 +10,11 @@ import Typography from "@mui/joy/Typography";
 // File Hub
 export default function Files() {
   const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
-  const currentQuadrat = useQuadratContext();
-  if (!currentPlot && !currentCensus && !currentQuadrat) {
+  if (!currentPlot) {
     return (
       <>
         <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-          <p>You must select a <b>plot</b>, <b>census</b>, and <b>quadrat</b> to continue!</p>
+          <p>You must select a <b>plot</b> to continue!</p>
         </Box>
       </>
     );
