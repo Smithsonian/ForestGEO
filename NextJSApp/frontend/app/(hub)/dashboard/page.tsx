@@ -11,7 +11,18 @@ import Typography from "@mui/joy/Typography";
 import {Button, DialogActions, DialogContent, DialogTitle, Grid, Modal, ModalDialog, Stack} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
-import {AttributesCard, CensusCard, PersonnelCard, QuadratCard, SpeciesCard} from "@/components/iconselections";
+import Box from "@mui/joy/Box";
+import PersonnelBackground from '@/public/personneliconphoto.jpg';
+import SpeciesBackground from '@/public/speciesiconphoto.jpg';
+import AttributeBackground from '@/public/attributesiconphoto.jpg';
+import CensusBackground from '@/public/censusiconphoto.jpg';
+import QuadratBackground from '@/public/quadraticonphoto.jpg';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import DescriptionIcon from '@mui/icons-material/Description';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import WidgetsIcon from '@mui/icons-material/Widgets';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import {TemplateCard} from "@/components/iconselection";
 
 export default function Page() {
   const currentPlot = usePlotContext();
@@ -48,42 +59,36 @@ export default function Page() {
   else {
     return (
       <>
-        <Stack direction={"column"}>
+        <Box sx={{
+          // flex: 1,
+          // flexGrow: 1,
+          // display: 'flex',
+          display: 'inherit',
+          flexDirection: 'column',
+        }}>
           <Typography display={"block"}>You have selected {currentPlot ? currentPlot!.key : "no plot"}</Typography>
           <Typography display={"block"}>You have selected {currentCensus ? currentCensus : "no census"}</Typography>
           <Typography display={"block"}>You have selected {currentQuadrat ? currentQuadrat : "no quadrat"}</Typography>
-          <Grid container spacing={2} sx={{flexGrow: 1}}>
-            <Grid xs={5}>
-              <PersonnelCard />
+          {/*<Grid container spacing={2} sx={{flexGrow: 1}}>*/}
+          <Grid container columnSpacing={2} rowSpacing={10}>
+            <Grid xs={4}>
+              {TemplateCard(PersonnelBackground, <AccountCircleIcon />, "Personnel", "/personnel")}
             </Grid>
-            <Grid xs={2}>
-            
+            <Grid xs={4}>
+              {TemplateCard(AttributeBackground, <DescriptionIcon />, "Attributes", "/attributes")}
             </Grid>
-            <Grid xs={5}>
-              <AttributesCard />
+            <Grid xs={4}>
+              {TemplateCard(CensusBackground, <GridOnIcon />, "Census", "/census")}
             </Grid>
             
-            <Grid xs={3}>
-            
+            <Grid xs={6}>
+              {TemplateCard(QuadratBackground, <WidgetsIcon />, "Quadrats", "/quadrats")}
             </Grid>
             <Grid xs={6}>
-              <CensusCard />
-            </Grid>
-            <Grid xs={3}>
-            
-            </Grid>
-            
-            <Grid xs={5}>
-              <QuadratCard />
-            </Grid>
-            <Grid xs={2}>
-            
-            </Grid>
-            <Grid xs={5}>
-              <SpeciesCard />
+              {TemplateCard(SpeciesBackground, <BugReportIcon />, "Species", "/species")}
             </Grid>
           </Grid>
-        </Stack>
+        </Box>
       </>
     );
   }

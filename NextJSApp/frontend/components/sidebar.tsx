@@ -128,6 +128,9 @@ export default function Sidebar() {
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
   
+  /**
+   * UNAUTHENTICATED SESSION HANDLING:
+   */
   useSession({
     required: true,
     onUnauthenticated() {
@@ -141,7 +144,7 @@ export default function Sidebar() {
                   md: 'sticky',
                 },
                 height: '100dvh',
-                width: 'var(--Sidebar-width)',
+                width: 'calc(var(--Sidebar-width) )',
                 top: 0,
                 p: 2,
                 flexShrink: 0,
@@ -211,9 +214,13 @@ export default function Sidebar() {
       );
     }
   });
+  /**
+   * AUTHENTICATED SESSION HANDLING
+   */
   return (
     <>
-      <Stack direction={"row"} overflow={'hidden'}>
+      <Stack direction={"row"} sx={{}}>
+        {/*BASE SIDEBAR*/}
         <Box
           className="Sidebar"
           sx={{
@@ -221,7 +228,7 @@ export default function Sidebar() {
               md: 'sticky',
             },
             height: '100dvh',
-            width: 'var(--Sidebar-width)',
+            width: 'calc(var(--Sidebar-width) )',
             top: 0,
             p: 2,
             flexShrink: 0,
@@ -321,6 +328,7 @@ export default function Sidebar() {
           <Divider/>
           <LoginLogout/>
         </Box>
+        {/*SUB SIDE BAR HANDLING*/}
         <Slide in={!!currentPlot && pathname == '/dashboard'} direction={"right"}
                container={containerRef.current}>
           <Box
@@ -331,10 +339,9 @@ export default function Sidebar() {
                   md: 'sticky',
                 },
                 height: '100dvh',
-                width: 'var(--SubSidebar-width)',
+                width: 'calc(var(--SubSidebar-width) )',
                 top: 0,
                 gap: 5,
-                p: 2,
                 flexShrink: 0,
                 display: 'flex',
                 flexDirection: 'column',
@@ -349,7 +356,6 @@ export default function Sidebar() {
                 width: 0,
                 top: 0,
                 gap: 5,
-                p: 2,
                 flexShrink: 0,
                 display: 'flex',
                 flexDirection: 'column',
@@ -361,9 +367,9 @@ export default function Sidebar() {
             <GlobalStyles
               styles={(theme) => ({
                 ':root': {
-                  '--SubSidebar-width': '260px',
+                  '--SubSidebar-width': '300',
                   [theme.breakpoints.up('lg')]: {
-                    '--SubSidebar-width': '280px',
+                    '--SubSidebar-width': '320px',
                   },
                 },
               })}
@@ -380,7 +386,9 @@ export default function Sidebar() {
                 },
               }}
             >
-              <Typography level="title-lg">Additional Settings</Typography>
+              <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
+                <Typography level="title-lg">Additional Settings</Typography>
+              </Box>
               <List
                 size="sm"
                 sx={{
