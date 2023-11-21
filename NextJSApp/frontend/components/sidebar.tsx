@@ -26,8 +26,22 @@ import {
   useQuadratDispatch
 } from "@/app/plotcontext";
 import {usePathname, useRouter} from "next/navigation";
-import {Stack} from "@mui/joy";
+import {
+  Breadcrumbs,
+  Button,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Link,
+  Modal, ModalDialog,
+  Stack, Step, StepIndicator, Stepper
+} from "@mui/joy";
 import {Slide} from "@mui/material";
+import CommitIcon from "@mui/icons-material/Commit";
+import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
+import {Check} from "@mui/icons-material";
+import Select from "@mui/joy/Select";
+import Option from '@mui/joy/Option';
 
 function SimpleToggler({
                          isOpen,
@@ -65,68 +79,44 @@ export default function Sidebar() {
   const currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
   
-  const [p, setP] = useState(false);
-  const [c, setC] = useState(false);
-  const [q, setQ] = useState(false);
-  
-  function plotRenderToggle() {
-    return (
-      <>
-        <ListItemButton onClick={() => setP(!p)}>
-          <AssignmentRoundedIcon/>
-          <ListItemContent>
-            {currentPlot == null ?
-              <Typography level="title-sm">Plots</Typography> :
-              <Typography level={"title-sm"}>Now Viewing: {currentPlot!.key}</Typography>}
-          </ListItemContent>
-          <KeyboardArrowDownIcon
-            sx={{transform: p ? 'rotate(180deg)' : 'none'}}
-          />
-        </ListItemButton>
-      </>
-    );
-  }
-  
-  function censusRenderToggle() {
-    return (
-      <>
-        <ListItemButton onClick={() => setC(!c)}>
-          <AssignmentRoundedIcon/>
-          <ListItemContent>
-            {currentCensus == null ?
-              <Typography level="title-sm">Select Census</Typography> :
-              <Typography level={"title-sm"}>Selected Census: {currentCensus}</Typography>}
-          </ListItemContent>
-          <KeyboardArrowDownIcon
-            sx={{transform: c ? 'rotate(180deg)' : 'none'}}
-          />
-        </ListItemButton>
-      </>
-    );
-  }
-  
-  function quadratRenderToggle() {
-    return (
-      <>
-        <ListItemButton onClick={() => setQ(!q)}>
-          <AssignmentRoundedIcon/>
-          <ListItemContent>
-            {currentQuadrat == null ?
-              <Typography level="title-sm">Select Quadrat</Typography> :
-              <Typography level={"title-sm"}>Selected Quadrat: {currentQuadrat}</Typography>}
-          </ListItemContent>
-          <KeyboardArrowDownIcon
-            sx={{transform: q ? 'rotate(180deg)' : 'none'}}
-          />
-        </ListItemButton>
-      </>
-    );
-  }
+  const [plot, setPlot] = useState<string | null>(null);
+  const [census, setCensus] = useState<number | null>(null);
+  const [quadrat, setQuadrat] = useState<number | null>(null);
+  const [openSelectionModal, setOpenSelectionModal] = useState(false);
+  const [activeStep, setActiveStep] = React.useState(0);
+  const steps = ["Plot", "Census", "Quadrat"];
+  const subMenuLinks = ["/attributes", "/census", "/personnel", "/quadrats", "/species"];
   
   const {status} = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
+  
+  const [dash, setDash] = useState(false);
+  function DashboardRenderToggle() {
+    return (
+      <>
+        <ListItemButton selected={pathname === '/dashboard' || subMenuLinks.includes(pathname)}
+                        color={pathname === '/dashboard' ? 'primary' : undefined}
+                        onClick={() => {
+                          if (status == "authenticated") {
+                            router.push('/dashboard');
+                            setDash(!dash);
+                          } else {
+                            router.push('#');
+                          }
+                        }}>
+          <DashboardIcon/>
+          <ListItemContent>
+            <Typography level={"title-sm"}>Dashboard</Typography>
+          </ListItemContent>
+          <KeyboardArrowDownIcon
+            sx={{transform: dash ? 'rotate(180deg)' : 'none'}}
+          />
+        </ListItemButton>
+      </>
+    );
+  }
   
   /**
    * UNAUTHENTICATED SESSION HANDLING:
@@ -167,7 +157,7 @@ export default function Sidebar() {
                 })}
               />
               <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-                <Typography level="title-lg">ForestGEO</Typography>
+                <Typography level="h1">ForestGEO</Typography>
               </Box>
               <Box
                 sx={{
@@ -181,30 +171,6 @@ export default function Sidebar() {
                   },
                 }}
               >
-                <List
-                  size="sm"
-                  sx={{
-                    gap: 1,
-                    '--List-nestedInsetStart': '30px',
-                    '--ListItem-radius': (theme) => theme.vars.radius.sm,
-                  }}
-                >
-                  {siteConfig.navItems.map((item) => (
-                    <ListItem>
-                      <ListItemButton selected={pathname === item.href}
-                                      disabled={!currentPlot}
-                                      color={pathname === item.href ? 'primary' : undefined}
-                                      onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
-                        {item.label === 'Dashboard' && <DashboardIcon/>}
-                        {item.label === 'Files' && <FolderIcon/>}
-                        {item.label === 'Data' && <DataObjectIcon/>}
-                        <ListItemContent>
-                          <Typography level={"title-sm"}>{item.label}</Typography>
-                        </ListItemContent>
-                      </ListItemButton>
-                    </ListItem>
-                  ))}
-                </List>
               </Box>
               <Divider/>
               <LoginLogout/>
@@ -238,21 +204,21 @@ export default function Sidebar() {
             borderRight: '1px solid',
             borderColor: 'divider',
           }}
-          ref={containerRef}
         >
           <GlobalStyles
             styles={(theme) => ({
               ':root': {
-                '--Sidebar-width': '300px',
+                '--Sidebar-width': '375px',
                 [theme.breakpoints.up('lg')]: {
-                  '--Sidebar-width': '320px',
+                  '--Sidebar-width': '375px',
                 },
               },
             })}
           />
           <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-            <Typography level="title-lg">ForestGEO</Typography>
+            <Typography level="h1">ForestGEO</Typography>
           </Box>
+          <Divider orientation={"horizontal"} />
           <Box
             sx={{
               minHeight: 0,
@@ -266,201 +232,215 @@ export default function Sidebar() {
             }}
           >
             <List
-              size="sm"
+              size="lg"
               sx={{
                 gap: 1,
                 '--List-nestedInsetStart': '30px',
                 '--ListItem-radius': (theme) => theme.vars.radius.sm,
               }}
             >
-              {siteConfig.navItems.map((item) => (
-                <ListItem>
-                  <ListItemButton selected={pathname === item.href}
-                                  disabled={!currentPlot}
-                                  color={pathname === item.href ? 'primary' : undefined}
-                                  onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
-                    {item.label === 'Dashboard' && <DashboardIcon/>}
-                    {item.label === 'Files' && <FolderIcon/>}
-                    {item.label === 'Data' && <DataObjectIcon/>}
-                    <ListItemContent>
-                      <Typography level={"title-sm"}>{item.label}</Typography>
-                    </ListItemContent>
-                  </ListItemButton>
-                </ListItem>
-              ))}
-              
               <ListItem nested>
                 <SimpleToggler
-                  renderToggle={plotRenderToggle()}
-                  isOpen={p}
+                  renderToggle={DashboardRenderToggle()}
+                  isOpen={dash}
                 >
-                  <List sx={{gap: 0.5}}>
-                    <ListItem sx={{mt: 0.5}}>
-                      <ListItemButton
-                        selected={currentPlot == null}
-                        onClick={() => {
-                          censusDispatch ? censusDispatch({census: null}) : null;
-                          quadratDispatch ? quadratDispatch({quadrat: null}) : null;
-                          setP(false);
-                          setC(false);
-                          setQ(false);
-                          return plotDispatch ? plotDispatch({plotKey: null}) : null;
-                        }}>
-                        None
-                      </ListItemButton>
-                    </ListItem>
-                    {plots.map((keyItem, keyIndex) => (
-                      <ListItem key={keyIndex}>
-                        <ListItemButton selected={currentPlot?.key == keyItem.key}
-                                        onClick={() => {
-                                          setP(!p);
-                                          return plotDispatch ? plotDispatch({plotKey: keyItem.key}) : null
-                                        }}>
-                          {keyItem.key}
+                  <List sx={{gap: 0.5}} size={"sm"}>
+                    {subMenuLinks.map((link, linkIndex) => (
+                      <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
+                        <ListItemButton selected={pathname == link}
+                                        onClick={() => router.push(link)}>
+                          <Typography level={"title-sm"}>{link.charAt(1).toUpperCase() + link.slice(2)}</Typography>
                         </ListItemButton>
                       </ListItem>
                     ))}
                   </List>
                 </SimpleToggler>
               </ListItem>
+              <ListItem>
+                <ListItemButton selected={pathname === '/files'}
+                                color={pathname === '/files' ? 'primary' : undefined}
+                                onClick={() => status == "authenticated" ? router.push('/files') : router.push("#")}>
+                  <FolderIcon/>
+                  <ListItemContent>
+                    <Typography level={"title-sm"}>Files</Typography>
+                  </ListItemContent>
+                </ListItemButton>
+              </ListItem>
+              <ListItem>
+                <ListItemButton selected={pathname === '/data'}
+                                color={pathname === '/data' ? 'primary' : undefined}
+                                onClick={() => status == "authenticated" ? router.push('/data') : router.push("#")}>
+                  <DataObjectIcon/>
+                  <ListItemContent>
+                    <Typography level={"title-sm"}>Data</Typography>
+                  </ListItemContent>
+                </ListItemButton>
+              </ListItem>
+              <Divider orientation={"horizontal"} />
+              <Breadcrumbs separator={<CommitIcon fontSize={"small"} />}>
+                <Link component={"button"} onClick={() => {
+                  setActiveStep(0);
+                  setOpenSelectionModal(true);
+                }}>
+                  <Typography level="body-sm">Plot: {currentPlot ? currentPlot!.key : "None"}</Typography>
+                </Link>
+                <Link component={"button"} onClick={() => {
+                  setActiveStep(1);
+                  setOpenSelectionModal(true);
+                }}>
+                  <Typography level="body-sm">Census: {currentCensus ? currentCensus : "None"}</Typography>
+                </Link>
+                <Link component={"button"} onClick={() => {
+                  setActiveStep(2);
+                  setOpenSelectionModal(true);
+                }}>
+                  <Typography level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
+                </Link>
+              </Breadcrumbs>
+              <Divider orientation={"horizontal"} />
+              <Modal open={openSelectionModal} onClose={() => {
+                setActiveStep(0);
+                setPlot(null);
+                setCensus(null);
+                setQuadrat(null);
+                setOpenSelectionModal(false);
+              }}>
+                <ModalDialog variant="outlined" role="alertdialog">
+                  <DialogTitle>
+                    <WarningRoundedIcon />
+                    Selection
+                  </DialogTitle>
+                  <Divider />
+                  <DialogContent sx={{width: 750}}>
+                    <Stepper size={"lg"} sx={{display: 'flex', flexGrow: 1}}>
+                      {steps.map((step, index) => (
+                        <Step
+                          key={step}
+                          orientation={"vertical"}
+                          indicator={
+                            <StepIndicator
+                              variant={activeStep <= index ? 'soft' : 'solid'}
+                              color={activeStep < index ? 'neutral' : 'primary'}
+                            >
+                              {activeStep <= index ? index + 1 : <Check />}
+                            </StepIndicator>
+                          }
+                          sx={{
+                            '&::after': {
+                              ...(activeStep > index &&
+                                index !== 2 && { bgcolor: 'primary.solidBg' }),
+                            },
+                          }}
+                        >
+                          <Typography level={"title-lg"}>{step}</Typography>
+                        </Step>
+                      ))}
+                    </Stepper>
+                    <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+                      <Slide appear in={activeStep == 0} direction={"right"} container={containerRef.current}>
+                        {/*<Stack direction={"column"} spacing={2} marginRight={20} marginLeft={10} marginTop={5}>*/}
+                        <Stack direction={"column"} spacing={2}>
+                          <Typography level={"title-sm"}>Select Plot:</Typography>
+                          <Select
+                            placeholder="Select a Plot"
+                            name="None"
+                            required
+                            autoFocus
+                            size={"sm"}
+                            onChange={(_event: React.SyntheticEvent | null, newValue: string | null,) => setPlot(newValue)}
+                          >
+                            <Option value={null}>None</Option>
+                            {plots.map((keyItem) => (
+                              <Option value={keyItem.key}>{keyItem.key}</Option>
+                            ))}
+                          </Select>
+                        </Stack>
+                      </Slide>
+                      <Slide appear in={activeStep == 1} direction={"right"} container={containerRef.current}>
+                        {/*<Stack direction={"column"} spacing={2} marginRight={15} marginTop={5}>*/}
+                        <Stack direction={"column"} spacing={2}>
+                          <Typography level={"title-sm"}>Select Census:</Typography>
+                          <Select
+                            placeholder="Select a Census"
+                            name="None"
+                            required
+                            autoFocus
+                            size={"sm"}
+                            onChange={(_event: React.SyntheticEvent | null, newValue: number | null,) => setCensus(newValue)}
+                          >
+                            <Option value={null}>None</Option>
+                            {allCensus.map((item) => (
+                              <Option value={item}>{item}</Option>
+                            ))}
+                          </Select>
+                        </Stack>
+                      </Slide>
+                      <Slide appear in={activeStep == 2} direction={"right"} container={containerRef.current}>
+                        {/*<Stack direction={"column"} spacing={2} marginLeft={5} marginTop={5}>*/}
+                        <Stack direction={"column"} spacing={2}>
+                          <Typography level={"title-sm"}>Select Quadrat:</Typography>
+                          <Select
+                            placeholder="Select a Quadrat"
+                            name="None"
+                            required
+                            autoFocus
+                            size={"sm"}
+                            onChange={(_event: React.SyntheticEvent | null, newValue: number | null,) => setQuadrat(newValue)}
+                          >
+                            <Option value={null}>None</Option>
+                            {allQuadrats.map((item) => (
+                              <Option value={item}>{item}</Option>
+                            ))}
+                          </Select>
+                        </Stack>
+                      </Slide>
+                    </Box>
+                  </DialogContent>
+                  <DialogActions>
+                    <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                      {activeStep > 0 ? <Button size={"sm"} variant={"soft"} onClick={() => setActiveStep(activeStep - 1)}>
+                        Previous
+                      </Button> : <Button size={"sm"} variant={"soft"} disabled>
+                        Previous
+                      </Button>}
+                      <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
+                        setActiveStep(0);
+                        setPlot(null);
+                        setCensus(null);
+                        setQuadrat(null);
+                        setOpenSelectionModal(false);
+                      }}>
+                        Cancel
+                      </Button>
+                      {activeStep < 2 ? <Button size={"sm"} color={"primary"} variant={"soft"} onClick={() => setActiveStep(activeStep + 1)}>
+                        Submit {steps[activeStep]}
+                      </Button> : <Button size={"sm"} variant={"soft"} color="success" onClick={() => {
+                        if (plotDispatch) {
+                          plotDispatch({plotKey: plot});
+                        }
+                        if (censusDispatch) {
+                          censusDispatch({census: census});
+                        }
+                        if (quadratDispatch) {
+                          quadratDispatch({quadrat: quadrat});
+                        }
+                        setActiveStep(0);
+                        setPlot(null);
+                        setCensus(null);
+                        setQuadrat(null);
+                        setOpenSelectionModal(false);
+                      }}>
+                        Finish
+                      </Button>}
+                    </Stack>
+                  </DialogActions>
+                </ModalDialog>
+              </Modal>
             </List>
           </Box>
           <Divider/>
           <LoginLogout/>
         </Box>
-        {/*SUB SIDE BAR HANDLING*/}
-        <Slide in={!!currentPlot && pathname == '/dashboard'} direction={"right"}
-               container={containerRef.current}>
-          <Box
-            className="SubSidebar"
-            sx={{
-              ...(!!currentPlot && pathname == '/dashboard' && {
-                position: {
-                  md: 'sticky',
-                },
-                height: '100dvh',
-                width: 'calc(var(--SubSidebar-width) )',
-                top: 0,
-                gap: 5,
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                borderRight: '1px solid',
-                borderColor: 'divider',
-              }),
-              ...(!(!!currentPlot && pathname == '/dashboard') && {
-                position: {
-                  md: 'sticky',
-                },
-                height: '100dvh',
-                width: 0,
-                top: 0,
-                gap: 5,
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                borderRight: '1px solid',
-                borderColor: 'divider',
-              }),
-            }}
-          >
-            <GlobalStyles
-              styles={(theme) => ({
-                ':root': {
-                  '--SubSidebar-width': '300',
-                  [theme.breakpoints.up('lg')]: {
-                    '--SubSidebar-width': '320px',
-                  },
-                },
-              })}
-            />
-            <Box
-              sx={{
-                minHeight: 0,
-                overflow: 'hidden auto',
-                flexGrow: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                [`& .${listItemButtonClasses.root}`]: {
-                  gap: 1.5,
-                },
-              }}
-            >
-              <Box sx={{display: 'flex', gap: 1, alignItems: 'center', marginTop: '25px'}}>
-                <Typography level="title-lg">Additional Settings</Typography>
-              </Box>
-              <List
-                size="sm"
-                sx={{
-                  '--List-nestedInsetStart': '30px',
-                  '--ListItem-radius': (theme) => theme.vars.radius.sm,
-                }}
-              >
-                <ListItem nested>
-                  <SimpleToggler
-                    renderToggle={censusRenderToggle()}
-                    isOpen={c}
-                  >
-                    <List sx={{gap: 0.5}}>
-                      <ListItem sx={{mt: 0.5}}>
-                        <ListItemButton
-                          selected={currentCensus == null}
-                          onClick={() => {
-                            setC(!c);
-                            return censusDispatch ? censusDispatch({census: null}) : null
-                          }}>
-                          None
-                        </ListItemButton>
-                      </ListItem>
-                      {allCensus.map((keyItem, keyIndex) => (
-                        <ListItem key={keyIndex}>
-                          <ListItemButton selected={currentCensus == keyItem}
-                                          onClick={() => {
-                                            setC(!c);
-                                            return censusDispatch ? censusDispatch({census: keyItem}) : null
-                                          }}>
-                            {keyItem}
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  </SimpleToggler>
-                </ListItem>
-                
-                {currentCensus && <ListItem nested>
-                  <SimpleToggler
-                    renderToggle={quadratRenderToggle()}
-                    isOpen={q}
-                  >
-                    <List sx={{gap: 0.5}}>
-                      <ListItem sx={{mt: 0.5}}>
-                        <ListItemButton
-                          selected={currentQuadrat == null}
-                          onClick={() => {
-                            setQ(!q);
-                            return quadratDispatch ? quadratDispatch({quadrat: null}) : null
-                          }}>
-                          None
-                        </ListItemButton>
-                      </ListItem>
-                      {allQuadrats.map((keyItem, keyIndex) => (
-                        <ListItem key={keyIndex}>
-                          <ListItemButton selected={currentQuadrat == keyItem}
-                                          onClick={() => {
-                                            setQ(!q);
-                                            return quadratDispatch ? quadratDispatch({quadrat: keyItem}) : null
-                                          }}>
-                            {keyItem}
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  </SimpleToggler>
-                </ListItem>}
-              </List>
-            </Box>
-          </Box>
-        </Slide>
       </Stack>
     </>
   );

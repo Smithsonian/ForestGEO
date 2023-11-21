@@ -25,7 +25,7 @@ export function TemplateCard(image: any, cardIcon: any, cardTitle: string, cardL
             }}
           />
           <CardContent sx={{ justifyContent: 'flex-end' }}>
-            <Typography level="title-lg" textColor="#fff">
+            <Typography level="title-lg" textColor="#fff" alignSelf={"center"}>
               <Link
                 component={NextLink}
                 overlay
@@ -39,6 +39,8 @@ export function TemplateCard(image: any, cardIcon: any, cardTitle: string, cardL
             <Typography
               startDecorator={cardIcon}
               textColor="neutral.300"
+              alignSelf={"center"}
+              marginBottom={1}
             >
               View and Edit
             </Typography>

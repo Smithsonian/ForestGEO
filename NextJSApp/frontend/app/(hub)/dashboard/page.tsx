@@ -76,9 +76,6 @@ export default function Page() {
           flexDirection: 'column',
           overflow: 'hidden'
         }}>
-          <Typography display={"block"}>You have selected {currentPlot ? currentPlot!.key : "no plot"}</Typography>
-          <Typography display={"block"}>You have selected {currentCensus ? currentCensus : "no census"}</Typography>
-          <Typography display={"block"}>You have selected {currentQuadrat ? currentQuadrat : "no quadrat"}</Typography>
           <Box sx={{
             display: 'flex',
             flexGrow: 1,

@@ -75,43 +75,8 @@ export default function EndpointLayout({children,}: { children: React.ReactNode 
           flexShrink: 1,
         }}
       >
-        <Box sx={{display: 'flex', alignItems: 'left', paddingTop: '25px', paddingBottom: '25px'}}>
+        <Box sx={{display: 'flex', alignItems: 'left', paddingTop: '25px', paddingBottom: '25px', flexDirection: 'column'}}>
           {renderSwitch(pathname)}
-          <Breadcrumbs separator={<CircleIcon />}>
-            <Card orientation={"horizontal"} variant="soft">
-              {/*<AspectRatio sx={{ width: 120 }}>*/}
-              {/*  <Image src={PlotBackground} alt={"plot img"} />*/}
-              {/*</AspectRatio>*/}
-              <CardContent>
-                <Typography fontWeight="md" textColor="success.plainColor">
-                  Current Plot
-                </Typography>
-                <Typography level="body-sm">{currentPlot ? currentPlot!.key : "None"}</Typography>
-              </CardContent>
-            </Card>
-            <Card orientation={"horizontal"} variant="soft">
-              {/*<AspectRatio sx={{ width: 120 }}>*/}
-              {/*  <Image src={CensusBackground} alt={"census img"} />*/}
-              {/*</AspectRatio>*/}
-              <CardContent>
-                <Typography fontWeight="md" textColor="success.plainColor">
-                  Current Census
-                </Typography>
-                <Typography level="body-sm">{currentCensus ? currentCensus : "None"}</Typography>
-              </CardContent>
-            </Card>
-            <Card orientation={"horizontal"} variant="soft">
-              {/*<AspectRatio sx={{ width: 120 }}>*/}
-              {/*  <Image src={QuadratBackground} alt={"quadrat img"} />*/}
-              {/*</AspectRatio>*/}
-              <CardContent>
-                <Typography fontWeight="md" textColor="success.plainColor">
-                  Current Quadrat
-                </Typography>
-                <Typography level="body-sm">{currentQuadrat ? currentQuadrat : "None"}</Typography>
-              </CardContent>
-            </Card>
-          </Breadcrumbs>
         </Box>
         <Box sx={{display: 'flex', flexGrow: 1, flexShrink: 1, alignItems: 'flex-start', flexDirection: 'column'}}>
           {children}
