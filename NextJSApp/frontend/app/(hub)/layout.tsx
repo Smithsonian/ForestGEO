@@ -3,10 +3,17 @@ import * as React from "react";
 import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
 import {useSession} from "next-auth/react";
-import {Box, Stack} from "@mui/joy";
+import {AspectRatio, Box, Breadcrumbs, Card, CardContent, Stack} from "@mui/joy";
 import Sidebar from "@/components/sidebar";
 import Divider from "@mui/joy/Divider";
 import Header from "@/components/header";
+import CircleIcon from "@mui/icons-material/Circle";
+import Image from "next/image";
+import PlotBackground from "@/public/plotimage.jpg";
+import Typography from "@mui/joy/Typography";
+import CensusBackground from "@/public/censusiconphoto.jpg";
+import QuadratBackground from "@/public/quadraticonphoto.jpg";
+import {useCensusContext, usePlotContext, useQuadratContext} from "@/app/plotcontext";
 
 export default function EndpointLayout({children,}: { children: React.ReactNode }) {
   useSession({
@@ -45,6 +52,9 @@ export default function EndpointLayout({children,}: { children: React.ReactNode 
   }
   
   let pathname = usePathname();
+  const currentPlot = usePlotContext();
+  const currentCensus = useCensusContext();
+  const currentQuadrat = useQuadratContext();
   return (
     <>
       {/*<Stack direction={"row"}>*/}
@@ -67,8 +77,43 @@ export default function EndpointLayout({children,}: { children: React.ReactNode 
       >
         <Box sx={{display: 'flex', alignItems: 'left', paddingTop: '25px', paddingBottom: '25px'}}>
           {renderSwitch(pathname)}
+          <Breadcrumbs separator={<CircleIcon />}>
+            <Card orientation={"horizontal"} variant="soft">
+              {/*<AspectRatio sx={{ width: 120 }}>*/}
+              {/*  <Image src={PlotBackground} alt={"plot img"} />*/}
+              {/*</AspectRatio>*/}
+              <CardContent>
+                <Typography fontWeight="md" textColor="success.plainColor">
+                  Current Plot
+                </Typography>
+                <Typography level="body-sm">{currentPlot ? currentPlot!.key : "None"}</Typography>
+              </CardContent>
+            </Card>
+            <Card orientation={"horizontal"} variant="soft">
+              {/*<AspectRatio sx={{ width: 120 }}>*/}
+              {/*  <Image src={CensusBackground} alt={"census img"} />*/}
+              {/*</AspectRatio>*/}
+              <CardContent>
+                <Typography fontWeight="md" textColor="success.plainColor">
+                  Current Census
+                </Typography>
+                <Typography level="body-sm">{currentCensus ? currentCensus : "None"}</Typography>
+              </CardContent>
+            </Card>
+            <Card orientation={"horizontal"} variant="soft">
+              {/*<AspectRatio sx={{ width: 120 }}>*/}
+              {/*  <Image src={QuadratBackground} alt={"quadrat img"} />*/}
+              {/*</AspectRatio>*/}
+              <CardContent>
+                <Typography fontWeight="md" textColor="success.plainColor">
+                  Current Quadrat
+                </Typography>
+                <Typography level="body-sm">{currentQuadrat ? currentQuadrat : "None"}</Typography>
+              </CardContent>
+            </Card>
+          </Breadcrumbs>
         </Box>
-        <Box sx={{display: 'flex', alignItems: 'center'}}>
+        <Box sx={{display: 'flex', flexGrow: 1, flexShrink: 1, alignItems: 'flex-start', flexDirection: 'column'}}>
           {children}
         </Box>
         <Box mt={3} position="absolute" bottom="25px" right="calc(40% - var(--Sidebar-width))"

@@ -386,7 +386,7 @@ export default function Sidebar() {
                 },
               }}
             >
-              <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
+              <Box sx={{display: 'flex', gap: 1, alignItems: 'center', marginTop: '25px'}}>
                 <Typography level="title-lg">Additional Settings</Typography>
               </Box>
               <List
