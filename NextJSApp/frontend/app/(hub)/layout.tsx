@@ -1,4 +1,4 @@
-"use client";
+"use server"
 import * as React from "react";
 import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";

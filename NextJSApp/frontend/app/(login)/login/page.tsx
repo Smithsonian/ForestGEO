@@ -14,7 +14,7 @@ const slides = [
   'background-4.jpg',
 ]
 
-export default function Page() {
+export default async function Page() {
   const [index, setIndex] = useState(0);
   const transitions = useTransition(index, {
     key: index,

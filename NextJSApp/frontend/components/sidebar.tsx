@@ -9,13 +9,10 @@ import ListItem from '@mui/joy/ListItem';
 import ListItemButton, {listItemButtonClasses} from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
-import DashboardIcon from '@mui/icons-material/Dashboard';
-import FolderIcon from '@mui/icons-material/Folder';
-import DataObjectIcon from '@mui/icons-material/DataObject';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
-import {allCensus, allQuadrats, plots, siteConfig} from "@/config/macros";
+import {allCensus, allQuadrats, plots, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -45,6 +42,7 @@ import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import {Check} from "@mui/icons-material";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
+
 
 function SimpleToggler({
                          isOpen,
@@ -88,29 +86,29 @@ export default function Sidebar() {
   const [openSelectionModal, setOpenSelectionModal] = useState(false);
   const [activeStep, setActiveStep] = React.useState(0);
   const steps = ["Plot", "Census", "Quadrat"];
-  
-  const {status} = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
   
-  const [dash, setDash] = useState(false);
+  const [properties, setProperties] = useState(false);
   
-  function MenuRenderToggle(label: string, href: string, subMenuList: { label: string, href: string }[]) {
+  function MenuRenderToggle(props: SiteConfigProps, menuOpen: boolean, setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>) {
+    const Icon = props.icon;
     return (
       <>
-        <ListItemButton selected={pathname === href || subMenuList.find(value => value.href === pathname) !== undefined}
-                        color={pathname === href ? 'primary' : undefined}
+        <ListItemButton selected={pathname === props.href || props.expanded.find(value => value.href === pathname) !== undefined}
+                        color={pathname === props.href ? 'primary' : undefined}
+                        disabled={!currentPlot}
                         onClick={() => {
-                          router.push(href);
-                          setDash(!dash);
+                          router.push(props.href);
+                          setMenuOpen(!menuOpen);
                         }}>
-          <DashboardIcon/>
+          <Icon />
           <ListItemContent>
-            <Typography level={"title-sm"}>{label}</Typography>
+            <Typography level={"title-sm"}>{props.label}</Typography>
           </ListItemContent>
           <KeyboardArrowDownIcon
-            sx={{transform: dash ? 'rotate(180deg)' : 'none'}}
+            sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
           />
         </ListItemButton>
       </>
@@ -238,7 +236,8 @@ export default function Sidebar() {
                 '--ListItem-radius': (theme) => theme.vars.radius.sm,
               }}
             >
-              {siteConfig.navItems.map((item) => {
+              {siteConfigNav.map((item) => {
+                const Icon = item.icon;
                 if (item.expanded.length === 0) {
                   return (
                     <>
@@ -246,10 +245,8 @@ export default function Sidebar() {
                         <ListItemButton selected={pathname === item.href}
                                         disabled={!currentPlot}
                                         color={pathname === item.href ? 'primary' : undefined}
-                                        onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
-                          {item.label === 'Dashboard' && <DashboardIcon/>}
-                          {item.label === 'Files' && <FolderIcon/>}
-                          {item.label === 'Data' && <DataObjectIcon/>}
+                                        onClick={() => router.push(item.href)}>
+                          <Icon />
                           <ListItemContent>
                             <Typography level={"title-sm"}>{item.label}</Typography>
                           </ListItemContent>
@@ -257,64 +254,58 @@ export default function Sidebar() {
                       </ListItem>
                     </>
                   );
+                } else {
+                  return (
+                    <>
+                      <ListItem nested>
+                        <SimpleToggler
+                          renderToggle={MenuRenderToggle(item, properties, setProperties)}
+                          isOpen={properties}
+                        >
+                          <List sx={{gap: 0.5}} size={"sm"}>
+                            {item.expanded.map((link, linkIndex) => {
+                              const SubIcon = link.icon;
+                              return (
+                                <>
+                                  <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
+                                    <ListItemButton selected={pathname == (item.href + link.href)}
+                                                    disabled={!currentPlot}
+                                                    onClick={() => router.push((item.href + link.href))}>
+                                      <SubIcon />
+                                      <ListItemContent>
+                                        <Typography level={"title-sm"}>{link.label}</Typography>
+                                      </ListItemContent>
+                                    </ListItemButton>
+                                  </ListItem>
+                                </>
+                              );
+                            })}
+                          </List>
+                        </SimpleToggler>
+                      </ListItem>
+                    </>
+                  );
                 }
               })}
-              <ListItem nested>
-                <SimpleToggler
-                  renderToggle={PropertiesRenderToggle()}
-                  isOpen={dash}
-                >
-                  <List sx={{gap: 0.5}} size={"sm"}>
-                    {subMenuLinks.map((link, linkIndex) => (
-                      <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
-                        <ListItemButton selected={pathname == link}
-                                        onClick={() => router.push(link)}>
-                          <Typography level={"title-sm"}>{link.charAt(1).toUpperCase() + link.slice(2)}</Typography>
-                        </ListItemButton>
-                      </ListItem>
-                    ))}
-                  </List>
-                </SimpleToggler>
-              </ListItem>
-              <ListItem>
-                <ListItemButton selected={pathname === '/files'}
-                                color={pathname === '/files' ? 'primary' : undefined}
-                                onClick={() => status == "authenticated" ? router.push('/files') : router.push("#")}>
-                  <FolderIcon/>
-                  <ListItemContent>
-                    <Typography level={"title-sm"}>Files</Typography>
-                  </ListItemContent>
-                </ListItemButton>
-              </ListItem>
-              <ListItem>
-                <ListItemButton selected={pathname === '/data'}
-                                color={pathname === '/data' ? 'primary' : undefined}
-                                onClick={() => status == "authenticated" ? router.push('/data') : router.push("#")}>
-                  <DataObjectIcon/>
-                  <ListItemContent>
-                    <Typography level={"title-sm"}>Data</Typography>
-                  </ListItemContent>
-                </ListItemButton>
-              </ListItem>
               <Divider orientation={"horizontal"}/>
               <Breadcrumbs separator={<CommitIcon fontSize={"small"}/>}>
                 <Link component={"button"} onClick={() => {
                   setActiveStep(0);
                   setOpenSelectionModal(true);
                 }}>
-                  <Typography level="body-sm">Plot: {currentPlot ? currentPlot!.key : "None"}</Typography>
+                  <Typography color={!currentPlot ? "danger" : undefined} level="body-sm">Plot: {currentPlot ? currentPlot!.key : "None"}</Typography>
                 </Link>
                 <Link component={"button"} onClick={() => {
                   setActiveStep(1);
                   setOpenSelectionModal(true);
                 }}>
-                  <Typography level="body-sm">Census: {currentCensus ? currentCensus : "None"}</Typography>
+                  <Typography color={!currentCensus ? "danger" : undefined} level="body-sm">Census: {currentCensus ? currentCensus : "None"}</Typography>
                 </Link>
                 <Link component={"button"} onClick={() => {
                   setActiveStep(2);
                   setOpenSelectionModal(true);
                 }}>
-                  <Typography level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
+                  <Typography color={!currentQuadrat ? "danger" : undefined} level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
                 </Link>
               </Breadcrumbs>
               <Divider orientation={"horizontal"}/>

@@ -6,6 +6,12 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import FolderIcon from '@mui/icons-material/Folder';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import DescriptionIcon from '@mui/icons-material/Description';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import WidgetsIcon from '@mui/icons-material/Widgets';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import React from "react";
 
 // INTERFACES
 export interface Plot {
@@ -211,58 +217,74 @@ export const allCensus = Array.from({length: allCensusCount}, (_, i) => i + 1);
 
 export const allQuadratCount = 10;
 export const allQuadrats = Array.from({length: allQuadratCount}, (_, i) => i + 1);
-
+export type SiteConfigProps = {
+  label: string;
+  href: string;
+  icon: React.ElementType;
+  expanded: {
+    label: string;
+    href: string;
+    icon: React.ElementType;
+  }[];
+}
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and storage",
-  navItems: [
-    {
-      label: 'Dashboard',
-      href: '/dashboard',
-      icon: DashboardIcon,
-      expanded: [],
-    },
-    {
-      label: "Files",
-      href: "/files",
-      icon: FolderIcon,
-      expanded: [],
-    },
-    {
-      label: "Data",
-      href: "/data",
-      icon: DataObjectIcon,
-      expanded: [],
-    },
-    {
-      label: "Properties",
-      href: "/properties",
-      icon: SettingsSuggestIcon,
-      expanded: [
-        {
-          label: 'Attributes',
-          href: '/attributes',
-        },
-        {
-          label: 'Census',
-          href: '/census',
-        },
-        {
-          label: 'Personnel',
-          href: '/personnel',
-        },
-        {
-          label: 'Quadrats',
-          href: '/quadrats',
-        },
-        {
-          label: 'Species',
-          href: '/species',
-        }
-      ]
-    },
-  ]
 };
+
+export const siteConfigNav: SiteConfigProps[] = [
+  {
+    label: 'Dashboard',
+    href: '/dashboard',
+    icon: DashboardIcon,
+    expanded: [],
+  },
+  {
+    label: "Files",
+    href: "/files",
+    icon: FolderIcon,
+    expanded: [],
+  },
+  {
+    label: "Data",
+    href: "/data",
+    icon: DataObjectIcon,
+    expanded: [],
+  },
+  {
+    label: "Properties",
+    href: "/properties",
+    icon: SettingsSuggestIcon,
+    expanded: [
+      {
+        label: 'Attributes',
+        href: '/attributes',
+        icon: DescriptionIcon,
+      },
+      {
+        label: 'Census',
+        href: '/census',
+        icon: GridOnIcon,
+      },
+      {
+        label: 'Personnel',
+        href: '/personnel',
+        icon: AccountCircleIcon,
+      },
+      {
+        label: 'Quadrats',
+        href: '/quadrats',
+        icon: WidgetsIcon,
+      },
+      {
+        label: 'Species',
+        href: '/species',
+        icon: BugReportIcon,
+      }
+    ]
+  },
+]
+
 export const sqlConfig: any = {
   user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
   password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
@@ -312,6 +334,10 @@ export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
 export function selectAllRows(plot: string) {
   return `SELECT *
           FROM [plot_${plot.toLowerCase()}]`;
+}
+
+export function getAllAttributes() {
+  return `SELECT * FROM forestgeo.Attributes`;
 }
 
 /**
