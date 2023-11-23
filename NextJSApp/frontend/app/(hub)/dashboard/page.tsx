@@ -7,18 +7,7 @@ import {
   usePlotContext,
   useQuadratContext
 } from "@/app/plotcontext";
-import Typography from "@mui/joy/Typography";
-import {
-  Breadcrumbs,
-  Button,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Grid,
-  Modal,
-  ModalDialog,
-  Stack
-} from "@mui/joy";
+import {Button, DialogActions, DialogContent, DialogTitle, Grid, Modal, ModalDialog, Stack} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Box from "@mui/joy/Box";
@@ -46,10 +35,10 @@ export default function Page() {
         <Modal open={firstLoad} onClose={() => firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon />
+              <WarningRoundedIcon/>
               Welcome to the Application!
             </DialogTitle>
-            <Divider />
+            <Divider/>
             <DialogContent>
               <Stack direction={"column"}>
                 Select <b>Data</b> to view existing data and manually add data to storage
@@ -57,7 +46,8 @@ export default function Page() {
               </Stack>
             </DialogContent>
             <DialogActions>
-              <Button variant="plain" color="neutral" onClick={() => firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null}>
+              <Button variant="plain" color="neutral"
+                      onClick={() => firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null}>
                 Continue
               </Button>
             </DialogActions>
@@ -65,8 +55,7 @@ export default function Page() {
         </Modal>
       </>
     );
-  }
-  else {
+  } else {
     return (
       <>
         <Box sx={{
@@ -84,23 +73,23 @@ export default function Page() {
             <Grid container columnSpacing={2} rowSpacing={2} sx={{flexGrow: 1}}>
               {/*FIRST ROW*/}
               <Grid xs={4}>
-                {TemplateCard(AttributeBackground, <DescriptionIcon />, "Attributes", "/attributes")}
+                {TemplateCard(AttributeBackground, <DescriptionIcon/>, "Attributes", "/attributes")}
               </Grid>
               <Grid xs={4}>
-                {TemplateCard(CensusBackground, <GridOnIcon />, "Census", "/census")}
+                {TemplateCard(CensusBackground, <GridOnIcon/>, "Census", "/census")}
               </Grid>
               <Grid xs={4}>
-                {TemplateCard(PersonnelBackground, <AccountCircleIcon />, "Personnel", "/personnel")}
+                {TemplateCard(PersonnelBackground, <AccountCircleIcon/>, "Personnel", "/personnel")}
               </Grid>
               {/*SECOND ROW*/}
-              <Grid xs={2} />
+              <Grid xs={2}/>
               <Grid xs={4}>
-                {TemplateCard(QuadratBackground, <WidgetsIcon />, "Quadrats", "/quadrats")}
+                {TemplateCard(QuadratBackground, <WidgetsIcon/>, "Quadrats", "/quadrats")}
               </Grid>
               <Grid xs={4}>
-                {TemplateCard(SpeciesBackground, <BugReportIcon />, "Species", "/species")}
+                {TemplateCard(SpeciesBackground, <BugReportIcon/>, "Species", "/species")}
               </Grid>
-              <Grid xs={2} />
+              <Grid xs={2}/>
             </Grid>
           </Box>
         </Box>

@@ -1,8 +1,11 @@
 import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
-import {GridCellParams, GridColDef} from "@mui/x-data-grid";
+import {GridColDef} from "@mui/x-data-grid";
 import '@/styles/customtablesettings.css'
-import clsx from "clsx";
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import FolderIcon from '@mui/icons-material/Folder';
+import DataObjectIcon from '@mui/icons-material/DataObject';
+import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
 
 // INTERFACES
 export interface Plot {
@@ -211,19 +214,52 @@ export const allQuadrats = Array.from({length: allQuadratCount}, (_, i) => i + 1
 
 export const siteConfig = {
   name: "ForestGEO",
-  description: "Census data entry and data",
+  description: "Census data entry and storage",
   navItems: [
     {
       label: 'Dashboard',
-      href: '/dashboard'
+      href: '/dashboard',
+      icon: DashboardIcon,
+      expanded: [],
     },
     {
       label: "Files",
       href: "/files",
+      icon: FolderIcon,
+      expanded: [],
     },
     {
       label: "Data",
       href: "/data",
+      icon: DataObjectIcon,
+      expanded: [],
+    },
+    {
+      label: "Properties",
+      href: "/properties",
+      icon: SettingsSuggestIcon,
+      expanded: [
+        {
+          label: 'Attributes',
+          href: '/attributes',
+        },
+        {
+          label: 'Census',
+          href: '/census',
+        },
+        {
+          label: 'Personnel',
+          href: '/personnel',
+        },
+        {
+          label: 'Quadrats',
+          href: '/quadrats',
+        },
+        {
+          label: 'Species',
+          href: '/species',
+        }
+      ]
     },
   ]
 };
@@ -274,7 +310,8 @@ export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
 }
 
 export function selectAllRows(plot: string) {
-  return `SELECT * FROM [plot_${plot.toLowerCase()}]`;
+  return `SELECT *
+          FROM [plot_${plot.toLowerCase()}]`;
 }
 
 /**

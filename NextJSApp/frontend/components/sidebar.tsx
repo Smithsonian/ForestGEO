@@ -12,7 +12,6 @@ import Typography from '@mui/joy/Typography';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import FolderIcon from '@mui/icons-material/Folder';
 import DataObjectIcon from '@mui/icons-material/DataObject';
-import AssignmentRoundedIcon from '@mui/icons-material/AssignmentRounded';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
@@ -33,8 +32,12 @@ import {
   DialogContent,
   DialogTitle,
   Link,
-  Modal, ModalDialog,
-  Stack, Step, StepIndicator, Stepper
+  Modal,
+  ModalDialog,
+  Stack,
+  Step,
+  StepIndicator,
+  Stepper
 } from "@mui/joy";
 import {Slide} from "@mui/material";
 import CommitIcon from "@mui/icons-material/Commit";
@@ -85,7 +88,6 @@ export default function Sidebar() {
   const [openSelectionModal, setOpenSelectionModal] = useState(false);
   const [activeStep, setActiveStep] = React.useState(0);
   const steps = ["Plot", "Census", "Quadrat"];
-  const subMenuLinks = ["/attributes", "/census", "/personnel", "/quadrats", "/species"];
   
   const {status} = useSession();
   const router = useRouter();
@@ -93,22 +95,19 @@ export default function Sidebar() {
   const containerRef = React.useRef<HTMLElement>(null);
   
   const [dash, setDash] = useState(false);
-  function DashboardRenderToggle() {
+  
+  function MenuRenderToggle(label: string, href: string, subMenuList: { label: string, href: string }[]) {
     return (
       <>
-        <ListItemButton selected={pathname === '/dashboard' || subMenuLinks.includes(pathname)}
-                        color={pathname === '/dashboard' ? 'primary' : undefined}
+        <ListItemButton selected={pathname === href || subMenuList.find(value => value.href === pathname) !== undefined}
+                        color={pathname === href ? 'primary' : undefined}
                         onClick={() => {
-                          if (status == "authenticated") {
-                            router.push('/dashboard');
-                            setDash(!dash);
-                          } else {
-                            router.push('#');
-                          }
+                          router.push(href);
+                          setDash(!dash);
                         }}>
           <DashboardIcon/>
           <ListItemContent>
-            <Typography level={"title-sm"}>Dashboard</Typography>
+            <Typography level={"title-sm"}>{label}</Typography>
           </ListItemContent>
           <KeyboardArrowDownIcon
             sx={{transform: dash ? 'rotate(180deg)' : 'none'}}
@@ -218,7 +217,7 @@ export default function Sidebar() {
           <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
             <Typography level="h1">ForestGEO</Typography>
           </Box>
-          <Divider orientation={"horizontal"} />
+          <Divider orientation={"horizontal"}/>
           <Box
             sx={{
               minHeight: 0,
@@ -239,9 +238,30 @@ export default function Sidebar() {
                 '--ListItem-radius': (theme) => theme.vars.radius.sm,
               }}
             >
+              {siteConfig.navItems.map((item) => {
+                if (item.expanded.length === 0) {
+                  return (
+                    <>
+                      <ListItem>
+                        <ListItemButton selected={pathname === item.href}
+                                        disabled={!currentPlot}
+                                        color={pathname === item.href ? 'primary' : undefined}
+                                        onClick={() => status == "authenticated" ? router.push(item.href) : router.push("#")}>
+                          {item.label === 'Dashboard' && <DashboardIcon/>}
+                          {item.label === 'Files' && <FolderIcon/>}
+                          {item.label === 'Data' && <DataObjectIcon/>}
+                          <ListItemContent>
+                            <Typography level={"title-sm"}>{item.label}</Typography>
+                          </ListItemContent>
+                        </ListItemButton>
+                      </ListItem>
+                    </>
+                  );
+                }
+              })}
               <ListItem nested>
                 <SimpleToggler
-                  renderToggle={DashboardRenderToggle()}
+                  renderToggle={PropertiesRenderToggle()}
                   isOpen={dash}
                 >
                   <List sx={{gap: 0.5}} size={"sm"}>
@@ -276,8 +296,8 @@ export default function Sidebar() {
                   </ListItemContent>
                 </ListItemButton>
               </ListItem>
-              <Divider orientation={"horizontal"} />
-              <Breadcrumbs separator={<CommitIcon fontSize={"small"} />}>
+              <Divider orientation={"horizontal"}/>
+              <Breadcrumbs separator={<CommitIcon fontSize={"small"}/>}>
                 <Link component={"button"} onClick={() => {
                   setActiveStep(0);
                   setOpenSelectionModal(true);
@@ -297,7 +317,7 @@ export default function Sidebar() {
                   <Typography level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
                 </Link>
               </Breadcrumbs>
-              <Divider orientation={"horizontal"} />
+              <Divider orientation={"horizontal"}/>
               <Modal open={openSelectionModal} onClose={() => {
                 setActiveStep(0);
                 setPlot(null);
@@ -307,10 +327,10 @@ export default function Sidebar() {
               }}>
                 <ModalDialog variant="outlined" role="alertdialog">
                   <DialogTitle>
-                    <WarningRoundedIcon />
+                    <WarningRoundedIcon/>
                     Selection
                   </DialogTitle>
-                  <Divider />
+                  <Divider/>
                   <DialogContent sx={{width: 750}}>
                     <Stepper size={"lg"} sx={{display: 'flex', flexGrow: 1}}>
                       {steps.map((step, index) => (
@@ -322,13 +342,13 @@ export default function Sidebar() {
                               variant={activeStep <= index ? 'soft' : 'solid'}
                               color={activeStep < index ? 'neutral' : 'primary'}
                             >
-                              {activeStep <= index ? index + 1 : <Check />}
+                              {activeStep <= index ? index + 1 : <Check/>}
                             </StepIndicator>
                           }
                           sx={{
                             '&::after': {
                               ...(activeStep > index &&
-                                index !== 2 && { bgcolor: 'primary.solidBg' }),
+                                index !== 2 && {bgcolor: 'primary.solidBg'}),
                             },
                           }}
                         >
@@ -397,12 +417,13 @@ export default function Sidebar() {
                     </Box>
                   </DialogContent>
                   <DialogActions>
-                    <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                      {activeStep > 0 ? <Button size={"sm"} variant={"soft"} onClick={() => setActiveStep(activeStep - 1)}>
-                        Previous
-                      </Button> : <Button size={"sm"} variant={"soft"} disabled>
-                        Previous
-                      </Button>}
+                    <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+                      {activeStep > 0 ?
+                        <Button size={"sm"} variant={"soft"} onClick={() => setActiveStep(activeStep - 1)}>
+                          Previous
+                        </Button> : <Button size={"sm"} variant={"soft"} disabled>
+                          Previous
+                        </Button>}
                       <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                         setActiveStep(0);
                         setPlot(null);
@@ -412,7 +433,8 @@ export default function Sidebar() {
                       }}>
                         Cancel
                       </Button>
-                      {activeStep < 2 ? <Button size={"sm"} color={"primary"} variant={"soft"} onClick={() => setActiveStep(activeStep + 1)}>
+                      {activeStep < 2 ? <Button size={"sm"} color={"primary"} variant={"soft"}
+                                                onClick={() => setActiveStep(activeStep + 1)}>
                         Submit {steps[activeStep]}
                       </Button> : <Button size={"sm"} variant={"soft"} color="success" onClick={() => {
                         if (plotDispatch) {

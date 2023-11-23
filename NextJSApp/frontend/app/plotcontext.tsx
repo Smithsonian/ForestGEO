@@ -7,9 +7,9 @@ export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
 export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
-export const CensusDispatchContext = createContext<Dispatch<{census: number | null}> | null>(null);
-export const QuadratDispatchContext = createContext<Dispatch<{quadrat: number | null}> | null>(null);
-export const FirstLoadDispatchContext = createContext<Dispatch<{firstLoad: boolean}> | null>(null);
+export const CensusDispatchContext = createContext<Dispatch<{ census: number | null }> | null>(null);
+export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
+export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
   const [plot, plotDispatch] = useReducer(
@@ -57,19 +57,19 @@ function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
   else return currentPlot;
 }
 
-function censusReducer(currentCensus: any, action: { census: number | null} ) {
+function censusReducer(currentCensus: any, action: { census: number | null }) {
   if (action.census == null) return null;
   else if (allCensus.includes(action.census)) return action.census;
   else return currentCensus;
 }
 
-function quadratReducer(currentQuadrat: any, action: { quadrat: number | null } ) {
+function quadratReducer(currentQuadrat: any, action: { quadrat: number | null }) {
   if (action.quadrat == null) return null;
   else if (allQuadrats.includes(action.quadrat)) return action.quadrat;
   else return currentQuadrat;
 }
 
-function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null } ) {
+function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null }) {
   if (action.firstLoad == false && currentState) return action.firstLoad;
   else return currentState;
 }

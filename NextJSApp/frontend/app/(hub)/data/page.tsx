@@ -1,7 +1,7 @@
 "use client";
 
 import React, {useState} from "react";
-import {useCensusContext, usePlotContext, useQuadratContext} from "@/app/plotcontext";
+import {usePlotContext} from "@/app/plotcontext";
 import {IRecordSet} from "mssql";
 import {gridColumns, GridRowDataStructure, RowDataStructure} from "@/config/macros";
 import Button from "@mui/joy/Button";
@@ -9,7 +9,7 @@ import Box from "@mui/joy/Box";
 import {DataGrid, GridRowsProp} from '@mui/x-data-grid';
 import {styled} from "@mui/system";
 
-const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
+const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   border: 0,
   color:
     theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.85)',

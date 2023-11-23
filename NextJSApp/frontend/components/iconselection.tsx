@@ -1,5 +1,4 @@
-import {AspectRatio, Card, CardCover, Link} from '@mui/joy';
-import {CardContent} from "@mui/joy";
+import {AspectRatio, Card, CardContent, CardCover, Link} from '@mui/joy';
 import Typography from "@mui/joy/Typography";
 
 import Image from 'next/image';
@@ -16,7 +15,7 @@ export function TemplateCard(image: any, cardIcon: any, cardTitle: string, cardL
           flexShrink: 1,
         }}>
           <CardCover>
-            <Image src={image} alt={""} layout="fill" placeholder="blur" />
+            <Image src={image} alt={""} layout="fill" placeholder="blur"/>
           </CardCover>
           <CardCover
             sx={{
@@ -24,14 +23,14 @@ export function TemplateCard(image: any, cardIcon: any, cardTitle: string, cardL
                 'linear-gradient(to top, rgba(0,0,0,0.4), rgba(0,0,0,0) 200px), linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0) 300px)',
             }}
           />
-          <CardContent sx={{ justifyContent: 'flex-end' }}>
+          <CardContent sx={{justifyContent: 'flex-end'}}>
             <Typography level="title-lg" textColor="#fff" alignSelf={"center"}>
               <Link
                 component={NextLink}
                 overlay
                 underline="none"
                 href={cardLink}
-                sx={{ color: 'text.tertiary' }}
+                sx={{color: 'text.tertiary'}}
               >
                 {cardTitle}
               </Link>
