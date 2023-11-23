@@ -1,4 +1,4 @@
-"use server"
+"use client"
 import * as React from "react";
 import {subtitle, title} from "@/config/primitives";
 import {redirect, usePathname} from "next/navigation";
@@ -82,8 +82,8 @@ export default function EndpointLayout({children,}: { children: React.ReactNode 
         <Box sx={{display: 'flex', flexGrow: 1, flexShrink: 1, alignItems: 'flex-start', flexDirection: 'column'}}>
           {children}
         </Box>
-        <Box mt={3} position="absolute" bottom="25px" right="calc(40% - var(--Sidebar-width))"
-             sx={{display: 'flex', alignItems: 'center', flexDirection: 'row'}}>
+        <Box mt={3} position="absolute" bottom="25px" right="calc(50% - var(--Sidebar-width))"
+             sx={{display: 'flex', alignItems: 'center', alignSelf: 'center', flexDirection: 'row'}}>
           <Box>
             <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
           </Box>
