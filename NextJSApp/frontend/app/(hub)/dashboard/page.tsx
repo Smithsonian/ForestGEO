@@ -10,6 +10,7 @@ import {
 import {Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
+import Typography from "@mui/joy/Typography";
 
 export default function Page() {
   const currentPlot = usePlotContext();
@@ -20,17 +21,17 @@ export default function Page() {
   if (firstLoad) {
     return (
       <>
-        <Modal open={firstLoad} onClose={() => firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null}>
+        <Modal open={firstLoad} onClose={() => firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null} sx={{display: 'flex', flexGrow: 1}}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
               <WarningRoundedIcon/>
-              Welcome to the Application!
+              <Typography level={"title-lg"}>Welcome to the Application!</Typography>
             </DialogTitle>
             <Divider/>
             <DialogContent>
               <Stack direction={"column"}>
-                Select <b>Data</b> to view existing data and manually add data to storage
-                Select <b>Files</b> to add preformatted CSV data files to storage
+                <Typography level={"body-sm"}>Select <b>Data</b> to view existing data and manually add data to storage</Typography>
+                <Typography level={"body-sm"}>Select <b>Files</b> to add preformatted CSV data files to storage</Typography>
               </Stack>
             </DialogContent>
             <DialogActions>
