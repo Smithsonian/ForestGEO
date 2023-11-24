@@ -14,13 +14,9 @@ export default function RootLayout({children,}: { children: React.ReactNode; }) 
       <body>
       <ContextsProvider>
         <Providers>
-          {/*<Box sx={{display: 'block flex', flexGrow: 1}}>*/}
-          {/*  {children}*/}
-          {/*</Box>*/}
           <Box sx={{display: 'flex', width: '100%', height: '100%'}}>
             {children}
           </Box>
-          {/*<DrawerNav />*/}
         </Providers>
       </ContextsProvider>
       </body>

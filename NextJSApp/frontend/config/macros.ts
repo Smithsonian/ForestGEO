@@ -220,13 +220,16 @@ export const allQuadrats = Array.from({length: allQuadratCount}, (_, i) => i + 1
 export type SiteConfigProps = {
   label: string;
   href: string;
+  tip: string;
   icon: React.ElementType;
   expanded: {
     label: string;
     href: string;
+    tip: string;
     icon: React.ElementType;
   }[];
 }
+
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and storage",
@@ -236,49 +239,58 @@ export const siteConfigNav: SiteConfigProps[] = [
   {
     label: 'Dashboard',
     href: '/dashboard',
+    tip: '',
     icon: DashboardIcon,
     expanded: [],
   },
   {
     label: "Files",
     href: "/files",
+    tip: '',
     icon: FolderIcon,
     expanded: [],
   },
   {
     label: "Data",
     href: "/data",
+    tip: '',
     icon: DataObjectIcon,
     expanded: [],
   },
   {
     label: "Properties",
     href: "/properties",
+    tip: '',
     icon: SettingsSuggestIcon,
     expanded: [
       {
         label: 'Attributes',
         href: '/attributes',
+        tip: '',
         icon: DescriptionIcon,
       },
       {
         label: 'Census',
         href: '/census',
+        tip: '',
         icon: GridOnIcon,
       },
       {
         label: 'Personnel',
         href: '/personnel',
+        tip: '',
         icon: AccountCircleIcon,
       },
       {
         label: 'Quadrats',
         href: '/quadrats',
+        tip: '',
         icon: WidgetsIcon,
       },
       {
         label: 'Species',
         href: '/species',
+        tip: '',
         icon: BugReportIcon,
       }
     ]
@@ -334,10 +346,6 @@ export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
 export function selectAllRows(plot: string) {
   return `SELECT *
           FROM [plot_${plot.toLowerCase()}]`;
-}
-
-export function getAllAttributes() {
-  return `SELECT * FROM forestgeo.Attributes`;
 }
 
 /**

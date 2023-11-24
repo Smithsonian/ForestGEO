@@ -34,7 +34,8 @@ import {
   Stack,
   Step,
   StepIndicator,
-  Stepper
+  Stepper,
+  Tooltip
 } from "@mui/joy";
 import {Slide} from "@mui/material";
 import CommitIcon from "@mui/icons-material/Commit";
@@ -96,14 +97,15 @@ export default function Sidebar() {
     const Icon = props.icon;
     return (
       <>
-        <ListItemButton selected={pathname === props.href || props.expanded.find(value => value.href === pathname) !== undefined}
-                        color={pathname === props.href ? 'primary' : undefined}
-                        disabled={!currentPlot}
-                        onClick={() => {
-                          router.push(props.href);
-                          setMenuOpen(!menuOpen);
-                        }}>
-          <Icon />
+        <ListItemButton
+          selected={pathname === props.href || props.expanded.find(value => value.href === pathname) !== undefined}
+          color={pathname === props.href ? 'primary' : undefined}
+          disabled={!currentPlot}
+          onClick={() => {
+            router.push(props.href);
+            setMenuOpen(!menuOpen);
+          }}>
+          <Icon/>
           <ListItemContent>
             <Typography level={"title-sm"}>{props.label}</Typography>
           </ListItemContent>
@@ -241,48 +243,52 @@ export default function Sidebar() {
                 if (item.expanded.length === 0) {
                   return (
                     <>
-                      <ListItem>
-                        <ListItemButton selected={pathname === item.href}
-                                        disabled={!currentPlot}
-                                        color={pathname === item.href ? 'primary' : undefined}
-                                        onClick={() => router.push(item.href)}>
-                          <Icon />
-                          <ListItemContent>
-                            <Typography level={"title-sm"}>{item.label}</Typography>
-                          </ListItemContent>
-                        </ListItemButton>
-                      </ListItem>
+                      <Tooltip title={item.tip} variant={"soft"}>
+                        <ListItem>
+                          <ListItemButton selected={pathname === item.href}
+                                          disabled={!currentPlot}
+                                          color={pathname === item.href ? 'primary' : undefined}
+                                          onClick={() => router.push(item.href)}>
+                            <Icon/>
+                            <ListItemContent>
+                              <Typography level={"title-sm"}>{item.label}</Typography>
+                            </ListItemContent>
+                          </ListItemButton>
+                        </ListItem>
+                      </Tooltip>
                     </>
                   );
                 } else {
                   return (
                     <>
-                      <ListItem nested>
-                        <SimpleToggler
-                          renderToggle={MenuRenderToggle(item, properties, setProperties)}
-                          isOpen={properties}
-                        >
-                          <List sx={{gap: 0.5}} size={"sm"}>
-                            {item.expanded.map((link, linkIndex) => {
-                              const SubIcon = link.icon;
-                              return (
-                                <>
-                                  <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
-                                    <ListItemButton selected={pathname == (item.href + link.href)}
-                                                    disabled={!currentPlot}
-                                                    onClick={() => router.push((item.href + link.href))}>
-                                      <SubIcon />
-                                      <ListItemContent>
-                                        <Typography level={"title-sm"}>{link.label}</Typography>
-                                      </ListItemContent>
-                                    </ListItemButton>
-                                  </ListItem>
-                                </>
-                              );
-                            })}
-                          </List>
-                        </SimpleToggler>
-                      </ListItem>
+                      <Tooltip title={item.tip} variant={"soft"}>
+                        <ListItem nested>
+                          <SimpleToggler
+                            renderToggle={MenuRenderToggle(item, properties, setProperties)}
+                            isOpen={properties}
+                          >
+                            <List sx={{gap: 0.5}} size={"sm"}>
+                              {item.expanded.map((link, linkIndex) => {
+                                const SubIcon = link.icon;
+                                return (
+                                  <>
+                                    <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
+                                      <ListItemButton selected={pathname == (item.href + link.href)}
+                                                      disabled={!currentPlot}
+                                                      onClick={() => router.push((item.href + link.href))}>
+                                        <SubIcon/>
+                                        <ListItemContent>
+                                          <Typography level={"title-sm"}>{link.label}</Typography>
+                                        </ListItemContent>
+                                      </ListItemButton>
+                                    </ListItem>
+                                  </>
+                                );
+                              })}
+                            </List>
+                          </SimpleToggler>
+                        </ListItem>
+                      </Tooltip>
                     </>
                   );
                 }
@@ -293,19 +299,22 @@ export default function Sidebar() {
                   setActiveStep(0);
                   setOpenSelectionModal(true);
                 }}>
-                  <Typography color={!currentPlot ? "danger" : undefined} level="body-sm">Plot: {currentPlot ? currentPlot!.key : "None"}</Typography>
+                  <Typography color={!currentPlot ? "danger" : undefined}
+                              level="body-sm">Plot: {currentPlot ? currentPlot!.key : "None"}</Typography>
                 </Link>
                 <Link component={"button"} onClick={() => {
                   setActiveStep(1);
                   setOpenSelectionModal(true);
                 }}>
-                  <Typography color={!currentCensus ? "danger" : undefined} level="body-sm">Census: {currentCensus ? currentCensus : "None"}</Typography>
+                  <Typography color={!currentCensus ? "danger" : undefined}
+                              level="body-sm">Census: {currentCensus ? currentCensus : "None"}</Typography>
                 </Link>
                 <Link component={"button"} onClick={() => {
                   setActiveStep(2);
                   setOpenSelectionModal(true);
                 }}>
-                  <Typography color={!currentQuadrat ? "danger" : undefined} level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
+                  <Typography color={!currentQuadrat ? "danger" : undefined}
+                              level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
                 </Link>
               </Breadcrumbs>
               <Divider orientation={"horizontal"}/>

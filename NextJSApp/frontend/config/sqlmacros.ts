@@ -343,5 +343,10 @@ export interface ValidationErrorRDS {
 
 export const ValidationErrorGridColumns: GridColDef[] = [
   {field: 'id', headerName: 'ValidationErrorID', headerClassName: 'header', width: 150},
-  {field: 'validationErrorDescription', headerName: 'ValidationErrorDescription', headerClassName: 'header', width: 150},
+  {
+    field: 'validationErrorDescription',
+    headerName: 'ValidationErrorDescription',
+    headerClassName: 'header',
+    width: 150
+  },
 ]

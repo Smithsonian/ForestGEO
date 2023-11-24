@@ -7,21 +7,9 @@ import {
   usePlotContext,
   useQuadratContext
 } from "@/app/plotcontext";
-import {Button, DialogActions, DialogContent, DialogTitle, Grid, Modal, ModalDialog, Stack} from "@mui/joy";
+import {Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
-import Box from "@mui/joy/Box";
-import PersonnelBackground from '@/public/personneliconphoto.jpg';
-import SpeciesBackground from '@/public/speciesiconphoto.jpg';
-import AttributeBackground from '@/public/attributesiconphoto.jpg';
-import CensusBackground from '@/public/censusiconphoto.jpg';
-import QuadratBackground from '@/public/quadraticonphoto.jpg';
-import AccountCircleIcon from '@mui/icons-material/AccountCircle';
-import DescriptionIcon from '@mui/icons-material/Description';
-import GridOnIcon from '@mui/icons-material/GridOn';
-import WidgetsIcon from '@mui/icons-material/Widgets';
-import BugReportIcon from '@mui/icons-material/BugReport';
-import {TemplateCard} from "@/components/iconselection";
 
 export default function Page() {
   const currentPlot = usePlotContext();
