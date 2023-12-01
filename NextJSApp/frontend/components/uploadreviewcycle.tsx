@@ -1,8 +1,8 @@
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {FileErrors, ReviewStates, RowDataStructure} from "@/config/macros";
+import {FileErrors, ReviewStates} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/validationtable";
+import {DataStructure, DisplayParsedData} from "@/components/validationtable";
 import {parse} from "papaparse";
 import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
 import {usePlotContext} from "@/app/plotcontext";
@@ -40,7 +40,7 @@ export function UploadAndReviewProcess() {
   // validated error storage
   const [errorsData, setErrorsData] = useState<FileErrors>({});
   // validated error storage by row
-  const [errorRows, setErrorRows] = useState<{ [fileName: string]: RowDataStructure[] }>({})
+  // const [errorRows, setErrorRows] = useState<{ [fileName: string]: RowDataStructure[] }>({})
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
@@ -77,7 +77,7 @@ export function UploadAndReviewProcess() {
     });
     const data = await response.json();
     setErrorsData(await data.errors);
-    setErrorRows(await data.errorRows);
+    // setErrorRows(await data.errorRows);
     setUploaded(true);
   }, [acceptedFiles, currentPlot, session]);
   
@@ -178,10 +178,10 @@ export function UploadAndReviewProcess() {
         <>
           <div className={"grid grid-cols-2"}>
             <div className={"mr-4"}>
-              {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
-                fileName: '',
-                data: [],
-              })}
+              {/*{DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
+              {/*  fileName: '',*/}
+              {/*  data: [],*/}
+              {/*})}*/}
               <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
             </div>
             <div className={"flex justify-center w-2/4"}>
@@ -243,13 +243,13 @@ export function UploadAndReviewProcess() {
           <div className={"flex flex-row gap-5 w-auto h-auto justify-center"}>
             <div className={"grid grid-cols-2"}>
               <div className={"flex flex-col flex-1 gap-5 w-auto h-auto justify-left"}>
-                <DisplayErrorTable
-                  fileName={filesWithErrorsList[dataViewActive - 1].name}
-                  fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
-                    fileName: '',
-                    data: [],
-                  }}
-                  errorMessage={errorsData}/>
+                {/*<DisplayErrorTable*/}
+                {/*  fileName={filesWithErrorsList[dataViewActive - 1].name}*/}
+                {/*  fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
+                {/*    fileName: '',*/}
+                {/*    data: [],*/}
+                {/*  }}*/}
+                {/*  errorMessage={errorsData}/>*/}
                 <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
               </div>
               <div>
@@ -290,10 +290,10 @@ export function UploadAndReviewProcess() {
         <>
           <div className={"grid grid-cols-2"}>
             <div className={"mr-4"}>
-              {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
-                fileName: '',
-                data: [],
-              })}
+              {/*{DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
+              {/*  fileName: '',*/}
+              {/*  data: [],*/}
+              {/*})}*/}
               <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
             </div>
             <div className={"flex justify-center"}>

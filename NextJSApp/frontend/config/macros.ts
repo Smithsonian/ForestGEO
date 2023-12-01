@@ -78,15 +78,9 @@ export enum ReviewStates {
   UPLOADED = "uploaded",
   ERRORS = "errors"
 }
-
-export enum HTTPResponses {
-  NO_ERRORS = 201,
-  EMPTY_FILE = 204,
-  ERRORS_IN_FILE = 206,
-  STORAGE_CONNECTION_FAILURE = 503,
-  SQL_CONNECTION_TIMEOUT = 504,
+export enum ErrorMessages {
+  UKAE = "Unique Key Already Exists",
 }
-
 export const tableHeaderSettings = {
   fontWeight: 'bold',
   fontSize: 16,
@@ -95,42 +89,11 @@ export const tableHeaderSettings = {
 export interface DropzonePureProps {
   /** Is someone dragging file(s) onto the dropzone? */
   isDragActive: boolean;
-  /** From react-dropzone, function which gets  for putting properties */
+  /** From react-dropzone, function which gets  for putting attributes */
   getRootProps: any;
-  /** From react-dropzone, function which gets properties for the input field. */
+  /** From react-dropzone, function which gets attributes for the input field. */
   getInputProps: any;
 }
-
-export interface RowDataStructure {
-  tag: string,
-  subquadrat: string,
-  spcode: string,
-  dbh: string,
-  htmeas: string,
-  codes: string,
-  comments: string
-}
-
-export interface GridRowDataStructure {
-  id: string,
-  subquadrat: string,
-  spcode: string,
-  dbh: string,
-  htmeas: string,
-  codes: string,
-  comments: string
-}
-
-export const gridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'Tag', headerClassName: 'header', width: 150},
-  {field: 'subquadrat', headerName: 'Subquadrat', headerClassName: 'header', width: 150},
-  {field: 'spcode', headerName: 'Species Code', headerClassName: 'header', width: 150},
-  {field: 'dbh', headerName: 'DBH', headerClassName: 'header', width: 150},
-  {field: 'htmeas', headerName: 'HTMEAS', headerClassName: 'header', width: 150},
-  {field: 'codes', headerName: 'Codes', headerClassName: 'header', width: 150},
-  {field: 'comments', headerName: 'Comments', headerClassName: 'header', width: 150},
-];
-
 // conditional CSS logic saved here for future usage
 // const columns: GridColDef[] = [
 //   {
@@ -311,37 +274,17 @@ export const sqlConfig: any = {
   }
 }
 
-export const headers = [
-  "Tag",
-  "Subquadrat",
-  "SpCode",
-  "DBH",
-  "Htmeas",
-  "Codes",
-  "Comments",
-];
-
-export const tableHeaders = [
-  {key: 'tag', label: 'Tag'},
-  {key: 'subquadrat', label: 'Subquadrat'},
-  {key: 'spcode', label: 'SpCode'},
-  {key: 'dbh', label: 'DBH'},
-  {key: 'htmeas', label: 'Htmeas'},
-  {key: 'codes', label: 'Codes'},
-  {key: 'comments', label: 'Comments'},
-]
-
-export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
-  return `
-      IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row.tag)})
-        UPDATE [plot_${plot.toLowerCase()}]
-        SET Subquadrat = ${parseInt(row.subquadrat)}, SpCode = ${parseInt(row.spcode)}, DBH = ${parseFloat(row.dbh)}, Htmeas = ${parseFloat(row.htmeas)}, Codes = '${row.codes}', Comments = '${row.comments}'
-        WHERE Tag = ${parseInt(row.tag)};
-      ELSE
-        INSERT INTO [plot_${plot.toLowerCase()}] (Tag, Subquadrat, SpCode, DBH, Htmeas, Codes, Comments)
-        VALUES (${parseInt(row.tag)}, ${parseInt(row.subquadrat)}, ${parseInt(row.spcode)}, ${parseFloat(row.dbh)}, ${parseFloat(row.htmeas)}, '${row.codes}', '${row.comments}');
-    `;
-}
+// export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
+//   return `
+//       IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row.tag)})
+//         UPDATE [plot_${plot.toLowerCase()}]
+//         SET Subquadrat = ${parseInt(row.subquadrat)}, SpCode = ${parseInt(row.spcode)}, DBH = ${parseFloat(row.dbh)}, Htmeas = ${parseFloat(row.htmeas)}, Codes = '${row.codes}', Comments = '${row.comments}'
+//         WHERE Tag = ${parseInt(row.tag)};
+//       ELSE
+//         INSERT INTO [plot_${plot.toLowerCase()}] (Tag, Subquadrat, SpCode, DBH, Htmeas, Codes, Comments)
+//         VALUES (${parseInt(row.tag)}, ${parseInt(row.subquadrat)}, ${parseInt(row.spcode)}, ${parseFloat(row.dbh)}, ${parseFloat(row.htmeas)}, '${row.codes}', '${row.comments}');
+//     `;
+// }
 
 export function selectAllRows(plot: string) {
   return `SELECT *

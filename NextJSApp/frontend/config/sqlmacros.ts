@@ -1,63 +1,74 @@
 /**
  * macros for sql table props:
  */
-import {GridColDef} from "@mui/x-data-grid";
+import {GridColDef, GridRowProps} from "@mui/x-data-grid";
+import {
+  GridRowsProp,
+} from '@mui/x-data-grid';
+import {minWidth} from "@mui/system";
 
 export interface AttributeRDS {
+  id: number;
   code: string | null;
   description: string | null;
   status: string | null;
 }
 
+export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead']
+
 export const AttributeGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'Code', headerClassName: 'header', width: 150}, // all unique ID columns need to be tagged 'id'
-  {field: 'description', headerName: 'Description', headerClassName: 'header', width: 150},
-  {field: 'status', headerName: 'Status', headerClassName: 'header', width: 150},
+  {field: 'code', headerName: 'Code', headerClassName: 'header', minWidth: 150, flex: 1, editable: true}, // all unique ID columns need to be tagged 'id'
+  {field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 250, flex: 1, align: 'left', editable: true},
+  {field: 'status', headerName: 'Status', headerClassName: 'header', minWidth: 150, flex: 1, editable: true, type: 'singleSelect', valueOptions: AttributeStatusOptions,},
 ];
 
 export interface CensusRDS {
+  id: number;
   censusID: number | null;
   plotID: number | null;
   plotCensusNumber: number | null;
-  startDate: string | null;
-  endDate: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
   description: string | null;
 }
 
 export const CensusGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'censusID', headerClassName: 'header', width: 150},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', width: 150},
-  {field: 'plotCensusNumber', headerName: 'PlotCensusNumber', headerClassName: 'header', width: 150},
-  {field: 'startDate', headerName: 'StartDate', headerClassName: 'header', width: 150},
-  {field: 'endDate', headerName: 'EndDate', headerClassName: 'header', width: 150},
-  {field: 'description', headerName: 'Description', headerClassName: 'header', width: 150},
+  {field: 'censusID', headerName: 'censusID', headerClassName: 'header', flex: 1},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1},
+  {field: 'plotCensusNumber', headerName: 'PlotCensusNumber', headerClassName: 'header', flex: 1},
+  {field: 'startDate', headerName: 'StartDate', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'endDate', headerName: 'EndDate', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1},
 ];
 
 export interface CMAttributeRDS {
+  id: number;
   cmaID: number | null;
   coreMeasurementID: number | null;
   code: string | null;
 }
 
 export const CMAttributeGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'CMAID', headerClassName: 'header', width: 150},
-  {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', width: 150},
-  {field: 'code', headerName: 'Code', headerClassName: 'header', width: 150},
+  {field: 'cmaID', headerName: 'CMAID', headerClassName: 'header', flex: 1},
+  {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1},
+  {field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1},
 ]
 
 export interface CMVErrorRDS {
+  id: number;
   cmvErrorID: number | null;
   coreMeasurementID: number | null;
   validationErrorID: number | null;
 }
 
 export const CMVErrorGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'CMVErrorID', headerClassName: 'header', width: 150},
-  {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', width: 150},
-  {field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', width: 150},
+  {field: 'cmvErrorID', headerName: 'CMVErrorID', headerClassName: 'header', flex: 1},
+  {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1},
+  {field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1},
 ]
 
 export interface CoreMeasurementRDS {
+  id: number;
   coreMeasurementID: number | null;
   censusID: number | null;
   plotID: number | null;
@@ -66,58 +77,63 @@ export interface CoreMeasurementRDS {
   stemID: number | null;
   personnelID: number | null;
   measurementTypeID: number | null;
-  measurementDate: string | null;
+  measurementDate: Date | null;
   measurement: string | null;
   isRemeasurement: boolean | null;
   isCurrent: boolean | null;
   userDefinedFields: string | null;
 }
 
+
 export const CoreMeasurementGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'CoreMeasurementID', headerClassName: 'header', width: 150},
-  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', width: 150},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', width: 150},
-  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', width: 150},
-  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', width: 150},
-  {field: 'stemID', headerName: 'StemID', headerClassName: 'header', width: 150},
-  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', width: 150},
-  {field: 'measurementTypeID', headerName: 'MeasurementTypeID', headerClassName: 'header', width: 150},
-  {field: 'measurementDate', headerName: 'MeasurementDate', headerClassName: 'header', width: 150},
-  {field: 'measurement', headerName: 'Measurement', headerClassName: 'header', width: 150},
-  {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', width: 150},
-  {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', width: 150},
-  {field: 'userDefinedFields', headerName: 'UserDefinedFields', headerClassName: 'header', width: 150},
+  {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1},
+  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1},
+  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1},
+  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1},
+  {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1},
+  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1},
+  {field: 'measurementTypeID', headerName: 'MeasurementTypeID', headerClassName: 'header', flex: 1},
+  {field: 'measurementDate', headerName: 'MeasurementDate', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'measurement', headerName: 'Measurement', headerClassName: 'header', flex: 1},
+  {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1},
+  {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1},
+  {field: 'userDefinedFields', headerName: 'UserDefinedFields', headerClassName: 'header', flex: 1},
 ]
 
 export interface CurrentObsoleteRDS {
+  id: number;
   speciesID: number | null;
   obsoleteSpeciesID: number | null;
-  changeDate: string | null;
+  changeDate: Date | null;
   changeCodeID: number | null;
   changeNote: string | null;
 }
 
+
 export const CurrentObsoleteGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'SpeciesID', headerClassName: 'header', width: 150},
-  {field: 'obsoleteSpeciesID', headerName: 'ObsoleteSpeciesID', headerClassName: 'header', width: 150},
-  {field: 'changeDate', headerName: 'ChangeDate', headerClassName: 'header', width: 150},
-  {field: 'changeCodeID', headerName: 'ChangeCodeID', headerClassName: 'header', width: 150},
-  {field: 'changeNote', headerName: 'ChangeNote', headerClassName: 'header', width: 150},
+  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'obsoleteSpeciesID', headerName: 'ObsoleteSpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'changeDate', headerName: 'ChangeDate', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'changeCodeID', headerName: 'ChangeCodeID', headerClassName: 'header', flex: 1},
+  {field: 'changeNote', headerName: 'ChangeNote', headerClassName: 'header', flex: 1},
 ]
 
 export interface FamilyRDS {
+  id: number;
   familyID: number | null;
   family: string | null;
   referenceID: number | null;
 }
 
 export const FamilyGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'FamilyID', headerClassName: 'header', width: 150},
-  {field: 'family', headerName: 'Family', headerClassName: 'header', width: 150},
-  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', width: 150},
+  {field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1},
+  {field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1},
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1},
 ]
 
 export interface GenusRDS {
+  id: number;
   genusID: number | null;
   familyID: number | null;
   genusName: string | null;
@@ -126,29 +142,31 @@ export interface GenusRDS {
 }
 
 export const GenusGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'GenusID', headerClassName: 'header', width: 150},
-  {field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', width: 150},
-  {field: 'genusName', headerName: 'GenusName', headerClassName: 'header', width: 150},
-  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', width: 150},
-  {field: 'authority', headerName: 'Authority', headerClassName: 'header', width: 150},
+  {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1},
+  {field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1},
+  {field: 'genusName', headerName: 'GenusName', headerClassName: 'header', flex: 1},
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1},
+  {field: 'authority', headerName: 'Authority', headerClassName: 'header', flex: 1},
 ]
 
 export interface MeasurementTypeRDS {
+  id: number;
   measurementTypeID: number | null;
   measurementTypeDescription: string | null;
 }
 
 export const MeasurementTypeGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'MeasurementTypeID', headerClassName: 'header', width: 150},
+  {field: 'measurementTypeID', headerName: 'MeasurementTypeID', headerClassName: 'header', flex: 1},
   {
     field: 'measurementTypeDescription',
     headerName: 'MeasurementTypeDescription',
     headerClassName: 'header',
-    width: 150
+    flex: 1
   },
 ]
 
 export interface PersonnelRDS {
+  id: number;
   personnelID: number | null;
   firstName: string | null;
   lastName: string | null;
@@ -156,13 +174,14 @@ export interface PersonnelRDS {
 }
 
 export const PersonnelGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'PersonnelID', headerClassName: 'header', width: 150},
-  {field: 'firstName', headerName: 'FirstName', headerClassName: 'header', width: 150},
-  {field: 'lastName', headerName: 'LastName', headerClassName: 'header', width: 150},
-  {field: 'role', headerName: 'Role', headerClassName: 'header', width: 150},
+  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1},
+  {field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1},
+  {field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1},
+  {field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1},
 ]
 
 export interface PlotRDS {
+  id: number;
   plotID: number | null;
   plotName: string | null;
   locationName: string | null;
@@ -175,20 +194,22 @@ export interface PlotRDS {
   plotDescription: string | null;
 }
 
+
 export const PlotGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'PlotID', headerClassName: 'header', width: 150},
-  {field: 'plotName', headerName: 'PlotName', headerClassName: 'header', width: 150},
-  {field: 'locationName', headerName: 'LocationName', headerClassName: 'header', width: 150},
-  {field: 'countryName', headerName: 'CountryName', headerClassName: 'header', width: 150},
-  {field: 'area', headerName: 'Area', headerClassName: 'header', width: 150},
-  {field: 'plotX', headerName: 'PlotX', headerClassName: 'header', width: 150},
-  {field: 'plotY', headerName: 'PlotY', headerClassName: 'header', width: 150},
-  {field: 'plotZ', headerName: 'PlotZ', headerClassName: 'header', width: 150},
-  {field: 'plotShape', headerName: 'PlotShape', headerClassName: 'header', width: 150},
-  {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', width: 150},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1},
+  {field: 'plotName', headerName: 'PlotName', headerClassName: 'header', flex: 1},
+  {field: 'locationName', headerName: 'LocationName', headerClassName: 'header', flex: 1},
+  {field: 'countryName', headerName: 'CountryName', headerClassName: 'header', flex: 1},
+  {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1},
+  {field: 'plotX', headerName: 'PlotX', headerClassName: 'header', flex: 1},
+  {field: 'plotY', headerName: 'PlotY', headerClassName: 'header', flex: 1},
+  {field: 'plotZ', headerName: 'PlotZ', headerClassName: 'header', flex: 1},
+  {field: 'plotShape', headerName: 'PlotShape', headerClassName: 'header', flex: 1},
+  {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1},
 ]
 
 export interface QuadratRDS {
+  id: number;
   quadratID: number | null;
   plotID: number | null;
   quadratName: string | null;
@@ -201,34 +222,38 @@ export interface QuadratRDS {
   quadratShape: string | null;
 }
 
+
 export const QuadratGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'QuadratID', headerClassName: 'header', width: 150},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', width: 150},
-  {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', width: 150},
-  {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', width: 150},
-  {field: 'quadratY', headerName: 'QuadratY', headerClassName: 'header', width: 150},
-  {field: 'quadratZ', headerName: 'QuadratZ', headerClassName: 'header', width: 150},
-  {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', width: 150},
-  {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', width: 150},
-  {field: 'area', headerName: 'Area', headerClassName: 'header', width: 150},
-  {field: 'quadratShape', headerName: 'QuadratShape', headerClassName: 'header', width: 150},
+  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1},
+  {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1},
+  {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', flex: 1},
+  {field: 'quadratY', headerName: 'QuadratY', headerClassName: 'header', flex: 1},
+  {field: 'quadratZ', headerName: 'QuadratZ', headerClassName: 'header', flex: 1},
+  {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1},
+  {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1},
+  {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1},
+  {field: 'quadratShape', headerName: 'QuadratShape', headerClassName: 'header', flex: 1},
 ]
 
 export interface ReferenceRDS {
+  id: number;
   referenceID: number | null;
   publicationTitle: string | null;
   fullReference: string | null;
-  dateOfPublication: string | null;
+  dateOfPublication: Date | null;
 }
 
+
 export const ReferenceGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'ReferenceID', headerClassName: 'header', width: 150},
-  {field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', width: 150},
-  {field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', width: 150},
-  {field: 'dateOfPublication', headerName: 'DateOfPublication', headerClassName: 'header', width: 150},
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1},
+  {field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1},
+  {field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1},
+  {field: 'dateOfPublication', headerName: 'DateOfPublication', type: "date", headerClassName: 'header', flex: 1},
 ]
 
 export interface SpeciesRDS {
+  id: number;
   speciesID: number | null;
   genusID: number | null;
   currentTaxonFlag: boolean | null;
@@ -242,21 +267,23 @@ export interface SpeciesRDS {
   referenceID: number | null;
 }
 
+
 export const SpeciesGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'SpeciesID', headerClassName: 'header', width: 150},
-  {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', width: 150},
-  {field: 'currentTaxonFlag', headerName: 'CurrentTaxonFlag', headerClassName: 'header', width: 150},
-  {field: 'obsoleteTaxonFlag', headerName: 'ObsoleteTaxonFlag', headerClassName: 'header', width: 150},
-  {field: 'speciesName', headerName: 'SpeciesName', headerClassName: 'header', width: 150},
-  {field: 'speciesCode', headerName: 'SpeciesCode', headerClassName: 'header', width: 150},
-  {field: 'idLevel', headerName: 'IDLevel', headerClassName: 'header', width: 150},
-  {field: 'authority', headerName: 'Authority', headerClassName: 'header', width: 150},
-  {field: 'fieldFamily', headerName: 'FieldFamily', headerClassName: 'header', width: 150},
-  {field: 'description', headerName: 'Description', headerClassName: 'header', width: 150},
-  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', width: 150},
+  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1},
+  {field: 'currentTaxonFlag', headerName: 'CurrentTaxonFlag', headerClassName: 'header', flex: 1},
+  {field: 'obsoleteTaxonFlag', headerName: 'ObsoleteTaxonFlag', headerClassName: 'header', flex: 1},
+  {field: 'speciesName', headerName: 'SpeciesName', headerClassName: 'header', flex: 1},
+  {field: 'speciesCode', headerName: 'SpeciesCode', headerClassName: 'header', flex: 1},
+  {field: 'idLevel', headerName: 'IDLevel', headerClassName: 'header', flex: 1},
+  {field: 'authority', headerName: 'Authority', headerClassName: 'header', flex: 1},
+  {field: 'fieldFamily', headerName: 'FieldFamily', headerClassName: 'header', flex: 1},
+  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1},
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1},
 ]
 
 export interface SpeciesInventoryRDS {
+  id: number;
   speciesInventoryID: number | null;
   censusID: number | null;
   plotID: number | null;
@@ -265,14 +292,15 @@ export interface SpeciesInventoryRDS {
 }
 
 export const SpeciesInventoryGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'SpeciesInventoryID', headerClassName: 'header', width: 150},
-  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', width: 150},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', width: 150},
-  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', width: 150},
-  {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', width: 150},
+  {field: 'speciesInventoryID', headerName: 'SpeciesInventoryID', headerClassName: 'header', flex: 1},
+  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1},
+  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1},
 ]
 
 export interface StemRDS {
+  id: number;
   stemID: number | null;
   treeID: number | null;
   quadratID: number | null;
@@ -287,20 +315,21 @@ export interface StemRDS {
 }
 
 export const StemGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'StemID', headerClassName: 'header', width: 150},
-  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', width: 150},
-  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', width: 150},
-  {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', width: 150},
-  {field: 'stemTag', headerName: 'StemTag', headerClassName: 'header', width: 150},
-  {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', width: 150},
-  {field: 'stemX', headerName: 'StemX', headerClassName: 'header', width: 150},
-  {field: 'stemY', headerName: 'StemY', headerClassName: 'header', width: 150},
-  {field: 'stemZ', headerName: 'StemZ', headerClassName: 'header', width: 150},
-  {field: 'moved', headerName: 'Moved', headerClassName: 'header', width: 150},
-  {field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', width: 150},
+  {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1},
+  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1},
+  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1},
+  {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', flex: 1},
+  {field: 'stemTag', headerName: 'StemTag', headerClassName: 'header', flex: 1},
+  {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', flex: 1},
+  {field: 'stemX', headerName: 'StemX', headerClassName: 'header', flex: 1},
+  {field: 'stemY', headerName: 'StemY', headerClassName: 'header', flex: 1},
+  {field: 'stemZ', headerName: 'StemZ', headerClassName: 'header', flex: 1},
+  {field: 'moved', headerName: 'Moved', headerClassName: 'header', flex: 1},
+  {field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', flex: 1},
 ]
 
 export interface SubSpeciesRDS {
+  id: number;
   subSpeciesID: number | null;
   speciesID: number | null;
   subSpeciesName: string | null;
@@ -311,18 +340,20 @@ export interface SubSpeciesRDS {
   infraSpecificLevel: string | null;
 }
 
+
 export const SubSpeciesGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'SubSpeciesID', headerClassName: 'header', width: 150},
-  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', width: 150},
-  {field: 'subSpeciesName', headerName: 'SubSpeciesName', headerClassName: 'header', width: 150},
-  {field: 'subSpeciesCode', headerName: 'SubSpeciesCode', headerClassName: 'header', width: 150},
-  {field: 'currentTaxonFlag', headerName: 'CurrentTaxonFlag', headerClassName: 'header', width: 150},
-  {field: 'obsoleteTaxonFlag', headerName: 'ObsoleteTaxonFlag', headerClassName: 'header', width: 150},
-  {field: 'authority', headerName: 'authority', headerClassName: 'header', width: 150},
-  {field: 'infraSpecificLevel', headerName: 'InfraSpecificLevel', headerClassName: 'header', width: 150},
+  {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'subSpeciesName', headerName: 'SubSpeciesName', headerClassName: 'header', flex: 1},
+  {field: 'subSpeciesCode', headerName: 'SubSpeciesCode', headerClassName: 'header', flex: 1},
+  {field: 'currentTaxonFlag', headerName: 'CurrentTaxonFlag', headerClassName: 'header', flex: 1},
+  {field: 'obsoleteTaxonFlag', headerName: 'ObsoleteTaxonFlag', headerClassName: 'header', flex: 1},
+  {field: 'authority', headerName: 'authority', headerClassName: 'header', flex: 1},
+  {field: 'infraSpecificLevel', headerName: 'InfraSpecificLevel', headerClassName: 'header', flex: 1},
 ]
 
 export interface TreeRDS {
+  id: number;
   treeID: number | null;
   treeTag: string | null;
   speciesID: number | null;
@@ -330,23 +361,24 @@ export interface TreeRDS {
 }
 
 export const TreeGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'TreeID', headerClassName: 'header', width: 150},
-  {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', width: 150},
-  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', width: 150},
-  {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', width: 150},
+  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1},
+  {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', flex: 1},
+  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
+  {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1},
 ]
 
 export interface ValidationErrorRDS {
+  id: number;
   validationErrorID: number | null;
   validationErrorDescription: string | null;
 }
 
 export const ValidationErrorGridColumns: GridColDef[] = [
-  {field: 'id', headerName: 'ValidationErrorID', headerClassName: 'header', width: 150},
+  {field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1},
   {
     field: 'validationErrorDescription',
     headerName: 'ValidationErrorDescription',
     headerClassName: 'header',
-    width: 150
+    flex: 1
   },
 ]

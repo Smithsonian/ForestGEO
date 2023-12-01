@@ -19,29 +19,37 @@ export default function Page() {
       <Box sx={{
         display: 'flex',
         flexGrow: 1,
-        overflow: 'hidden',
+        flexShrink: 1,
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}>
-        <Grid container columnSpacing={2} rowSpacing={2} sx={{flexGrow: 1}}>
-          {/*FIRST ROW*/}
-          <Grid xs={4}>
-            {TemplateCard(AttributeBackground, <DescriptionIcon/>, "Attributes", "/properties/attributes")}
+        <Box sx={{
+          display: 'flex',
+          flexGrow: 1,
+          overflow: 'hidden',
+        }}>
+          <Grid container columnSpacing={2} rowSpacing={2} sx={{flexGrow: 1}}>
+            {/*FIRST ROW*/}
+            <Grid xs={4}>
+              {TemplateCard(AttributeBackground, <DescriptionIcon/>, "Attributes", "/properties/attributes")}
+            </Grid>
+            <Grid xs={4}>
+              {TemplateCard(CensusBackground, <GridOnIcon/>, "Census", "/properties/census")}
+            </Grid>
+            <Grid xs={4}>
+              {TemplateCard(PersonnelBackground, <AccountCircleIcon/>, "Personnel", "/properties/personnel")}
+            </Grid>
+            {/*SECOND ROW*/}
+            <Grid xs={2}/>
+            <Grid xs={4}>
+              {TemplateCard(QuadratBackground, <WidgetsIcon/>, "Quadrats", "/properties]/quadrats")}
+            </Grid>
+            <Grid xs={4}>
+              {TemplateCard(SpeciesBackground, <BugReportIcon/>, "Species", "/properties/species")}
+            </Grid>
+            <Grid xs={2}/>
           </Grid>
-          <Grid xs={4}>
-            {TemplateCard(CensusBackground, <GridOnIcon/>, "Census", "/properties/census")}
-          </Grid>
-          <Grid xs={4}>
-            {TemplateCard(PersonnelBackground, <AccountCircleIcon/>, "Personnel", "/properties/personnel")}
-          </Grid>
-          {/*SECOND ROW*/}
-          <Grid xs={2}/>
-          <Grid xs={4}>
-            {TemplateCard(QuadratBackground, <WidgetsIcon/>, "Quadrats", "/properties/quadrats")}
-          </Grid>
-          <Grid xs={4}>
-            {TemplateCard(SpeciesBackground, <BugReportIcon/>, "Species", "/properties/species")}
-          </Grid>
-          <Grid xs={2}/>
-        </Grid>
+        </Box>
       </Box>
     </>
   );

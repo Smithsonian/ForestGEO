@@ -1,15 +1,19 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
 import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
+import {GridRowProps, GridValidRowModel} from "@mui/x-data-grid";
+import {json} from "stream/consumers";
 
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
+export const AttributeLoadContext = createContext<GridValidRowModel[] | null>(null);
 export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
 export const CensusDispatchContext = createContext<Dispatch<{ census: number | null }> | null>(null);
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
+export const AttributeLoadDispatchContext = createContext<Dispatch<{attributeLoad: GridValidRowModel[] | null}> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
   const [plot, plotDispatch] = useReducer(
@@ -28,6 +32,10 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     firstLoadReducer,
     true
   )
+  const [attributeLoad, attributeLoadDispatch] = useReducer(
+    attributeLoadReducer,
+    null
+  )
   
   
   return (
@@ -39,7 +47,11 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
               <QuadratDispatchContext.Provider value={quadratDispatch}>
                 <FirstLoadContext.Provider value={firstLoad}>
                   <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
-                    {children}
+                    <AttributeLoadContext.Provider value={attributeLoad}>
+                      <AttributeLoadDispatchContext.Provider value={attributeLoadDispatch}>
+                        {children}
+                      </AttributeLoadDispatchContext.Provider>
+                    </AttributeLoadContext.Provider>
                   </FirstLoadDispatchContext.Provider>
                 </FirstLoadContext.Provider>
               </QuadratDispatchContext.Provider>
@@ -74,6 +86,10 @@ function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null
   else return currentState;
 }
 
+function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: GridValidRowModel[] | null}) {
+  return action.attributeLoad;
+}
+
 export function usePlotContext() {
   return useContext(PlotsContext);
 }
@@ -104,4 +120,12 @@ export function useFirstLoadContext() {
 
 export function useFirstLoadDispatch() {
   return useContext(FirstLoadDispatchContext);
+}
+
+export function useAttributeLoadContext() {
+  return useContext(AttributeLoadContext);
+}
+
+export function useAttributeLoadDispatch() {
+  return useContext(AttributeLoadDispatchContext);
 }

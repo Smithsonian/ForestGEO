@@ -100,7 +100,6 @@ export default function Sidebar() {
         <ListItemButton
           selected={pathname === props.href || props.expanded.find(value => value.href === pathname) !== undefined}
           color={pathname === props.href ? 'primary' : undefined}
-          disabled={!currentPlot}
           onClick={() => {
             router.push(props.href);
             setMenuOpen(!menuOpen);
@@ -246,7 +245,6 @@ export default function Sidebar() {
                       <Tooltip title={item.tip} variant={"soft"}>
                         <ListItem>
                           <ListItemButton selected={pathname === item.href}
-                                          disabled={!currentPlot}
                                           color={pathname === item.href ? 'primary' : undefined}
                                           onClick={() => router.push(item.href)}>
                             <Icon/>
@@ -274,7 +272,6 @@ export default function Sidebar() {
                                   <>
                                     <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
                                       <ListItemButton selected={pathname == (item.href + link.href)}
-                                                      disabled={!currentPlot}
                                                       onClick={() => router.push((item.href + link.href))}>
                                         <SubIcon/>
                                         <ListItemContent>

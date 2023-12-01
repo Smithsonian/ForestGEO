@@ -3,7 +3,6 @@
 import React, {useState} from "react";
 import {usePlotContext} from "@/app/plotcontext";
 import {IRecordSet} from "mssql";
-import {gridColumns, GridRowDataStructure, RowDataStructure} from "@/config/macros";
 import Button from "@mui/joy/Button";
 import Box from "@mui/joy/Box";
 import {DataGrid, GridRowsProp} from '@mui/x-data-grid';
@@ -70,61 +69,61 @@ export default function Page() {
     setLoading(false);
   }
   
-  if (!currentPlot) {
-    return (
-      <>
-        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-          <p>You must select a <b>plot</b> to continue!</p>
-        </Box>
-      </>
-    );
-  } else {
-    let gridRows: GridRowDataStructure[] = []
-    if (recordsets) {
-      Object.values(recordsets[0]).map((row) => {
-        let temp: RowDataStructure = {
-          tag: row['Tag'],
-          subquadrat: row['Subquadrat'],
-          spcode: row['SpCode'],
-          dbh: (row['DBH'] as number).toFixed(2),
-          htmeas: (row['Htmeas'] as number).toFixed(2),
-          codes: row['Codes'],
-          comments: row['Comments']
-        }
-        let gridTemp: GridRowDataStructure = {
-          id: row['Tag'],
-          subquadrat: row['Subquadrat'],
-          spcode: row['SpCode'],
-          dbh: (row['DBH'] as number).toFixed(2),
-          htmeas: (row['Htmeas'] as number).toFixed(2),
-          codes: row['Codes'],
-          comments: row['Comments']
-        }
-        gridRows.push(gridTemp);
-      })
-      // let gridRows : GridRowsProp = data;
-      let gridRowsProp: GridRowsProp = gridRows;
-      return (
-        <>
-          
-          <Box sx={{flexDirection: 'column'}}>
-            <Box>
-              <Button onClick={getData} loading={loading}>Reload Data</Button>
-            </Box>
-            <Box sx={{display: 'flex'}}>
-              <StyledDataGrid columns={gridColumns} rows={gridRowsProp}/>
-            </Box>
-          </Box>
-        </>
-      );
-    } else {
-      return (
-        <>
-          <Box sx={{display: 'flex', flexDirection: 'column', marginBottom: 5}}>
-            <Button onClick={getData} loading={loading}>Reload Data</Button>
-          </Box>
-        </>
-      );
-    }
-  }
+  // if (!currentPlot) {
+  //   return (
+  //     <>
+  //       <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
+  //         <p>You must select a <b>plot</b> to continue!</p>
+  //       </Box>
+  //     </>
+  //   );
+  // } else {
+  //   let gridRows: GridRowDataStructure[] = []
+  //   if (recordsets) {
+  //     Object.values(recordsets[0]).map((row) => {
+  //       let temp: RowDataStructure = {
+  //         tag: row['Tag'],
+  //         subquadrat: row['Subquadrat'],
+  //         spcode: row['SpCode'],
+  //         dbh: (row['DBH'] as number).toFixed(2),
+  //         htmeas: (row['Htmeas'] as number).toFixed(2),
+  //         codes: row['Codes'],
+  //         comments: row['Comments']
+  //       }
+  //       let gridTemp: GridRowDataStructure = {
+  //         id: row['Tag'],
+  //         subquadrat: row['Subquadrat'],
+  //         spcode: row['SpCode'],
+  //         dbh: (row['DBH'] as number).toFixed(2),
+  //         htmeas: (row['Htmeas'] as number).toFixed(2),
+  //         codes: row['Codes'],
+  //         comments: row['Comments']
+  //       }
+  //       gridRows.push(gridTemp);
+  //     })
+  //     // let gridRows : GridRowsProp = data;
+  //     let gridRowsProp: GridRowsProp = gridRows;
+  //     return (
+  //       <>
+  //
+  //         <Box sx={{flexDirection: 'column'}}>
+  //           <Box>
+  //             <Button onClick={getData} loading={loading}>Reload Data</Button>
+  //           </Box>
+  //           <Box sx={{display: 'flex'}}>
+  //             <StyledDataGrid columns={gridColumns} rows={gridRowsProp}/>
+  //           </Box>
+  //         </Box>
+  //       </>
+  //     );
+  //   } else {
+  //     return (
+  //       <>
+  //         <Box sx={{display: 'flex', flexDirection: 'column', marginBottom: 5}}>
+  //           <Button onClick={getData} loading={loading}>Reload Data</Button>
+  //         </Box>
+  //       </>
+  //     );
+  //   }
+  // }
 }
