@@ -75,18 +75,20 @@ interface EditToolbarProps {
 function EditToolbar(props: EditToolbarProps) {
   const {setRows, setRowModesModel, setRefresh} = props;
   
-  const handleClick = () => {
+  const handleClick = async () => {
     const id = randomId();
     setRows((oldRows) => [...oldRows, { id, code: '', description: '', status: '', isNew: true }]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'name' },
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'code' },
     }));
   };
   
   const handleRefresh = async() => {
     setRefresh(true);
-    const response = await fetch('/api/attributes', {method: 'GET'});
+    const response = await fetch(`/api/attributes`, {
+      method: 'GET'
+    });
     setRows(await response.json());
     setRefresh(false);
   }
@@ -105,13 +107,13 @@ function EditToolbar(props: EditToolbarProps) {
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
   if (newRow.code !== oldRow.code) {
-    return `Code from '${oldRow.code}' to '${newRow.code}'`;
+    return `Code`;
   }
   if (newRow.description !== oldRow.description) {
-    return `Description from '${oldRow.description || ''}' to '${newRow.description || ''}'`;
+    return `Description`;
   }
   if (newRow.status !== oldRow.status) {
-    return `Status from '${oldRow.status || ''}' to '${newRow.status || ''}'`;
+    return `Status`;
   }
   return null;
 }
@@ -137,6 +139,14 @@ export default function Page() {
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
+  const refreshData = async() => {
+    setRefresh(true);
+    const response = await fetch(`/api/attributes`, {
+      method: 'GET'
+    });
+    setRows(await response.json());
+    setRefresh(false);
+  }
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
     setSnackbar({ children: String(error), severity: 'error' });
@@ -162,6 +172,7 @@ export default function Page() {
     else {
       setSnackbar({ children: "Row successfully deleted", severity: 'success' });
       setRows(rows.filter((row) => row.id !== id));
+      await refreshData();
     }
   };
   
@@ -184,41 +195,28 @@ export default function Page() {
         if (newRow.code == '') {
           reject(new Error("Primary key Code cannot be empty!"));
         }
-        const mutation = computeMutation(newRow, oldRow);
-        switch (mutation) {
-          case `Code from '${oldRow.code}' to '${newRow.code}'`:
-            // Make the HTTP request to save in the backend
-            const codeResponse = await fetch(
-              `/api/attributes?oldCode=${String(oldRow.code)}&newCode=${String(newRow.code)}`, {
-                method: 'PATCH',
-              });
-            if (!codeResponse.ok) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Code change from ${oldRow.code} to ${newRow.code} saved successfully`, severity: 'success'});
+        else if (oldRow.code == '') {
+          // inserting a row
+          const response = await fetch(`/api/attributes?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
+            method: 'POST'
+          });
+          const responseJSON = await response.json();
+          if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+          setSnackbar({children: `New row added!`, severity: 'success'});
+          resolve(newRow);
+        } else {
+          const mutation = computeMutation(newRow, oldRow);
+          if (mutation) {
+            const response = await fetch(`/api/attributes?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
+              method: 'PATCH'
+            })
+            const responseJSON = await response.json();
+            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            setSnackbar({children: `Row edits saved!`, severity: 'success'});
             resolve(newRow);
-            break;
-          case `Description from '${oldRow.description || ''}' to '${newRow.description || ''}'`:
-            // Make the HTTP request to save in the backend
-            const descResponse = await fetch(
-              `/api/attributes?oldCode=${String(oldRow.code)}&newDesc=${String(newRow.description)}`, {
-                method: 'PATCH',
-              });
-            if (!descResponse.ok) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Description change from ${oldRow.description} to ${newRow.description} on row ${oldRow.code} saved successfully`, severity: 'success'});
-            resolve(newRow);
-            break;
-          case `Status from '${oldRow.status || ''}' to '${newRow.status || ''}'`:
-            // Make the HTTP request to save in the backend
-            const statResponse = await fetch(
-              `/api/attributes?oldCode=${String(oldRow.code)}&newStat=${String(newRow.status)}`, {
-                method: 'PATCH',
-              });
-            if (!statResponse.ok) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Status change from ${oldRow.status} to ${newRow.status} on row ${oldRow.code} saved successfully`, severity: 'success'});
-            resolve(newRow);
-            break;
-          default:
-            reject(new Error("Unknown error!"));
+          }
         }
+        await refreshData();
       }),
     [],
   );

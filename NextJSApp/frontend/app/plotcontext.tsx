@@ -9,11 +9,13 @@ export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
 export const AttributeLoadContext = createContext<GridValidRowModel[] | null>(null);
+export const CensusLoadContext = createContext<GridValidRowModel[] | null>(null);
 export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
 export const CensusDispatchContext = createContext<Dispatch<{ census: number | null }> | null>(null);
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 export const AttributeLoadDispatchContext = createContext<Dispatch<{attributeLoad: GridValidRowModel[] | null}> | null>(null);
+export const CensusLoadDispatchContext = createContext<Dispatch<{censusLoad: GridValidRowModel[] | null}> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
   const [plot, plotDispatch] = useReducer(
@@ -37,6 +39,11 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     null
   )
   
+  const [censusLoad, censusLoadDispatch] = useReducer(
+    censusLoadReducer,
+    null
+  )
+  
   
   return (
     <PlotsContext.Provider value={plot}>
@@ -49,7 +56,11 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
                   <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
                     <AttributeLoadContext.Provider value={attributeLoad}>
                       <AttributeLoadDispatchContext.Provider value={attributeLoadDispatch}>
-                        {children}
+                        <CensusLoadContext.Provider value={censusLoad}>
+                          <CensusLoadDispatchContext.Provider value={censusLoadDispatch}>
+                            {children}
+                          </CensusLoadDispatchContext.Provider>
+                        </CensusLoadContext.Provider>
                       </AttributeLoadDispatchContext.Provider>
                     </AttributeLoadContext.Provider>
                   </FirstLoadDispatchContext.Provider>
@@ -88,6 +99,10 @@ function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null
 
 function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: GridValidRowModel[] | null}) {
   return action.attributeLoad;
+}
+
+function censusLoadReducer(currentCensusLoad: any, action: { censusLoad: GridValidRowModel[] | null}) {
+  return action.censusLoad;
 }
 
 export function usePlotContext() {

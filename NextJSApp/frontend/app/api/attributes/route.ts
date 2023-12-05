@@ -43,16 +43,28 @@ export async function GET(): Promise<NextResponse<AttributeRDS[]>> {
   );
 }
 
+export async function POST(request: NextRequest) {
+  let i = 0;
+  let conn = await getSqlConnection(i);
+  if (!conn) throw new Error('sql connection failed');
+  const newCode = request.nextUrl.searchParams.get('code')!;
+  const newDesc = request.nextUrl.searchParams.get('desc')!;
+  const newStat = request.nextUrl.searchParams.get('stat')!;
+  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Attributes (Code, Description, Status) VALUES ('${newCode}', '${newDesc}', '${newStat}')`);
+  if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
+  await conn.close();
+  return NextResponse.json({message: "Insert successful"}, {status: 200});
+}
+
 export async function DELETE(request: NextRequest) {
-  
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
   
   const deleteCode = request.nextUrl.searchParams.get('code')!;
-  // let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`);
-  let deleteRow = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`); // remove this once CRUD grid is working
-  if (!deleteRow) throw new Error('deletion cmd failed');
+  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`);
+  // let deleteRow = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`); // remove this once CRUD grid is working
+  if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
   await conn.close();
   return NextResponse.json({ message: "Update successful", }, {status: 200});
 }
@@ -62,30 +74,17 @@ export async function PATCH(request: NextRequest) {
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
   const oldCode = request.nextUrl.searchParams.get('oldCode')!;
-  let column = "";
-  let param = "";
-  let value: string;
-  if (request.nextUrl.searchParams.has('newCode')) {
-    // swapping code
-    column = "Code";
-    param = "newCode";
-  } else if (request.nextUrl.searchParams.has('newDesc')) {
-    // swapping desc
-    column = "Description";
-    param = "newDesc";
-  } else if (request.nextUrl.searchParams.has('newStat')) {
-    // swapping stat
-    column = "Status";
-    param = "newStat";
-  }
-  value = request.nextUrl.searchParams.get(param)!;
-  if (column == "Code") {
-    // validation: confirm that new Code is UNIQUE
-    let codeValidation = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [${String(column)}] = '${String(value)}'`);
-    if (!codeValidation) throw new Error("call failed");
-    if (codeValidation.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-  }
-  // let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [${String(column)}] = ${String(value)} where Code = ${String(oldCode)};`); // uncomment this once crud datagrid is working
+  const newCode = request.nextUrl.searchParams.get('newCode')!;
+  const newDesc = request.nextUrl.searchParams.get('newDesc')!;
+  const newStat = request.nextUrl.searchParams.get('newStat')!;
+  
+  let oldCodeValidation = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${oldCode}'`);
+  if (!oldCodeValidation) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
+  if (oldCodeValidation.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409})
+  let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [Code] = '${newCode}', [Description] = '${newDesc}', [Status] = '${newStat}' WHERE [Code] = '${oldCode}'`);
+  if (results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
+  
+  // let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [${String(column)}] = ${String(value)} where Code = ${String(oldCode)}`); // uncomment this once crud datagrid is working
   // if (!results) throw new Error("call failed");
   await conn.close();
   return NextResponse.json({ message: "Update successful", }, {status: 200});

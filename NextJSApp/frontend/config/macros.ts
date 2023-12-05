@@ -79,6 +79,10 @@ export enum ReviewStates {
   ERRORS = "errors"
 }
 export enum ErrorMessages {
+  SCF = "SQL Command Failure",
+  ICF = "Insertion Command Failed",
+  UCF = "Update Command Failed",
+  DCF = "Delete Command Failed",
   UKAE = "Unique Key Already Exists",
 }
 export const tableHeaderSettings = {
