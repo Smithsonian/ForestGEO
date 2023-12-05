@@ -63,7 +63,6 @@ export async function DELETE(request: NextRequest) {
   
   const deleteCode = request.nextUrl.searchParams.get('code')!;
   let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`);
-  // let deleteRow = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`); // remove this once CRUD grid is working
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
   await conn.close();
   return NextResponse.json({ message: "Update successful", }, {status: 200});
@@ -83,9 +82,6 @@ export async function PATCH(request: NextRequest) {
   if (oldCodeValidation.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409})
   let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [Code] = '${newCode}', [Description] = '${newDesc}', [Status] = '${newStat}' WHERE [Code] = '${oldCode}'`);
   if (results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-  
-  // let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [${String(column)}] = ${String(value)} where Code = ${String(oldCode)}`); // uncomment this once crud datagrid is working
-  // if (!results) throw new Error("call failed");
   await conn.close();
   return NextResponse.json({ message: "Update successful", }, {status: 200});
 }
