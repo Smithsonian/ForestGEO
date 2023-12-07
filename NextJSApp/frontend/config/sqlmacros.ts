@@ -1,15 +1,19 @@
 /**
  * macros for sql table props:
  */
-import {GridColDef, GridRowProps} from "@mui/x-data-grid";
-import {
-  GridRowsProp,
-} from '@mui/x-data-grid';
-import {minWidth} from "@mui/system";
+import {GridColDef} from "@mui/x-data-grid";
+
+function objectToQueryString(obj: any) {
+  const keys = Object.keys(obj);
+  const keyValuePairs = keys.map(key => {
+    return encodeURIComponent(key) + '=' + encodeURIComponent(obj[key]);
+  });
+  return keyValuePairs.join('&');
+}
 
 export interface AttributeRDS {
   id: number;
-  code: string | null;
+  code: string;
   description: string | null;
   status: string | null;
 }
@@ -24,7 +28,7 @@ export const AttributeGridColumns: GridColDef[] = [
 
 export interface CensusRDS {
   id: number;
-  censusID: number | null;
+  censusID: number;
   plotID: number | null;
   plotCensusNumber: number | null;
   startDate: Date | null;
@@ -33,17 +37,27 @@ export interface CensusRDS {
 }
 
 export const CensusGridColumns: GridColDef[] = [
-  {field: 'censusID', headerName: 'censusID', headerClassName: 'header', flex: 1},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1},
-  {field: 'plotCensusNumber', headerName: 'PlotCensusNumber', headerClassName: 'header', flex: 1},
-  {field: 'startDate', headerName: 'StartDate', type: "date", headerClassName: 'header', flex: 1},
-  {field: 'endDate', headerName: 'EndDate', type: "date", headerClassName: 'header', flex: 1},
-  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1},
+  {field: 'censusID', headerName: 'CensusID', type: 'number', headerClassName: 'header', minWidth: 200, flex: 1, editable: true},
+  {field: 'plotID', headerName: 'PlotID', type: 'number', headerClassName: 'header', minWidth: 200, flex: 1, editable: true},
+  {field: 'plotCensusNumber', headerName: 'PlotCensusNumber', type: 'number', headerClassName: 'header', minWidth: 150, flex: 1, editable: true},
+  {
+    field: 'startDate', headerName: 'StartDate', type: 'date', headerClassName: 'header', minWidth: 200, flex: 1, editable: true, valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }
+  },
+  {
+    field: 'endDate', headerName: 'EndDate', type: 'date', headerClassName: 'header', minWidth: 200, flex: 1, editable: true, valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }
+  },
+  {field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 200, flex: 1, editable: true},
 ];
 
 export interface CMAttributeRDS {
   id: number;
-  cmaID: number | null;
+  cmaID: number;
   coreMeasurementID: number | null;
   code: string | null;
 }
@@ -56,7 +70,7 @@ export const CMAttributeGridColumns: GridColDef[] = [
 
 export interface CMVErrorRDS {
   id: number;
-  cmvErrorID: number | null;
+  cmvErrorID: number;
   coreMeasurementID: number | null;
   validationErrorID: number | null;
 }
@@ -69,7 +83,7 @@ export const CMVErrorGridColumns: GridColDef[] = [
 
 export interface CoreMeasurementRDS {
   id: number;
-  coreMeasurementID: number | null;
+  coreMeasurementID: number;
   censusID: number | null;
   plotID: number | null;
   quadratID: number | null;
@@ -94,7 +108,10 @@ export const CoreMeasurementGridColumns: GridColDef[] = [
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1},
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1},
   {field: 'measurementTypeID', headerName: 'MeasurementTypeID', headerClassName: 'header', flex: 1},
-  {field: 'measurementDate', headerName: 'MeasurementDate', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'measurementDate', headerName: 'MeasurementDate', type: "date", headerClassName: 'header', flex: 1, valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }},
   {field: 'measurement', headerName: 'Measurement', headerClassName: 'header', flex: 1},
   {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1},
   {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1},
@@ -103,8 +120,8 @@ export const CoreMeasurementGridColumns: GridColDef[] = [
 
 export interface CurrentObsoleteRDS {
   id: number;
-  speciesID: number | null;
-  obsoleteSpeciesID: number | null;
+  speciesID: number;
+  obsoleteSpeciesID: number;
   changeDate: Date | null;
   changeCodeID: number | null;
   changeNote: string | null;
@@ -114,14 +131,17 @@ export interface CurrentObsoleteRDS {
 export const CurrentObsoleteGridColumns: GridColDef[] = [
   {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
   {field: 'obsoleteSpeciesID', headerName: 'ObsoleteSpeciesID', headerClassName: 'header', flex: 1},
-  {field: 'changeDate', headerName: 'ChangeDate', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'changeDate', headerName: 'ChangeDate', type: "date", headerClassName: 'header', flex: 1, valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }},
   {field: 'changeCodeID', headerName: 'ChangeCodeID', headerClassName: 'header', flex: 1},
   {field: 'changeNote', headerName: 'ChangeNote', headerClassName: 'header', flex: 1},
 ]
 
 export interface FamilyRDS {
   id: number;
-  familyID: number | null;
+  familyID: number;
   family: string | null;
   referenceID: number | null;
 }
@@ -134,7 +154,7 @@ export const FamilyGridColumns: GridColDef[] = [
 
 export interface GenusRDS {
   id: number;
-  genusID: number | null;
+  genusID: number;
   familyID: number | null;
   genusName: string | null;
   referenceID: number | null;
@@ -151,7 +171,7 @@ export const GenusGridColumns: GridColDef[] = [
 
 export interface MeasurementTypeRDS {
   id: number;
-  measurementTypeID: number | null;
+  measurementTypeID: number;
   measurementTypeDescription: string | null;
 }
 
@@ -167,7 +187,7 @@ export const MeasurementTypeGridColumns: GridColDef[] = [
 
 export interface PersonnelRDS {
   id: number;
-  personnelID: number | null;
+  personnelID: number;
   firstName: string | null;
   lastName: string | null;
   role: string | null;
@@ -182,7 +202,7 @@ export const PersonnelGridColumns: GridColDef[] = [
 
 export interface PlotRDS {
   id: number;
-  plotID: number | null;
+  plotID: number;
   plotName: string | null;
   locationName: string | null;
   countryName: string | null;
@@ -210,7 +230,7 @@ export const PlotGridColumns: GridColDef[] = [
 
 export interface QuadratRDS {
   id: number;
-  quadratID: number | null;
+  quadratID: number;
   plotID: number | null;
   quadratName: string | null;
   quadratX: number | null;
@@ -238,7 +258,7 @@ export const QuadratGridColumns: GridColDef[] = [
 
 export interface ReferenceRDS {
   id: number;
-  referenceID: number | null;
+  referenceID: number;
   publicationTitle: string | null;
   fullReference: string | null;
   dateOfPublication: Date | null;
@@ -249,12 +269,15 @@ export const ReferenceGridColumns: GridColDef[] = [
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1},
   {field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1},
   {field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1},
-  {field: 'dateOfPublication', headerName: 'DateOfPublication', type: "date", headerClassName: 'header', flex: 1},
+  {field: 'dateOfPublication', headerName: 'DateOfPublication', type: "date", headerClassName: 'header', flex: 1, valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }},
 ]
 
 export interface SpeciesRDS {
   id: number;
-  speciesID: number | null;
+  speciesID: number;
   genusID: number | null;
   currentTaxonFlag: boolean | null;
   obsoleteTaxonFlag: boolean | null;
@@ -284,7 +307,7 @@ export const SpeciesGridColumns: GridColDef[] = [
 
 export interface SpeciesInventoryRDS {
   id: number;
-  speciesInventoryID: number | null;
+  speciesInventoryID: number;
   censusID: number | null;
   plotID: number | null;
   speciesID: number | null;
@@ -301,7 +324,7 @@ export const SpeciesInventoryGridColumns: GridColDef[] = [
 
 export interface StemRDS {
   id: number;
-  stemID: number | null;
+  stemID: number;
   treeID: number | null;
   quadratID: number | null;
   stemNumber: number | null;
@@ -330,7 +353,7 @@ export const StemGridColumns: GridColDef[] = [
 
 export interface SubSpeciesRDS {
   id: number;
-  subSpeciesID: number | null;
+  subSpeciesID: number;
   speciesID: number | null;
   subSpeciesName: string | null;
   subSpeciesCode: string | null;
@@ -354,7 +377,7 @@ export const SubSpeciesGridColumns: GridColDef[] = [
 
 export interface TreeRDS {
   id: number;
-  treeID: number | null;
+  treeID: number;
   treeTag: string | null;
   speciesID: number | null;
   subSpeciesID: number | null;
@@ -369,7 +392,7 @@ export const TreeGridColumns: GridColDef[] = [
 
 export interface ValidationErrorRDS {
   id: number;
-  validationErrorID: number | null;
+  validationErrorID: number;
   validationErrorDescription: string | null;
 }
 

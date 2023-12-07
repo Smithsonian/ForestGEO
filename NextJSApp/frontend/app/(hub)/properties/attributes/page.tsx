@@ -1,7 +1,12 @@
 "use client";
 import {
   DataGrid,
-  GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel,
+  GridActionsCellItem,
+  GridColDef,
+  GridEventListener,
+  GridRowEditStopReasons,
+  GridRowId,
+  GridRowModel,
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
@@ -17,10 +22,11 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {useAttributeLoadContext, useAttributeLoadDispatch} from "@/app/plotcontext";
-import {AttributeRDS, AttributeStatusOptions} from "@/config/sqlmacros";
+import {useAttributeLoadContext} from "@/app/contexts/fixeddatacontext";
+import {AttributeGridColumns} from "@/config/sqlmacros";
 import {ErrorMessages} from "@/config/macros";
 import {styled} from "@mui/system";
+
 const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   border: 0,
   color:
@@ -77,16 +83,16 @@ function EditToolbar(props: EditToolbarProps) {
   
   const handleClick = async () => {
     const id = randomId();
-    setRows((oldRows) => [...oldRows, { id, code: '', description: '', status: '', isNew: true }]);
+    setRows((oldRows) => [...oldRows, {id, code: '', description: '', status: '', isNew: true}]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'code' },
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'code'},
     }));
   };
   
-  const handleRefresh = async() => {
+  const handleRefresh = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/attributes`, {
+    const response = await fetch(`/api/fixeddata/attributes`, {
       method: 'GET'
     });
     setRows(await response.json());
@@ -95,10 +101,10 @@ function EditToolbar(props: EditToolbarProps) {
   
   return (
     <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon />} onClick={handleClick}>
+      <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
         Add attribute
       </Button>
-      <Button color={"primary"} startIcon={<RefreshIcon />} onClick={handleRefresh}>
+      <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
     </GridToolbarContainer>
@@ -106,17 +112,10 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  if (newRow.code !== oldRow.code) {
-    return `Code`;
-  }
-  if (newRow.description !== oldRow.description) {
-    return `Description`;
-  }
-  if (newRow.status !== oldRow.status) {
-    return `Status`;
-  }
-  return null;
+  return newRow.code !== oldRow.code || newRow.description !== oldRow.description || newRow.status !== oldRow.status;
+  
 }
+
 export default function Page() {
   const initialRows: GridRowsProp = [
     {
@@ -139,9 +138,9 @@ export default function Page() {
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const refreshData = async() => {
+  const refreshData = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/attributes`, {
+    const response = await fetch(`/api/fixeddata/attributes`, {
       method: 'GET'
     });
     setRows(await response.json());
@@ -149,7 +148,7 @@ export default function Page() {
   }
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
-    setSnackbar({ children: String(error), severity: 'error' });
+    setSnackbar({children: String(error), severity: 'error'});
   }, []);
   
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
@@ -159,18 +158,18 @@ export default function Page() {
   };
   
   const handleEditClick = (id: GridRowId) => () => {
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
   
   const handleSaveClick = (id: GridRowId) => () => {
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.View } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
   };
   
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/attributes?code=${rows.find((row) => row.id == id)!.code}`, {method: 'DELETE'});
-    if (!response.ok) setSnackbar({ children: "Error: Deletion failed", severity: 'error' });
+    const response = await fetch(`/api/fixeddata/attributes?code=${rows.find((row) => row.id == id)!.code}`, {method: 'DELETE'});
+    if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
-      setSnackbar({ children: "Row successfully deleted", severity: 'success' });
+      setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
       await refreshData();
     }
@@ -179,13 +178,13 @@ export default function Page() {
   const handleCancelClick = (id: GridRowId) => () => {
     setRowModesModel({
       ...rowModesModel,
-      [id]: { mode: GridRowModes.View, ignoreModifications: true },
+      [id]: {mode: GridRowModes.View, ignoreModifications: true},
     });
     
     const editedRow = rows.find((row) => row.id === id);
     if (editedRow!.isNew) {
       setRows(rows.filter((row) => row.id !== id));
-      setSnackbar({ children: "Changes cancelled", severity: 'success' });
+      setSnackbar({children: "Changes cancelled", severity: 'success'});
     }
   };
   
@@ -194,24 +193,26 @@ export default function Page() {
       new Promise<GridRowModel>(async (resolve, reject) => {
         if (newRow.code == '') {
           reject(new Error("Primary key Code cannot be empty!"));
-        }
-        else if (oldRow.code == '') {
+        } else if (oldRow.code == '') {
           // inserting a row
-          const response = await fetch(`/api/attributes?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
+          const response = await fetch(`/api/fixeddata/attributes?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
             method: 'POST'
           });
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+          else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+          else if (!response.ok) reject(new Error(responseJSON.message));
           setSnackbar({children: `New row added!`, severity: 'success'});
           resolve(newRow);
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/attributes?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
+            const response = await fetch(`/api/fixeddata/attributes?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
               method: 'PATCH'
             })
             const responseJSON = await response.json();
             if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            else if (!response.ok) reject(new Error(responseJSON.message));
             setSnackbar({children: `Row edits saved!`, severity: 'success'});
             resolve(newRow);
           }
@@ -225,22 +226,20 @@ export default function Page() {
   };
   
   const columns: GridColDef[] = [
-    {field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1, editable: true}, // all unique ID columns need to be tagged 'id'
-    {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-    {field: 'status', headerName: 'Status', headerClassName: 'header', flex: 1, editable: true, type: 'singleSelect', valueOptions: AttributeStatusOptions,},
+    ...AttributeGridColumns,
     {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
       width: 100,
       cellClassName: 'actions',
-      getActions: ({ id }) => {
+      getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
         
         if (isInEditMode) {
           return [
             <GridActionsCellItem
-              icon={<SaveIcon />}
+              icon={<SaveIcon/>}
               label="Save"
               sx={{
                 color: 'primary.main',
@@ -248,7 +247,7 @@ export default function Page() {
               onClick={handleSaveClick(id)}
             />,
             <GridActionsCellItem
-              icon={<CancelIcon />}
+              icon={<CancelIcon/>}
               label="Cancel"
               className="textPrimary"
               onClick={handleCancelClick(id)}
@@ -259,14 +258,14 @@ export default function Page() {
         
         return [
           <GridActionsCellItem
-            icon={<EditIcon />}
+            icon={<EditIcon/>}
             label="Edit"
             className="textPrimary"
             onClick={handleEditClick(id)}
             color="inherit"
           />,
           <GridActionsCellItem
-            icon={<DeleteIcon />}
+            icon={<DeleteIcon/>}
             label="Delete"
             onClick={handleDeleteClick(id)}
             color="inherit"
@@ -290,30 +289,30 @@ export default function Page() {
       }}
     >
       <StyledDataGrid sx={{width: 1000}}
-        rows={rows}
-        columns={columns}
-        editMode="row"
-        rowModesModel={rowModesModel}
-        onRowModesModelChange={handleRowModesModelChange}
-        onRowEditStop={handleRowEditStop}
-        processRowUpdate={processRowUpdate}
-        onProcessRowUpdateError={handleProcessRowUpdateError}
-        loading={refresh}
-        slots={{
-          toolbar: EditToolbar,
-        }}
-        slotProps={{
-          toolbar: { setRows, setRowModesModel, setRefresh},
-        }}
+                      rows={rows}
+                      columns={columns}
+                      editMode="row"
+                      rowModesModel={rowModesModel}
+                      onRowModesModelChange={handleRowModesModelChange}
+                      onRowEditStop={handleRowEditStop}
+                      processRowUpdate={processRowUpdate}
+                      onProcessRowUpdateError={handleProcessRowUpdateError}
+                      loading={refresh}
+                      slots={{
+                        toolbar: EditToolbar,
+                      }}
+                      slotProps={{
+                        toolbar: {setRows, setRowModesModel, setRefresh},
+                      }}
       />
       {!!snackbar && (
         <Snackbar
           open
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
           onClose={handleCloseSnackbar}
           autoHideDuration={6000}
         >
-          <Alert {...snackbar} onClose={handleCloseSnackbar} />
+          <Alert {...snackbar} onClose={handleCloseSnackbar}/>
         </Snackbar>
       )}
     </Box>

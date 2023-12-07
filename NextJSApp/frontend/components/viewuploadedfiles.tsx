@@ -3,7 +3,7 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {fileColumns, tableHeaderSettings, UploadedFileData} from "@/config/macros";
 import {title} from "@/config/primitives";
 import {BrowseError} from "@/app/error"
-import {usePlotContext} from "@/app/plotcontext";
+import {usePlotContext} from "@/app/contexts/plotcontext";
 import {
   Button,
   Card,

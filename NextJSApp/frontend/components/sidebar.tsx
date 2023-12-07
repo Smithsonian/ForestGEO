@@ -20,7 +20,7 @@ import {
   usePlotDispatch,
   useQuadratContext,
   useQuadratDispatch
-} from "@/app/plotcontext";
+} from "@/app/contexts/plotcontext";
 import {usePathname, useRouter} from "next/navigation";
 import {
   Breadcrumbs,

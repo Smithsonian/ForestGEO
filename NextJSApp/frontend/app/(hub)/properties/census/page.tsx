@@ -5,7 +5,7 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbarContainer
+  GridToolbarContainer, GridValidRowModel
 } from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
 import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
@@ -17,10 +17,15 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {useAttributeLoadContext, useAttributeLoadDispatch} from "@/app/plotcontext";
-import {AttributeRDS, AttributeStatusOptions} from "@/config/sqlmacros";
 import {ErrorMessages} from "@/config/macros";
 import {styled} from "@mui/system";
+import {
+  useAttributeLoadContext,
+  useCensusLoadContext,
+  useCensusLoadDispatch,
+  usePlotsLoadContext
+} from "@/app/contexts/fixeddatacontext";
+import {AttributeStatusOptions, CensusGridColumns, PlotRDS} from "@/config/sqlmacros";
 const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   border: 0,
   color:
@@ -75,18 +80,20 @@ interface EditToolbarProps {
 function EditToolbar(props: EditToolbarProps) {
   const {setRows, setRowModesModel, setRefresh} = props;
   
-  const handleClick = () => {
+  const handleClick = async () => {
     const id = randomId();
-    setRows((oldRows) => [...oldRows, { id, code: '', description: '', status: '', isNew: true }]);
+    setRows((oldRows) => [...oldRows, { id, censusID: 0, plotID: 0, plotCensusNumber: 0, startDate: new Date(), endDate: new Date(), description: '', isNew: true }]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'name' },
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'censusID' },
     }));
   };
   
   const handleRefresh = async() => {
     setRefresh(true);
-    const response = await fetch('/api/census', {method: 'GET'});
+    const response = await fetch(`/api/fixeddata/census`, {
+      method: 'GET'
+    });
     setRows(await response.json());
     setRefresh(false);
   }
@@ -104,39 +111,67 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  if (newRow.code !== oldRow.code) {
-    return `Code from '${oldRow.code}' to '${newRow.code}'`;
-  }
-  if (newRow.description !== oldRow.description) {
-    return `Description from '${oldRow.description || ''}' to '${newRow.description || ''}'`;
-  }
-  if (newRow.status !== oldRow.status) {
-    return `Status from '${oldRow.status || ''}' to '${newRow.status || ''}'`;
-  }
-  return null;
+  return newRow.censusID !== oldRow.censusID || newRow.plotID !== oldRow.plotID ||
+    newRow.plotCensusNumber !== oldRow.plotCensusNumber || newRow.startDate !== oldRow.startDate ||
+    newRow.endDate !== oldRow.endDate || newRow.description !== oldRow.description;
 }
 export default function Page() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      code: '',
-      description: '',
-      status: '',
+      censusID: 0,
+      plotID: 0,
+      plotCensusNumber: 0,
+      startDate: new Date(),
+      endDate: new Date(),
+      description: ''
     },
   ]
-  const [rows, setRows] = React.useState(initialRows);
-  const attributeLoad = useAttributeLoadContext();
-  useEffect(() => {
-    if (attributeLoad) {
-      setRows(attributeLoad);
+  const initialPlots: GridRowsProp = [
+    {
+      id: 0,
+      plotID: 0,
+      plotName: '',
+      locationName: '',
+      countryName: '',
+      area: 0.0,
+      plotX: 0.0,
+      plotY: 0.0,
+      plotZ: 0.0,
+      plotShape: '',
+      plotDescription: ''
     }
-  }, [attributeLoad, setRows]);
+  ]
+  const [rows, setRows] = React.useState(initialRows);
+  const [plotRows, setPlotRows] = React.useState(initialPlots);
+  const censusLoad = useCensusLoadContext();
+  const plotsLoad = usePlotsLoadContext();
+  useEffect(() => {
+    if (censusLoad) {
+      setRows(censusLoad);
+    }
+    if (plotsLoad) {
+      setPlotRows(plotsLoad);
+    }
+  }, [censusLoad, setRows]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
+  const refreshData = async() => {
+    setRefresh(true);
+    const response = await fetch(`/api/fixeddata/census`, {
+      method: 'GET'
+    });
+    const plotsResponse = await fetch(`/api/fixeddata/plots`, {
+      method: 'GET'
+    });
+    setRows(await response.json());
+    setPlotRows(await plotsResponse.json());
+    setRefresh(false);
+  }
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
     setSnackbar({ children: String(error), severity: 'error' });
@@ -157,11 +192,12 @@ export default function Page() {
   };
   
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/census?code=${rows.find((row) => row.id == id)!.code}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/census?censusID=${rows.find((row) => row.id == id)!.censusID}`, {method: 'DELETE'});
     if (!response.ok) setSnackbar({ children: "Error: Deletion failed", severity: 'error' });
     else {
       setSnackbar({ children: "Row successfully deleted", severity: 'success' });
       setRows(rows.filter((row) => row.id !== id));
+      await refreshData();
     }
   };
   
@@ -181,55 +217,41 @@ export default function Page() {
   const processRowUpdate = React.useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>(async (resolve, reject) => {
-        if (newRow.code == '') {
-          reject(new Error("Primary key Code cannot be empty!"));
+        if (newRow.censusID == '') {
+          reject(new Error("Primary key CensusID cannot be empty!"));
         }
-        const mutation = computeMutation(newRow, oldRow);
-        switch (mutation) {
-          case `Code from '${oldRow.code}' to '${newRow.code}'`:
-            // Make the HTTP request to save in the backend
-            const codeResponse = await fetch(
-              `/api/census?oldCode=${String(oldRow.code)}&newCode=${String(newRow.code)}`, {
-                method: 'PATCH',
-              });
-            if (!codeResponse.ok) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Code change from ${oldRow.code} to ${newRow.code} saved successfully`, severity: 'success'});
+        else if (oldRow.code == '') {
+          // inserting a row
+          const response = await fetch(`/api/fixeddata/census?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
+            method: 'POST'
+          });
+          const responseJSON = await response.json();
+          if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+          setSnackbar({children: `New row added!`, severity: 'success'});
+          resolve(newRow);
+        } else {
+          const mutation = computeMutation(newRow, oldRow);
+          if (mutation) {
+            const response = await fetch(`/api/fixeddata/census?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
+              method: 'PATCH'
+            })
+            const responseJSON = await response.json();
+            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            setSnackbar({children: `Row edits saved!`, severity: 'success'});
             resolve(newRow);
-            break;
-          case `Description from '${oldRow.description || ''}' to '${newRow.description || ''}'`:
-            // Make the HTTP request to save in the backend
-            const descResponse = await fetch(
-              `/api/census?oldCode=${String(oldRow.code)}&newDesc=${String(newRow.description)}`, {
-                method: 'PATCH',
-              });
-            if (!descResponse.ok) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Description change from ${oldRow.description} to ${newRow.description} on row ${oldRow.code} saved successfully`, severity: 'success'});
-            resolve(newRow);
-            break;
-          case `Status from '${oldRow.status || ''}' to '${newRow.status || ''}'`:
-            // Make the HTTP request to save in the backend
-            const statResponse = await fetch(
-              `/api/census?oldCode=${String(oldRow.code)}&newStat=${String(newRow.status)}`, {
-                method: 'PATCH',
-              });
-            if (!statResponse.ok) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Status change from ${oldRow.status} to ${newRow.status} on row ${oldRow.code} saved successfully`, severity: 'success'});
-            resolve(newRow);
-            break;
-          default:
-            reject(new Error("Unknown error!"));
+          }
         }
+        await refreshData();
       }),
     [],
   );
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
   };
-  
+  const plotIDs: number[] = plotRows.map((plotRow: GridValidRowModel) => plotRow.plotID);
   const columns: GridColDef[] = [
-    {field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1, editable: true}, // all unique ID columns need to be tagged 'id'
-    {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-    {field: 'status', headerName: 'Status', headerClassName: 'header', flex: 1, editable: true, type: 'singleSelect', valueOptions: AttributeStatusOptions,},
+    ...CensusGridColumns,
+    {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', minWidth: 200, flex: 1, editable: true, type: 'singleSelect', valueOptions: plotIDs},
     {
       field: 'actions',
       type: 'actions',
@@ -291,23 +313,25 @@ export default function Page() {
         },
       }}
     >
-      <StyledDataGrid sx={{width: 1000}}
-                      rows={rows}
-                      columns={columns}
-                      editMode="row"
-                      rowModesModel={rowModesModel}
-                      onRowModesModelChange={handleRowModesModelChange}
-                      onRowEditStop={handleRowEditStop}
-                      processRowUpdate={processRowUpdate}
-                      onProcessRowUpdateError={handleProcessRowUpdateError}
-                      loading={refresh}
-                      slots={{
-                        toolbar: EditToolbar,
-                      }}
-                      slotProps={{
-                        toolbar: { setRows, setRowModesModel, setRefresh},
-                      }}
-      />
+      <Box sx={{display: 'flex', flex: 1, flexDirection: 'row'}}>
+        <StyledDataGrid sx={{width: '100%'}}
+          rows={rows}
+          columns={columns}
+          editMode="row"
+          rowModesModel={rowModesModel}
+          onRowModesModelChange={handleRowModesModelChange}
+          onRowEditStop={handleRowEditStop}
+          processRowUpdate={processRowUpdate}
+          onProcessRowUpdateError={handleProcessRowUpdateError}
+          loading={refresh}
+          slots={{
+            toolbar: EditToolbar,
+          }}
+          slotProps={{
+            toolbar: { setRows, setRowModesModel, setRefresh},
+          }}
+        />
+      </Box>
       {!!snackbar && (
         <Snackbar
           open

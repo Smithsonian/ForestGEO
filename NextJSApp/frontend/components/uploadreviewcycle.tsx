@@ -5,7 +5,7 @@ import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayParsedData} from "@/components/validationtable";
 import {parse} from "papaparse";
 import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
-import {usePlotContext} from "@/app/plotcontext";
+import {usePlotContext} from "@/app/contexts/plotcontext";
 import {useSession} from "next-auth/react";
 import {
   Button,

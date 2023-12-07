@@ -85,6 +85,7 @@ export enum ErrorMessages {
   DCF = "Delete Command Failed",
   UKAE = "Unique Key Already Exists",
 }
+
 export const tableHeaderSettings = {
   fontWeight: 'bold',
   fontSize: 16,

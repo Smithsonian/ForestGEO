@@ -1,7 +1,7 @@
 "use client";
 
 import React, {useState} from "react";
-import {usePlotContext} from "@/app/plotcontext";
+import {usePlotContext} from "@/app/contexts/plotcontext";
 import {IRecordSet} from "mssql";
 import Button from "@mui/joy/Button";
 import Box from "@mui/joy/Box";
