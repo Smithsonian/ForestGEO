@@ -108,7 +108,7 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
   const initState: { fileName: string; data: DataStructure[] }[] = [];
   const [data, setData] = useState(initState);
-  
+
   const display = () => {
     // eslint-disable-next-line array-callback-return
     uploadedData.forEach((file: FileWithPath) => {
@@ -118,7 +118,7 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
         complete: function (results: any) {
           try {
             // eslint-disable-next-line array-callback-return
-            tempData.push({fileName: file.name, data: results.data});
+            tempData.push({ fileName: file.name, data: results.data });
             setData(tempData);
           } catch (e) {
             console.log(e);
@@ -214,7 +214,6 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
     </>
   );
 }
-
 export function DisplayParsedData(fileData: { fileName: string; data: DataStructure[] }) {
   return (
     <>
