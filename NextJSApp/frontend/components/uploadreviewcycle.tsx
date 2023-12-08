@@ -2,7 +2,7 @@
 import React, {useCallback, useEffect, useState} from "react";
 import {FileErrors, ReviewStates} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DataStructure, DisplayParsedData} from "@/components/fileupload/merged_validationtable";
+import {DataStructure, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse} from "papaparse";
 import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
 import {usePlotContext} from "@/app/contexts/plotcontext";
