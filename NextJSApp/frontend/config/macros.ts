@@ -1,6 +1,5 @@
 import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
-import {GridColDef} from "@mui/x-data-grid";
 import '@/styles/customtablesettings.css'
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import FolderIcon from '@mui/icons-material/Folder';
@@ -78,6 +77,7 @@ export enum ReviewStates {
   UPLOADED = "uploaded",
   ERRORS = "errors"
 }
+
 export enum ErrorMessages {
   SCF = "SQL Command Failure",
   ICF = "Insertion Command Failed",
@@ -99,6 +99,7 @@ export interface DropzonePureProps {
   /** From react-dropzone, function which gets attributes for the input field. */
   getInputProps: any;
 }
+
 // conditional CSS logic saved here for future usage
 // const columns: GridColDef[] = [
 //   {

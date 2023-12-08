@@ -1,8 +1,6 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
 import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
-import {GridRowProps, GridValidRowModel} from "@mui/x-data-grid";
-import {json} from "stream/consumers";
 
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
@@ -12,6 +10,7 @@ export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | n
 export const CensusDispatchContext = createContext<Dispatch<{ census: number | null }> | null>(null);
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
+
 export function ContextsProvider({children}: { children: React.ReactNode }) {
   const [plot, plotDispatch] = useReducer(
     plotsReducer,

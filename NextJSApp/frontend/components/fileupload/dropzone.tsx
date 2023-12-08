@@ -1,20 +1,12 @@
 "use client";
-import React, {useCallback, useState} from 'react';
-import {useSession} from "next-auth/react";
-import {DropzoneProps, DropzonePureProps, FileErrors, FileListProps, UploadValidationProps} from "@/config/macros";
-import {ValidationTable} from "@/components/fileupload/validationtable";
-import {usePlotContext} from "@/app/contexts/plotcontext";
+import React, {useCallback} from 'react';
+import {DropzoneProps, DropzonePureProps} from "@/config/macros";
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
 import {FileUploadIcon} from "@/components/icons";
 
 import '@/styles/dropzone.css';
 import {subtitle} from "@/config/primitives";
-import {Card, CardContent, CardHeader, Pagination} from "@mui/material";
-import {Skeleton} from "@mui/joy";
-import Chip from "@mui/joy/Chip";
-import Divider from "@mui/joy/Divider";
-import LoadingButton from "@mui/lab/LoadingButton";
 
 
 /**
@@ -56,17 +48,17 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
         const reader = new FileReader();
-
+        
         reader.onabort = () => alert('file reading was aborted');
         reader.onerror = () => alert('file reading has failed');
         reader.onload = () => {
           // Do whatever you want with the file contents
           const binaryStr = reader.result as string;
-          const config: ParseConfig = { delimiter: ',' };
+          const config: ParseConfig = {delimiter: ','};
           const results = parse(binaryStr, config);
-
+          
           //console.log(JSON.stringify(results.data));
-
+          
           if (results.errors.length) {
             alert(
               `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`
@@ -80,8 +72,8 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
       rejectedFiles.forEach((fileRejection: FileRejection) => {
         alert(
           ' The file ' +
-            fileRejection.file.name +
-            ' was not uploaded. Only .csv files are supported.'
+          fileRejection.file.name +
+          ' was not uploaded. Only .csv files are supported.'
         );
       });
     },

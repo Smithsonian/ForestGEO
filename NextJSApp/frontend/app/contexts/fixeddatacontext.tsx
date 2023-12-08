@@ -9,12 +9,22 @@ export const PersonnelLoadContext = createContext<GridValidRowModel[] | null>(nu
 export const QuadratsLoadContext = createContext<GridValidRowModel[] | null>(null);
 export const SpeciesLoadContext = createContext<GridValidRowModel[] | null>(null);
 export const PlotsLoadContext = createContext<GridValidRowModel[] | null>(null);
-export const AttributeLoadDispatchContext = createContext<Dispatch<{attributeLoad: GridValidRowModel[] | null}> | null>(null);
-export const CensusLoadDispatchContext = createContext<Dispatch<{censusLoad: GridValidRowModel[] | null}> | null>(null);
-export const PersonnelLoadDispatchContext = createContext<Dispatch<{personnelLoad: GridValidRowModel[] | null}> | null>(null);
-export const QuadratsLoadDispatchContext = createContext<Dispatch<{quadratsLoad: GridValidRowModel[] | null}> | null>(null);
-export const SpeciesLoadDispatchContext = createContext<Dispatch<{speciesLoad: GridValidRowModel[] | null}> | null>(null);
-export const PlotsLoadDispatchContext = createContext<Dispatch<{plotsLoad: GridValidRowModel[] | null}> | null>(null);
+export const AttributeLoadDispatchContext = createContext<Dispatch<{
+  attributeLoad: GridValidRowModel[] | null
+}> | null>(null);
+export const CensusLoadDispatchContext = createContext<Dispatch<{
+  censusLoad: GridValidRowModel[] | null
+}> | null>(null);
+export const PersonnelLoadDispatchContext = createContext<Dispatch<{
+  personnelLoad: GridValidRowModel[] | null
+}> | null>(null);
+export const QuadratsLoadDispatchContext = createContext<Dispatch<{
+  quadratsLoad: GridValidRowModel[] | null
+}> | null>(null);
+export const SpeciesLoadDispatchContext = createContext<Dispatch<{
+  speciesLoad: GridValidRowModel[] | null
+}> | null>(null);
+export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: GridValidRowModel[] | null }> | null>(null);
 
 export function FixedDataProvider({children}: { children: React.ReactNode }) {
   const [attributeLoad, attributeLoadDispatch] = useReducer(
@@ -40,8 +50,8 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
   )
   
   const [plotsLoad, plotsLoadDispatch] = useReducer(
-  plotsLoadReducer,
-  null
+    plotsLoadReducer,
+    null
   )
   
   return (
@@ -73,63 +83,74 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
   );
 }
 
-function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: GridValidRowModel[] | null}) {
+function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: GridValidRowModel[] | null }) {
   return action.attributeLoad;
 }
 
-function censusLoadReducer(currentCensusLoad: any, action: { censusLoad: GridValidRowModel[] | null}) {
+function censusLoadReducer(currentCensusLoad: any, action: { censusLoad: GridValidRowModel[] | null }) {
   return action.censusLoad;
 }
 
-function personnelLoadReducer(currentPersonnelLoad: any, action: { personnelLoad: GridValidRowModel[] | null}) {
+function personnelLoadReducer(currentPersonnelLoad: any, action: { personnelLoad: GridValidRowModel[] | null }) {
   return action.personnelLoad;
 }
 
-function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: GridValidRowModel[] | null}) {
+function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: GridValidRowModel[] | null }) {
   return action.quadratsLoad;
 }
 
-function speciesLoadReducer(currentSpeciesLoad: any, action: { speciesLoad: GridValidRowModel[] | null}) {
+function speciesLoadReducer(currentSpeciesLoad: any, action: { speciesLoad: GridValidRowModel[] | null }) {
   return action.speciesLoad;
 }
 
-function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: GridValidRowModel[] | null}) {
+function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: GridValidRowModel[] | null }) {
   return action.plotsLoad;
 }
 
 export function useAttributeLoadContext() {
   return useContext(AttributeLoadContext);
 }
+
 export function useAttributeLoadDispatch() {
   return useContext(AttributeLoadDispatchContext);
 }
+
 export function useCensusLoadContext() {
   return useContext(CensusLoadContext);
 }
+
 export function useCensusLoadDispatch() {
   return useContext(CensusLoadDispatchContext);
 }
+
 export function usePersonnelLoadContext() {
   return useContext(PersonnelLoadContext);
 }
+
 export function usePersonnelLoadDispatch() {
   return useContext(PersonnelLoadDispatchContext);
 }
+
 export function useQuadratsLoadContext() {
   return useContext(QuadratsLoadContext);
 }
+
 export function useQuadratsLoadDispatch() {
   return useContext(QuadratsLoadDispatchContext);
 }
+
 export function useSpeciesLoadContext() {
   return useContext(SpeciesLoadContext);
 }
+
 export function useSpeciesLoadDispatch() {
   return useContext(SpeciesLoadDispatchContext);
 }
+
 export function usePlotsLoadContext() {
   return useContext(PlotsLoadContext);
 }
+
 export function usePlotsLoadDispatch() {
   return useContext(PlotsLoadDispatchContext);
 }

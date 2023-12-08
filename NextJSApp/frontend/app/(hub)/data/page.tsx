@@ -1,11 +1,9 @@
 "use client";
 
-import React, {useState} from "react";
+import {useState} from "react";
 import {usePlotContext} from "@/app/contexts/plotcontext";
 import {IRecordSet} from "mssql";
-import Button from "@mui/joy/Button";
-import Box from "@mui/joy/Box";
-import {DataGrid, GridRowsProp} from '@mui/x-data-grid';
+import {DataGrid} from '@mui/x-data-grid';
 import {styled} from "@mui/system";
 
 const StyledDataGrid = styled(DataGrid)(({theme}) => ({

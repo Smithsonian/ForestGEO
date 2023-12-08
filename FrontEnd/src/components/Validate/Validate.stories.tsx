@@ -1,13 +1,13 @@
-import { MemoryRouter } from 'react-router-dom';
-import { ComponentMeta, Story } from '@storybook/react';
-import { ValidatePure, ValidatePureProps } from './Validate';
+import {MemoryRouter} from 'react-router-dom';
+import {ComponentMeta, Story} from '@storybook/react';
+import {ValidatePure, ValidatePureProps} from './Validate';
 
 export default {
   title: 'Validate',
   component: ValidatePure,
   argTypes: {
-    label: { control: 'text' },
-    onClick: { action: 'clicked' },
+    label: {control: 'text'},
+    onClick: {action: 'clicked'},
   },
 } as ComponentMeta<typeof ValidatePure>;
 

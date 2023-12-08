@@ -30,7 +30,7 @@ export function DisplayErrorTable({fileName, fileData, errorMessage}: DisplayErr
     <>
       <TableContainer component={Paper}>
         <h3>file: {fileName}</h3>
-
+        
         <Table>
           {errorMessage[fileName]['headers'] ? (
             <></>
@@ -117,7 +117,7 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
         complete: function (results: any) {
           try {
             // eslint-disable-next-line array-callback-return
-            tempData.push({ fileName: file.name, data: results.data });
+            tempData.push({fileName: file.name, data: results.data});
             setData(tempData);
           } catch (e) {
             console.log(e);
@@ -133,7 +133,7 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
     <>
       {Object.keys(errorMessage).map((fileName) => {
         fileData = data.find((file) => file.fileName == fileName) || {
-
+          
           fileName: '',
           data: [],
         };

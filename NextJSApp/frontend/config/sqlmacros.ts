@@ -22,8 +22,25 @@ export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'm
 
 export const AttributeGridColumns: GridColDef[] = [
   {field: 'code', headerName: 'Code', headerClassName: 'header', minWidth: 150, flex: 1, editable: true}, // all unique ID columns need to be tagged 'id'
-  {field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 250, flex: 1, align: 'left', editable: true},
-  {field: 'status', headerName: 'Status', headerClassName: 'header', minWidth: 150, flex: 1, editable: true, type: 'singleSelect', valueOptions: AttributeStatusOptions,},
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    minWidth: 250,
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'status',
+    headerName: 'Status',
+    headerClassName: 'header',
+    minWidth: 150,
+    flex: 1,
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: AttributeStatusOptions,
+  },
 ];
 
 export interface CensusRDS {
@@ -37,17 +54,55 @@ export interface CensusRDS {
 }
 
 export const CensusGridColumns: GridColDef[] = [
-  {field: 'censusID', headerName: 'CensusID', type: 'number', headerClassName: 'header', minWidth: 200, flex: 1, editable: true},
-  {field: 'plotID', headerName: 'PlotID', type: 'number', headerClassName: 'header', minWidth: 200, flex: 1, editable: true},
-  {field: 'plotCensusNumber', headerName: 'PlotCensusNumber', type: 'number', headerClassName: 'header', minWidth: 150, flex: 1, editable: true},
   {
-    field: 'startDate', headerName: 'StartDate', type: 'date', headerClassName: 'header', minWidth: 200, flex: 1, editable: true, valueGetter: (params) => {
+    field: 'censusID',
+    headerName: 'CensusID',
+    type: 'number',
+    headerClassName: 'header',
+    minWidth: 200,
+    flex: 1,
+    editable: true
+  },
+  {
+    field: 'plotID',
+    headerName: 'PlotID',
+    type: 'number',
+    headerClassName: 'header',
+    minWidth: 200,
+    flex: 1,
+    editable: true
+  },
+  {
+    field: 'plotCensusNumber',
+    headerName: 'PlotCensusNumber',
+    type: 'number',
+    headerClassName: 'header',
+    minWidth: 150,
+    flex: 1,
+    editable: true
+  },
+  {
+    field: 'startDate',
+    headerName: 'StartDate',
+    type: 'date',
+    headerClassName: 'header',
+    minWidth: 200,
+    flex: 1,
+    editable: true,
+    valueGetter: (params) => {
       if (!params.value) return null;
       return new Date(params.value);
     }
   },
   {
-    field: 'endDate', headerName: 'EndDate', type: 'date', headerClassName: 'header', minWidth: 200, flex: 1, editable: true, valueGetter: (params) => {
+    field: 'endDate',
+    headerName: 'EndDate',
+    type: 'date',
+    headerClassName: 'header',
+    minWidth: 200,
+    flex: 1,
+    editable: true,
+    valueGetter: (params) => {
       if (!params.value) return null;
       return new Date(params.value);
     }
@@ -108,10 +163,17 @@ export const CoreMeasurementGridColumns: GridColDef[] = [
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1},
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1},
   {field: 'measurementTypeID', headerName: 'MeasurementTypeID', headerClassName: 'header', flex: 1},
-  {field: 'measurementDate', headerName: 'MeasurementDate', type: "date", headerClassName: 'header', flex: 1, valueGetter: (params) => {
+  {
+    field: 'measurementDate',
+    headerName: 'MeasurementDate',
+    type: "date",
+    headerClassName: 'header',
+    flex: 1,
+    valueGetter: (params) => {
       if (!params.value) return null;
       return new Date(params.value);
-    }},
+    }
+  },
   {field: 'measurement', headerName: 'Measurement', headerClassName: 'header', flex: 1},
   {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1},
   {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1},
@@ -131,10 +193,17 @@ export interface CurrentObsoleteRDS {
 export const CurrentObsoleteGridColumns: GridColDef[] = [
   {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1},
   {field: 'obsoleteSpeciesID', headerName: 'ObsoleteSpeciesID', headerClassName: 'header', flex: 1},
-  {field: 'changeDate', headerName: 'ChangeDate', type: "date", headerClassName: 'header', flex: 1, valueGetter: (params) => {
+  {
+    field: 'changeDate',
+    headerName: 'ChangeDate',
+    type: "date",
+    headerClassName: 'header',
+    flex: 1,
+    valueGetter: (params) => {
       if (!params.value) return null;
       return new Date(params.value);
-    }},
+    }
+  },
   {field: 'changeCodeID', headerName: 'ChangeCodeID', headerClassName: 'header', flex: 1},
   {field: 'changeNote', headerName: 'ChangeNote', headerClassName: 'header', flex: 1},
 ]
@@ -269,10 +338,17 @@ export const ReferenceGridColumns: GridColDef[] = [
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1},
   {field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1},
   {field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1},
-  {field: 'dateOfPublication', headerName: 'DateOfPublication', type: "date", headerClassName: 'header', flex: 1, valueGetter: (params) => {
+  {
+    field: 'dateOfPublication',
+    headerName: 'DateOfPublication',
+    type: "date",
+    headerClassName: 'header',
+    flex: 1,
+    valueGetter: (params) => {
       if (!params.value) return null;
       return new Date(params.value);
-    }},
+    }
+  },
 ]
 
 export interface SpeciesRDS {

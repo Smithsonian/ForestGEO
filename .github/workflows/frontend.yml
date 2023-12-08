@@ -3,14 +3,14 @@ name: Build and test Frontend
 on:
   pull_request:
     paths:
-    - 'FrontEnd/**'
-    - '.github/**'
+      - 'FrontEnd/**'
+      - '.github/**'
   push:
     branches:
       - main
     paths:
-    - 'FrontEnd/**'
-    - '.github/**'
+      - 'FrontEnd/**'
+      - '.github/**'
 
 jobs:
   build:
@@ -19,44 +19,44 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        node-version: [16.x]
+        os: [ ubuntu-latest, windows-latest ]
+        node-version: [ 16.x ]
 
     steps:
-    - uses: actions/checkout@v2.3.3
+      - uses: actions/checkout@v2.3.3
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v1
-      with:
-        node-version: ${{ matrix.node-version }}
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
 
-    - name: Install dependencies
-      run: |
-        pwd
-        cd FrontEnd
-        npm install
+      - name: Install dependencies
+        run: |
+          pwd
+          cd FrontEnd
+          npm install
 
-    - name: Run linter
-      run: |
-        cd FrontEnd
-        npm run lint
+      - name: Run linter
+        run: |
+          cd FrontEnd
+          npm run lint
 
-    - name: Run type checker
-      run: |
-        cd FrontEnd
-        npm run tsc
+      - name: Run type checker
+        run: |
+          cd FrontEnd
+          npm run tsc
 
-    - name: Run tests
-      run: |
-        cd FrontEnd
-        npm test -- --passWithNoTests
+      - name: Run tests
+        run: |
+          cd FrontEnd
+          npm test -- --passWithNoTests
 
-    - name: Build FrontEnd
-      run: |
-        cd FrontEnd
-        npm run build
+      - name: Build FrontEnd
+        run: |
+          cd FrontEnd
+          npm run build
 
-    - name: Build storybook
-      run: |
-        cd FrontEnd
-        npm run build-storybook
+      - name: Build storybook
+        run: |
+          cd FrontEnd
+          npm run build-storybook

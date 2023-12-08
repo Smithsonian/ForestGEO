@@ -84,7 +84,7 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
       setLoadingMsg('Retrieving Plots...')
       response = await fetch(`/api/fixeddata/plots`, {method: 'GET'});
       setLoading(99);
-      if (plotsLoadDispatch){
+      if (plotsLoadDispatch) {
         plotsLoadDispatch({plotsLoad: await response.json()});
       }
       setLoading(100);
@@ -165,7 +165,14 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
         </Box>
         <Divider orientation={"horizontal"} sx={{my: '5px'}}/>
         <Box
-          sx={{display: 'flex', flexGrow: 1, flexShrink: 1, alignItems: 'flex-start', flexDirection: 'column', paddingLeft: 2}}>
+          sx={{
+            display: 'flex',
+            flexGrow: 1,
+            flexShrink: 1,
+            alignItems: 'flex-start',
+            flexDirection: 'column',
+            paddingLeft: 2
+          }}>
           {firstLoad ? <Modal open={firstLoad}
                               sx={{display: 'flex', flex: 1}}
                               onClose={(_event: React.MouseEvent<HTMLButtonElement>, reason: string) => {
@@ -205,7 +212,13 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
         </Box>
         <Divider orientation={"horizontal"}/>
         <Box mt={3}
-             sx={{display: 'flex', alignItems: 'center', alignSelf: 'center', flexDirection: 'row', marginBottom: '15px'}}>
+             sx={{
+               display: 'flex',
+               alignItems: 'center',
+               alignSelf: 'center',
+               flexDirection: 'row',
+               marginBottom: '15px'
+             }}>
           <Box>
             <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
           </Box>

@@ -1,11 +1,17 @@
 "use client";
 import {
   DataGrid,
-  GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel,
+  GridActionsCellItem,
+  GridColDef,
+  GridEventListener,
+  GridRowEditStopReasons,
+  GridRowId,
+  GridRowModel,
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbarContainer, GridValidRowModel
+  GridToolbarContainer,
+  GridValidRowModel
 } from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
 import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
@@ -19,13 +25,9 @@ import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
 import {styled} from "@mui/system";
-import {
-  useAttributeLoadContext,
-  useCensusLoadContext,
-  useCensusLoadDispatch,
-  usePlotsLoadContext
-} from "@/app/contexts/fixeddatacontext";
-import {AttributeStatusOptions, CensusGridColumns, PlotRDS} from "@/config/sqlmacros";
+import {useCensusLoadContext, usePlotsLoadContext} from "@/app/contexts/fixeddatacontext";
+import {CensusGridColumns} from "@/config/sqlmacros";
+
 const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   border: 0,
   color:
@@ -82,14 +84,23 @@ function EditToolbar(props: EditToolbarProps) {
   
   const handleClick = async () => {
     const id = randomId();
-    setRows((oldRows) => [...oldRows, { id, censusID: 0, plotID: 0, plotCensusNumber: 0, startDate: new Date(), endDate: new Date(), description: '', isNew: true }]);
+    setRows((oldRows) => [...oldRows, {
+      id,
+      censusID: 0,
+      plotID: 0,
+      plotCensusNumber: 0,
+      startDate: new Date(),
+      endDate: new Date(),
+      description: '',
+      isNew: true
+    }]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'censusID' },
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'censusID'},
     }));
   };
   
-  const handleRefresh = async() => {
+  const handleRefresh = async () => {
     setRefresh(true);
     const response = await fetch(`/api/fixeddata/census`, {
       method: 'GET'
@@ -100,10 +111,10 @@ function EditToolbar(props: EditToolbarProps) {
   
   return (
     <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon />} onClick={handleClick}>
+      <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
         Add census
       </Button>
-      <Button color={"primary"} startIcon={<RefreshIcon />} onClick={handleRefresh}>
+      <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
     </GridToolbarContainer>
@@ -115,6 +126,7 @@ function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
     newRow.plotCensusNumber !== oldRow.plotCensusNumber || newRow.startDate !== oldRow.startDate ||
     newRow.endDate !== oldRow.endDate || newRow.description !== oldRow.description;
 }
+
 export default function Page() {
   const initialRows: GridRowsProp = [
     {
@@ -160,7 +172,7 @@ export default function Page() {
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const refreshData = async() => {
+  const refreshData = async () => {
     setRefresh(true);
     const response = await fetch(`/api/fixeddata/census`, {
       method: 'GET'
@@ -174,7 +186,7 @@ export default function Page() {
   }
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
-    setSnackbar({ children: String(error), severity: 'error' });
+    setSnackbar({children: String(error), severity: 'error'});
   }, []);
   
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
@@ -184,18 +196,18 @@ export default function Page() {
   };
   
   const handleEditClick = (id: GridRowId) => () => {
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
   
   const handleSaveClick = (id: GridRowId) => () => {
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.View } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
   };
   
   const handleDeleteClick = (id: GridRowId) => async () => {
     const response = await fetch(`/api/fixeddata/census?censusID=${rows.find((row) => row.id == id)!.censusID}`, {method: 'DELETE'});
-    if (!response.ok) setSnackbar({ children: "Error: Deletion failed", severity: 'error' });
+    if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
-      setSnackbar({ children: "Row successfully deleted", severity: 'success' });
+      setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
       await refreshData();
     }
@@ -204,13 +216,13 @@ export default function Page() {
   const handleCancelClick = (id: GridRowId) => () => {
     setRowModesModel({
       ...rowModesModel,
-      [id]: { mode: GridRowModes.View, ignoreModifications: true },
+      [id]: {mode: GridRowModes.View, ignoreModifications: true},
     });
     
     const editedRow = rows.find((row) => row.id === id);
     if (editedRow!.isNew) {
       setRows(rows.filter((row) => row.id !== id));
-      setSnackbar({ children: "Changes cancelled", severity: 'success' });
+      setSnackbar({children: "Changes cancelled", severity: 'success'});
     }
   };
   
@@ -219,8 +231,7 @@ export default function Page() {
       new Promise<GridRowModel>(async (resolve, reject) => {
         if (newRow.censusID == '') {
           reject(new Error("Primary key CensusID cannot be empty!"));
-        }
-        else if (oldRow.code == '') {
+        } else if (oldRow.code == '') {
           // inserting a row
           const response = await fetch(`/api/fixeddata/census?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
             method: 'POST'
@@ -251,20 +262,29 @@ export default function Page() {
   const plotIDs: number[] = plotRows.map((plotRow: GridValidRowModel) => plotRow.plotID);
   const columns: GridColDef[] = [
     ...CensusGridColumns,
-    {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', minWidth: 200, flex: 1, editable: true, type: 'singleSelect', valueOptions: plotIDs},
+    {
+      field: 'plotID',
+      headerName: 'PlotID',
+      headerClassName: 'header',
+      minWidth: 200,
+      flex: 1,
+      editable: true,
+      type: 'singleSelect',
+      valueOptions: plotIDs
+    },
     {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
       width: 100,
       cellClassName: 'actions',
-      getActions: ({ id }) => {
+      getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
         
         if (isInEditMode) {
           return [
             <GridActionsCellItem
-              icon={<SaveIcon />}
+              icon={<SaveIcon/>}
               label="Save"
               sx={{
                 color: 'primary.main',
@@ -272,7 +292,7 @@ export default function Page() {
               onClick={handleSaveClick(id)}
             />,
             <GridActionsCellItem
-              icon={<CancelIcon />}
+              icon={<CancelIcon/>}
               label="Cancel"
               className="textPrimary"
               onClick={handleCancelClick(id)}
@@ -283,14 +303,14 @@ export default function Page() {
         
         return [
           <GridActionsCellItem
-            icon={<EditIcon />}
+            icon={<EditIcon/>}
             label="Edit"
             className="textPrimary"
             onClick={handleEditClick(id)}
             color="inherit"
           />,
           <GridActionsCellItem
-            icon={<DeleteIcon />}
+            icon={<DeleteIcon/>}
             label="Delete"
             onClick={handleDeleteClick(id)}
             color="inherit"
@@ -315,31 +335,31 @@ export default function Page() {
     >
       <Box sx={{display: 'flex', flex: 1, flexDirection: 'row'}}>
         <StyledDataGrid sx={{width: '100%'}}
-          rows={rows}
-          columns={columns}
-          editMode="row"
-          rowModesModel={rowModesModel}
-          onRowModesModelChange={handleRowModesModelChange}
-          onRowEditStop={handleRowEditStop}
-          processRowUpdate={processRowUpdate}
-          onProcessRowUpdateError={handleProcessRowUpdateError}
-          loading={refresh}
-          slots={{
-            toolbar: EditToolbar,
-          }}
-          slotProps={{
-            toolbar: { setRows, setRowModesModel, setRefresh},
-          }}
+                        rows={rows}
+                        columns={columns}
+                        editMode="row"
+                        rowModesModel={rowModesModel}
+                        onRowModesModelChange={handleRowModesModelChange}
+                        onRowEditStop={handleRowEditStop}
+                        processRowUpdate={processRowUpdate}
+                        onProcessRowUpdateError={handleProcessRowUpdateError}
+                        loading={refresh}
+                        slots={{
+                          toolbar: EditToolbar,
+                        }}
+                        slotProps={{
+                          toolbar: {setRows, setRowModesModel, setRefresh},
+                        }}
         />
       </Box>
       {!!snackbar && (
         <Snackbar
           open
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
           onClose={handleCloseSnackbar}
           autoHideDuration={6000}
         >
-          <Alert {...snackbar} onClose={handleCloseSnackbar} />
+          <Alert {...snackbar} onClose={handleCloseSnackbar}/>
         </Snackbar>
       )}
     </Box>

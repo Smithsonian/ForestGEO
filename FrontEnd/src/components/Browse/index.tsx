@@ -1,2 +1,2 @@
-export { default } from './Browse';
+export {default} from './Browse';
 export * from './Browse';

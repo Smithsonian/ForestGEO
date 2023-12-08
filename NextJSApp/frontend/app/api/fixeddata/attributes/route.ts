@@ -2,6 +2,7 @@ import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {ErrorMessages, sqlConfig} from "@/config/macros";
 import {AttributeRDS} from "@/config/sqlmacros";
+
 async function getSqlConnection(tries: number) {
   return await sql.connect(sqlConfig).catch((err) => {
     console.error(err);
@@ -47,7 +48,12 @@ export async function POST(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  const row: AttributeRDS = {id: 0, code: request.nextUrl.searchParams.get('code')!, description: request.nextUrl.searchParams.get('desc')!, status: request.nextUrl.searchParams.get('stat')!}
+  const row: AttributeRDS = {
+    id: 0,
+    code: request.nextUrl.searchParams.get('code')!,
+    description: request.nextUrl.searchParams.get('desc')!,
+    status: request.nextUrl.searchParams.get('stat')!
+  }
   
   let validateCode = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${row.code}'`);
   if (!validateCode) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
@@ -68,7 +74,7 @@ export async function DELETE(request: NextRequest) {
   let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
   await conn.close();
-  return NextResponse.json({ message: "Update successful", }, {status: 200});
+  return NextResponse.json({message: "Update successful",}, {status: 200});
 }
 
 export async function PATCH(request: NextRequest) {
@@ -77,7 +83,12 @@ export async function PATCH(request: NextRequest) {
   if (!conn) throw new Error('sql connection failed');
   
   const oldCode = request.nextUrl.searchParams.get('oldCode')!;
-  const row: AttributeRDS = {id: 0, code: request.nextUrl.searchParams.get('newCode')!, description: request.nextUrl.searchParams.get('newDesc')!, status: request.nextUrl.searchParams.get('newStat')!};
+  const row: AttributeRDS = {
+    id: 0,
+    code: request.nextUrl.searchParams.get('newCode')!,
+    description: request.nextUrl.searchParams.get('newDesc')!,
+    status: request.nextUrl.searchParams.get('newStat')!
+  };
   
   // check to ensure new code is not already taken
   if (row.code !== oldCode) { // if CODE is being updated, this check needs to happen
@@ -88,11 +99,11 @@ export async function PATCH(request: NextRequest) {
     let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [Code] = '${row.code}', [Description] = '${row.description}', [Status] = '${row.status}' WHERE [Code] = '${oldCode}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
-    return NextResponse.json({ message: "Update successful", }, {status: 200});
+    return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // otherwise updating can focus solely on other columns
     let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [Description] = '${row.description}', [Status] = '${row.status}' WHERE [Code] = '${oldCode}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
-    return NextResponse.json({ message: "Update successful", }, {status: 200});
+    return NextResponse.json({message: "Update successful",}, {status: 200});
   }
 }

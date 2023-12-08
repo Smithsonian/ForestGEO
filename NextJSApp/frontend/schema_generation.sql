@@ -3,10 +3,10 @@ create table Attributes
     Code        varchar(10) not null
         constraint Attributes_pk
             primary key,
-    Description varchar(max),
+    Description varchar(max
+) ,
     Status      varchar(5)
-)
-go
+) go
 
 create table MeasurementTypes
 (
@@ -15,7 +15,7 @@ create table MeasurementTypes
             primary key,
     MeasurementTypeDescription int
 )
-go
+    go
 
 create table Personnel
 (
@@ -26,14 +26,15 @@ create table Personnel
     LastName    varchar(50),
     Role        varchar(50)
 )
-go
+    go
 
 create table Plots
 (
-    PlotID          int not null
+    PlotID   int not null
         constraint PlotID_PK
             primary key,
-    PlotName        varchar(max),
+    PlotName varchar(max
+) ,
     LocationName    varchar(max),
     CountryName     varchar(max),
     Area            float,
@@ -42,8 +43,7 @@ create table Plots
     PlotZ           float,
     PlotShape       varchar(max),
     PlotDescription varchar(max)
-)
-go
+) go
 
 create table Census
 (
@@ -56,22 +56,23 @@ create table Census
     PlotCensusNumber varchar(16),
     StartDate        date,
     EndDate          date,
-    Description      varchar(max)
+    Description      varchar(max
 )
-go
+    ) go
 
 create table Quadrats
 (
-    QuadratID    int not null
+    QuadratID   int not null
         constraint Quadrats_PK
             primary key,
-    PlotID       int
+    PlotID      int
         constraint Quadrats_Plots_FK
             references Plots,
-    PersonnelID  int
+    PersonnelID int
         constraint Quadrats_Personnel_fk
             references Personnel,
-    QuadratName  varchar(max),
+    QuadratName varchar(max
+) ,
     QuadratX     float,
     QuadratY     float,
     QuadratZ     float,
@@ -79,19 +80,18 @@ create table Quadrats
     DimensionY   int,
     Area         float,
     QuadratShape varchar(max)
-)
-go
+) go
 
 create table Reference
 (
-    ReferenceID       int not null
+    ReferenceID      int not null
         constraint Reference_pk
             primary key,
-    PublicationTitle  varchar(64),
-    FullReference     varchar(max),
+    PublicationTitle varchar(64),
+    FullReference    varchar(max
+) ,
     DateOfPublication date
-)
-go
+) go
 
 create table Family
 (
@@ -103,7 +103,7 @@ create table Family
         constraint Family_Reference_ReferenceID_fk
             references Reference
 )
-go
+    go
 
 create table Genus
 (
@@ -119,7 +119,7 @@ create table Genus
             references Reference,
     Authority   varchar(32)
 )
-go
+    go
 
 create table Species
 (
@@ -136,28 +136,28 @@ create table Species
     IDLevel           varchar(8),
     Authority         varchar(128),
     FieldFamily       varchar(32),
-    Description       varchar(max),
+    Description       varchar(max
+) ,
     ReferenceID       int
         constraint Species_Reference_ReferenceID_fk
             references Reference
-)
-go
+) go
 
 create table CurrentObsolete
 (
-    SpeciesID         int          not null
+    SpeciesID         int  not null
         constraint FK_CurrentObsolete_Species
             references Species,
-    ObsoleteSpeciesID int          not null
+    ObsoleteSpeciesID int  not null
         constraint FK_CurrentObsolete_Species_Obsolete
             references Species,
-    ChangeDate        date         not null,
+    ChangeDate        date not null,
     ChangeCodeID      int,
-    ChangeNote        varchar(max) not null,
+    ChangeNote        varchar(max
+) not null,
     constraint CurrentObsolete_pk
         primary key (SpeciesID, ObsoleteSpeciesID, ChangeDate)
-)
-go
+) go
 
 create table SubSpecies
 (
@@ -174,7 +174,7 @@ create table SubSpecies
     Authority          varchar(128),
     InfraSpecificLevel char(32)
 )
-go
+    go
 
 create table SpeciesInventory
 (
@@ -194,7 +194,7 @@ create table SpeciesInventory
         constraint FK_SpeciesInventory_SubSpecies
             references SubSpecies
 )
-go
+    go
 
 create table Trees
 (
@@ -206,7 +206,7 @@ create table Trees
         constraint FK_Trees_Species
             references Species
 )
-go
+    go
 
 create table Stems
 (
@@ -226,9 +226,9 @@ create table Stems
     StemY           float,
     StemZ           float,
     Moved           bit,
-    StemDescription varchar(max)
+    StemDescription varchar(max
 )
-go
+    ) go
 
 create table CoreMeasurements
 (
@@ -257,12 +257,12 @@ create table CoreMeasurements
         constraint CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
             references MeasurementTypes,
     MeasurementDate   date,
-    Measurement       varchar(max),
+    Measurement       varchar(max
+) ,
     IsRemeasurement   bit,
     IsCurrent         bit,
     UserDefinedFields varchar(max)
-)
-go
+) go
 
 create table CMAttributes
 (
@@ -276,16 +276,16 @@ create table CMAttributes
         constraint CMAttributes_Attributes_Code_fk
             references Attributes
 )
-go
+    go
 
 create table ValidationErrors
 (
     ValidationErrorID          int not null
         constraint ValidationErrors_pk
             primary key,
-    ValidationErrorDescription varchar(max)
+    ValidationErrorDescription varchar(max
 )
-go
+    ) go
 
 create table CMVErrors
 (
@@ -299,6 +299,6 @@ create table CMVErrors
         constraint CMVErrors_ValidationErrors_ValidationErrorID_fk
             references ValidationErrors
 )
-go
+    go
 
 

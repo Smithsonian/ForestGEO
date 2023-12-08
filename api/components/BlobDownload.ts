@@ -1,5 +1,5 @@
-import { ParsedFile } from "@anzp/azure-function-multipart/dist/types/parsed-file.type";
-import { BlobServiceClient } from "@azure/storage-blob";
+import {BlobServiceClient} from "@azure/storage-blob";
+
 require("dotenv").config();
 const blobUrl: string = process.env.REACT_APP_BLOB_STR || undefined;
 if (!blobUrl) {
@@ -10,7 +10,7 @@ export interface FileWithMetadata {
   fileName: {
     metaData: string
   }
-
+  
 }
 
 const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
@@ -23,8 +23,8 @@ const listContainers = async () => {
     // figure out how to use metadata, for now using names to compare
     const containerName = container.name;
     const containerNameShort = containerName.replace(/[^a-z0-9]/gi, "");
-
-    containers.push({ name: containerName, nameShort: containerNameShort });
+    
+    containers.push({name: containerName, nameShort: containerNameShort});
   }
 };
 
@@ -38,16 +38,16 @@ const showFiles = async (plot: string) => {
     );
     if (found) {
       const containerName = found.name;
-
+      
       const containerClient =
         blobServiceClient.getContainerClient(containerName);
-
+      
       for await (const blob of containerClient.listBlobsFlat({
         includeMetadata: true,
       })) {
         blobData[blob.name] = blob.metadata;
       }
-      console.log('Backend blobData',blobData);
+      console.log('Backend blobData', blobData);
       return blobData;
     } else {
       console.log("Plot ", plot, "does not exist");

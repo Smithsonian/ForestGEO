@@ -2,6 +2,7 @@ import {NextResponse} from "next/server";
 import sql from "mssql";
 import {sqlConfig} from "@/config/macros";
 import {PlotRDS} from "@/config/sqlmacros";
+
 async function getSqlConnection(tries: number) {
   return await sql.connect(sqlConfig).catch((err) => {
     console.error(err);

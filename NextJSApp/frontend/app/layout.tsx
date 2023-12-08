@@ -3,7 +3,7 @@ import {Providers} from "./providers";
 import React from "react";
 import {ContextsProvider} from "@/app/contexts/plotcontext";
 import {Box} from "@mui/joy";
-import { FixedDataProvider } from "./contexts/fixeddatacontext";
+import {FixedDataProvider} from "./contexts/fixeddatacontext";
 
 export default function RootLayout({children,}: { children: React.ReactNode; }) {
   return (

@@ -2,6 +2,7 @@ import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {ErrorMessages, sqlConfig} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
+
 async function getSqlConnection(tries: number) {
   return await sql.connect(sqlConfig).catch((err) => {
     console.error(err);
@@ -78,7 +79,7 @@ export async function DELETE(request: NextRequest) {
   let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Census WHERE [CensusID] = ${deleteID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
   await conn.close();
-  return NextResponse.json({ message: "Update successful", }, {status: 200});
+  return NextResponse.json({message: "Update successful",}, {status: 200});
 }
 
 export async function PATCH(request: NextRequest) {
@@ -107,13 +108,13 @@ export async function PATCH(request: NextRequest) {
     [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = ${row.description} WHERE [CensusID] = '${oldCensus}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
-    return NextResponse.json({ message: "Update successful", }, {status: 200});
+    return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // other column information is being updated, no PK check required
     let results = await runQuery(conn, `UPDATE forestgeo.Census
     SET [PlotID] = ${row.plotID}, [PlotCensusNumber] = ${row.plotCensusNumber},
     [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = ${row.description} WHERE [CensusID] = '${row.censusID}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
-    return NextResponse.json({ message: "Update successful", }, {status: 200});
+    return NextResponse.json({message: "Update successful",}, {status: 200});
   }
 }
