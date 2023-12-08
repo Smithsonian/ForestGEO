@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 "use client";
 import React, {useCallback, useState} from 'react';
 import {useSession} from "next-auth/react";
