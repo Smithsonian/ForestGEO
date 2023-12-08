@@ -104,7 +104,7 @@ export function DisplayErrorTable({fileName, fileData, errorMessage}: DisplayErr
 /**
  * Shows a data table with the possibility of showing errors.
  */
-export function ValidationErrorTable({uploadedData, errorMessage, headers,}: ValidationTableProps) {
+export function ValidationTable({uploadedData, errorMessage, headers,}: ValidationTableProps) {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
   const initState: { fileName: string; data: DataStructure[] }[] = [];
   const [data, setData] = useState(initState);
