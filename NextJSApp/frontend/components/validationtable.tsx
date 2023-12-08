@@ -38,9 +38,9 @@ export function DisplayErrorTable({fileName, fileData, errorMessage}: DisplayErr
             <>
               <TableHead>
                 <TableRow>
-                  {/*{tableHeaders.map((row, index) => {*/}
-                  {/*  return <TableCell key={index}>{row.label}</TableCell>;*/}
-                  {/*})}*/}
+                  {tableHeaders.map((row, index) => {
+                    return <TableCell key={index}>{row.label}</TableCell>;
+                  })}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -48,46 +48,46 @@ export function DisplayErrorTable({fileName, fileData, errorMessage}: DisplayErr
                   return (
                     <>
                       <TableRow>
-                        {/*{tableHeaders.map((header, i) => {*/}
-                        {/*  if (errorMessage[fileName][rowIdx]) {*/}
-                        {/*    let errInfo = errorMessage[fileName][rowIdx].split('::');*/}
-                        {/*    console.log(errInfo);*/}
-                        {/*    if (errInfo[1] == header.label && errInfo[0] == 'MValue') {*/}
-                        {/*      return (*/}
-                        {/*        <>*/}
-                        {/*          <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>*/}
-                        {/*            Missing Value!*/}
-                        {/*          </TableCell>*/}
-                        {/*        </>*/}
-                        {/*      );*/}
-                        {/*    } else if (errInfo[1] == header.label && errInfo[0] == 'WFormat') {*/}
-                        {/*      return (*/}
-                        {/*        <>*/}
-                        {/*          <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>*/}
-                        {/*            {data[header.label]} <br/>*/}
-                        {/*            Wrong Format!*/}
-                        {/*          </TableCell>*/}
-                        {/*        </>*/}
-                        {/*      );*/}
-                        {/*    } else {*/}
-                        {/*      return (*/}
-                        {/*        <>*/}
-                        {/*          <TableCell key={i} sx={{color: 'red'}}>*/}
-                        {/*            {data[header.label]}*/}
-                        {/*          </TableCell>*/}
-                        {/*        </>*/}
-                        {/*      );*/}
-                        {/*    }*/}
-                        {/*  } else {*/}
-                        {/*    return (*/}
-                        {/*      <>*/}
-                        {/*        <TableCell key={i}>*/}
-                        {/*          {data[header.label]}*/}
-                        {/*        </TableCell>*/}
-                        {/*      </>*/}
-                        {/*    );*/}
-                        {/*  }*/}
-                        {/*})}*/}
+                        {tableHeaders.map((header, i) => {
+                          if (errorMessage[fileName][rowIdx]) {
+                            let errInfo = errorMessage[fileName][rowIdx].split('::');
+                            console.log(errInfo);
+                            if (errInfo[1] == header.label && errInfo[0] == 'MValue') {
+                              return (
+                                <>
+                                  <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
+                                    Missing Value!
+                                  </TableCell>
+                                </>
+                              );
+                            } else if (errInfo[1] == header.label && errInfo[0] == 'WFormat') {
+                              return (
+                                <>
+                                  <TableCell key={i} sx={{color: 'red', fontWeight: 'bold'}}>
+                                    {data[header.label]} <br/>
+                                    Wrong Format!
+                                  </TableCell>
+                                </>
+                              );
+                            } else {
+                              return (
+                                <>
+                                  <TableCell key={i} sx={{color: 'red'}}>
+                                    {data[header.label]}
+                                  </TableCell>
+                                </>
+                              );
+                            }
+                          } else {
+                            return (
+                              <>
+                                <TableCell key={i}>
+                                  {data[header.label]}
+                                </TableCell>
+                              </>
+                            );
+                          }
+                        })}
                       </TableRow>
                     </>
                   );
@@ -222,9 +222,9 @@ export function DisplayParsedData(fileData: { fileName: string; data: DataStruct
         <Table>
           <TableHead>
             <TableRow>
-              {/*{tableHeaders.map((row, index) => {*/}
-              {/*  return <TableCell key={index}>{row.label}</TableCell>;*/}
-              {/*})}*/}
+              {tableHeaders.map((row, index) => {
+                return <TableCell key={index}>{row.label}</TableCell>;
+              })}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -232,11 +232,11 @@ export function DisplayParsedData(fileData: { fileName: string; data: DataStruct
               return (
                 <>
                   <TableRow>
-                    {/*{tableHeaders.map((header, i) => (*/}
-                    {/*  <TableCell key={i}>*/}
-                    {/*    {data[header.label]}*/}
-                    {/*  </TableCell>*/}
-                    {/*))}*/}
+                    {tableHeaders.map((header, i) => (
+                      <TableCell key={i}>
+                        {data[header.label]}
+                      </TableCell>
+                    ))}
                   </TableRow>
                 </>
               );
