@@ -2,7 +2,7 @@
 import React, {useCallback, useState} from 'react';
 import {useSession} from "next-auth/react";
 import {DropzoneProps, DropzonePureProps, FileErrors, FileListProps, UploadValidationProps} from "@/config/macros";
-import {ValidationErrorTable} from "@/components/fileupload/validationtable";
+import {ValidationTable} from "@/components/fileupload/validationtable";
 import {usePlotContext} from "@/app/contexts/plotcontext";
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
@@ -187,7 +187,7 @@ function UploadAndValidateFiles({
       return (
         <>
           <div className={"flex flex-col gap-5 w-3/5 h-3/5 justify-center"}>
-            <ValidationErrorTable
+            <ValidationTable
               errorMessage={errorsData}
               uploadedData={filesWithErrorsList}
               headers={[
