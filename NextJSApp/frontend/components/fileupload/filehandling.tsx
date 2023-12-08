@@ -2,7 +2,7 @@
 import React, {useCallback, useState} from 'react';
 import {useSession} from "next-auth/react";
 import {DropzoneProps, DropzonePureProps, FileErrors, FileListProps, UploadValidationProps} from "@/config/macros";
-import {ValidationErrorTable} from "@/components/validationtable";
+import {ValidationErrorTable} from "@/components/fileupload/merged_validationtable";
 import {usePlotContext} from "@/app/contexts/plotcontext";
 import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
 import {parse, ParseConfig} from 'papaparse';
