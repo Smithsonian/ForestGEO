@@ -2,9 +2,8 @@
 import React, {useCallback, useEffect, useState} from "react";
 import {FileErrors, ReviewStates} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DataStructure} from "@/components/fileupload/validationtable";
+import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse} from "papaparse";
-import {DropzoneLogic, FileDisplay} from "@/components/filehandling";
 import {usePlotContext} from "@/app/contexts/plotcontext";
 import {useSession} from "next-auth/react";
 import {
@@ -25,6 +24,8 @@ import LoadingButton from '@mui/lab/LoadingButton';
 import {Dropdown, Menu, MenuButton, MenuItem, menuItemClasses} from "@mui/base";
 import {styled} from '@mui/system';
 import Divider from "@mui/joy/Divider";
+import {DropzoneLogic} from "@/components/fileupload/dropzone";
+import {FileDisplay} from "@/components/fileupload/filelist";
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
@@ -243,13 +244,13 @@ export function UploadAndReviewProcess() {
           <div className={"flex flex-row gap-5 w-auto h-auto justify-center"}>
             <div className={"grid grid-cols-2"}>
               <div className={"flex flex-col flex-1 gap-5 w-auto h-auto justify-left"}>
-                {/*<DisplayErrorTable*/}
-                {/*  fileName={filesWithErrorsList[dataViewActive - 1].name}*/}
-                {/*  fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
-                {/*    fileName: '',*/}
-                {/*    data: [],*/}
-                {/*  }}*/}
-                {/*  errorMessage={errorsData}/>*/}
+                <DisplayErrorTable
+                  fileName={filesWithErrorsList[dataViewActive - 1].name}
+                  fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
+                    fileName: '',
+                    data: [],
+                  }}
+                  errorMessage={errorsData}/>
                 <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
               </div>
               <div>
@@ -290,10 +291,10 @@ export function UploadAndReviewProcess() {
         <>
           <div className={"grid grid-cols-2"}>
             <div className={"mr-4"}>
-              {/*{DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
-              {/*  fileName: '',*/}
-              {/*  data: [],*/}
-              {/*})}*/}
+              {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
+                fileName: '',
+                data: [],
+              })}
               <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
             </div>
             <div className={"flex justify-center"}>
