@@ -56,17 +56,17 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
         const reader = new FileReader();
-        
+
         reader.onabort = () => alert('file reading was aborted');
         reader.onerror = () => alert('file reading has failed');
         reader.onload = () => {
           // Do whatever you want with the file contents
           const binaryStr = reader.result as string;
-          const config: ParseConfig = {delimiter: ','};
+          const config: ParseConfig = { delimiter: ',' };
           const results = parse(binaryStr, config);
-          
+
           //console.log(JSON.stringify(results.data));
-          
+
           if (results.errors.length) {
             alert(
               `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`
@@ -76,13 +76,12 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
         };
         reader.readAsText(file);
       });
-      
       onChange(acceptedFiles, rejectedFiles);
       rejectedFiles.forEach((fileRejection: FileRejection) => {
         alert(
           ' The file ' +
-          fileRejection.file.name +
-          ' was not uploaded. Only .csv files are supported.'
+            fileRejection.file.name +
+            ' was not uploaded. Only .csv files are supported.'
         );
       });
     },

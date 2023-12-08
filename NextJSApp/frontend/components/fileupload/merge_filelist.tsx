@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 "use client";
 import React, {useCallback, useState} from 'react';
 import {useSession} from "next-auth/react";
@@ -15,8 +16,6 @@ import {Skeleton} from "@mui/joy";
 import Chip from "@mui/joy/Chip";
 import Divider from "@mui/joy/Divider";
 import LoadingButton from "@mui/lab/LoadingButton";
-
-
 /**
  * A simple list of files with their sizes.
  */
