@@ -49,8 +49,8 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
       if (attributeLoadDispatch) {
         attributeLoadDispatch({attributeLoad: await response.json()});
       }
-      setLoading(18)
-      setLoadingMsg('Retrieving Census...')
+      setLoading(18);
+      setLoadingMsg('Retrieving Census...');
       response = await fetch(`/api/fixeddata/census`, {method: 'GET'});
       setLoading(27);
       if (censusLoadDispatch) {

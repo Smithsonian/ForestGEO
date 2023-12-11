@@ -1,6 +1,5 @@
 "use client";
 import {
-  DataGrid,
   GridActionsCellItem,
   GridColDef,
   GridEventListener,
@@ -10,8 +9,7 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbarContainer,
-  GridValidRowModel
+  GridToolbarContainer
 } from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
 import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
@@ -24,7 +22,6 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
-import {styled} from "@mui/system";
 import {useCensusLoadContext, usePlotsLoadContext} from "@/app/contexts/fixeddatacontext";
 import {CensusGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 
@@ -122,7 +119,7 @@ export default function Page() {
     if (plotsLoad) {
       setPlotRows(plotsLoad);
     }
-  }, [censusLoad, setRows]);
+  }, [censusLoad, setRows, plotsLoad, setPlotRows]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
@@ -134,11 +131,7 @@ export default function Page() {
     const response = await fetch(`/api/fixeddata/census`, {
       method: 'GET'
     });
-    const plotsResponse = await fetch(`/api/fixeddata/plots`, {
-      method: 'GET'
-    });
     setRows(await response.json());
-    setPlotRows(await plotsResponse.json());
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -216,24 +209,16 @@ export default function Page() {
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
   };
-  const plotIDs: number[] = plotRows.map((plotRow: GridValidRowModel) => plotRow.plotID);
+  
+  const plotIDs = plotRows.map((plotRow) => plotRow.plotID);
   const columns: GridColDef[] = [
     ...CensusGridColumns,
-    {
-      field: 'plotID',
-      headerName: 'PlotID',
-      headerClassName: 'header',
-      minWidth: 200,
-      flex: 1,
-      editable: true,
-      type: 'singleSelect',
-      valueOptions: plotIDs
-    },
     {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      width: 100,
+      minWidth: 100,
+      flex: 1,
       cellClassName: 'actions',
       getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
@@ -290,8 +275,8 @@ export default function Page() {
         },
       }}
     >
-      <Box sx={{display: 'flex', flex: 1, flexDirection: 'row'}}>
-        <StyledDataGrid sx={{width: '100%'}}
+      <Box sx={{display: 'flex', flex: 1}}>
+        <StyledDataGrid sx={{display: 'flex', flex: 1}}
                         rows={rows}
                         columns={columns}
                         editMode="row"

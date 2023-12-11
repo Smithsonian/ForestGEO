@@ -98,13 +98,15 @@ export interface CensusRDS {
   description: string | null;
 }
 
+const plotIDs = []
+
 export const CensusGridColumns: GridColDef[] = [
   {
     field: 'censusID',
     headerName: 'CensusID',
     type: 'number',
     headerClassName: 'header',
-    minWidth: 200,
+    minWidth: 300,
     flex: 1,
     align: 'left',
     editable: true
@@ -114,7 +116,7 @@ export const CensusGridColumns: GridColDef[] = [
     headerName: 'PlotID',
     type: 'number',
     headerClassName: 'header',
-    minWidth: 200,
+    minWidth: 300,
     flex: 1,
     align: 'left',
     editable: true
@@ -124,7 +126,7 @@ export const CensusGridColumns: GridColDef[] = [
     headerName: 'PlotCensusNumber',
     type: 'number',
     headerClassName: 'header',
-    minWidth: 150,
+    minWidth: 300,
     flex: 1,
     align: 'left',
     editable: true
@@ -134,7 +136,7 @@ export const CensusGridColumns: GridColDef[] = [
     headerName: 'StartDate',
     type: 'date',
     headerClassName: 'header',
-    minWidth: 200,
+    minWidth: 300,
     flex: 1,
     align: 'left',
     editable: true,
@@ -148,7 +150,7 @@ export const CensusGridColumns: GridColDef[] = [
     headerName: 'EndDate',
     type: 'date',
     headerClassName: 'header',
-    minWidth: 200,
+    minWidth: 300,
     flex: 1,
     align: 'left',
     editable: true,
@@ -157,7 +159,7 @@ export const CensusGridColumns: GridColDef[] = [
       return new Date(params.value);
     }
   },
-  {field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 200, flex: 1, editable: true},
+  {field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 300, flex: 1, editable: true},
 ];
 
 export interface CMAttributeRDS {
@@ -334,7 +336,6 @@ export interface PlotRDS {
   plotShape: string | null;
   plotDescription: string | null;
 }
-
 
 export const PlotGridColumns: GridColDef[] = [
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
