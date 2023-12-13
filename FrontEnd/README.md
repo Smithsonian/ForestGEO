@@ -21,7 +21,9 @@ You will also see any lint errors in the console.
 ### `npm test`
 
 Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+See the section
+about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more
+information.
 
 ### `npm run build`
 
@@ -31,7 +33,8 @@ It correctly bundles React in production mode and optimizes the build for the be
 The build is minified and the filenames include the hashes.\
 Your app is ready to be deployed!
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for
+more information.
 
 ### `npm run format`
 
@@ -55,16 +58,16 @@ View a demo of components ("storybook") in the browser.
 
 ## Learn More
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+You can learn more in
+the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
 
 To learn React, check out the [React documentation](https://reactjs.org/).
 
 ### How to use Storybook? What is storybook?
 
-Storybook is a demo of our components. 
-It's useful for development and testing variations of our components.
-We can _create variations_ of each component by using **stories**,
-an example of a variation is a blue button or a red button.
+Storybook is a demo of our components. It's useful for development and testing variations of our
+components. We can _create variations_ of each component by using **stories**, an example of a
+variation is a blue button or a red button.
 
 To see the storybook running run this:
 
@@ -74,7 +77,8 @@ npm run storybook
 
 ... which opens the browser on port 6006 and allows you to see all components with stories.
 
-See [official tutorial](https://storybook.js.org/tutorials/intro-to-storybook/react/en/simple-component/) to create new components.
+See [official tutorial](https://storybook.js.org/tutorials/intro-to-storybook/react/en/simple-component/)
+to create new components.
 
 See src/components/DropZone/DropZone.stories.tsx and other .stories.tsx files as examples.
 

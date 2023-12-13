@@ -1,2 +1,2 @@
-export { default } from './Dropzone';
+export {default} from './Dropzone';
 export * from './Dropzone';
