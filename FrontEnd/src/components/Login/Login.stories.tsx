@@ -1,7 +1,7 @@
-import { MemoryRouter } from 'react-router-dom';
+import {MemoryRouter} from 'react-router-dom';
 
-import { ComponentMeta, Story } from '@storybook/react';
-import { LoginPure, LoginPureProps } from './Login';
+import {ComponentMeta, Story} from '@storybook/react';
+import {LoginPure, LoginPureProps} from './Login';
 
 export default {
   title: 'Login',

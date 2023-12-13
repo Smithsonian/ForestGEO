@@ -1,5 +1,6 @@
-import { ParsedFile } from '@anzp/azure-function-multipart/dist/types/parsed-file.type';
-import { BlobServiceClient } from '@azure/storage-blob';
+import {ParsedFile} from '@anzp/azure-function-multipart/dist/types/parsed-file.type';
+import {BlobServiceClient} from '@azure/storage-blob';
+
 require('dotenv').config();
 const blobUrl: string = process.env.REACT_APP_BLOB_STR || undefined;
 if (!blobUrl) {
@@ -16,16 +17,16 @@ export interface clientPrincipal {
 }
 
 const blobServiceClient = BlobServiceClient.fromConnectionString(blobUrl);
-const containers: {name: string; nameShort: string}[] = [];
+const containers: { name: string; nameShort: string }[] = [];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const listContainers = async () => {
   for await (const container of blobServiceClient.listContainers()) {
     // figure out how to use metadata, for now using names to compare
     const containerName = container.name;
     const containerNameShort = containerName.replace(/[^a-z0-9]/gi, '');
-
+    
     containers.push(
-      { name: containerName, nameShort: containerNameShort });
+      {name: containerName, nameShort: containerNameShort});
   }
 };
 
@@ -36,13 +37,13 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
     const found = containers.find((container) => container.nameShort === plotReplaced);
     if (found) {
       const containerForUpload = found.name;
-    
-    for (const file of acceptedFilesList) {
+      
+      for (const file of acceptedFilesList) {
         const containerClient =
           blobServiceClient.getContainerClient(containerForUpload);
         const blobName = file.filename;
         const blobClient = containerClient.getBlockBlobClient(blobName);
-
+        
         const uploadOptions = {
           metadata: {
             user: userInfo.userDetails,
@@ -55,15 +56,15 @@ const uploadFiles = async (acceptedFilesList: ParsedFile[], plot: string, userIn
           }
         }
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.length, uploadOptions);          
+        const uploadBlob = await blobClient.upload(file.bufferFile, file.bufferFile.length, uploadOptions);
+      }
+    } else {
+      console.log('Plot ', plot, 'does not exist');
+      alert('Plot ' + plot + ' does not exist');
     }
-  } else {
-    console.log('Plot ', plot, 'does not exist');
-    alert('Plot ' + plot + ' does not exist');
-  }
   } catch (e) {
     console.log(e);
   }
 };
 
-export { uploadFiles };
+export {uploadFiles};

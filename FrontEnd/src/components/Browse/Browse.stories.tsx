@@ -1,7 +1,7 @@
-import { MemoryRouter } from 'react-router-dom';
+import {MemoryRouter} from 'react-router-dom';
 
-import { ComponentMeta, Story } from '@storybook/react';
-import { BrowsePure, BrowsePureProps } from './Browse';
+import {ComponentMeta, Story} from '@storybook/react';
+import {BrowsePure, BrowsePureProps} from './Browse';
 
 export default {
   title: 'Browse',

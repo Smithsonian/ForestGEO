@@ -1,9 +1,9 @@
-import { Dispatch, SetStateAction } from 'react';
+import {Dispatch, SetStateAction} from 'react';
 import InputLabel from '@mui/material/InputLabel';
 import MenuItem from '@mui/material/MenuItem';
 import FormHelperText from '@mui/material/FormHelperText';
 import FormControl from '@mui/material/FormControl';
-import Select, { SelectChangeEvent } from '@mui/material/Select';
+import Select, {SelectChangeEvent} from '@mui/material/Select';
 
 export interface Plot {
   plotName: string;
@@ -17,49 +17,49 @@ export interface SelectPlotProps {
 
 export default function SelectPlot(props: SelectPlotProps) {
   const plots: Plot[] = [];
-
+  
   const plotsObjects: { [key: string]: number }[] = [
-    { Amacayacu: 16 },
-    { BCI: 40 },
-    { bukittimah: 22 },
-    { Cocoli: 39 },
-    { CRC: 1 },
-    { 'CTFS-Panama': 11 },
-    { Danum: 36 },
-    { 'Harvard Forest': 9 },
-    { Heishiding: 4 },
-    { HKK: 19 },
-    { ituri_all: 24 },
-    { khaochong: 38 },
-    { Korup: 10 },
-    { korup3census: 32 },
-    { Lambir: 35 },
-    { Lilly_Dickey: 41 },
-    { Luquillo: 25 },
-    { Mpala: 3 },
-    { osfdp: 37 },
-    { pasoh: 15 },
-    { Rabi: 17 },
-    { 'Scotty Creek': 8 },
-    { SERC: 7 },
-    { Sinharaja: 26 },
-    { Speulderbos: 29 },
-    { Stable_bukittimah: 27 },
-    { stable_pasoh: 28 },
-    { Traunstein: 34 },
-    { Tyson: 23 },
-    { UMBC: 18 },
-    { Utah: 30 },
-    { Vandermeer: 14 },
-    { wanang: 21 },
-    { Yosemite: 33 },
+    {Amacayacu: 16},
+    {BCI: 40},
+    {bukittimah: 22},
+    {Cocoli: 39},
+    {CRC: 1},
+    {'CTFS-Panama': 11},
+    {Danum: 36},
+    {'Harvard Forest': 9},
+    {Heishiding: 4},
+    {HKK: 19},
+    {ituri_all: 24},
+    {khaochong: 38},
+    {Korup: 10},
+    {korup3census: 32},
+    {Lambir: 35},
+    {Lilly_Dickey: 41},
+    {Luquillo: 25},
+    {Mpala: 3},
+    {osfdp: 37},
+    {pasoh: 15},
+    {Rabi: 17},
+    {'Scotty Creek': 8},
+    {SERC: 7},
+    {Sinharaja: 26},
+    {Speulderbos: 29},
+    {Stable_bukittimah: 27},
+    {stable_pasoh: 28},
+    {Traunstein: 34},
+    {Tyson: 23},
+    {UMBC: 18},
+    {Utah: 30},
+    {Vandermeer: 14},
+    {wanang: 21},
+    {Yosemite: 33},
   ];
-
+  
   plotsObjects.forEach((e) => {
     const obj = Object.entries(e);
-    plots.push({ plotName: obj[0][0], plotNumber: obj[0][1] });
+    plots.push({plotName: obj[0][0], plotNumber: obj[0][1]});
   });
-
+  
   const handleChange = (event: SelectChangeEvent) => {
     const chosenPlotNumber = parseInt(event.target.value);
     const setNumberPlot = plots.find((e) => e.plotNumber === chosenPlotNumber);
@@ -75,7 +75,7 @@ export default function SelectPlot(props: SelectPlotProps) {
     ? (value = '')
     : (value = props.plot.plotNumber.toString());
   return (
-    <FormControl sx={{ m: 1, minWidth: 180 }} required>
+    <FormControl sx={{m: 1, minWidth: 180}} required>
       <InputLabel id="simple">Plot</InputLabel>
       <Select
         labelId="simple"
@@ -87,7 +87,7 @@ export default function SelectPlot(props: SelectPlotProps) {
         <MenuItem value="">
           <em>None</em>
         </MenuItem>
-
+        
         {plots.map((plot: Plot, i) => {
           return (
             <MenuItem value={plot.plotNumber.toString()} key={i}>

@@ -1,2 +1,2 @@
-export { default } from './FileList';
+export {default} from './FileList';
 export * from './FileList';

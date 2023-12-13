@@ -1,7 +1,6 @@
-import { ComponentMeta, Story } from '@storybook/react';
-import { FileWithPath } from 'react-dropzone';
-import ValidationTable, { ValidationTableProps } from './ValidationTable';
-import fs from 'fs';
+import {ComponentMeta, Story} from '@storybook/react';
+import {FileWithPath} from 'react-dropzone';
+import ValidationTable, {ValidationTableProps} from './ValidationTable';
 
 export default {
   title: 'ValidationTable',
@@ -14,13 +13,13 @@ const Template: Story<ValidationTableProps> = (args) => (
 );
 
 const HEADERS = [
-  { label: 'Tag' },
-  { label: 'Subquadrat' },
-  { label: 'SpCode' },
-  { label: 'DBH' },
-  { label: 'Htmeas' },
-  { label: 'Codes' },
-  { label: 'Comments' },
+  {label: 'Tag'},
+  {label: 'Subquadrat'},
+  {label: 'SpCode'},
+  {label: 'DBH'},
+  {label: 'Htmeas'},
+  {label: 'Codes'},
+  {label: 'Comments'},
 ];
 
 // some example uploaded data
@@ -39,11 +38,11 @@ const uploadedData: FileWithPath[] = [
             'Tag5,Subquadrat5,SpCode5,DBH5,Htmeas5,Codes5,Comment5',
           ].join('\n'),
         ],
-        { type: 'text/plain' }
+        {type: 'text/plain'}
       ),
     ],
     'test1.csv',
-    { lastModified: new Date().getTime() }
+    {lastModified: new Date().getTime()}
   ),
   new File(
     [
@@ -59,11 +58,11 @@ const uploadedData: FileWithPath[] = [
             'Tag5,Subquadrat5,SpCode5,DBH5,Htmeas5,Codes5,Comment5',
           ].join('\n'),
         ],
-        { type: 'text/plain' }
+        {type: 'text/plain'}
       ),
     ],
     'test2.csv',
-    { lastModified: new Date().getTime() }
+    {lastModified: new Date().getTime()}
   ),
 ];
 

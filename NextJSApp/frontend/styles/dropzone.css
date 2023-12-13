@@ -1,0 +1,7 @@
+#outerBox {
+    justify-content: center;
+    width: 600px;
+    height: 400px;
+    background-color: #46424f;
+    border: 3px dashed;
+}

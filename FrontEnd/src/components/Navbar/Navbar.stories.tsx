@@ -1,6 +1,6 @@
-import { ComponentMeta, Story } from '@storybook/react';
-import { NavbarProps, NavbarPure } from './Navbar';
-import { MemoryRouter } from 'react-router-dom';
+import {ComponentMeta, Story} from '@storybook/react';
+import {NavbarProps, NavbarPure} from './Navbar';
+import {MemoryRouter} from 'react-router-dom';
 
 export interface clientPrincipal {
   userId: string;
@@ -25,7 +25,7 @@ const Template: Story<NavbarProps> = (args) => {
 };
 
 export const WithUser = Template.bind({});
-WithUser.args = { userDetails: 'lalala' };
+WithUser.args = {userDetails: 'lalala'};
 
 export const WithoutUser = Template.bind({});
 WithoutUser.args = {};

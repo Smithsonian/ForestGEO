@@ -1,12 +1,12 @@
-import { ComponentMeta, Story } from '@storybook/react';
-import Button, { ButtonProps } from './Button';
+import {ComponentMeta, Story} from '@storybook/react';
+import Button, {ButtonProps} from './Button';
 
 export default {
   title: 'Button',
   component: Button,
   argTypes: {
-    label: { control: 'text' },
-    onClick: { action: 'clicked' },
+    label: {control: 'text'},
+    onClick: {action: 'clicked'},
   },
 } as ComponentMeta<typeof Button>;
 

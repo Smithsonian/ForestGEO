@@ -1,16 +1,7 @@
-import {
-  TableContainer,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Typography,
-  Paper,
-} from '@mui/material';
-import { parse } from 'papaparse';
-import { useState } from 'react';
-import { FileWithPath } from 'react-dropzone';
+import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography,} from '@mui/material';
+import {parse} from 'papaparse';
+import {useState} from 'react';
+import {FileWithPath} from 'react-dropzone';
 import './ValidationTable.css';
 
 export interface ValidationTableProps {
@@ -31,14 +22,14 @@ export interface dataStructure {
  * Shows a data table with the possibility of showing errors.
  */
 export default function ValidationTable({
-  uploadedData,
-  errorMessage,
-  headers,
-}: ValidationTableProps): JSX.Element {
+                                          uploadedData,
+                                          errorMessage,
+                                          headers,
+                                        }: ValidationTableProps): JSX.Element {
   let tempData: { fileName: string; data: dataStructure[] }[] = [];
   const initState: { fileName: string; data: dataStructure[] }[] = [];
   const [data, setData] = useState(initState);
-
+  
   const display = () => {
     // eslint-disable-next-line array-callback-return
     uploadedData.forEach((file: FileWithPath) => {
@@ -48,7 +39,7 @@ export default function ValidationTable({
         complete: function (results: any) {
           try {
             // eslint-disable-next-line array-callback-return
-            tempData.push({ fileName: file.name, data: results.data });
+            tempData.push({fileName: file.name, data: results.data});
             setData(tempData);
           } catch (e) {
             console.log(e);
@@ -59,7 +50,7 @@ export default function ValidationTable({
   };
   display();
   let fileData: { fileName: string; data: dataStructure[] };
-
+  
   return (
     <>
       {Object.keys(errorMessage).map((fileName) => {
@@ -70,7 +61,7 @@ export default function ValidationTable({
         return (
           <TableContainer component={Paper}>
             <h3>file: {fileName}</h3>
-
+            
             <Table>
               {errorMessage[fileName]['headers'] ? (
                 <></>
@@ -94,7 +85,7 @@ export default function ValidationTable({
                               </TableCell>
                             ))}
                           </TableRow>
-
+                          
                           {errorMessage[fileName][rowIdx] && (
                             <TableRow className="errorMessage">
                               <TableCell colSpan={headers.length}>

@@ -1,2 +1,2 @@
-export { default } from './ValidationTable';
+export {default} from './ValidationTable';
 export * from './ValidationTable';

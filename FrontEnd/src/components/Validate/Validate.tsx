@@ -1,13 +1,14 @@
-import { useState } from 'react';
-import { Button, CircularProgress, Container, Typography } from '@mui/material';
-import { FileWithPath } from 'react-dropzone';
+import {useState} from 'react';
+import {Button, CircularProgress, Container, Typography} from '@mui/material';
+import {FileWithPath} from 'react-dropzone';
 
 import Dropzone from '../../components/Dropzone';
 import FileList from '../../components/FileList';
-import SelectPlot, { SelectPlotProps } from '../../components/SelectPlot';
+import SelectPlot, {SelectPlotProps} from '../../components/SelectPlot';
 import ValidationTable from '../../components/ValidationTable';
 
-export interface ValidateProps extends SelectPlotProps {}
+export interface ValidateProps extends SelectPlotProps {
+}
 
 interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
@@ -35,15 +36,15 @@ export interface ValidatePureProps extends SelectPlotProps {
  * For uploading and validating drag and dropped CSV files.
  */
 export function ValidatePure({
-  uploadDone,
-  isUploading,
-  errorsData,
-  acceptedFiles,
-  handleUpload,
-  handleAcceptedFiles,
-  plot,
-  setPlot,
-}: ValidatePureProps) {
+                               uploadDone,
+                               isUploading,
+                               errorsData,
+                               acceptedFiles,
+                               handleUpload,
+                               handleAcceptedFiles,
+                               plot,
+                               setPlot,
+                             }: ValidatePureProps) {
   if (uploadDone) {
     if (Object.keys(errorsData).length === 0) {
       return (
@@ -55,7 +56,7 @@ export function ValidatePure({
       );
     } else {
       const filesWithErrorsList: FileWithPath[] = [];
-
+      
       if (Object.keys(errorsData).length) {
         acceptedFiles.forEach((file: FileWithPath) => {
           if (Object.keys(errorsData).includes(file.name.toString())) {
@@ -63,7 +64,7 @@ export function ValidatePure({
           }
         });
       }
-
+      
       // Show errors with the data that were uploaded
       return (
         <>
@@ -72,29 +73,29 @@ export function ValidatePure({
             uploadedData={filesWithErrorsList}
             headers={[
               // @todo: these are hardcoded.
-              { label: 'Tag' },
-              { label: 'Subquadrat' },
-              { label: 'SpCode' },
-              { label: 'DBH' },
-              { label: 'Htmeas' },
-              { label: 'Codes' },
-              { label: 'Comments' },
+              {label: 'Tag'},
+              {label: 'Subquadrat'},
+              {label: 'SpCode'},
+              {label: 'DBH'},
+              {label: 'Htmeas'},
+              {label: 'Codes'},
+              {label: 'Comments'},
             ]}
           />
         </>
       );
     }
   }
-
+  
   return (
     <>
       <Container fixed>
-        <SelectPlot plot={plot} setPlot={setPlot} />
+        <SelectPlot plot={plot} setPlot={setPlot}/>
       </Container>
       <Container fixed>
-        {isUploading && <CircularProgress />}
-        <Dropzone onChange={handleAcceptedFiles} />
-        {acceptedFiles?.length && <FileList acceptedFiles={acceptedFiles} />}
+        {isUploading && <CircularProgress/>}
+        <Dropzone onChange={handleAcceptedFiles}/>
+        {acceptedFiles?.length && <FileList acceptedFiles={acceptedFiles}/>}
         {acceptedFiles?.length > 0 && plot.plotNumber > 0 && (
           <Button
             disabled={isUploading}
@@ -109,12 +110,12 @@ export function ValidatePure({
   );
 }
 
-export default function Validate({ plot, setPlot }: ValidateProps) {
+export default function Validate({plot, setPlot}: ValidateProps) {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   const [isUploading, setisUploading] = useState(false);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
   const [uploadDone, setUploadDone] = useState(false);
-
+  
   return (
     <ValidatePure
       uploadDone={uploadDone}
@@ -130,9 +131,9 @@ export default function Validate({ plot, setPlot }: ValidateProps) {
           fileToFormData.append(`file_${i}`, file);
           i++;
         }
-
+        
         setisUploading(true);
-
+        
         // @todo: wrap this in a try/catch, and set an error state.
         const response = await fetch('/api/upload?plot=' + plot.plotName, {
           method: 'Post',
@@ -140,7 +141,7 @@ export default function Validate({ plot, setPlot }: ValidateProps) {
         });
         const data = await response.json();
         setErrorsData(data.errors);
-
+        
         setisUploading(false);
         setUploadDone(true);
       }}

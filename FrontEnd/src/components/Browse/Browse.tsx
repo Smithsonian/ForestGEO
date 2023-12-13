@@ -1,21 +1,21 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
-  TableContainer,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Grid,
-  Button,
   Box,
+  Button,
+  Grid,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Typography,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CircularProgress from '@mui/material/CircularProgress';
-import SelectPlot, { SelectPlotProps } from '../SelectPlot';
+import SelectPlot, {SelectPlotProps} from '../SelectPlot';
 
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
@@ -31,7 +31,8 @@ interface PlotRows {
   };
 }
 
-export interface BrowseProps extends SelectPlotProps {}
+export interface BrowseProps extends SelectPlotProps {
+}
 
 export interface BrowsePureProps extends BrowseProps {
   error?: Error;
@@ -41,7 +42,7 @@ export interface BrowsePureProps extends BrowseProps {
   plotRows?: PlotRows;
 }
 
-export default function Browse({ plot, setPlot }: BrowseProps) {
+export default function Browse({plot, setPlot}: BrowseProps) {
   // @TODO - implement remove and download files
   // let handleRemove = (i: any) => {
   //   const newRows = [...rows];
@@ -49,11 +50,11 @@ export default function Browse({ plot, setPlot }: BrowseProps) {
   //   newRows.splice(index, 1);
   //   setRows(newRows);
   // };
-
+  
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [plotRows, setRows] = useState<PlotRows>();
-
+  
   const getListOfFiles = useCallback(async () => {
     if (plot.plotName) {
       let response = null;
@@ -61,7 +62,7 @@ export default function Browse({ plot, setPlot }: BrowseProps) {
         response = await fetch('/api/download?plot=' + plot.plotName, {
           method: 'Get',
         });
-
+        
         if (!response.ok) {
           console.error('response.statusText', response.statusText);
           setError(new Error('API response not ok'));
@@ -70,7 +71,7 @@ export default function Browse({ plot, setPlot }: BrowseProps) {
         console.error(e);
         setError(new Error('API response not ok'));
       }
-
+      
       if (response) {
         const data = await response.json();
         setRows(data);
@@ -81,17 +82,17 @@ export default function Browse({ plot, setPlot }: BrowseProps) {
       setError(new Error('No plot'));
     }
   }, [plot.plotName]);
-
+  
   useEffect(() => {
     getListOfFiles();
   }, [getListOfFiles]);
-
+  
   useEffect(() => {
     setPlot(plot);
     setIsLoaded(true);
     setError(undefined);
   }, [plot, setPlot, error, isLoaded]);
-
+  
   return (
     <BrowsePure
       plot={plot}
@@ -106,7 +107,7 @@ export default function Browse({ plot, setPlot }: BrowseProps) {
 /**
  * A container for layout.
  */
-function Container({ children }: { children?: React.ReactNode }) {
+function Container({children}: { children?: React.ReactNode }) {
   return (
     <Grid
       container
@@ -134,19 +135,19 @@ function Container({ children }: { children?: React.ReactNode }) {
  * Allows selecting from a list of plots, then shows the data for that plot.
  */
 export function BrowsePure({
-  plot,
-  setPlot,
-  error,
-  isLoaded,
-  plotRows,
-}: BrowsePureProps) {
+                             plot,
+                             setPlot,
+                             error,
+                             isLoaded,
+                             plotRows,
+                           }: BrowsePureProps) {
   if (!plot.plotName) {
     return (
       <Container>
         <Typography variant="h2" mt={2}>
           Please select plot
         </Typography>
-        <SelectPlot plot={plot} setPlot={setPlot} />
+        <SelectPlot plot={plot} setPlot={setPlot}/>
       </Container>
     );
   } else if (error) {
@@ -159,7 +160,7 @@ export function BrowsePure({
           Perhaps try reloading the page. If it still doesn't work, please again
           a bit later.
         </Typography>
-        <SelectPlot plot={plot} setPlot={setPlot} />
+        <SelectPlot plot={plot} setPlot={setPlot}/>
       </Container>
     );
   } else if (!isLoaded || !plotRows) {
@@ -177,7 +178,7 @@ export function BrowsePure({
         <Typography variant="h2" mt={2}>
           Files for "{plot.plotName}"
         </Typography>
-        <SelectPlot plot={plot} setPlot={setPlot} />
+        <SelectPlot plot={plot} setPlot={setPlot}/>
         <Grid
           container
           direction="row"
@@ -206,7 +207,7 @@ export function BrowsePure({
                   <TableCell>File Name</TableCell>
                   <TableCell>Date Entered</TableCell>
                   <TableCell>Uploaded by</TableCell>
-                  <TableCell sx={{ textAlign: 'center' }}>Actions</TableCell>
+                  <TableCell sx={{textAlign: 'center'}}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>

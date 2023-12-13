@@ -1,49 +1,50 @@
-import React, { useEffect, useState } from 'react';
+import React, {useEffect, useState} from 'react';
 import Validate from './components/Validate';
 import Browse from './components/Browse';
 import Report from './pages/Report';
 import Login from './components/Login';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import {BrowserRouter as Router, Route, Routes} from 'react-router-dom';
 import Navbar from './components/Navbar';
-import { Plot } from './components/SelectPlot';
+import {Plot} from './components/SelectPlot';
 
 function App() {
-  const initialState: Plot = { plotName: '', plotNumber: 0 };
+  const initialState: Plot = {plotName: '', plotNumber: 0};
   const [localPlot, setLocalPlot] = useState(initialState);
-
+  
   const [userInfo, setUserInfo] = useState<any>();
-
+  
   useEffect(() => {
     (async () => {
       setUserInfo(await getUserInfo());
     })();
   }, []);
-
+  
   async function getUserInfo() {
     try {
       const response = await fetch('/.auth/me');
       const payload = await response.json();
-      const { clientPrincipal } = payload;
+      const {clientPrincipal} = payload;
       return clientPrincipal;
     } catch (error) {
       console.error('No profile could be found');
       return undefined;
     }
   }
+  
   return (
     <Router>
-      {userInfo ? <Navbar /> : <p></p>}
+      {userInfo ? <Navbar/> : <p></p>}
       <Routes>
-        <Route path="/" element={<Login />} />
+        <Route path="/" element={<Login/>}/>
         <Route
           path="/validate"
-          element={<Validate plot={localPlot} setPlot={setLocalPlot} />}
+          element={<Validate plot={localPlot} setPlot={setLocalPlot}/>}
         />
         <Route
           path="/browse"
-          element={<Browse plot={localPlot} setPlot={setLocalPlot} />}
+          element={<Browse plot={localPlot} setPlot={setLocalPlot}/>}
         />
-        <Route path="/report" element={<Report />} />
+        <Route path="/report" element={<Report/>}/>
       </Routes>
     </Router>
   );

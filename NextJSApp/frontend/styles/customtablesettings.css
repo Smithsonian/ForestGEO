@@ -1,0 +1,9 @@
+.header {
+    font-weight: bold;
+    font-size: 14pt;
+}
+
+.error {
+    font-weight: bold;
+    color: red;
+}

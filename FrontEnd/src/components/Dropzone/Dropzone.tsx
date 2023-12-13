@@ -1,11 +1,10 @@
 /* eslint-disable prettier/prettier */
-import React, { useCallback } from 'react';
-import { useDropzone, FileWithPath, FileRejection } from 'react-dropzone';
-import { parse, ParseConfig } from 'papaparse';
+import React, {useCallback} from 'react';
+import {FileRejection, FileWithPath, useDropzone} from 'react-dropzone';
+import {parse, ParseConfig} from 'papaparse';
 import Box from '@mui/material/Box';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
-import { Typography } from '@mui/material';
-import { Stack } from '@mui/material';
+import {Stack, Typography} from '@mui/material';
 import './Dropzone.css';
 
 export interface DropzonePureProps {
@@ -22,10 +21,10 @@ export interface DropzonePureProps {
  * It should be free of logic, and concentrate on the presentation.
  */
 export function DropzonePure({
-  getRootProps,
-  getInputProps,
-  isDragActive,
-}: DropzonePureProps) {
+                               getRootProps,
+                               getInputProps,
+                               isDragActive,
+                             }: DropzonePureProps) {
   return (
     <Box
       id={'outerBox'}
@@ -40,7 +39,7 @@ export function DropzonePure({
     >
       <Typography align="center">
         {' '}
-        <FileUploadIcon color="primary" sx={{ fontSize: 80 }} />{' '}
+        <FileUploadIcon color="primary" sx={{fontSize: 80}}/>{' '}
       </Typography>
       <input {...getInputProps()} />
       {isDragActive ? (
@@ -71,22 +70,22 @@ export interface DropzoneProps {
 /**
  * A drop zone for CSV file uploads.
  */
-export default function Dropzone({ onChange }: DropzoneProps) {
+export default function Dropzone({onChange}: DropzoneProps) {
   const onDrop = useCallback(
     (acceptedFiles: FileWithPath[], rejectedFiles: FileRejection[]) => {
       acceptedFiles.forEach((file: FileWithPath) => {
         const reader = new FileReader();
-
+        
         reader.onabort = () => alert('file reading was aborted');
         reader.onerror = () => alert('file reading has failed');
         reader.onload = () => {
           // Do whatever you want with the file contents
           const binaryStr = reader.result as string;
-          const config: ParseConfig = { delimiter: ',' };
+          const config: ParseConfig = {delimiter: ','};
           const results = parse(binaryStr, config);
-
+          
           //console.log(JSON.stringify(results.data));
-
+          
           if (results.errors.length) {
             alert(
               `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`
@@ -96,23 +95,23 @@ export default function Dropzone({ onChange }: DropzoneProps) {
         };
         reader.readAsText(file);
       });
-
+      
       onChange(acceptedFiles, rejectedFiles);
       rejectedFiles.forEach((fileRejection: FileRejection) => {
         alert(
           ' The file ' +
-            fileRejection.file.name +
-            ' was not uploaded. Only .csv files are supported.'
+          fileRejection.file.name +
+          ' was not uploaded. Only .csv files are supported.'
         );
       });
     },
     [onChange]
   );
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const {getRootProps, getInputProps, isDragActive} = useDropzone({
     onDrop,
     accept: 'text/csv, application/vnd.ms-excel',
   });
-
+  
   return (
     <DropzonePure
       isDragActive={isDragActive}

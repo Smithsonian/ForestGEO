@@ -1,0 +1,48 @@
+{
+  "name": "next-app-template",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "bs": "next build; next start",
+    "clean": "rm -rf .next node_modules package-lock.json; npm install",
+    "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest"
+  },
+  "dependencies": {
+    "@azure/storage-blob": "^12.17.0",
+    "@emotion/cache": "latest",
+    "@emotion/react": "^11.11.1",
+    "@emotion/styled": "^11.11.0",
+    "@mui/base": "^5.0.0-beta.24",
+    "@mui/icons-material": "^5.14.18",
+    "@mui/joy": "latest",
+    "@mui/lab": "^5.0.0-alpha.153",
+    "@mui/material": "^5.14.18",
+    "@mui/system": "^5.14.18",
+    "@mui/x-data-grid": "^6.18.2",
+    "@mui/x-data-grid-generator": "^6.18.2",
+    "@react-spring/web": "^9.7.3",
+    "autoprefixer": "^10.4.16",
+    "dotenv": "^16.3.1",
+    "mssql": "^10.0.1",
+    "next": "latest",
+    "next-auth": "^4.24.5",
+    "papaparse": "^5.4.1",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-dropzone": "^14.2.3",
+    "sharp": "^0.32.6",
+    "tailwind-variants": "^0.1.18",
+    "tailwindcss": "3.3.5"
+  },
+  "devDependencies": {
+    "@types/mssql": "^9.1.4",
+    "@types/papaparse": "^5.3.13",
+    "@types/react": "latest",
+    "eslint": "8.54.0",
+    "eslint-config-next": "14.0.3"
+  }
+}

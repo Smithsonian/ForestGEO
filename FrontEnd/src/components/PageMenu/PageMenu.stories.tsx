@@ -1,9 +1,9 @@
-import { MemoryRouter } from 'react-router-dom';
+import {MemoryRouter} from 'react-router-dom';
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
 
-import { ComponentMeta, Story } from '@storybook/react';
-import PageMenu, { PageMenuProps } from './PageMenu';
+import {ComponentMeta, Story} from '@storybook/react';
+import PageMenu, {PageMenuProps} from './PageMenu';
 
 export default {
   title: 'PageMenu',

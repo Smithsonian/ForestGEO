@@ -1,11 +1,12 @@
 import React from 'react';
-import { Grid, Typography } from '@mui/material';
+import {Grid, Typography} from '@mui/material';
 import image from './login.png';
 import Link from '@mui/material/Link';
-import GetUser, { clientPrincipal } from '../GetUser';
-import { useNavigate } from 'react-router-dom';
+import GetUser, {clientPrincipal} from '../GetUser';
+import {useNavigate} from 'react-router-dom';
 
-export interface LoginPureProps {}
+export interface LoginPureProps {
+}
 
 /**
  * LoginPure welcomes people, and links to /login
@@ -38,7 +39,7 @@ export function LoginPure() {
             justifyContent: 'center',
           }}
         >
-          <Typography variant="h4" component="h2" sx={{ pt: '20%' }}>
+          <Typography variant="h4" component="h2" sx={{pt: '20%'}}>
             Login
           </Typography>
         </Link>
@@ -47,7 +48,8 @@ export function LoginPure() {
   );
 }
 
-export interface LoginProps {}
+export interface LoginProps {
+}
 
 /**
  * For logging into the app.
@@ -56,13 +58,13 @@ export interface LoginProps {}
  */
 export default function Login() {
   let navigate = useNavigate();
-
+  
   const userInfo: clientPrincipal | undefined = GetUser();
-
+  
   React.useEffect(() => {
     if (userInfo) {
       navigate('/validate');
     }
   });
-  return <LoginPure />;
+  return <LoginPure/>;
 }
