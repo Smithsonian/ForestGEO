@@ -109,7 +109,7 @@ function UploadAndValidateFiles({
   );
 }
 
-export function Filehandling() {
+export function FileHandling() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
