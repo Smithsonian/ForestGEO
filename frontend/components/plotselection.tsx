@@ -1,6 +1,6 @@
 "use client";
 import React, {useEffect, useState} from "react";
-import {plots} from "@/config/macros";
+import {Plot, plots} from "@/config/macros";
 import {usePlotContext, usePlotDispatch} from "@/app/contexts/plotcontext";
 import {useSession} from "next-auth/react";
 import Select from "@mui/joy/Select";
@@ -10,6 +10,7 @@ export const PlotSelection = () => {
   const {status} = useSession();
   const dispatch = usePlotDispatch();
   const currentPlot = usePlotContext();
+  // const [plots, setPlots] = useState<Plot>();
   const [value, setValue] = useState<string>(currentPlot ? currentPlot!.key : "");
   useEffect(() => {
     if (dispatch && value != currentPlot!.key) {

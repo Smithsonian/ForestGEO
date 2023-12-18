@@ -5,6 +5,7 @@ export default function Page() {
   return (
     <>
       Welcome!
+      Scaffolding for Dashboard View:
     </>
   );
 }
