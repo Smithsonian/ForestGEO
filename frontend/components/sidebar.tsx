@@ -12,15 +12,8 @@ import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
-import {allCensus, allQuadrats, plots, siteConfigNav, SiteConfigProps} from "@/config/macros";
-import {
-  useCensusContext,
-  useCensusDispatch,
-  usePlotContext,
-  usePlotDispatch,
-  useQuadratContext,
-  useQuadratDispatch
-} from "@/app/contexts/plotcontext";
+import {plots, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {usePlotContext, usePlotDispatch} from "@/app/contexts/plotcontext";
 import {usePathname, useRouter} from "next/navigation";
 import {
   Breadcrumbs,
@@ -76,17 +69,11 @@ function SimpleToggler({
 export default function Sidebar() {
   const currentPlot = usePlotContext();
   const plotDispatch = usePlotDispatch();
-  const currentCensus = useCensusContext();
-  const censusDispatch = useCensusDispatch();
-  const currentQuadrat = useQuadratContext();
-  const quadratDispatch = useQuadratDispatch();
   
   const [plot, setPlot] = useState<string | null>(null);
-  const [census, setCensus] = useState<number | null>(null);
-  const [quadrat, setQuadrat] = useState<number | null>(null);
   const [openSelectionModal, setOpenSelectionModal] = useState(false);
   const [activeStep, setActiveStep] = React.useState(0);
-  const steps = ["Plot", "Census", "Quadrat"];
+  const steps = ["Plot"];
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
@@ -299,27 +286,11 @@ export default function Sidebar() {
                   <Typography color={!currentPlot ? "danger" : undefined}
                               level="body-sm">Plot: {currentPlot ? currentPlot!.key : "None"}</Typography>
                 </Link>
-                <Link component={"button"} onClick={() => {
-                  setActiveStep(1);
-                  setOpenSelectionModal(true);
-                }}>
-                  <Typography color={!currentCensus ? "danger" : undefined}
-                              level="body-sm">Census: {currentCensus ? currentCensus : "None"}</Typography>
-                </Link>
-                <Link component={"button"} onClick={() => {
-                  setActiveStep(2);
-                  setOpenSelectionModal(true);
-                }}>
-                  <Typography color={!currentQuadrat ? "danger" : undefined}
-                              level="body-sm">Quadrat: {currentQuadrat ? currentQuadrat : "None"}</Typography>
-                </Link>
               </Breadcrumbs>
               <Divider orientation={"horizontal"}/>
               <Modal open={openSelectionModal} onClose={() => {
                 setActiveStep(0);
                 setPlot(null);
-                setCensus(null);
-                setQuadrat(null);
                 setOpenSelectionModal(false);
               }}>
                 <ModalDialog variant="outlined" role="alertdialog">
@@ -373,84 +344,27 @@ export default function Sidebar() {
                           </Select>
                         </Stack>
                       </Slide>
-                      <Slide appear in={activeStep == 1} direction={"right"} container={containerRef.current}>
-                        {/*<Stack direction={"column"} spacing={2} marginRight={15} marginTop={5}>*/}
-                        <Stack direction={"column"} spacing={2}>
-                          <Typography level={"title-sm"}>Select Census:</Typography>
-                          <Select
-                            placeholder="Select a Census"
-                            name="None"
-                            required
-                            autoFocus
-                            size={"sm"}
-                            onChange={(_event: React.SyntheticEvent | null, newValue: number | null,) => setCensus(newValue)}
-                          >
-                            <Option value={null}>None</Option>
-                            {allCensus.map((item) => (
-                              <Option value={item}>{item}</Option>
-                            ))}
-                          </Select>
-                        </Stack>
-                      </Slide>
-                      <Slide appear in={activeStep == 2} direction={"right"} container={containerRef.current}>
-                        {/*<Stack direction={"column"} spacing={2} marginLeft={5} marginTop={5}>*/}
-                        <Stack direction={"column"} spacing={2}>
-                          <Typography level={"title-sm"}>Select Quadrat:</Typography>
-                          <Select
-                            placeholder="Select a Quadrat"
-                            name="None"
-                            required
-                            autoFocus
-                            size={"sm"}
-                            onChange={(_event: React.SyntheticEvent | null, newValue: number | null,) => setQuadrat(newValue)}
-                          >
-                            <Option value={null}>None</Option>
-                            {allQuadrats.map((item) => (
-                              <Option value={item}>{item}</Option>
-                            ))}
-                          </Select>
-                        </Stack>
-                      </Slide>
                     </Box>
                   </DialogContent>
                   <DialogActions>
                     <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
-                      {activeStep > 0 ?
-                        <Button size={"sm"} variant={"soft"} onClick={() => setActiveStep(activeStep - 1)}>
-                          Previous
-                        </Button> : <Button size={"sm"} variant={"soft"} disabled>
-                          Previous
-                        </Button>}
                       <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                         setActiveStep(0);
                         setPlot(null);
-                        setCensus(null);
-                        setQuadrat(null);
                         setOpenSelectionModal(false);
                       }}>
                         Cancel
                       </Button>
-                      {activeStep < 2 ? <Button size={"sm"} color={"primary"} variant={"soft"}
-                                                onClick={() => setActiveStep(activeStep + 1)}>
-                        Submit {steps[activeStep]}
-                      </Button> : <Button size={"sm"} variant={"soft"} color="success" onClick={() => {
+                      <Button size={"sm"} variant={"soft"} color="success" onClick={() => {
                         if (plotDispatch) {
                           plotDispatch({plotKey: plot});
                         }
-                        if (censusDispatch) {
-                          censusDispatch({census: census});
-                        }
-                        if (quadratDispatch) {
-                          quadratDispatch({quadrat: quadrat});
-                        }
                         setActiveStep(0);
                         setPlot(null);
-                        setCensus(null);
-                        setQuadrat(null);
                         setOpenSelectionModal(false);
                       }}>
                         Finish
-                      </Button>}
+                      </Button>
                     </Stack>
                   </DialogActions>
                 </ModalDialog>
