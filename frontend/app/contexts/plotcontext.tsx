@@ -2,16 +2,22 @@
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
 import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
 
+export const PlotListContext = createContext<Plot[] | null>(null);
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
 export const QuadratContext = createContext<number | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
+export const PlotListDispatchContext = createContext<Dispatch<{ plotList: Plot[] | null }> | null>(null);
 export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
 export const CensusDispatchContext = createContext<Dispatch<{ census: number | null }> | null>(null);
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
+  const [plotList, plotListDispatch] = useReducer(
+    plotListReducer,
+    plots
+  )
   const [plot, plotDispatch] = useReducer(
     plotsReducer,
     null
@@ -29,31 +35,45 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     true
   )
   
+  
   return (
-    <PlotsContext.Provider value={plot}>
-      <PlotsDispatchContext.Provider value={plotDispatch}>
-        <CensusContext.Provider value={census}>
-          <CensusDispatchContext.Provider value={censusDispatch}>
-            <QuadratContext.Provider value={quadrat}>
-              <QuadratDispatchContext.Provider value={quadratDispatch}>
-                <FirstLoadContext.Provider value={firstLoad}>
-                  <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
-                    {children}
-                  </FirstLoadDispatchContext.Provider>
-                </FirstLoadContext.Provider>
-              </QuadratDispatchContext.Provider>
-            </QuadratContext.Provider>
-          </CensusDispatchContext.Provider>
-        </CensusContext.Provider>
-      </PlotsDispatchContext.Provider>
-    </PlotsContext.Provider>
+    <>
+      <PlotListContext.Provider value={plotList}>
+        <PlotListDispatchContext.Provider value={plotListDispatch}>
+          <PlotsContext.Provider value={plot}>
+            <PlotsDispatchContext.Provider value={plotDispatch}>
+              <CensusContext.Provider value={census}>
+                <CensusDispatchContext.Provider value={censusDispatch}>
+                  <QuadratContext.Provider value={quadrat}>
+                    <QuadratDispatchContext.Provider value={quadratDispatch}>
+                      <FirstLoadContext.Provider value={firstLoad}>
+                        <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+                          {children}
+                        </FirstLoadDispatchContext.Provider>
+                      </FirstLoadContext.Provider>
+                    </QuadratDispatchContext.Provider>
+                  </QuadratContext.Provider>
+                </CensusDispatchContext.Provider>
+              </CensusContext.Provider>
+            </PlotsDispatchContext.Provider>
+          </PlotsContext.Provider>
+        </PlotListDispatchContext.Provider>
+      </PlotListContext.Provider>
+    </>
   );
 }
 
 function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
-  if (action.plotKey == null) return null;
-  else if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
-  else return currentPlot;
+  const plotListContext = usePlotListContext();
+  if (plotListContext) {
+    if (action.plotKey == null) return null;
+    else if (plotListContext.find((p) => p.key == action.plotKey)) return plotListContext.find((p) => p.key == action.plotKey);
+    else return currentPlot;
+  } else {
+    if (action.plotKey == null) return null;
+    else if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
+    else return currentPlot;
+  }
 }
 
 function censusReducer(currentCensus: any, action: { census: number | null }) {
@@ -71,6 +91,10 @@ function quadratReducer(currentQuadrat: any, action: { quadrat: number | null })
 function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null }) {
   if (action.firstLoad == false && currentState) return action.firstLoad;
   else return currentState;
+}
+
+function plotListReducer(_currentPlotList: any, action: {plotList: Plot[] | null}) {
+  return action.plotList;
 }
 
 export function usePlotContext() {
@@ -103,4 +127,12 @@ export function useFirstLoadContext() {
 
 export function useFirstLoadDispatch() {
   return useContext(FirstLoadDispatchContext);
+}
+
+export function usePlotListContext() {
+  return useContext(PlotListContext);
+}
+
+export function usePlotListDispatch() {
+  return useContext(PlotListDispatchContext);
 }
