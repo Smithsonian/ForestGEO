@@ -28,7 +28,7 @@ import {
 } from "@mui/joy";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Divider from "@mui/joy/Divider";
-import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/plotcontext";
+import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/generalcontext";
 import EntryModal from "@/components/client/entrymodal";
 
 const slides = [

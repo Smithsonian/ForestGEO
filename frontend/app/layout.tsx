@@ -1,7 +1,7 @@
 import "@/styles/globals.css";
 import {Providers} from "./providers";
 import React from "react";
-import {ContextsProvider} from "@/app/contexts/plotcontext";
+import {ContextsProvider} from "@/app/contexts/generalcontext";
 import {Box} from "@mui/joy";
 import {FixedDataProvider} from "./contexts/fixeddatacontext";
 

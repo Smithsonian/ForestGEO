@@ -13,7 +13,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
 import {plots, siteConfigNav, SiteConfigProps} from "@/config/macros";
-import {usePlotContext, usePlotDispatch} from "@/app/contexts/plotcontext";
+import {usePlotContext, usePlotDispatch} from "@/app/contexts/userselectioncontext";
 import {usePathname, useRouter} from "next/navigation";
 import {
   Breadcrumbs,
@@ -36,6 +36,7 @@ import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import {Check} from "@mui/icons-material";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
+import {usePlotListContext} from "@/app/contexts/generalcontext";
 
 
 function SimpleToggler({
@@ -69,6 +70,7 @@ function SimpleToggler({
 export default function Sidebar() {
   const currentPlot = usePlotContext();
   const plotDispatch = usePlotDispatch();
+  const plotListContext = usePlotListContext()!;
   
   const [plot, setPlot] = useState<string | null>(null);
   const [openSelectionModal, setOpenSelectionModal] = useState(false);
@@ -338,8 +340,8 @@ export default function Sidebar() {
                             onChange={(_event: React.SyntheticEvent | null, newValue: string | null,) => setPlot(newValue)}
                           >
                             <Option value={null}>None</Option>
-                            {plots.map((keyItem) => (
-                              <Option value={keyItem.key}>{keyItem.key}</Option>
+                            {plotListContext.map((keyItem) => (
+                              <Option value={keyItem.key}>{keyItem.key}, Quadrats: {keyItem.num}</Option>
                             ))}
                           </Select>
                         </Stack>

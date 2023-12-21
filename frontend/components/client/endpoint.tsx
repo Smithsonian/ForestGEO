@@ -28,7 +28,7 @@ import {
   useQuadratsLoadDispatch,
   useSpeciesLoadDispatch
 } from "@/app/contexts/fixeddatacontext";
-import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/plotcontext";
+import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/generalcontext";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 
 export default function Endpoint({children,}: { children: React.ReactNode }) {
