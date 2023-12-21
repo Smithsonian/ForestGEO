@@ -10,7 +10,7 @@ import {
   useSpeciesLoadDispatch,
   useSubSpeciesLoadDispatch
 } from "@/app/contexts/fixeddatacontext";
-import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/plotcontext";
+import {useFirstLoadContext, useFirstLoadDispatch, usePlotListDispatch} from "@/app/contexts/generalcontext";
 import {
   Button,
   DialogActions,
@@ -25,6 +25,9 @@ import {
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Divider from "@mui/joy/Divider";
 import {redirect} from "next/navigation";
+import {Plot} from "@/config/macros";
+import {QuadratRDS} from "@/config/sqlmacros";
+import {GridValidRowModel} from "@mui/x-data-grid";
 
 export default function EntryModal() {
   const [loading, setLoading] = useState(0);
@@ -36,6 +39,7 @@ export default function EntryModal() {
   const speciesLoadDispatch = useSpeciesLoadDispatch();
   const subSpeciesLoadDispatch = useSubSpeciesLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
+  const plotsListDispatch = usePlotListDispatch();
   const firstLoad = useFirstLoadContext();
   const firstLoadDispatch = useFirstLoadDispatch();
   const interval = 100 / 14;
@@ -66,8 +70,9 @@ export default function EntryModal() {
       setLoadingMsg('Retrieving Quadrats...');
       response = await fetch(`/api/fixeddata/quadrats`, {method: 'GET'});
       setLoading(loading + interval);
+      let quadratRDS: GridValidRowModel[] = await response.json();
       if (quadratsLoadDispatch) {
-        quadratsLoadDispatch({quadratsLoad: await response.json()});
+        quadratsLoadDispatch({quadratsLoad: quadratRDS});
       }
       setLoading(loading + interval);
       setLoadingMsg('Retrieving Species...');
@@ -87,10 +92,19 @@ export default function EntryModal() {
       setLoadingMsg('Retrieving Plots...')
       response = await fetch(`/api/fixeddata/plots`, {method: 'GET'});
       setLoading(loading + interval);
+      let plotRDSLoad: GridValidRowModel[] = await response.json();
       if (plotsLoadDispatch) {
-        plotsLoadDispatch({plotsLoad: await response.json()});
+        plotsLoadDispatch({plotsLoad: plotRDSLoad});
+      }
+      let plotList: Plot[] = [];
+      for (const plotRDS of plotRDSLoad) {
+        plotList.push({key: plotRDS.plotName, num: quadratRDS.filter((quadrat) => quadrat.plotID == plotRDS.plotID).length});
+      }
+      if (plotsListDispatch) {
+        plotsListDispatch({plotList: plotList});
       }
       setLoading(100);
+      
     }
     fetchData().catch(console.error);
   }, []);
