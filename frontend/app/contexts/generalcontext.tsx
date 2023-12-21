@@ -4,12 +4,12 @@ import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
 import PlotProvider, {PlotsContext} from "@/app/contexts/userselectioncontext";
 
 export const PlotListContext = createContext<Plot[] | null>(null);
-export const CensusContext = createContext<number | null>(null);
-export const QuadratContext = createContext<number | null>(null);
+export const QuadratListContext = createContext<number[] | null>(null);
+export const CensusListContext = createContext<number[] | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
 export const PlotListDispatchContext = createContext<Dispatch<{ plotList: Plot[] | null }> | null>(null);
-export const CensusDispatchContext = createContext<Dispatch<{ census: number | null }> | null>(null);
-export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
+export const QuadratListDispatchContext = createContext<Dispatch<{ quadratList: number[] | null }> | null>(null);
+export const CensusListDispatchContext = createContext<Dispatch<{ censusList: number[] | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
 export function ContextsProvider({children}: { children: React.ReactNode }) {
@@ -17,14 +17,17 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     plotListReducer,
     plots
   )
-  const [census, censusDispatch] = useReducer(
-    censusReducer,
-    null
-  );
-  const [quadrat, quadratDispatch] = useReducer(
-    quadratReducer,
-    null
+  
+  const [quadratList, quadratListDispatch] = useReducer(
+    quadratListReducer,
+    []
   )
+  
+  const [censusList, censusListDispatch] = useReducer(
+    censusListReducer,
+    []
+  )
+  
   const [firstLoad, firstLoadDispatch] = useReducer(
     firstLoadReducer,
     true
@@ -35,37 +38,25 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     <>
       <PlotListContext.Provider value={plotList}>
         <PlotListDispatchContext.Provider value={plotListDispatch}>
-          <PlotProvider>
-            <CensusContext.Provider value={census}>
-              <CensusDispatchContext.Provider value={censusDispatch}>
-                <QuadratContext.Provider value={quadrat}>
-                  <QuadratDispatchContext.Provider value={quadratDispatch}>
-                    <FirstLoadContext.Provider value={firstLoad}>
-                      <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+          <QuadratListContext.Provider value={quadratList}>
+            <QuadratListDispatchContext.Provider value={quadratListDispatch}>
+              <CensusListContext.Provider value={censusList}>
+                <CensusListDispatchContext.Provider value={censusListDispatch}>
+                  <FirstLoadContext.Provider value={firstLoad}>
+                    <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+                      <PlotProvider>
                         {children}
-                      </FirstLoadDispatchContext.Provider>
-                    </FirstLoadContext.Provider>
-                  </QuadratDispatchContext.Provider>
-                </QuadratContext.Provider>
-              </CensusDispatchContext.Provider>
-            </CensusContext.Provider>
-          </PlotProvider>
+                      </PlotProvider>
+                    </FirstLoadDispatchContext.Provider>
+                  </FirstLoadContext.Provider>
+                </CensusListDispatchContext.Provider>
+              </CensusListContext.Provider>
+            </QuadratListDispatchContext.Provider>
+          </QuadratListContext.Provider>
         </PlotListDispatchContext.Provider>
       </PlotListContext.Provider>
     </>
   );
-}
-
-function censusReducer(currentCensus: any, action: { census: number | null }) {
-  if (action.census == null) return null;
-  else if (allCensus.includes(action.census)) return action.census;
-  else return currentCensus;
-}
-
-function quadratReducer(currentQuadrat: any, action: { quadrat: number | null }) {
-  if (action.quadrat == null) return null;
-  else if (allQuadrats.includes(action.quadrat)) return action.quadrat;
-  else return currentQuadrat;
 }
 
 function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null }) {
@@ -76,21 +67,11 @@ function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null
 function plotListReducer(_currentPlotList: any, action: {plotList: Plot[] | null}) {
   return action.plotList;
 }
-
-export function useCensusContext() {
-  return useContext(CensusContext);
+function quadratListReducer(_currentQuadratList: any, action: { quadratList: number[] | null}) {
+  return action.quadratList;
 }
-
-export function useCensusDispatch() {
-  return useContext(CensusDispatchContext);
-}
-
-export function useQuadratContext() {
-  return useContext(QuadratContext);
-}
-
-export function useQuadratDispatch() {
-  return useContext(QuadratDispatchContext);
+function censusListReducer(_currentCensusList: any, action: { censusList: number[] | null}) {
+  return action.censusList;
 }
 
 export function useFirstLoadContext() {
