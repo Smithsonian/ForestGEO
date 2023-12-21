@@ -63,7 +63,6 @@ function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null
   if (action.firstLoad == false && currentState) return action.firstLoad;
   else return currentState;
 }
-
 function plotListReducer(_currentPlotList: any, action: {plotList: Plot[] | null}) {
   return action.plotList;
 }
@@ -73,19 +72,27 @@ function quadratListReducer(_currentQuadratList: any, action: { quadratList: num
 function censusListReducer(_currentCensusList: any, action: { censusList: number[] | null}) {
   return action.censusList;
 }
-
 export function useFirstLoadContext() {
   return useContext(FirstLoadContext);
 }
-
 export function useFirstLoadDispatch() {
   return useContext(FirstLoadDispatchContext);
 }
-
 export function usePlotListContext() {
   return useContext(PlotListContext);
 }
-
 export function usePlotListDispatch() {
   return useContext(PlotListDispatchContext);
+}
+export function useQuadratListContext() {
+  return useContext(QuadratListContext);
+}
+export function useQuadratListDispatch() {
+  return useContext(QuadratListDispatchContext);
+}
+export function useCensusListContext() {
+  return useContext(CensusListContext);
+}
+export function useCensusListDispatch() {
+  return useContext(CensusListDispatchContext);
 }

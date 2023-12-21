@@ -1,7 +1,7 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from "react";
 import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
-import {usePlotListContext} from "@/app/contexts/generalcontext";
+import {useCensusListContext, usePlotListContext, useQuadratListContext} from "@/app/contexts/generalcontext";
 
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<number | null>(null);
@@ -55,15 +55,29 @@ function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
   }
 }
 function censusReducer(currentCensus: any, action: { census: number | null }) {
-  if (action.census == null) return null;
-  else if (allCensus.includes(action.census)) return action.census;
-  else return currentCensus;
+  let censusListContext = useCensusListContext();
+  if (censusListContext) {
+    if (action.census == null) return null;
+    else if (censusListContext.includes(action.census)) return action.census;
+    else return currentCensus;
+  } else {
+    if (action.census == null) return null;
+    else if (allCensus.includes(action.census)) return action.census;
+    else return currentCensus;
+  }
 }
 
 function quadratReducer(currentQuadrat: any, action: { quadrat: number | null }) {
-  if (action.quadrat == null) return null;
-  else if (allQuadrats.includes(action.quadrat)) return action.quadrat;
-  else return currentQuadrat;
+  let quadratListContext = useQuadratListContext();
+  if (quadratListContext) {
+    if (action.quadrat == null) return null;
+    else if (quadratListContext.includes(action.quadrat)) return action.quadrat;
+    else return currentQuadrat;
+  } else {
+    if (action.quadrat == null) return null;
+    else if (allQuadrats.includes(action.quadrat)) return action.quadrat;
+    else return currentQuadrat;
+  }
 }
 
 export function usePlotContext() {
