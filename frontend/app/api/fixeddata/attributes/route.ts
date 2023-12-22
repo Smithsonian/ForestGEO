@@ -51,8 +51,8 @@ export async function POST(request: NextRequest) {
   const row: AttributeRDS = {
     id: 0,
     code: request.nextUrl.searchParams.get('code')!,
-    description: request.nextUrl.searchParams.get('desc')!,
-    status: request.nextUrl.searchParams.get('stat')!
+    description: request.nextUrl.searchParams.get('desc'),
+    status: request.nextUrl.searchParams.get('stat')
   }
   
   let validateCode = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${row.code}'`);
