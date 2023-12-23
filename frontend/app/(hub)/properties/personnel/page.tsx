@@ -21,8 +21,8 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {useAttributeLoadContext, usePersonnelLoadContext} from "@/app/contexts/fixeddatacontext";
-import {AttributeGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {usePersonnelLoadContext} from "@/app/contexts/fixeddatacontext";
+import {PersonnelGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 import {ErrorMessages} from "@/config/macros";
 
 interface EditToolbarProps {
@@ -64,7 +64,7 @@ function EditToolbar(props: EditToolbarProps) {
   return (
     <GridToolbarContainer>
       <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
-        Add attribute
+        Add Personnel
       </Button>
       <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
@@ -131,7 +131,7 @@ export default function Page() {
   };
   
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/attributes?code=${rows.find((row) => row.id == id)!.code}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/personnel?personnelID=${rows.find((row) => row.id == id)!.personnelID}`, {method: 'DELETE'});
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -159,8 +159,9 @@ export default function Page() {
         if (newRow.code == '') {
           reject(new Error("Primary key Code cannot be empty!"));
         } else if (oldRow.code == '') {
-          // inserting a row
-          const response = await fetch(`/api/fixeddata/attributes?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
+          // inserting a row --> personnelID, firstName, lastName, role
+          const response = await fetch(
+            `/api/fixeddata/personnel?personnelID=${newRow.personnelID}&firstName=${newRow.firstName}&lastName=${newRow.lastName}&role=${newRow.role}`, {
             method: 'POST'
           });
           const responseJSON = await response.json();
@@ -172,7 +173,8 @@ export default function Page() {
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/attributes?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
+            const response = await fetch(
+              `/api/fixeddata/personnel?oldPersonnelID=${oldRow.personnelID}&personnelID=${newRow.personnelID}&firstName=${newRow.firstName}&lastName=${newRow.lastName}&role=${newRow.role}`, {
               method: 'PATCH'
             })
             const responseJSON = await response.json();
@@ -191,7 +193,7 @@ export default function Page() {
   };
   
   const columns: GridColDef[] = [
-    ...AttributeGridColumns,
+    ...PersonnelGridColumns,
     {
       field: 'actions',
       type: 'actions',
