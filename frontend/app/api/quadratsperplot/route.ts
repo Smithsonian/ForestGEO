@@ -1,7 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {sqlConfig} from "@/config/macros";
-import {AttributeRDS} from "@/config/sqlmacros";
 
 async function getSqlConnection(tries: number) {
   return await sql.connect(sqlConfig).catch((err) => {
@@ -20,6 +19,7 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
   }
   return await conn.request().query(query);
 }
+
 export async function GET(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);

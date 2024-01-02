@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {ErrorMessages, sqlConfig} from "@/config/macros";
-import {SpeciesRDS, SubSpeciesRDS} from "@/config/sqlmacros";
+import {SubSpeciesRDS} from "@/config/sqlmacros";
 
 async function getSqlConnection(tries: number) {
   return await sql.connect(sqlConfig).catch((err) => {

@@ -54,6 +54,7 @@ function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
     else return currentPlot;
   }
 }
+
 function censusReducer(currentCensus: any, action: { census: number | null }) {
   let censusListContext = useCensusListContext();
   if (censusListContext) {
@@ -87,6 +88,7 @@ export function usePlotContext() {
 export function usePlotDispatch() {
   return useContext(PlotsDispatchContext);
 }
+
 export function useCensusContext() {
   return useContext(CensusContext);
 }

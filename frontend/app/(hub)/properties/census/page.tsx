@@ -23,7 +23,7 @@ import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
 import {useCensusLoadContext, usePlotsLoadContext} from "@/app/contexts/fixeddatacontext";
-import {CensusGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {StyledDataGrid} from "@/config/sqlmacros";
 
 interface EditToolbarProps {
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
@@ -181,9 +181,10 @@ export default function Page() {
       new Promise<GridRowModel>(async (resolve, reject) => {
         if (newRow.censusID == '') {
           reject(new Error("Primary key CensusID cannot be empty!"));
-        } else if (oldRow.code == '') {
+        } else if (oldRow.censusID == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/census?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
+          const response = await fetch(`/api/fixeddata/census?censusID=${newRow.censusID}&plotID=${newRow.plotID}
+          &plotCensusNumber=${newRow.plotCensusNumber}&startDate=${newRow.startDate}&endDate=${newRow.endDate}&description=${newRow.description}`, {
             method: 'POST'
           });
           const responseJSON = await response.json();
@@ -193,7 +194,9 @@ export default function Page() {
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/census?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
+            const response = await fetch(`/api/fixeddata/census?oldCensusID=${oldRow.censusID}&censusID=${newRow.censusID}
+            &plotID=${newRow.plotID}&plotCensusNumber=${newRow.plotCensusNumber}&startDate=${newRow.startDate}
+            &endDate=${newRow.endDate}&description=${newRow.description}`, {
               method: 'PATCH'
             })
             const responseJSON = await response.json();
@@ -212,12 +215,65 @@ export default function Page() {
   
   const plotIDs = plotRows.map((plotRow) => plotRow.plotID);
   const columns: GridColDef[] = [
-    ...CensusGridColumns,
+    {
+      field: 'censusID',
+      headerName: 'CensusID',
+      type: 'number',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
+    },
+    {
+      field: 'plotID',
+      headerName: 'PlotID',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      type: 'singleSelect',
+      valueOptions: plotIDs,
+      editable: true
+    },
+    {
+      field: 'plotCensusNumber',
+      headerName: 'PlotCensusNumber',
+      type: 'number',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
+    },
+    {
+      field: 'startDate',
+      headerName: 'StartDate',
+      type: 'date',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true,
+      valueGetter: (params) => {
+        if (!params.value) return null;
+        return new Date(params.value);
+      }
+    },
+    {
+      field: 'endDate',
+      headerName: 'EndDate',
+      type: 'date',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true,
+      valueGetter: (params) => {
+        if (!params.value) return null;
+        return new Date(params.value);
+      }
+    },
+    {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
     {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      minWidth: 100,
       flex: 1,
       cellClassName: 'actions',
       getActions: ({id}) => {
@@ -265,8 +321,7 @@ export default function Page() {
   return (
     <Box
       sx={{
-        display: 'flex',
-        flex: 1,
+        width: '100%',
         '& .actions': {
           color: 'text.secondary',
         },
@@ -275,8 +330,8 @@ export default function Page() {
         },
       }}
     >
-      <Box sx={{display: 'flex', flex: 1}}>
-        <StyledDataGrid sx={{display: 'flex', flex: 1}}
+      <Box sx={{width: '100%'}}>
+        <StyledDataGrid sx={{width: '100%'}}
                         rows={rows}
                         columns={columns}
                         editMode="row"

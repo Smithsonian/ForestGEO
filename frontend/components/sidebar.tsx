@@ -12,7 +12,7 @@ import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
-import {plots, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {usePlotContext, usePlotDispatch} from "@/app/contexts/userselectioncontext";
 import {usePathname, useRouter} from "next/navigation";
 import {
