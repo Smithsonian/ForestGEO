@@ -26,8 +26,7 @@ import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Divider from "@mui/joy/Divider";
 import {redirect} from "next/navigation";
 import {Plot} from "@/config/macros";
-import {QuadratRDS} from "@/config/sqlmacros";
-import {GridValidRowModel} from "@mui/x-data-grid";
+import {PlotRDS, QuadratRDS} from "@/config/sqlmacros";
 
 export default function EntryModal() {
   const [loading, setLoading] = useState(0);
@@ -63,14 +62,14 @@ export default function EntryModal() {
       setLoadingMsg('Retrieving Personnel...');
       response = await fetch(`/api/fixeddata/personnel`, {method: 'GET'});
       setLoading(loading + interval);
-      if(personnelLoadDispatch){
+      if (personnelLoadDispatch) {
         personnelLoadDispatch({personnelLoad: await response.json()});
       }
       setLoading(loading + interval);
       setLoadingMsg('Retrieving Quadrats...');
       response = await fetch(`/api/fixeddata/quadrats`, {method: 'GET'});
       setLoading(loading + interval);
-      let quadratRDS: GridValidRowModel[] = await response.json();
+      let quadratRDS: QuadratRDS[] = await response.json();
       if (quadratsLoadDispatch) {
         quadratsLoadDispatch({quadratsLoad: quadratRDS});
       }
@@ -92,13 +91,16 @@ export default function EntryModal() {
       setLoadingMsg('Retrieving Plots...')
       response = await fetch(`/api/fixeddata/plots`, {method: 'GET'});
       setLoading(loading + interval);
-      let plotRDSLoad: GridValidRowModel[] = await response.json();
+      let plotRDSLoad: PlotRDS[] = await response.json();
       if (plotsLoadDispatch) {
         plotsLoadDispatch({plotsLoad: plotRDSLoad});
       }
       let plotList: Plot[] = [];
       for (const plotRDS of plotRDSLoad) {
-        plotList.push({key: plotRDS.plotName, num: quadratRDS.filter((quadrat) => quadrat.plotID == plotRDS.plotID).length});
+        plotList.push({
+          key: plotRDS.plotName ? plotRDS.plotName : "",
+          num: quadratRDS.filter((quadrat) => quadrat.plotID == plotRDS.plotID).length
+        });
       }
       if (plotsListDispatch) {
         plotsListDispatch({plotList: plotList});

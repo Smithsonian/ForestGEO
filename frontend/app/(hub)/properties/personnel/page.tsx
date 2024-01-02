@@ -162,8 +162,8 @@ export default function Page() {
           // inserting a row --> personnelID, firstName, lastName, role
           const response = await fetch(
             `/api/fixeddata/personnel?personnelID=${newRow.personnelID}&firstName=${newRow.firstName}&lastName=${newRow.lastName}&role=${newRow.role}`, {
-            method: 'POST'
-          });
+              method: 'POST'
+            });
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
           else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
@@ -175,8 +175,8 @@ export default function Page() {
           if (mutation) {
             const response = await fetch(
               `/api/fixeddata/personnel?oldPersonnelID=${oldRow.personnelID}&personnelID=${newRow.personnelID}&firstName=${newRow.firstName}&lastName=${newRow.lastName}&role=${newRow.role}`, {
-              method: 'PATCH'
-            })
+                method: 'PATCH'
+              })
             const responseJSON = await response.json();
             if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
             else if (!response.ok) reject(new Error(responseJSON.message));
@@ -245,8 +245,7 @@ export default function Page() {
   return (
     <Box
       sx={{
-        display: 'flex',
-        flex: 1,
+        width: '100%',
         '& .actions': {
           color: 'text.secondary',
         },
@@ -255,23 +254,25 @@ export default function Page() {
         },
       }}
     >
-      <StyledDataGrid sx={{width: 1000}}
-                      rows={rows}
-                      columns={columns}
-                      editMode="row"
-                      rowModesModel={rowModesModel}
-                      onRowModesModelChange={handleRowModesModelChange}
-                      onRowEditStop={handleRowEditStop}
-                      processRowUpdate={processRowUpdate}
-                      onProcessRowUpdateError={handleProcessRowUpdateError}
-                      loading={refresh}
-                      slots={{
-                        toolbar: EditToolbar,
-                      }}
-                      slotProps={{
-                        toolbar: {setRows, setRowModesModel, setRefresh},
-                      }}
-      />
+      <Box sx={{width: '100%'}}>
+        <StyledDataGrid sx={{width: '100%'}}
+                        rows={rows}
+                        columns={columns}
+                        editMode="row"
+                        rowModesModel={rowModesModel}
+                        onRowModesModelChange={handleRowModesModelChange}
+                        onRowEditStop={handleRowEditStop}
+                        processRowUpdate={processRowUpdate}
+                        onProcessRowUpdateError={handleProcessRowUpdateError}
+                        loading={refresh}
+                        slots={{
+                          toolbar: EditToolbar,
+                        }}
+                        slotProps={{
+                          toolbar: {setRows, setRowModesModel, setRefresh},
+                        }}
+        />
+      </Box>
       {!!snackbar && (
         <Snackbar
           open
