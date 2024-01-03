@@ -99,7 +99,8 @@ export default function EntryModal() {
       for (const plotRDS of plotRDSLoad) {
         plotList.push({
           key: plotRDS.plotName ? plotRDS.plotName : "",
-          num: quadratRDS.filter((quadrat) => quadrat.plotID == plotRDS.plotID).length
+          num: quadratRDS.filter((quadrat) => quadrat.plotID == plotRDS.plotID).length,
+          id: plotRDS.plotID
         });
       }
       if (plotsListDispatch) {

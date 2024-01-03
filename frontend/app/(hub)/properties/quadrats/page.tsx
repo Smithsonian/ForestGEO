@@ -24,6 +24,7 @@ import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
 import {usePlotsLoadContext, useQuadratsLoadContext} from "@/app/contexts/fixeddatacontext";
 import {QuadratGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {usePlotContext} from "@/app/contexts/userselectioncontext";
 
 interface EditToolbarProps {
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
@@ -124,8 +125,9 @@ export default function Page() {
   ]
   const [rows, setRows] = React.useState(initialRows);
   const [plotRows, setPlotRows] = React.useState(initialPlots);
-  const quadratsLoad = useQuadratsLoadContext();
-  const plotsLoad = usePlotsLoadContext();
+  let quadratsLoad = useQuadratsLoadContext();
+  let plotsLoad = usePlotsLoadContext();
+  let currentPlot = usePlotContext();
   useEffect(() => {
     if (quadratsLoad) {
       setRows(quadratsLoad);
@@ -133,7 +135,7 @@ export default function Page() {
     if (plotsLoad) {
       setPlotRows(plotsLoad);
     }
-  }, [quadratsLoad, setRows, plotsLoad, setPlotRows]);
+  }, [quadratsLoad, setRows, plotsLoad]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
@@ -240,7 +242,7 @@ export default function Page() {
     setRowModesModel(newRowModesModel);
   };
   
-  const plotIDs = plotRows.map((plotRow) => plotRow.plotID);
+  // const plotIDs = plotRows.map((plotRow) => plotRow.plotID);
   const columns: GridColDef[] = [
     {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
     {
@@ -249,8 +251,6 @@ export default function Page() {
       headerClassName: 'header',
       flex: 1,
       align: 'left',
-      type: 'singleSelect',
-      valueOptions: plotIDs,
       editable: true
     },
     {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
@@ -309,47 +309,58 @@ export default function Page() {
     },
   ];
   
-  return (
-    <Box
-      sx={{
-        width: '100%',
-        '& .actions': {
-          color: 'text.secondary',
-        },
-        '& .textPrimary': {
-          color: 'text.primary',
-        },
-      }}
-    >
-      <Box sx={{width: '100%'}}>
-        <StyledDataGrid sx={{width: '100%'}}
-                        rows={rows}
-                        columns={columns}
-                        editMode="row"
-                        rowModesModel={rowModesModel}
-                        onRowModesModelChange={handleRowModesModelChange}
-                        onRowEditStop={handleRowEditStop}
-                        processRowUpdate={processRowUpdate}
-                        onProcessRowUpdateError={handleProcessRowUpdateError}
-                        loading={refresh}
-                        slots={{
-                          toolbar: EditToolbar,
-                        }}
-                        slotProps={{
-                          toolbar: {setRows, setRowModesModel, setRefresh},
-                        }}
-        />
+  if (!currentPlot) {
+    return <>You must select a plot to continue!</>;
+  } else {
+    return (
+      <Box
+        sx={{
+          width: '100%',
+          '& .actions': {
+            color: 'text.secondary',
+          },
+          '& .textPrimary': {
+            color: 'text.primary',
+          },
+        }}
+      >
+        <Box sx={{width: '100%'}}>
+          <StyledDataGrid sx={{width: '100%'}}
+                          rows={rows}
+                          columns={columns}
+                          editMode="row"
+                          rowModesModel={rowModesModel}
+                          onRowModesModelChange={handleRowModesModelChange}
+                          onRowEditStop={handleRowEditStop}
+                          processRowUpdate={processRowUpdate}
+                          onProcessRowUpdateError={handleProcessRowUpdateError}
+                          loading={refresh}
+                          slots={{
+                            toolbar: EditToolbar,
+                          }}
+                          slotProps={{
+                            toolbar: {setRows, setRowModesModel, setRefresh},
+                          }}
+                          initialState={{
+                            filter: {
+                              filterModel: {
+                                items: [{ field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}` }],
+                              },
+                            },
+                          }}
+          />
+        </Box>
+        {!!snackbar && (
+          <Snackbar
+            open
+            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
+            onClose={handleCloseSnackbar}
+            autoHideDuration={6000}
+          >
+            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
+          </Snackbar>
+        )}
       </Box>
-      {!!snackbar && (
-        <Snackbar
-          open
-          anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
-          onClose={handleCloseSnackbar}
-          autoHideDuration={6000}
-        >
-          <Alert {...snackbar} onClose={handleCloseSnackbar}/>
-        </Snackbar>
-      )}
-    </Box>
-  );
+    );
+  }
 }
