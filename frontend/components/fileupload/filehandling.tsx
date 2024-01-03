@@ -188,7 +188,7 @@ export function FileTabView() {
                 <Tab>Upload New Files</Tab>
               </TabList>
               <TabPanel value={0}>
-                <ViewUploadedFiles/>
+                {/*<ViewUploadedFiles/>*/}
               </TabPanel>
               <TabPanel value={1}>
                 <UploadAndReviewProcess/>

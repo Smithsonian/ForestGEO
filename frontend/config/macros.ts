@@ -71,28 +71,6 @@ export interface UploadValidationProps {
   handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
 }
 
-export const SchemaTableNames = [
-  "Attributes",
-  "Census",
-  "CMAttributes",
-  "CMVErrors",
-  "CoreMeasurements",
-  "CurrentObsolete",
-  "Family",
-  "Genus",
-  "MeasurementTypes",
-  "Personnel",
-  "Plots",
-  "Quadrats",
-  "Reference",
-  "Species",
-  "SpeciesInventory",
-  "Stems",
-  "SubSpecies",
-  "Trees",
-  "ValidationErrors"
-]
-
 export enum ReviewStates {
   TABLE_SELECT = "table_select",
   PARSE = "parse",

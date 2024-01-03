@@ -187,7 +187,7 @@ export default function ViewUploadedFiles() {
             </TableContainer>
           </Box>
         </Box>
-      {/*  ARCGIS FILES */}
+        {/*  ARCGIS FILES */}
         <Box sx={{display: 'flex', flex: 1, flexDirection: "column"}}>
           <Box sx={{display: 'flex', flexDirection: "column"}}>
             <Typography level={"title-lg"}>

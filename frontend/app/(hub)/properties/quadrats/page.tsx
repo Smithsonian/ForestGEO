@@ -23,7 +23,7 @@ import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
 import {usePlotsLoadContext, useQuadratsLoadContext} from "@/app/contexts/fixeddatacontext";
-import {QuadratGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 
 interface EditToolbarProps {
@@ -344,7 +344,7 @@ export default function Page() {
                           initialState={{
                             filter: {
                               filterModel: {
-                                items: [{ field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}` }],
+                                items: [{field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}`}],
                               },
                             },
                           }}

@@ -18,7 +18,7 @@ export function FileDisplay({acceptedFiles}: FileListProps) {
   };
   return (
     <>
-      <Card className={"flex flex-1 justify-center w-auto"}>
+      <Card className={"flex flex-1 justify-center w-auto"} sx={{display: 'flex', flex: 1}}>
         <CardHeader>
           File Preview:
         </CardHeader>

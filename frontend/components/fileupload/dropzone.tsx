@@ -10,7 +10,7 @@ import {subtitle} from "@/config/primitives";
 
 
 /**
- * This is the presentation component for Fileuploadcomponents.
+ * This is the presentation component for FileUploadComponents.
  * It should be free of logic, and concentrate on the presentation.
  */
 export function DropzoneCoreDisplay({getRootProps, getInputProps, isDragActive,}: DropzonePureProps) {
@@ -30,7 +30,7 @@ export function DropzoneCoreDisplay({getRootProps, getInputProps, isDragActive,}
           </p>
         ) : (
           <p className={subtitle()} color="primary" style={{textAlign: 'center'}}>
-            <b>Choose a CSV file</b> or drag it here.
+            <b>Choose a CSV or ArcGIS file</b> or drag it here.
           </p>
         )}
         <div/>
@@ -73,7 +73,7 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
         alert(
           ' The file ' +
           fileRejection.file.name +
-          ' was not uploaded. Only .csv files are supported.'
+          ' was not uploaded. Only .csv and .xlsx files are supported.'
         );
       });
     },
