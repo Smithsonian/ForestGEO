@@ -30,6 +30,8 @@ import {FileDisplay} from "@/components/fileupload/filelist";
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
   const initState: { fileName: string; data: DataStructure[] }[] = [];
+  // select schema table that file should be uploaded to --> state
+  const [uploadTable, setUploadTable] = useState("");
   // in progress state --> data is being parsed
   const [parsing, setParsing] = useState(false);
   // in progress state --> async upload function has completed
@@ -149,6 +151,27 @@ export function UploadAndReviewProcess() {
   // }, [errMenuSelected]);
   
   switch (reviewState) {
+    case ReviewStates.TABLE_SELECT:
+      return (
+        <>
+          <div className={"grid grid-cols-2"}>
+            <div>
+            
+            </div>
+            <div className={"flex flex-col m-auto"}>
+              <div className={"flex justify-center"}>
+                <FileDisplay acceptedFiles={acceptedFiles}/>
+              </div>
+              <Divider className={"my-4"}/>
+              <div className={"flex justify-center"}>
+                <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
+                  Review Files
+                </LoadingButton>
+              </div>
+            </div>
+          </div>
+        </>
+      );
     case ReviewStates.PARSE:
       return (
         <>

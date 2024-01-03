@@ -71,7 +71,30 @@ export interface UploadValidationProps {
   handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
 }
 
+export const SchemaTableNames = [
+  "Attributes",
+  "Census",
+  "CMAttributes",
+  "CMVErrors",
+  "CoreMeasurements",
+  "CurrentObsolete",
+  "Family",
+  "Genus",
+  "MeasurementTypes",
+  "Personnel",
+  "Plots",
+  "Quadrats",
+  "Reference",
+  "Species",
+  "SpeciesInventory",
+  "Stems",
+  "SubSpecies",
+  "Trees",
+  "ValidationErrors"
+]
+
 export enum ReviewStates {
+  TABLE_SELECT = "table_select",
   PARSE = "parse",
   REVIEW = "review",
   UPLOAD = "upload",
@@ -302,9 +325,8 @@ export function selectAllRows(plot: string) {
  * CONTAINER STORAGE FUNCTIONS
  */
 export async function getContainerClient(plot: string) {
-  const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!accountName || !storageAccountConnectionString) throw new Error("process envs failed");
+  if (!storageAccountConnectionString) throw new Error("process envs failed");
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
   if (!blobServiceClient) throw new Error("blob service client creation failed");

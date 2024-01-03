@@ -48,16 +48,16 @@ function LoadingFiles() {
 }
 
 export default function ViewUploadedFiles() {
-  let localPlot = usePlotContext();
+  let currentPlot = usePlotContext();
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   // const [deleteFile, setDeleteFile] = useState("");
   const getListOfFiles = useCallback(async () => {
-    if (localPlot && localPlot.key !== undefined) {
+    if (currentPlot && currentPlot.key !== undefined) {
       let response = null;
       try {
-        response = await fetch('/api/downloadallfiles?plot=' + localPlot.key, {
+        response = await fetch('/api/downloadallfiles?plot=' + currentPlot.key, {
           method: 'GET',
         });
         
@@ -79,7 +79,7 @@ export default function ViewUploadedFiles() {
       console.log('Plot is undefined');
       setError(new Error('No plot'));
     }
-  }, [localPlot]);
+  }, [currentPlot]);
   
   useEffect(() => {
     getListOfFiles().then();
@@ -107,7 +107,7 @@ export default function ViewUploadedFiles() {
   //   }
   // }, [deleteFile, setDeleteFile, deleteFileByName]);
   
-  if ((!localPlot || !localPlot.key)) {
+  if ((!currentPlot || !currentPlot.key)) {
     return (
       <>
         <h1 className={title()}>Please select a plot to continue.</h1>
@@ -126,10 +126,11 @@ export default function ViewUploadedFiles() {
     })
     return (
       <>
-        <Box sx={{display: 'flex', flexDirection: "column"}}>
+        {/*CSV FILES*/}
+        <Box sx={{display: 'flex', flex: 1, flexDirection: "column", mb: 10}}>
           <Box sx={{display: 'flex', flexDirection: "column"}}>
             <Typography level={"title-lg"}>
-              Uploaded Files
+              Uploaded CSV Files
             </Typography>
           </Box>
           <Divider className={"mt-6 mb-6"}/>
@@ -146,7 +147,68 @@ export default function ViewUploadedFiles() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileData!.map((row, index) => {
+                  {sortedFileData!.filter((row) => row.name.toLowerCase().endsWith('.csv')).map((row, index) => {
+                    let errs = row.errors == "false";
+                    return (
+                      <>
+                        <TableRow key={index}>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.date).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.version).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                          <TableCell align="center">
+                            <Button>
+                              <DownloadIcon/>
+                            </Button>
+                            <Button>
+                              <EditIcon/>
+                            </Button>
+                            <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                              <DeleteIcon/>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Box>
+      {/*  ARCGIS FILES */}
+        <Box sx={{display: 'flex', flex: 1, flexDirection: "column"}}>
+          <Box sx={{display: 'flex', flexDirection: "column"}}>
+            <Typography level={"title-lg"}>
+              Uploaded ArcGIS Files
+            </Typography>
+          </Box>
+          <Divider className={"mt-6 mb-6"}/>
+          <Box sx={{display: 'flex', flexDirection: "column"}}>
+            <TableContainer component={Paper}>
+              <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={tableHeaderSettings}>File Count</TableCell>
+                    {fileColumns.map((item, index) => (
+                      <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
+                    ))}
+                    <TableCell sx={tableHeaderSettings}>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sortedFileData!.filter((row) => row.name.toLowerCase().endsWith('.xlsx')).map((row, index) => {
                     let errs = row.errors == "false";
                     return (
                       <>
