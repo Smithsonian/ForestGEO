@@ -17,7 +17,6 @@ import {DropzoneLogic} from "@/components/fileupload/dropzone";
 import {FileDisplay} from "@/components/fileupload/filelist";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
-import ViewUploadedFiles from "@/components/viewuploadedfiles";
 import {UploadAndReviewProcess} from "@/components/uploadreviewcycle";
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
