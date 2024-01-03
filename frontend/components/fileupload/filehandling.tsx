@@ -177,12 +177,12 @@ export function FileTabView() {
     // Tab system -- Browse page, Upload page
     return (
       <>
-        <Box sx={{display: 'flex', flexDirection: 'column', marginBottom: 5}}>
+        <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
           <Typography level={"title-lg"} color={"primary"}>
             Drag and drop files into the box to upload them to storage
           </Typography>
-          <Box sx={{mt: 5}}>
-            <Tabs aria-label={"File Hub Options"} size={"sm"} className={""}>
+          <Box sx={{mt: 5, mr: 5, width: '95%'}}>
+            <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
               <TabList sticky={"top"}>
                 <Tab>Browse Uploaded Files</Tab>
                 <Tab>Upload New Files</Tab>
