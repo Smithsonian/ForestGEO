@@ -1,3 +1,4 @@
+"use client";
 import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,} from '@mui/material';
 import {parse} from 'papaparse';
 import React, {useState} from 'react';

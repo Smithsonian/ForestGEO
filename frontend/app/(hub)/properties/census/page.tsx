@@ -22,8 +22,8 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
-import {useCensusLoadContext, usePlotsLoadContext} from "@/app/contexts/fixeddatacontext";
-import {StyledDataGrid} from "@/config/sqlmacros";
+import {useCensusLoadContext} from "@/app/contexts/fixeddatacontext";
+import {CensusGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 
 interface EditToolbarProps {
@@ -196,59 +196,7 @@ export default function Page() {
   };
   
   const columns: GridColDef[] = [
-    {
-      field: 'censusID',
-      headerName: 'CensusID',
-      type: 'number',
-      headerClassName: 'header',
-      flex: 1,
-      align: 'left',
-      editable: true
-    },
-    {
-      field: 'plotID',
-      headerName: 'PlotID',
-      headerClassName: 'header',
-      flex: 1,
-      align: 'left',
-      editable: true
-    },
-    {
-      field: 'plotCensusNumber',
-      headerName: 'PlotCensusNumber',
-      type: 'number',
-      headerClassName: 'header',
-      flex: 1,
-      align: 'left',
-      editable: true
-    },
-    {
-      field: 'startDate',
-      headerName: 'StartDate',
-      type: 'date',
-      headerClassName: 'header',
-      flex: 1,
-      align: 'left',
-      editable: true,
-      valueGetter: (params) => {
-        if (!params.value) return null;
-        return new Date(params.value);
-      }
-    },
-    {
-      field: 'endDate',
-      headerName: 'EndDate',
-      type: 'date',
-      headerClassName: 'header',
-      flex: 1,
-      align: 'left',
-      editable: true,
-      valueGetter: (params) => {
-        if (!params.value) return null;
-        return new Date(params.value);
-      }
-    },
-    {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
+    ...CensusGridColumns,
     {
       field: 'actions',
       type: 'actions',
@@ -331,7 +279,7 @@ export default function Page() {
                           initialState={{
                             filter: {
                               filterModel: {
-                                items: [{ field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}` }],
+                                items: [{field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}`}],
                               },
                             },
                           }}

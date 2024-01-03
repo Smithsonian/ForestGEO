@@ -341,7 +341,8 @@ export default function Sidebar() {
                           >
                             <Option value={null}>None</Option>
                             {plotListContext.map((keyItem) => (
-                              <Option value={keyItem.key}>{keyItem.key}, Quadrats: {keyItem.num}, ID: {keyItem.id}</Option>
+                              <Option value={keyItem.key}>{keyItem.key}, Quadrats: {keyItem.num},
+                                ID: {keyItem.id}</Option>
                             ))}
                           </Select>
                         </Stack>

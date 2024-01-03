@@ -98,6 +98,62 @@ export interface CensusRDS {
   description: string | null;
 }
 
+export const CensusGridColumns: GridColDef[] = [
+  {
+    field: 'censusID',
+    headerName: 'CensusID',
+    type: 'number',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'plotID',
+    headerName: 'PlotID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'plotCensusNumber',
+    headerName: 'PlotCensusNumber',
+    type: 'number',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'startDate',
+    headerName: 'StartDate',
+    type: 'date',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true,
+    valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }
+  },
+  {
+    field: 'endDate',
+    headerName: 'EndDate',
+    type: 'date',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true,
+    valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value);
+    }
+  },
+  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
+]
+
 export interface CMAttributeRDS {
   id: number;
   cmaID: number;
@@ -471,4 +527,26 @@ export const ValidationErrorGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
   },
+]
+
+export const SchemaTableNames = [
+  {name: "Attributes", columns: AttributeGridColumns},
+  {name: "Census", columns: CensusGridColumns},
+  {name: "CMAttributes", columns: CMAttributeGridColumns},
+  {name: "CMVErrors", columns: CMVErrorGridColumns},
+  {name: "CoreMeasurements", columns: CoreMeasurementGridColumns},
+  {name: "CurrentObsolete", columns: CurrentObsoleteGridColumns},
+  {name: "Family", columns: FamilyGridColumns},
+  {name: "Genus", columns: GenusGridColumns},
+  {name: "MeasurementTypes", columns: MeasurementTypeGridColumns},
+  {name: "Personnel", columns: PersonnelGridColumns},
+  {name: "Plots", columns: PlotGridColumns},
+  {name: "Quadrats", columns: QuadratGridColumns},
+  {name: "Reference", columns: ReferenceGridColumns},
+  {name: "Species", columns: SpeciesGridColumns},
+  {name: "SpeciesInventory", columns: SpeciesInventoryGridColumns},
+  {name: "Stems", columns: StemGridColumns},
+  {name: "SubSpecies", columns: SubSpeciesGridColumns},
+  {name: "Trees", columns: TreeGridColumns},
+  {name: "ValidationErrors", columns: ValidationErrorGridColumns}
 ]

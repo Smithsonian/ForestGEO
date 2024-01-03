@@ -26,6 +26,10 @@ import {styled} from '@mui/system';
 import Divider from "@mui/joy/Divider";
 import {DropzoneLogic} from "@/components/fileupload/dropzone";
 import {FileDisplay} from "@/components/fileupload/filelist";
+import Select from "@mui/joy/Select";
+import Option from "@mui/joy/Option";
+import {Box, Stack} from "@mui/joy";
+import {SchemaTableNames} from "@/config/sqlmacros";
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
@@ -37,7 +41,7 @@ export function UploadAndReviewProcess() {
   // in progress state --> async upload function has completed
   const [uploaded, setUploaded] = useState(false);
   // core enum to handle state progression
-  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.PARSE);
+  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.TABLE_SELECT);
   // dropped file storage
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   // validated error storage
@@ -97,7 +101,6 @@ export function UploadAndReviewProcess() {
       }
     }
   }, [errorsData, handleUpload, reviewState, uploaded]);
-  0
   
   async function handleInitialSubmit() {
     setParsing(true);
@@ -149,72 +152,87 @@ export function UploadAndReviewProcess() {
   //
   //   }
   // }, [errMenuSelected]);
+  const handleTableSelectChange = (
+    event: React.SyntheticEvent | null,
+    newValue: string | null,
+  ) => {
+    setUploadTable(newValue!);
+  };
   
   switch (reviewState) {
     case ReviewStates.TABLE_SELECT:
       return (
         <>
-          <div className={"grid grid-cols-2"}>
-            <div>
-            
-            </div>
-            <div className={"flex flex-col m-auto"}>
-              <div className={"flex justify-center"}>
-                <FileDisplay acceptedFiles={acceptedFiles}/>
-              </div>
+          <Box className={"grid grid-cols-2"}>
+            <Box>
+              <Select size={"md"} onChange={handleTableSelectChange} placeholder={"Upload this file to table: "}
+                      sx={{display: 'flex', flex: 1}}>
+                {SchemaTableNames.map((table) => <Option value={table.name}>{table.name}</Option>)}
+              </Select>
+            </Box>
+            <Box className={"flex flex-col m-auto"}>
+              <Stack direction={"column"} className={"flex justify-center"}>
+                <Box sx={{display: 'flex', flex: 1, mb: 10}}>
+                  <Typography>Your file will need the correct headers in order to be uploaded to your intended table
+                    destination. Please review the table header requirements before continuing:</Typography>
+                </Box>
+                <Box>
+                  {uploadTable !== '' && SchemaTableNames.find(obj => obj["name"] === uploadTable)!.columns.map(obj => obj["headerName"]).join(', ')}
+                </Box>
+              </Stack>
               <Divider className={"my-4"}/>
-              <div className={"flex justify-center"}>
-                <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
-                  Review Files
+              <Box className={"flex justify-center"}>
+                <LoadingButton disabled={uploadTable == ''} onClick={() => setReviewState(ReviewStates.PARSE)}>
+                  Continue
                 </LoadingButton>
-              </div>
-            </div>
-          </div>
+              </Box>
+            </Box>
+          </Box>
         </>
       );
     case ReviewStates.PARSE:
       return (
         <>
-          <div className={"grid grid-cols-2"}>
-            <div>
+          <Box className={"grid grid-cols-2"}>
+            <Box>
               <DropzoneLogic onChange={(acceptedFiles: FileWithPath[]) => {
                 // @todo: what about rejectedFiles?
                 setAcceptedFiles((files) => acceptedFiles.concat(files));
               }}/>
-            </div>
-            <div className={"flex flex-col m-auto"}>
-              <div className={"flex justify-center"}>
+            </Box>
+            <Box className={"flex flex-col m-auto"}>
+              <Box className={"flex justify-center"}>
                 <FileDisplay acceptedFiles={acceptedFiles}/>
-              </div>
+              </Box>
               <Divider className={"my-4"}/>
-              <div className={"flex justify-center"}>
+              <Box className={"flex justify-center"}>
                 <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
                   Review Files
                 </LoadingButton>
-              </div>
-            </div>
-          </div>
+              </Box>
+            </Box>
+          </Box>
         </>
       );
     case ReviewStates.REVIEW:
       if (!parsedData) throw new Error("parsing the accepted files failed. parsedData empty");
       return (
         <>
-          <div className={"grid grid-cols-2"}>
-            <div className={"mr-4"}>
+          <Box className={"grid grid-cols-2"}>
+            <Box className={"mr-4"}>
               {/*{DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
               {/*  fileName: '',*/}
               {/*  data: [],*/}
               {/*})}*/}
               <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-            </div>
-            <div className={"flex justify-center w-2/4"}>
+            </Box>
+            <Box className={"flex justify-center w-2/4"}>
               <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/4 h-1/6 justify-center"}>
                 Confirm Changes
               </Button>
-            </div>
-          </div>
-          <div>
+            </Box>
+          </Box>
+          <Box>
             <Dialog
               open={dialogOpen}
               onClose={handleCancel}
@@ -236,19 +254,19 @@ export function UploadAndReviewProcess() {
                 </Button>
               </DialogActions>
             </Dialog>
-          </div>
+          </Box>
         </>
       );
     case ReviewStates.UPLOAD:
       return (
         <>
-          <div>
+          <Box>
             <LinearProgress
               color={"primary"}
               aria-label="Uploading..."
               className="w-auto"
             />
-          </div>
+          </Box>
         </>
       );
     case ReviewStates.ERRORS:
@@ -264,9 +282,9 @@ export function UploadAndReviewProcess() {
       // Show errors with the data that were uploaded
       return (
         <>
-          <div className={"flex flex-row gap-5 w-auto h-auto justify-center"}>
-            <div className={"grid grid-cols-2"}>
-              <div className={"flex flex-col flex-1 gap-5 w-auto h-auto justify-left"}>
+          <Box className={"flex flex-row gap-5 w-auto h-auto justify-center"}>
+            <Box className={"grid grid-cols-2"}>
+              <Box className={"flex flex-col flex-1 gap-5 w-auto h-auto justify-left"}>
                 <DisplayErrorTable
                   fileName={filesWithErrorsList[dataViewActive - 1].name}
                   fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
@@ -275,8 +293,8 @@ export function UploadAndReviewProcess() {
                   }}
                   errorMessage={errorsData}/>
                 <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-              </div>
-              <div>
+              </Box>
+              <Box>
                 <ClickAwayListener onClickAway={handleCloseErrDropdown}>
                   <Dropdown onOpenChange={handleOpenErrDropdown}>
                     <TriggerButton>Dashboard</TriggerButton>
@@ -304,27 +322,27 @@ export function UploadAndReviewProcess() {
                       marked as containing errors.</Typography>
                   </CardContent>
                 </Card>
-              </div>
-            </div>
-          </div>
+              </Box>
+            </Box>
+          </Box>
         </>
       );
     case ReviewStates.UPLOADED: // UPLOADED
       return (
         <>
-          <div className={"grid grid-cols-2"}>
-            <div className={"mr-4"}>
+          <Box className={"grid grid-cols-2"}>
+            <Box className={"mr-4"}>
               {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
                 fileName: '',
                 data: [],
               })}
               <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-            </div>
-            <div className={"flex justify-center"}>
+            </Box>
+            <Box className={"flex justify-center"}>
               Data was successfully uploaded! <br/>
               Please visit the Data page to view updated data.
-            </div>
-          </div>
+            </Box>
+          </Box>
         </>
       );
   }
