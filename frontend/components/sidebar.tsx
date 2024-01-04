@@ -213,8 +213,8 @@ export default function Sidebar() {
               },
             })}
           />
-          <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-            <Typography level="h1">ForestGEO</Typography>
+          <Box sx={{display: 'flex', gap: 1, alignItems: 'left'}}>
+            <Typography level="h1">ForestGEO: <Typography className={"text-teal-400"}>Panama</Typography></Typography>
           </Box>
           <Divider orientation={"horizontal"}/>
           <Box
