@@ -106,22 +106,22 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
             <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard View</h3>
           </>
         )
-      case 'data':
+      case 'coremeasurementshub':
         return (
           <>
-            <h2 className={title({color: "green"})} key={endpoint}>Data Hub</h2>
+            <h2 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h2>
           </>
         )
-      case 'files':
+      case 'fileuploadhub':
         return (
           <>
-            <h3 className={title({color: "pink"})} key={endpoint}>File Hub</h3>
+            <h3 className={title({color: "pink"})} key={endpoint}>CSV & ArcGIS File Upload Hub</h3>
           </>
         )
       case 'properties':
         return (
           <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub</h3>
+            <h3 className={title({color: "sky"})} key={endpoint}>Measurement Properties Hub</h3>
           </>
         )
       default:
@@ -187,17 +187,16 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
               </DialogTitle>
               <Divider/>
               <DialogContent>
-                <Stack direction={"column"} width={500}>
+                <Stack direction={"column"} sx={{display: 'flex', flex: 1}}>
                   {loading != 100 ?
                     <>
                       <LinearProgress sx={{display: 'flex', flex: 1}} determinate size={"lg"} value={loading}/>
                       <Typography level="body-sm" color="neutral"><b>{loadingMsg}</b></Typography>
                     </> :
                     <>
-                      <Typography level={"body-sm"}>Select <b>Data</b> to view existing data and manually add data to
-                        storage</Typography>
-                      <Typography level={"body-sm"}>Select <b>Files</b> to add preformatted CSV data files to
-                        storage</Typography>
+                      <Typography level={"body-sm"} >Select <b>Core Measurements Hub</b> to view existing core measurement data for a given plot, census, and quadrat</Typography>
+                      <Typography level={"body-sm"}>Select <b>CSV & ArcGIS File Upload Hub</b> to upload core measurements in either CSV format or in collected ArcGIS format</Typography>
+                      <Typography level={"body-sm"}>Select <b>Measurement Properties Hub</b> to view and edit measurement properties used in data collection</Typography>
                     </>}
                 </Stack>
               </DialogContent>

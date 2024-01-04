@@ -42,7 +42,7 @@ export default function Page() {
             {/*SECOND ROW*/}
             <Grid xs={2}/>
             <Grid xs={4}>
-              {TemplateCard(QuadratBackground, <WidgetsIcon/>, "Quadrats", "/properties]/quadrats")}
+              {TemplateCard(QuadratBackground, <WidgetsIcon/>, "Quadrats", "/properties/quadrats")}
             </Grid>
             <Grid xs={4}>
               {TemplateCard(SpeciesBackground, <BugReportIcon/>, "Species", "/properties/species")}
