@@ -10,6 +10,8 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
+import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import React from "react";
 
 // INTERFACES
@@ -215,11 +217,24 @@ export const siteConfigNav: SiteConfigProps[] = [
     expanded: [],
   },
   {
-    label: "CSV & ArcGIS File Upload Hub",
+    label: "File Upload Hub",
     href: "/fileuploadhub",
-    tip: 'Upload core measurements in either CSV format or in collected ArcGIS format',
+    tip: 'Upload data',
     icon: FolderIcon,
-    expanded: [],
+    expanded: [
+      {
+        label: 'ArcGIS File Upload',
+        href: '/arcgisfile',
+        tip: 'Upload an ArcGIS File',
+        icon: SatelliteAltIcon,
+      },
+      {
+        label: 'CSV File Upload',
+        href: '/csvfile',
+        tip: 'Upload a CSV file',
+        icon: UploadFileIcon,
+      }
+    ],
   },
   {
     label: "Core Measurements Hub",
@@ -231,7 +246,7 @@ export const siteConfigNav: SiteConfigProps[] = [
   {
     label: "Measurement Properties Hub",
     href: "/properties",
-    tip: '',
+    tip: 'View Modifiable Properties',
     icon: SettingsSuggestIcon,
     expanded: [
       {

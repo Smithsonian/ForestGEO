@@ -231,34 +231,34 @@ export default function Sidebar() {
                 if (item.expanded.length === 0) {
                   return (
                     <>
-                      <Tooltip title={item.tip} variant={"soft"}>
-                        <ListItem>
-                          <ListItemButton selected={pathname === item.href}
-                                          color={pathname === item.href ? 'primary' : undefined}
-                                          onClick={() => router.push(item.href)}>
-                            <Icon/>
-                            <ListItemContent>
+                      <ListItem>
+                        <ListItemButton selected={pathname === item.href}
+                                        color={pathname === item.href ? 'primary' : undefined}
+                                        onClick={() => router.push(item.href)}>
+                          <Icon/>
+                          <ListItemContent>
+                            <Tooltip title={item.tip} variant={"soft"}>
                               <Typography level={"title-sm"}>{item.label}</Typography>
-                            </ListItemContent>
-                          </ListItemButton>
-                        </ListItem>
-                      </Tooltip>
+                            </Tooltip>
+                          </ListItemContent>
+                        </ListItemButton>
+                      </ListItem>
                     </>
                   );
                 } else {
                   return (
                     <>
-                      <Tooltip title={item.tip} variant={"soft"}>
-                        <ListItem nested>
-                          <SimpleToggler
-                            renderToggle={MenuRenderToggle(item, properties, setProperties)}
-                            isOpen={properties}
-                          >
-                            <List sx={{gap: 0.5}} size={"sm"}>
-                              {item.expanded.map((link, linkIndex) => {
-                                const SubIcon = link.icon;
-                                return (
-                                  <>
+                      <ListItem nested>
+                        <SimpleToggler
+                          renderToggle={MenuRenderToggle(item, properties, setProperties)}
+                          isOpen={properties}
+                        >
+                          <List sx={{gap: 0.5}} size={"sm"}>
+                            {item.expanded.map((link, linkIndex) => {
+                              const SubIcon = link.icon;
+                              return (
+                                <>
+                                  <Tooltip title={link.tip} variant={"soft"}>
                                     <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
                                       <ListItemButton selected={pathname == (item.href + link.href)}
                                                       onClick={() => router.push((item.href + link.href))}>
@@ -268,13 +268,13 @@ export default function Sidebar() {
                                         </ListItemContent>
                                       </ListItemButton>
                                     </ListItem>
-                                  </>
-                                );
-                              })}
-                            </List>
-                          </SimpleToggler>
-                        </ListItem>
-                      </Tooltip>
+                                  </Tooltip>
+                                </>
+                              );
+                            })}
+                          </List>
+                        </SimpleToggler>
+                      </ListItem>
                     </>
                   );
                 }

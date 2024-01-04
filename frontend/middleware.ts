@@ -1,3 +1,3 @@
 export {default} from "next-auth/middleware"
 
-export const config = {matcher: ["/dashboard", "/files", "/data"]}
+export const config = {matcher: ['/(dashboard|coremeasurementhub|fileuploadhub|properties)(/|$)']}
