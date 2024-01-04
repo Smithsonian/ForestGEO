@@ -18,17 +18,16 @@ export default function Page() {
     <>
       <Box sx={{
         display: 'flex',
-        flexGrow: 1,
-        flexShrink: 1,
+        flex: 1,
         flexDirection: 'column',
         overflow: 'hidden'
       }}>
         <Box sx={{
           display: 'flex',
-          flexGrow: 1,
+          flex: 1,
           overflow: 'hidden',
         }}>
-          <Grid container columnSpacing={2} rowSpacing={2} sx={{flexGrow: 1}}>
+          <Grid container columnSpacing={2} rowSpacing={2} sx={{flex: 1, width: '100%'}}>
             {/*FIRST ROW*/}
             <Grid xs={4}>
               {TemplateCard(AttributeBackground, <DescriptionIcon/>, "Attributes", "/properties/attributes")}

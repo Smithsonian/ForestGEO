@@ -172,11 +172,11 @@ export function UploadAndReviewProcess() {
             </Box>
             <Box className={"flex flex-col m-auto"}>
               <Stack direction={"column"} className={"flex justify-center"}>
-                <Box sx={{display: 'flex', flex: 1, mb: 10}}>
+                <Box sx={{display: 'flex', flex: 1, mb: 10, marginRight: 50}}>
                   <Typography>Your file will need the correct headers in order to be uploaded to your intended table
                     destination. Please review the table header requirements before continuing:</Typography>
                 </Box>
-                <Box>
+                <Box sx={{display: 'flex', flex: 1, marginLeft: 50}}>
                   {uploadTable !== '' && SchemaTableNames.find(obj => obj["name"] === uploadTable)!.columns.map(obj => obj["headerName"]).join(', ')}
                 </Box>
               </Stack>
