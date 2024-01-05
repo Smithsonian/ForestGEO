@@ -4,7 +4,7 @@ import {FileErrors, ReviewStates} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse} from "papaparse";
-import {usePlotContext} from "@/app/contexts/plotcontext";
+import {usePlotContext} from "@/app/contexts/userselectioncontext";
 import {useSession} from "next-auth/react";
 import {
   Button,
