@@ -1,30 +1,42 @@
 "use client";
 
 import React, {createContext, Dispatch, useContext, useReducer} from "react";
-import {GridValidRowModel} from "@mui/x-data-grid";
+import {
+  AttributeRDS,
+  CensusRDS,
+  PersonnelRDS,
+  PlotRDS,
+  QuadratRDS,
+  SpeciesRDS,
+  SubSpeciesRDS
+} from "@/config/sqlmacros";
 
-export const AttributeLoadContext = createContext<GridValidRowModel[] | null>(null);
-export const CensusLoadContext = createContext<GridValidRowModel[] | null>(null);
-export const PersonnelLoadContext = createContext<GridValidRowModel[] | null>(null);
-export const QuadratsLoadContext = createContext<GridValidRowModel[] | null>(null);
-export const SpeciesLoadContext = createContext<GridValidRowModel[] | null>(null);
-export const PlotsLoadContext = createContext<GridValidRowModel[] | null>(null);
+export const AttributeLoadContext = createContext<AttributeRDS[] | null>(null);
+export const CensusLoadContext = createContext<CensusRDS[] | null>(null);
+export const PersonnelLoadContext = createContext<PersonnelRDS[] | null>(null);
+export const QuadratsLoadContext = createContext<QuadratRDS[] | null>(null);
+export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
+export const SubSpeciesLoadContext = createContext<SubSpeciesRDS[] | null>(null);
+export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
 export const AttributeLoadDispatchContext = createContext<Dispatch<{
-  attributeLoad: GridValidRowModel[] | null
+  attributeLoad: AttributeRDS[] | null
 }> | null>(null);
 export const CensusLoadDispatchContext = createContext<Dispatch<{
-  censusLoad: GridValidRowModel[] | null
+  censusLoad: CensusRDS[] | null
 }> | null>(null);
 export const PersonnelLoadDispatchContext = createContext<Dispatch<{
-  personnelLoad: GridValidRowModel[] | null
+  personnelLoad: PersonnelRDS[] | null
 }> | null>(null);
 export const QuadratsLoadDispatchContext = createContext<Dispatch<{
-  quadratsLoad: GridValidRowModel[] | null
+  quadratsLoad: QuadratRDS[] | null
 }> | null>(null);
 export const SpeciesLoadDispatchContext = createContext<Dispatch<{
-  speciesLoad: GridValidRowModel[] | null
+  speciesLoad: SpeciesRDS[] | null
 }> | null>(null);
-export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: GridValidRowModel[] | null }> | null>(null);
+export const SubSpeciesLoadDispatchContext = createContext<Dispatch<{
+  subSpeciesLoad: SubSpeciesRDS[] | null
+}> | null>(null);
+export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: PlotRDS[] | null }> | null>(null);
 
 export function FixedDataProvider({children}: { children: React.ReactNode }) {
   const [attributeLoad, attributeLoadDispatch] = useReducer(
@@ -83,27 +95,31 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
   );
 }
 
-function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: GridValidRowModel[] | null }) {
+function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: AttributeRDS[] | null }) {
   return action.attributeLoad;
 }
 
-function censusLoadReducer(currentCensusLoad: any, action: { censusLoad: GridValidRowModel[] | null }) {
+function censusLoadReducer(currentCensusLoad: any, action: { censusLoad: CensusRDS[] | null }) {
   return action.censusLoad;
 }
 
-function personnelLoadReducer(currentPersonnelLoad: any, action: { personnelLoad: GridValidRowModel[] | null }) {
+function personnelLoadReducer(currentPersonnelLoad: any, action: { personnelLoad: PersonnelRDS[] | null }) {
   return action.personnelLoad;
 }
 
-function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: GridValidRowModel[] | null }) {
+function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: QuadratRDS[] | null }) {
   return action.quadratsLoad;
 }
 
-function speciesLoadReducer(currentSpeciesLoad: any, action: { speciesLoad: GridValidRowModel[] | null }) {
+function speciesLoadReducer(currentSpeciesLoad: any, action: { speciesLoad: SpeciesRDS[] | null }) {
   return action.speciesLoad;
 }
 
-function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: GridValidRowModel[] | null }) {
+function subSpeciesLoadReducer(currentSpeciesLoad: any, action: { subSpeciesLoad: SubSpeciesRDS[] | null }) {
+  return action.subSpeciesLoad;
+}
+
+function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: PlotRDS[] | null }) {
   return action.plotsLoad;
 }
 

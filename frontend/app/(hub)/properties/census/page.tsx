@@ -23,7 +23,8 @@ import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
 import {useCensusLoadContext, usePlotsLoadContext} from "@/app/contexts/fixeddatacontext";
-import {CensusGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {StyledDataGrid} from "@/config/sqlmacros";
+import {usePlotContext} from "@/app/contexts/userselectioncontext";
 
 interface EditToolbarProps {
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
@@ -93,33 +94,14 @@ export default function Page() {
       description: ''
     },
   ]
-  const initialPlots: GridRowsProp = [
-    {
-      id: 0,
-      plotID: 0,
-      plotName: '',
-      locationName: '',
-      countryName: '',
-      area: 0.0,
-      plotX: 0.0,
-      plotY: 0.0,
-      plotZ: 0.0,
-      plotShape: '',
-      plotDescription: ''
-    }
-  ]
   const [rows, setRows] = React.useState(initialRows);
-  const [plotRows, setPlotRows] = React.useState(initialPlots);
   const censusLoad = useCensusLoadContext();
-  const plotsLoad = usePlotsLoadContext();
+  let currentPlot = usePlotContext();
   useEffect(() => {
     if (censusLoad) {
       setRows(censusLoad);
     }
-    if (plotsLoad) {
-      setPlotRows(plotsLoad);
-    }
-  }, [censusLoad, setRows, plotsLoad, setPlotRows]);
+  }, [censusLoad, setRows]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
@@ -181,9 +163,10 @@ export default function Page() {
       new Promise<GridRowModel>(async (resolve, reject) => {
         if (newRow.censusID == '') {
           reject(new Error("Primary key CensusID cannot be empty!"));
-        } else if (oldRow.code == '') {
+        } else if (oldRow.censusID == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/census?code=${newRow.code}&desc=${newRow.description}&stat=${newRow.status}`, {
+          const response = await fetch(`/api/fixeddata/census?censusID=${newRow.censusID}&plotID=${currentPlot!.id}
+          &plotCensusNumber=${newRow.plotCensusNumber}&startDate=${newRow.startDate}&endDate=${newRow.endDate}&description=${newRow.description}`, {
             method: 'POST'
           });
           const responseJSON = await response.json();
@@ -193,7 +176,9 @@ export default function Page() {
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/census?oldCode=${oldRow.code}&newCode=${newRow.code}&newDesc=${newRow.description}&newStat=${newRow.status}`, {
+            const response = await fetch(`/api/fixeddata/census?oldCensusID=${oldRow.censusID}&censusID=${newRow.censusID}
+            &plotID=${currentPlot!.id}&plotCensusNumber=${newRow.plotCensusNumber}&startDate=${newRow.startDate}
+            &endDate=${newRow.endDate}&description=${newRow.description}`, {
               method: 'PATCH'
             })
             const responseJSON = await response.json();
@@ -210,14 +195,64 @@ export default function Page() {
     setRowModesModel(newRowModesModel);
   };
   
-  const plotIDs = plotRows.map((plotRow) => plotRow.plotID);
   const columns: GridColDef[] = [
-    ...CensusGridColumns,
+    {
+      field: 'censusID',
+      headerName: 'CensusID',
+      type: 'number',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
+    },
+    {
+      field: 'plotID',
+      headerName: 'PlotID',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
+    },
+    {
+      field: 'plotCensusNumber',
+      headerName: 'PlotCensusNumber',
+      type: 'number',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
+    },
+    {
+      field: 'startDate',
+      headerName: 'StartDate',
+      type: 'date',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true,
+      valueGetter: (params) => {
+        if (!params.value) return null;
+        return new Date(params.value);
+      }
+    },
+    {
+      field: 'endDate',
+      headerName: 'EndDate',
+      type: 'date',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true,
+      valueGetter: (params) => {
+        if (!params.value) return null;
+        return new Date(params.value);
+      }
+    },
+    {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
     {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      minWidth: 100,
       flex: 1,
       cellClassName: 'actions',
       getActions: ({id}) => {
@@ -261,49 +296,58 @@ export default function Page() {
       },
     },
   ];
-  
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        flex: 1,
-        '& .actions': {
-          color: 'text.secondary',
-        },
-        '& .textPrimary': {
-          color: 'text.primary',
-        },
-      }}
-    >
-      <Box sx={{display: 'flex', flex: 1}}>
-        <StyledDataGrid sx={{display: 'flex', flex: 1}}
-                        rows={rows}
-                        columns={columns}
-                        editMode="row"
-                        rowModesModel={rowModesModel}
-                        onRowModesModelChange={handleRowModesModelChange}
-                        onRowEditStop={handleRowEditStop}
-                        processRowUpdate={processRowUpdate}
-                        onProcessRowUpdateError={handleProcessRowUpdateError}
-                        loading={refresh}
-                        slots={{
-                          toolbar: EditToolbar,
-                        }}
-                        slotProps={{
-                          toolbar: {setRows, setRowModesModel, setRefresh},
-                        }}
-        />
+  if (!currentPlot) {
+    return <>You must select a plot to continue!</>;
+  } else {
+    return (
+      <Box
+        sx={{
+          width: '100%',
+          '& .actions': {
+            color: 'text.secondary',
+          },
+          '& .textPrimary': {
+            color: 'text.primary',
+          },
+        }}
+      >
+        <Box sx={{width: '100%'}}>
+          <StyledDataGrid sx={{width: '100%'}}
+                          rows={rows}
+                          columns={columns}
+                          editMode="row"
+                          rowModesModel={rowModesModel}
+                          onRowModesModelChange={handleRowModesModelChange}
+                          onRowEditStop={handleRowEditStop}
+                          processRowUpdate={processRowUpdate}
+                          onProcessRowUpdateError={handleProcessRowUpdateError}
+                          loading={refresh}
+                          slots={{
+                            toolbar: EditToolbar,
+                          }}
+                          slotProps={{
+                            toolbar: {setRows, setRowModesModel, setRefresh},
+                          }}
+                          initialState={{
+                            filter: {
+                              filterModel: {
+                                items: [{ field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}` }],
+                              },
+                            },
+                          }}
+          />
+        </Box>
+        {!!snackbar && (
+          <Snackbar
+            open
+            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
+            onClose={handleCloseSnackbar}
+            autoHideDuration={6000}
+          >
+            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
+          </Snackbar>
+        )}
       </Box>
-      {!!snackbar && (
-        <Snackbar
-          open
-          anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
-          onClose={handleCloseSnackbar}
-          autoHideDuration={6000}
-        >
-          <Alert {...snackbar} onClose={handleCloseSnackbar}/>
-        </Snackbar>
-      )}
-    </Box>
-  );
+    );
+  }
 }

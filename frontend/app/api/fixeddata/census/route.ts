@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   if (!checkCensusID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkCensusID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
   let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Census (CensusID, PlotID, PlotCensusNumber, StartDate, EndDate, Description) VALUES
-    (${row.censusID}, ${row.plotID}, ${row.plotCensusNumber}, ${row.startDate}, ${row.endDate}, ${row.description})`);
+    (${row.censusID}, ${row.plotID}, ${row.plotCensusNumber}, ${row.startDate}, ${row.endDate}, '${row.description}')`);
   if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   await conn.close();
   return NextResponse.json({message: "Insert successful"}, {status: 200});
@@ -105,14 +105,14 @@ export async function PATCH(request: NextRequest) {
     
     let results = await runQuery(conn, `UPDATE forestgeo.Census
     SET [CensusID] = ${row.censusID}, [PlotID] = ${row.plotID}, [PlotCensusNumber] = ${row.plotCensusNumber},
-    [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = ${row.description} WHERE [CensusID] = '${oldCensus}'`);
+    [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = '${row.description}' WHERE [CensusID] = '${oldCensus}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // other column information is being updated, no PK check required
     let results = await runQuery(conn, `UPDATE forestgeo.Census
     SET [PlotID] = ${row.plotID}, [PlotCensusNumber] = ${row.plotCensusNumber},
-    [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = ${row.description} WHERE [CensusID] = '${row.censusID}'`);
+    [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = '${row.description}' WHERE [CensusID] = '${row.censusID}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
