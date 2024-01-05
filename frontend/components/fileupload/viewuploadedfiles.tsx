@@ -49,32 +49,25 @@ function LoadingFiles() {
 
 export default function ViewUploadedFiles() {
   let currentPlot = usePlotContext();
-  const [error, setError] = useState<Error>();
+  const [error, setError] = useState<Error>(new Error());
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   // const [deleteFile, setDeleteFile] = useState("");
   const getListOfFiles = useCallback(async () => {
     if (currentPlot && currentPlot.key !== undefined) {
-      let response = null;
-      try {
-        response = await fetch('/api/downloadallfiles?plot=' + currentPlot.key, {
-          method: 'GET',
-        });
-        
-        if (!response.ok) {
-          console.error('response.statusText', response.statusText);
-          setError(new Error('API response not ok'));
-        }
-      } catch (e) {
-        console.error(e);
-        setError(new Error('API response not ok'));
-      }
+      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot!.key}`, {
+        method: 'GET',
+      });
       
-      if (response) {
-        let data = await response.json();
-        setFileRows(data.blobData);
-        setIsLoaded(true);
-      }
+      // if (!response.ok) {
+      //   let jsonOutput = await response.json();
+      //   console.error('response.statusText', jsonOutput.statusText);
+      //   setError(new Error(`API response: ${jsonOutput.statusText}`));
+      // } else {
+      //   let data = await response.json();
+      //   setFileRows(data.blobData);
+      //   setIsLoaded(true);
+      // }
     } else {
       console.log('Plot is undefined');
       setError(new Error('No plot'));
@@ -114,7 +107,7 @@ export default function ViewUploadedFiles() {
       </>
     );
   } else if (error) {
-    return <BrowseError/>
+    return BrowseError(error);
   } else if (!isLoaded || !fileRows) {
     return <LoadingFiles/>
   } else {

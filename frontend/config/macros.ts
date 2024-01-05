@@ -325,8 +325,8 @@ export async function getContainerClient(plot: string) {
   if (!blobServiceClient) throw new Error("blob service client creation failed");
   // attempt connection to pre-existing container --> additional check to see if container was found
   let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
-  await containerClient.createIfNotExists();
-  return containerClient;
+  if (!(await containerClient.exists())) await containerClient.create();
+  else return containerClient;
 }
 
 export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string, errors: boolean) {
