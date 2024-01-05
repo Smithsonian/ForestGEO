@@ -1,6 +1,5 @@
 "use client";
 import {
-  DataGrid,
   GridActionsCellItem,
   GridColDef,
   GridEventListener,
@@ -25,7 +24,6 @@ import Box from "@mui/joy/Box";
 import {useAttributeLoadContext} from "@/app/contexts/fixeddatacontext";
 import {AttributeGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 import {ErrorMessages} from "@/config/macros";
-import {styled} from "@mui/system";
 
 interface EditToolbarProps {
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
