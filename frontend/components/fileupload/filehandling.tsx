@@ -17,7 +17,8 @@ import {DropzoneLogic} from "@/components/fileupload/dropzone";
 import {FileDisplay} from "@/components/fileupload/filelist";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
-import {UploadAndReviewProcess} from "@/components/uploadreviewcycle";
+import {UploadAndReviewProcess} from "@/components/fileupload/uploadreviewcycle";
+import ViewUploadedFiles from './viewuploadedfiles';
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
  *
@@ -187,7 +188,7 @@ export function FileTabView() {
                 <Tab>Upload New Files</Tab>
               </TabList>
               <TabPanel value={0}>
-                {/*<ViewUploadedFiles/>*/}
+                <ViewUploadedFiles/>
               </TabPanel>
               <TabPanel value={1}>
                 <UploadAndReviewProcess/>
