@@ -1,16 +1,14 @@
 "use client";
-import React, {useCallback, useState} from 'react';
+import React, {useState} from 'react';
 import {useSession} from "next-auth/react";
-import {DropzoneProps, DropzonePureProps, FileErrors, FileListProps, UploadValidationProps} from "@/config/macros";
+import {FileErrors, UploadValidationProps} from "@/config/macros";
 import {ValidationTable} from "@/components/fileupload/validationtable";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 import {FileWithPath} from 'react-dropzone';
 
 import '@/styles/dropzone.css';
 import {subtitle} from "@/config/primitives";
-import {Card, CardContent, CardHeader, Pagination} from "@mui/material";
-import {Skeleton, Tab, TabList, TabPanel, Tabs} from "@mui/joy";
-import Chip from "@mui/joy/Chip";
+import {Tab, TabList, TabPanel, Tabs} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import LoadingButton from "@mui/lab/LoadingButton";
 import {DropzoneLogic} from "@/components/fileupload/dropzone";
@@ -27,7 +25,7 @@ import ViewUploadedFiles from './viewuploadedfiles';
  * - DropzonePure: presentation side of dropzone box
  * - Dropzone: dropzone box upload logic/file type validation
  * - UploadAndValidateFiles: error display/upload completion display
- * - Filehandling: core logic for file upload/api fire
+ * - FileHandling: core logic for file upload/api fire
  */
 
 /**

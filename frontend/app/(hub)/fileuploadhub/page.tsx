@@ -28,14 +28,16 @@ export default function Page() {
           alignItems: 'center',
           width: '100%',
         }}>
-          <Grid container direction={"row"} justifyContent={"flex-start"} alignItems={"center"} columnSpacing={2} rowSpacing={2} sx={{display: 'flex', width: '100%'}}>
+          <Grid container direction={"row"} justifyContent={"flex-start"} alignItems={"center"} columnSpacing={2}
+                rowSpacing={2} sx={{display: 'flex', width: '100%'}}>
             {/*FIRST ROW*/}
             <Grid xs={5}>
               {TemplateCard(CSVUploadBackground, <UploadFileIcon/>, "Upload CSV File", "/fileuploadhub/csvfile")}
             </Grid>
-            <Grid xs={2} />
+            <Grid xs={2}/>
             <Grid xs={5}>
-              {TemplateCard(ArcGISUploadBackground, <SatelliteAltIcon/>, "Upload ArcGIS File", "/fileuploadhub/arcgisfile")}
+              {TemplateCard(ArcGISUploadBackground,
+                <SatelliteAltIcon/>, "Upload ArcGIS File", "/fileuploadhub/arcgisfile")}
             </Grid>
           </Grid>
         </Box>
