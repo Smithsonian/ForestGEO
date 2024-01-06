@@ -31,7 +31,7 @@ export function DisplayErrorTable({fileName, fileData, errorMessage}: DisplayErr
     <>
       <TableContainer component={Paper}>
         <h3>file: {fileName}</h3>
-        
+
         <Table>
           {errorMessage[fileName]['headers'] ? (
             <></>
@@ -129,12 +129,12 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
   };
   display();
   let fileData: { fileName: string; data: DataStructure[] };
-  
+
   return (
     <>
       {Object.keys(errorMessage).map((fileName) => {
         fileData = data.find((file) => file.fileName == fileName) || {
-          
+
           fileName: '',
           data: [],
         };
@@ -142,7 +142,7 @@ export function ValidationTable({uploadedData, errorMessage, headers,}: Validati
           <>
             <TableContainer component={Paper}>
               <h3>file: {fileName}</h3>
-              
+
               <Table>
                 {errorMessage[fileName]['headers'] ? (
                   <></>

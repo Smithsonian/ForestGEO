@@ -35,7 +35,7 @@ interface EditToolbarProps {
 
 function EditToolbar(props: EditToolbarProps) {
   const {setRows, setRowModesModel, setRefresh} = props;
-  
+
   const handleClick = async () => {
     const id = randomId();
     setRows((oldRows) => [...oldRows, {
@@ -51,7 +51,7 @@ function EditToolbar(props: EditToolbarProps) {
       [id]: {mode: GridRowModes.Edit, fieldToFocus: 'code'},
     }));
   };
-  
+
   const handleRefresh = async () => {
     setRefresh(true);
     const response = await fetch(`/api/fixeddata/personnel`, {
@@ -60,7 +60,7 @@ function EditToolbar(props: EditToolbarProps) {
     setRows(await response.json());
     setRefresh(false);
   }
-  
+
   return (
     <GridToolbarContainer>
       <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
@@ -115,21 +115,21 @@ export default function Page() {
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
     setSnackbar({children: String(error), severity: 'error'});
   }, []);
-  
+
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
       event.defaultMuiPrevented = true;
     }
   };
-  
+
   const handleEditClick = (id: GridRowId) => () => {
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
-  
+
   const handleSaveClick = (id: GridRowId) => () => {
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
   };
-  
+
   const handleDeleteClick = (id: GridRowId) => async () => {
     const response = await fetch(`/api/fixeddata/personnel?personnelID=${rows.find((row) => row.id == id)!.personnelID}`, {method: 'DELETE'});
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
@@ -139,20 +139,20 @@ export default function Page() {
       await refreshData();
     }
   };
-  
+
   const handleCancelClick = (id: GridRowId) => () => {
     setRowModesModel({
       ...rowModesModel,
       [id]: {mode: GridRowModes.View, ignoreModifications: true},
     });
-    
+
     const editedRow = rows.find((row) => row.id === id);
     if (editedRow!.isNew) {
       setRows(rows.filter((row) => row.id !== id));
       setSnackbar({children: "Changes cancelled", severity: 'success'});
     }
   };
-  
+
   const processRowUpdate = React.useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>(async (resolve, reject) => {
@@ -160,8 +160,11 @@ export default function Page() {
           reject(new Error("Primary key Code cannot be empty!"));
         } else if (oldRow.code == '') {
           // inserting a row --> personnelID, firstName, lastName, role
-          const response = await fetch(
-            `/api/fixeddata/personnel?personnelID=${newRow.personnelID}&firstName=${newRow.firstName}&lastName=${newRow.lastName}&role=${newRow.role}`, {
+          const response = await fetch(`/api/fixeddata/personnel?
+          personnelID=${newRow.personnelID}
+          &firstName=${newRow.firstName}
+          &lastName=${newRow.lastName}
+          &role=${newRow.role}`, {
               method: 'POST'
             });
           const responseJSON = await response.json();
@@ -174,7 +177,12 @@ export default function Page() {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
             const response = await fetch(
-              `/api/fixeddata/personnel?oldPersonnelID=${oldRow.personnelID}&personnelID=${newRow.personnelID}&firstName=${newRow.firstName}&lastName=${newRow.lastName}&role=${newRow.role}`, {
+              `/api/fixeddata/personnel?
+              oldPersonnelID=${oldRow.personnelID}
+              &personnelID=${newRow.personnelID}
+              &firstName=${newRow.firstName}
+              &lastName=${newRow.lastName}
+              &role=${newRow.role}`, {
                 method: 'PATCH'
               })
             const responseJSON = await response.json();
@@ -191,7 +199,7 @@ export default function Page() {
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
   };
-  
+
   const columns: GridColDef[] = [
     ...PersonnelGridColumns,
     {
@@ -202,12 +210,13 @@ export default function Page() {
       cellClassName: 'actions',
       getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
-        
+
         if (isInEditMode) {
           return [
             <GridActionsCellItem
               icon={<SaveIcon/>}
               label="Save"
+              key={"save"}
               sx={{
                 color: 'primary.main',
               }}
@@ -216,17 +225,19 @@ export default function Page() {
             <GridActionsCellItem
               icon={<CancelIcon/>}
               label="Cancel"
+              key={"cancel"}
               className="textPrimary"
               onClick={handleCancelClick(id)}
               color="inherit"
             />,
           ];
         }
-        
+
         return [
           <GridActionsCellItem
             icon={<EditIcon/>}
             label="Edit"
+            key={"edit"}
             className="textPrimary"
             onClick={handleEditClick(id)}
             color="inherit"
@@ -234,6 +245,7 @@ export default function Page() {
           <GridActionsCellItem
             icon={<DeleteIcon/>}
             label="Delete"
+            key={"delete"}
             onClick={handleDeleteClick(id)}
             color="inherit"
           />,
@@ -241,7 +253,7 @@ export default function Page() {
       },
     },
   ];
-  
+
   return (
     <Box
       sx={{

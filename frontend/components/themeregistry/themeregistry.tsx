@@ -11,7 +11,7 @@ import {CssVarsProvider as JoyCssVarsProvider} from '@mui/joy/styles';
 
 const materialTheme = materialExtendTheme();
 export default function ThemeRegistry({children}: { children: React.ReactNode }) {
-  
+
   return (
     <NextAppDirEmotionCacheProvider options={{key: 'joy'}}>
       <MaterialCssVarsProvider theme={{[MATERIAL_THEME_ID]: materialTheme}} defaultMode={"dark"}

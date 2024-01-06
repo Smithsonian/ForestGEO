@@ -4,6 +4,7 @@ import React, {createContext, Dispatch, useContext, useReducer} from "react";
 import {
   AttributeRDS,
   CensusRDS,
+  CoreMeasurementRDS,
   PersonnelRDS,
   PlotRDS,
   QuadratRDS,
@@ -11,6 +12,7 @@ import {
   SubSpeciesRDS
 } from "@/config/sqlmacros";
 
+export const CoreMeasurementLoadContext = createContext<CoreMeasurementRDS[] | null>(null);
 export const AttributeLoadContext = createContext<AttributeRDS[] | null>(null);
 export const CensusLoadContext = createContext<CensusRDS[] | null>(null);
 export const PersonnelLoadContext = createContext<PersonnelRDS[] | null>(null);
@@ -18,6 +20,9 @@ export const QuadratsLoadContext = createContext<QuadratRDS[] | null>(null);
 export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
 export const SubSpeciesLoadContext = createContext<SubSpeciesRDS[] | null>(null);
 export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
+export const CoreMeasurementLoadDispatchContext = createContext<Dispatch<{
+  coreMeasurementLoad: CoreMeasurementRDS[] | null
+}> | null>(null);
 export const AttributeLoadDispatchContext = createContext<Dispatch<{
   attributeLoad: AttributeRDS[] | null
 }> | null>(null);
@@ -39,11 +44,14 @@ export const SubSpeciesLoadDispatchContext = createContext<Dispatch<{
 export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: PlotRDS[] | null }> | null>(null);
 
 export function FixedDataProvider({children}: { children: React.ReactNode }) {
+  const [coreMeasurementLoad, coreMeasurementLoadDispatch] = useReducer(
+    coreMeasurementLoadReducer,
+    null
+  )
   const [attributeLoad, attributeLoadDispatch] = useReducer(
     attributeLoadReducer,
     null
   )
-  
   const [censusLoad, censusLoadDispatch] = useReducer(
     censusLoadReducer,
     null
@@ -64,43 +72,52 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
     subSpeciesLoadReducer,
     null
   )
-  
   const [plotsLoad, plotsLoadDispatch] = useReducer(
     plotsLoadReducer,
     null
   )
-  
+
   return (
-    <AttributeLoadContext.Provider value={attributeLoad}>
-      <AttributeLoadDispatchContext.Provider value={attributeLoadDispatch}>
-        <CensusLoadContext.Provider value={censusLoad}>
-          <CensusLoadDispatchContext.Provider value={censusLoadDispatch}>
-            <PersonnelLoadContext.Provider value={personnelLoad}>
-              <PersonnelLoadDispatchContext.Provider value={personnelLoadDispatch}>
-                <QuadratsLoadContext.Provider value={quadratsLoad}>
-                  <QuadratsLoadDispatchContext.Provider value={quadratsLoadDispatch}>
-                    <SpeciesLoadContext.Provider value={speciesLoad}>
-                      <SpeciesLoadDispatchContext.Provider value={speciesLoadDispatch}>
-                        <SubSpeciesLoadContext.Provider value={subSpeciesLoad}>
-                          <SubSpeciesLoadDispatchContext.Provider value={subSpeciesLoadDispatch}>
-                            <PlotsLoadContext.Provider value={plotsLoad}>
-                              <PlotsLoadDispatchContext.Provider value={plotsLoadDispatch}>
-                                {children}
-                              </PlotsLoadDispatchContext.Provider>
-                            </PlotsLoadContext.Provider>
-                          </SubSpeciesLoadDispatchContext.Provider>
-                        </SubSpeciesLoadContext.Provider>
-                      </SpeciesLoadDispatchContext.Provider>
-                    </SpeciesLoadContext.Provider>
-                  </QuadratsLoadDispatchContext.Provider>
-                </QuadratsLoadContext.Provider>
-              </PersonnelLoadDispatchContext.Provider>
-            </PersonnelLoadContext.Provider>
-          </CensusLoadDispatchContext.Provider>
-        </CensusLoadContext.Provider>
-      </AttributeLoadDispatchContext.Provider>
-    </AttributeLoadContext.Provider>
+    <CoreMeasurementLoadContext.Provider value={coreMeasurementLoad}>
+      <CoreMeasurementLoadDispatchContext.Provider value={coreMeasurementLoadDispatch}>
+        <AttributeLoadContext.Provider value={attributeLoad}>
+          <AttributeLoadDispatchContext.Provider value={attributeLoadDispatch}>
+            <CensusLoadContext.Provider value={censusLoad}>
+              <CensusLoadDispatchContext.Provider value={censusLoadDispatch}>
+                <PersonnelLoadContext.Provider value={personnelLoad}>
+                  <PersonnelLoadDispatchContext.Provider value={personnelLoadDispatch}>
+                    <QuadratsLoadContext.Provider value={quadratsLoad}>
+                      <QuadratsLoadDispatchContext.Provider value={quadratsLoadDispatch}>
+                        <SpeciesLoadContext.Provider value={speciesLoad}>
+                          <SpeciesLoadDispatchContext.Provider value={speciesLoadDispatch}>
+                            <SubSpeciesLoadContext.Provider value={subSpeciesLoad}>
+                              <SubSpeciesLoadDispatchContext.Provider value={subSpeciesLoadDispatch}>
+                                <PlotsLoadContext.Provider value={plotsLoad}>
+                                  <PlotsLoadDispatchContext.Provider value={plotsLoadDispatch}>
+                                    {children}
+                                  </PlotsLoadDispatchContext.Provider>
+                                </PlotsLoadContext.Provider>
+                              </SubSpeciesLoadDispatchContext.Provider>
+                            </SubSpeciesLoadContext.Provider>
+                          </SpeciesLoadDispatchContext.Provider>
+                        </SpeciesLoadContext.Provider>
+                      </QuadratsLoadDispatchContext.Provider>
+                    </QuadratsLoadContext.Provider>
+                  </PersonnelLoadDispatchContext.Provider>
+                </PersonnelLoadContext.Provider>
+              </CensusLoadDispatchContext.Provider>
+            </CensusLoadContext.Provider>
+          </AttributeLoadDispatchContext.Provider>
+        </AttributeLoadContext.Provider>
+      </CoreMeasurementLoadDispatchContext.Provider>
+    </CoreMeasurementLoadContext.Provider>
   );
+}
+
+function coreMeasurementLoadReducer(currentCoreMeasurementLoad: any, action: {
+  coreMeasurementLoad: CoreMeasurementRDS[] | null
+}) {
+  return action.coreMeasurementLoad;
 }
 
 function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: AttributeRDS[] | null }) {
@@ -129,6 +146,14 @@ function subSpeciesLoadReducer(currentSpeciesLoad: any, action: { subSpeciesLoad
 
 function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: PlotRDS[] | null }) {
   return action.plotsLoad;
+}
+
+export function useCoreMeasurementLoadContext() {
+  return useContext(CoreMeasurementLoadContext);
+}
+
+export function useCoreMeasurementLoadDispatch() {
+  return useContext(CoreMeasurementLoadDispatchContext);
 }
 
 export function useAttributeLoadContext() {

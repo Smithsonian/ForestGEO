@@ -58,7 +58,7 @@ function UploadAndValidateFiles({
           }
         });
       }
-      
+
       // Show errors with the data that were uploaded
       return (
         <>
@@ -82,7 +82,7 @@ function UploadAndValidateFiles({
       );
     }
   }
-  
+
   return (
     <>
       <div className={"grid grid-cols-2"}>
@@ -112,7 +112,7 @@ export function FileHandling() {
   const [uploadDone, setUploadDone] = useState(false);
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
-  
+
   async function handleUpload() {
     setIsUploading(true);
     setUploadDone(false);
@@ -125,7 +125,7 @@ export function FileHandling() {
       fileToFormData.append(`file_${i}`, file);
       i++;
     }
-    
+
     const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
       method: 'POST',
       body: fileToFormData,
@@ -135,7 +135,7 @@ export function FileHandling() {
     setIsUploading(false);
     setUploadDone(true);
   }
-  
+
   if (!currentPlot || !currentPlot.key || !currentPlot.num) {
     return (
       <>

@@ -35,7 +35,7 @@ interface EditToolbarProps {
 
 function EditToolbar(props: EditToolbarProps) {
   const {setRows, setRowModesModel, setRefresh} = props;
-  
+
   const handleClick = async () => {
     const id = randomId();
     setRows((oldRows) => [...oldRows, {
@@ -57,7 +57,7 @@ function EditToolbar(props: EditToolbarProps) {
       [id]: {mode: GridRowModes.Edit, fieldToFocus: 'speciesID'},
     }));
   };
-  
+
   const handleRefresh = async () => {
     setRefresh(true);
     const response = await fetch(`/api/fixeddata/species`, {
@@ -66,7 +66,7 @@ function EditToolbar(props: EditToolbarProps) {
     setRows(await response.json());
     setRefresh(false);
   }
-  
+
   return (
     <GridToolbarContainer>
       <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
@@ -135,21 +135,21 @@ export default function Page() {
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
     setSnackbar({children: String(error), severity: 'error'});
   }, []);
-  
+
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
       event.defaultMuiPrevented = true;
     }
   };
-  
+
   const handleEditClick = (id: GridRowId) => () => {
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
-  
+
   const handleSaveClick = (id: GridRowId) => () => {
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
   };
-  
+
   const handleDeleteClick = (id: GridRowId) => async () => {
     const response = await fetch(`/api/fixeddata/species?speciesID=${rows.find((row) => row.id == id)!.speciesID}`, {method: 'DELETE'});
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
@@ -159,32 +159,19 @@ export default function Page() {
       await refreshData();
     }
   };
-  
+
   const handleCancelClick = (id: GridRowId) => () => {
     setRowModesModel({
       ...rowModesModel,
       [id]: {mode: GridRowModes.View, ignoreModifications: true},
     });
-    
+
     const editedRow = rows.find((row) => row.id === id);
     if (editedRow!.isNew) {
       setRows(rows.filter((row) => row.id !== id));
       setSnackbar({children: "Changes cancelled", severity: 'success'});
     }
   };
-  /**
-   *   speciesID: number;
-   *   genusID: number | null;
-   *   currentTaxonFlag: boolean | null;
-   *   obsoleteTaxonFlag: boolean | null;
-   *   speciesName: string | null;
-   *   speciesCode: string | null;
-   *   idLevel: string | null;
-   *   authority: string | null;
-   *   fieldFamily: string | null;
-   *   description: string | null;
-   *   referenceID: number | null;
-   */
   const processRowUpdate = React.useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>(async (resolve, reject) => {
@@ -192,7 +179,8 @@ export default function Page() {
           reject(new Error("Primary key SpeciesID cannot be empty!"));
         } else if (oldRow.code == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/species?speciesID=${newRow.speciesID}&
+          const response = await fetch(`/api/fixeddata/species?
+          speciesID=${newRow.speciesID}&
           genusID=${newRow.plotID}&
           currentTaxonFlag=${newRow.currentTaxonFlag}&
           obsoleteTaxonFlag=${newRow.obsoleteTaxonFlag}&
@@ -212,7 +200,8 @@ export default function Page() {
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/species?oldSpeciesID=${oldRow.speciesID}&
+            const response = await fetch(`/api/fixeddata/species?
+            oldSpeciesID=${oldRow.speciesID}&
             speciesID=${newRow.speciesID}&
             genusID=${newRow.plotID}&
             currentTaxonFlag=${newRow.currentTaxonFlag}&
@@ -239,7 +228,7 @@ export default function Page() {
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
   };
-  
+
   const columns: GridColDef[] = [
     ...SpeciesGridColumns,
     {
@@ -250,12 +239,13 @@ export default function Page() {
       cellClassName: 'actions',
       getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
-        
+
         if (isInEditMode) {
           return [
             <GridActionsCellItem
               icon={<SaveIcon/>}
               label="Save"
+              key={"save"}
               sx={{
                 color: 'primary.main',
               }}
@@ -264,17 +254,19 @@ export default function Page() {
             <GridActionsCellItem
               icon={<CancelIcon/>}
               label="Cancel"
+              key={"cancel"}
               className="textPrimary"
               onClick={handleCancelClick(id)}
               color="inherit"
             />,
           ];
         }
-        
+
         return [
           <GridActionsCellItem
             icon={<EditIcon/>}
             label="Edit"
+            key={"edit"}
             className="textPrimary"
             onClick={handleEditClick(id)}
             color="inherit"
@@ -282,6 +274,7 @@ export default function Page() {
           <GridActionsCellItem
             icon={<DeleteIcon/>}
             label="Delete"
+            key={"delete"}
             onClick={handleDeleteClick(id)}
             color="inherit"
           />,
@@ -289,7 +282,7 @@ export default function Page() {
       },
     },
   ];
-  
+
   return (
     <Box
       sx={{

@@ -15,7 +15,7 @@ export default function Error({
     // Log the error to an error files service
     console.error(error)
   }, [error])
-  
+
   return (
     <div>
       <h2>Something went wrong!</h2>

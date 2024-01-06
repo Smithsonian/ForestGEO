@@ -27,7 +27,7 @@ export async function DELETE(request: NextRequest) {
     deleteSnapshots: 'include' // or 'only'
   };
   const blobDeleteIfExistsResponse: BlobDeleteIfExistsResponse = await blockBlobClient.deleteIfExists(options);
-  
+
   if (!blobDeleteIfExistsResponse.errorCode) {
     console.log(`deleted blob ${filename}`);
   } else {

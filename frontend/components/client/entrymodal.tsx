@@ -107,11 +107,11 @@ export default function EntryModal() {
         plotsListDispatch({plotList: plotList});
       }
       setLoading(100);
-      
+
     }
     fetchData().catch(console.error);
   }, []);
-  
+
   return (
     <>
       {firstLoad ? <Modal open={firstLoad}

@@ -39,7 +39,7 @@ export interface UploadedFileData {
 export interface FileSize {
   path?: string;
   size: number;
-  
+
   /** Can contain other fields, which we don't care about. */
   [otherFields: string]: any;
 }
@@ -59,7 +59,7 @@ export interface UploadValidationProps {
    * Also, false when upload hasn't started.
    */
   plot: Plot;
-  
+
   uploadDone: boolean;
   /** true when the upload has started but not done. */
   isUploading: boolean;

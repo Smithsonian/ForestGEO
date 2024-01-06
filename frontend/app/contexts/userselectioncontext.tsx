@@ -24,21 +24,19 @@ export default function PlotProvider({children}: { children: React.ReactNode }) 
     null
   );
   return (
-    <>
-      <PlotsContext.Provider value={plot}>
-        <PlotsDispatchContext.Provider value={plotDispatch}>
-          <CensusContext.Provider value={census}>
-            <CensusDispatchContext.Provider value={censusDispatch}>
-              <QuadratContext.Provider value={quadrat}>
-                <QuadratDispatchContext.Provider value={quadratDispatch}>
-                  {children}
-                </QuadratDispatchContext.Provider>
-              </QuadratContext.Provider>
-            </CensusDispatchContext.Provider>
-          </CensusContext.Provider>
-        </PlotsDispatchContext.Provider>
-      </PlotsContext.Provider>
-    </>
+    <PlotsContext.Provider value={plot}>
+      <PlotsDispatchContext.Provider value={plotDispatch}>
+        <CensusContext.Provider value={census}>
+          <CensusDispatchContext.Provider value={censusDispatch}>
+            <QuadratContext.Provider value={quadrat}>
+              <QuadratDispatchContext.Provider value={quadratDispatch}>
+                {children}
+              </QuadratDispatchContext.Provider>
+            </QuadratContext.Provider>
+          </CensusDispatchContext.Provider>
+        </CensusContext.Provider>
+      </PlotsDispatchContext.Provider>
+    </PlotsContext.Provider>
   );
 }
 
