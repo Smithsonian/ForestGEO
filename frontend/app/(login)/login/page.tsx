@@ -31,29 +31,25 @@ export default function Page() {
   })
   useEffect(
     () => {
-      void setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
+      setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
     }, []);
   const {status} = useSession();
   if (status == "authenticated") {
     return (
-      <>
-        <EntryModal/>
-      </>
+      <EntryModal/>
     );
   } else
     return (
-      <>
-        <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
-          {transitions((style, i) => (
-            <animated.div
-              className={styles.bg}
-              style={{
-                ...style,
-                backgroundImage: `url(${slides[i]})`,
-              }}/>
-          ))}
-          <Sidebar/>
-        </Box>
-      </>
+      <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
+        {transitions((style, i) => (
+          <animated.div
+            className={styles.bg}
+            style={{
+              ...style,
+              backgroundImage: `url(${slides[i]})`,
+            }}/>
+        ))}
+        <Sidebar/>
+      </Box>
     );
 }

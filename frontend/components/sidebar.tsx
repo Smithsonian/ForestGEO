@@ -12,7 +12,7 @@ import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {useSession} from "next-auth/react";
-import {siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {usePlotContext, usePlotDispatch} from "@/app/contexts/userselectioncontext";
 import {usePathname, useRouter} from "next/navigation";
 import {
@@ -27,8 +27,7 @@ import {
   Stack,
   Step,
   StepIndicator,
-  Stepper,
-  Tooltip
+  Stepper
 } from "@mui/joy";
 import {Slide} from "@mui/material";
 import CommitIcon from "@mui/icons-material/Commit";
@@ -37,6 +36,7 @@ import {Check} from "@mui/icons-material";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import {usePlotListContext} from "@/app/contexts/generalcontext";
+import {AppRouterInstance} from "next/dist/shared/lib/app-router-context.shared-runtime";
 
 
 function SimpleToggler({
@@ -67,6 +67,34 @@ function SimpleToggler({
   );
 }
 
+interface MRTProps {
+  currentPlot: Plot | null;
+  pathname: string;
+  router: AppRouterInstance;
+}
+
+function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean, setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>) {
+  const Icon = siteConfigProps.icon;
+  return (
+    <ListItemButton
+      disabled={!props.currentPlot}
+      selected={props.pathname === siteConfigProps.href || siteConfigProps.expanded.find(value => value.href === props.pathname) !== undefined}
+      color={props.pathname === siteConfigProps.href ? 'primary' : undefined}
+      onClick={() => {
+        props.router.push(siteConfigProps.href);
+        setMenuOpen(!menuOpen);
+      }}>
+      <Icon/>
+      <ListItemContent>
+        <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
+      </ListItemContent>
+      <KeyboardArrowDownIcon
+        sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
+      />
+    </ListItemButton>
+  );
+}
+
 export default function Sidebar() {
   const currentPlot = usePlotContext();
   const plotDispatch = usePlotDispatch();
@@ -81,28 +109,6 @@ export default function Sidebar() {
   const containerRef = React.useRef<HTMLElement>(null);
 
   const [properties, setProperties] = useState(false);
-
-  function MenuRenderToggle(props: SiteConfigProps, menuOpen: boolean, setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>) {
-    const Icon = props.icon;
-    return (
-      <ListItemButton
-        disabled={!currentPlot}
-        selected={pathname === props.href || props.expanded.find(value => value.href === pathname) !== undefined}
-        color={pathname === props.href ? 'primary' : undefined}
-        onClick={() => {
-          router.push(props.href);
-          setMenuOpen(!menuOpen);
-        }}>
-        <Icon/>
-        <ListItemContent>
-          <Typography level={"title-sm"}>{props.label}</Typography>
-        </ListItemContent>
-        <KeyboardArrowDownIcon
-          sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
-        />
-      </ListItemButton>
-    );
-  }
 
   /**
    * UNAUTHENTICATED SESSION HANDLING:
@@ -233,9 +239,7 @@ export default function Sidebar() {
                                     onClick={() => router.push(item.href)}>
                       <Icon/>
                       <ListItemContent>
-                        <Tooltip title={item.tip} variant={"soft"}>
-                          <Typography level={"title-sm"}>{item.label}</Typography>
-                        </Tooltip>
+                        <Typography level={"title-sm"}>{item.label}</Typography>
                       </ListItemContent>
                     </ListItemButton>
                   </ListItem>
@@ -244,24 +248,22 @@ export default function Sidebar() {
                 return (
                   <ListItem key={item.href} nested>
                     <SimpleToggler
-                      renderToggle={MenuRenderToggle(item, properties, setProperties)}
+                      renderToggle={MenuRenderToggle({currentPlot, pathname, router}, item, properties, setProperties)}
                       isOpen={properties}
                     >
                       <List sx={{gap: 0.5}} size={"sm"}>
                         {item.expanded.map((link, linkIndex) => {
                           const SubIcon = link.icon;
                           return (
-                            <ListItem sx={{marginTop: 0.5}} key={linkIndex}>
-                              <Tooltip title={link.tip} variant={"soft"}>
-                                <ListItemButton selected={pathname == (item.href + link.href)}
-                                                disabled={!currentPlot}
-                                                onClick={() => router.push((item.href + link.href))}>
-                                  <SubIcon/>
-                                  <ListItemContent>
-                                    <Typography level={"title-sm"}>{link.label}</Typography>
-                                  </ListItemContent>
-                                </ListItemButton>
-                              </Tooltip>
+                            <ListItem sx={{marginTop: 0.5}} key={link.href}>
+                              <ListItemButton selected={pathname == (item.href + link.href)}
+                                              disabled={!currentPlot}
+                                              onClick={() => router.push((item.href + link.href))}>
+                                <SubIcon/>
+                                <ListItemContent>
+                                  <Typography level={"title-sm"}>{link.label}</Typography>
+                                </ListItemContent>
+                              </ListItemButton>
                             </ListItem>
                           );
                         })}

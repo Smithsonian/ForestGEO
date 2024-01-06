@@ -1,16 +1,20 @@
 "use client";
-
-import React, {useEffect, useState} from "react";
+import React, { useEffect, useState } from 'react';
 import {
   useAttributeLoadDispatch,
   useCensusLoadDispatch,
+  useCoreMeasurementLoadDispatch,
   usePersonnelLoadDispatch,
   usePlotsLoadDispatch,
   useQuadratsLoadDispatch,
   useSpeciesLoadDispatch,
-  useSubSpeciesLoadDispatch
-} from "@/app/contexts/fixeddatacontext";
-import {useFirstLoadContext, useFirstLoadDispatch, usePlotListDispatch} from "@/app/contexts/generalcontext";
+  useSubSpeciesLoadDispatch,
+} from '@/app/contexts/fixeddatacontext';
+import {
+  useFirstLoadContext,
+  useFirstLoadDispatch,
+  usePlotListDispatch,
+} from '@/app/contexts/generalcontext';
 import {
   Button,
   DialogActions,
@@ -20,17 +24,24 @@ import {
   Modal,
   ModalDialog,
   Stack,
-  Typography
-} from "@mui/joy";
-import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
-import Divider from "@mui/joy/Divider";
-import {redirect} from "next/navigation";
-import {Plot} from "@/config/macros";
-import {PlotRDS, QuadratRDS} from "@/config/sqlmacros";
+  Typography,
+} from '@mui/joy';
+import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
+import Divider from '@mui/joy/Divider';
+import { redirect } from 'next/navigation';
+import { Plot } from '@/config/macros';
+import { PlotRDS, QuadratRDS } from '@/config/sqlmacros';
+
+interface PlotData {
+  key: string;
+  num: number;
+  id: number;
+}
 
 export default function EntryModal() {
   const [loading, setLoading] = useState(0);
   const [loadingMsg, setLoadingMsg] = useState('');
+  const coreMeasurementLoadDispatch = useCoreMeasurementLoadDispatch();
   const attributeLoadDispatch = useAttributeLoadDispatch();
   const censusLoadDispatch = useCensusLoadDispatch();
   const personnelLoadDispatch = usePersonnelLoadDispatch();
@@ -41,75 +52,61 @@ export default function EntryModal() {
   const plotsListDispatch = usePlotListDispatch();
   const firstLoad = useFirstLoadContext();
   const firstLoadDispatch = useFirstLoadDispatch();
-  const interval = 100 / 14;
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(loading + interval);
-      setLoadingMsg('Retrieving Attributes...');
-      let response = await fetch(`/api/fixeddata/attributes`, {method: 'GET'});
-      setLoading(loading + interval);
-      if (attributeLoadDispatch) {
-        attributeLoadDispatch({attributeLoad: await response.json()});
-      }
-      setLoading(loading + interval);
-      setLoadingMsg('Retrieving Census...');
-      response = await fetch(`/api/fixeddata/census`, {method: 'GET'});
-      setLoading(loading + interval);
-      if (censusLoadDispatch) {
-        censusLoadDispatch({censusLoad: await response.json()});
-      }
-      setLoading(loading + interval);
-      setLoadingMsg('Retrieving Personnel...');
-      response = await fetch(`/api/fixeddata/personnel`, {method: 'GET'});
-      setLoading(loading + interval);
-      if (personnelLoadDispatch) {
-        personnelLoadDispatch({personnelLoad: await response.json()});
-      }
-      setLoading(loading + interval);
-      setLoadingMsg('Retrieving Quadrats...');
-      response = await fetch(`/api/fixeddata/quadrats`, {method: 'GET'});
-      setLoading(loading + interval);
-      let quadratRDS: QuadratRDS[] = await response.json();
-      if (quadratsLoadDispatch) {
-        quadratsLoadDispatch({quadratsLoad: quadratRDS});
-      }
-      setLoading(loading + interval);
-      setLoadingMsg('Retrieving Species...');
-      response = await fetch(`/api/fixeddata/species`, {method: 'GET'});
-      setLoading(loading + interval);
-      if (speciesLoadDispatch) {
-        speciesLoadDispatch({speciesLoad: await response.json()});
-      }
-      setLoading(loading + interval);
-      setLoadingMsg('Retrieving SubSpecies...');
-      response = await fetch(`/api/fixeddata/subspecies`, {method: 'GET'});
-      setLoading(loading + interval);
-      if (subSpeciesLoadDispatch) {
-        subSpeciesLoadDispatch({subSpeciesLoad: await response.json()});
-      }
-      setLoading(loading + interval)
-      setLoadingMsg('Retrieving Plots...')
-      response = await fetch(`/api/fixeddata/plots`, {method: 'GET'});
-      setLoading(loading + interval);
-      let plotRDSLoad: PlotRDS[] = await response.json();
-      if (plotsLoadDispatch) {
-        plotsLoadDispatch({plotsLoad: plotRDSLoad});
-      }
-      let plotList: Plot[] = [];
-      for (const plotRDS of plotRDSLoad) {
-        plotList.push({
-          key: plotRDS.plotName ? plotRDS.plotName : "",
-          num: quadratRDS.filter((quadrat) => quadrat.plotID == plotRDS.plotID).length,
-          id: plotRDS.plotID
-        });
-      }
-      if (plotsListDispatch) {
-        plotsListDispatch({plotList: plotList});
-      }
-      setLoading(100);
+  const interval = 5;
 
+  const fetchData = async (url: string, dispatch: Function | null, actionType: string) => {
+    setLoading(loading + interval);
+    setLoadingMsg(`Retrieving ${actionType}...`);
+    const response = await fetch(url, { method: 'GET' });
+    setLoading(loading + interval);
+    setLoadingMsg('Dispatching...');
+    if (dispatch) {
+      dispatch({ [actionType]: await response.json() });
     }
-    fetchData().catch(console.error);
+  };
+
+  const fetchAndDispatchPlots = async () => {
+    setLoading(loading + interval);
+    setLoadingMsg('Retrieving Plots...');
+    const response = await fetch('/api/fixeddata/plots', { method: 'GET' });
+    setLoading(loading + interval);
+    setLoadingMsg('Dispatching...');
+    const plotRDSLoad: PlotRDS[] = await response.json();
+    if (plotsLoadDispatch) {
+      plotsLoadDispatch({ plotsLoad: plotRDSLoad });
+    }
+
+    const plotList: PlotData[] = plotRDSLoad.map((plotRDS) => ({
+      key: plotRDS.plotName ? plotRDS.plotName : '',
+      num: quadratsLoadDispatch ? quadratsLoadDispatch.length : 0,
+      id: plotRDS.plotID,
+    }));
+
+    setLoadingMsg('Dispatching Plot List...');
+    if (plotsListDispatch) {
+      plotsListDispatch({ plotList });
+    }
+  };
+
+  useEffect(() => {
+    const fetchDataEffect = async () => {
+      try {
+        await fetchData('/api/coremeasurements', coreMeasurementLoadDispatch, 'coreMeasurementLoad');
+        await fetchData('/api/fixeddata/attributes', attributeLoadDispatch, 'attributeLoad');
+        await fetchData('/api/fixeddata/census', censusLoadDispatch, 'censusLoad');
+        await fetchData('/api/fixeddata/personnel', personnelLoadDispatch, 'personnelLoad');
+        await fetchData('/api/fixeddata/quadrats', quadratsLoadDispatch, 'quadratsLoad');
+        await fetchData('/api/fixeddata/species', speciesLoadDispatch, 'speciesLoad');
+        await fetchData('/api/fixeddata/subspecies', subSpeciesLoadDispatch, 'subSpeciesLoad');
+
+        await fetchAndDispatchPlots();
+        setLoading(100);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    fetchDataEffect().catch(console.error);
   }, []);
 
   return (
@@ -118,7 +115,7 @@ export default function EntryModal() {
                           sx={{display: 'flex', flex: 1}}
                           onClose={(_event: React.MouseEvent<HTMLButtonElement>, reason: string) => {
                             if (reason !== 'backdropClick' && reason !== 'escapeKeyDown') {
-                              firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null
+                              return firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null
                             }
                           }}>
         <ModalDialog variant="outlined" role="alertdialog">
