@@ -4,7 +4,7 @@ create table Attributes
         constraint Attributes_pk
             primary key,
     Description varchar(max),
-    Status      varchar(5)
+    Status      varchar(20)
 )
 go
 
@@ -24,7 +24,7 @@ create table Personnel
             primary key,
     FirstName   varchar(50),
     LastName    varchar(50),
-    Role        varchar(50)
+    Role        varchar(150)
 )
 go
 
@@ -47,16 +47,17 @@ go
 
 create table Census
 (
-    CensusID         int not null
+    CensusID    int not null
         constraint Census_pk
             primary key,
-    PlotID           int
+    PlotID      int
         constraint Census_Plots_PlotID_fk
-            references Plots,
-    PlotCensusNumber varchar(16),
-    StartDate        date,
-    EndDate          date,
-    Description      varchar(max)
+            references Plots
+            on update cascade,
+    StartDate   date,
+    EndDate     date,
+    Description varchar(max),
+    PCN         int
 )
 go
 
@@ -89,7 +90,8 @@ create table Reference
             primary key,
     PublicationTitle  varchar(64),
     FullReference     varchar(max),
-    DateOfPublication date
+    DateOfPublication date,
+    Citation          varchar(50)
 )
 go
 
@@ -124,7 +126,7 @@ go
 create table Species
 (
     SpeciesID         int not null
-        constraint PK_Species
+        constraint Species_pk
             primary key,
     GenusID           int
         constraint Species_Genus_GenusID_fk
@@ -132,47 +134,30 @@ create table Species
     CurrentTaxonFlag  bit,
     ObsoleteTaxonFlag bit,
     SpeciesName       varchar(64),
-    SpeciesCode       varchar(64),
     IDLevel           varchar(8),
     Authority         varchar(128),
     FieldFamily       varchar(32),
     Description       varchar(max),
     ReferenceID       int
         constraint Species_Reference_ReferenceID_fk
-            references Reference
+            references Reference,
+    SpeciesCode       varchar(25)
 )
 go
 
 create table CurrentObsolete
 (
-    SpeciesID         int          not null
-        constraint FK_CurrentObsolete_Species
+    SpeciesID         int  not null
+        constraint CurrentObsolete_Species_SpeciesID_fk
             references Species,
-    ObsoleteSpeciesID int          not null
-        constraint FK_CurrentObsolete_Species_Obsolete
+    ObsoleteSpeciesID int  not null
+        constraint CurrentObsolete_Species_SpeciesID_fk2
             references Species,
-    ChangeDate        date         not null,
+    ChangeDate        date not null,
     ChangeCodeID      int,
-    ChangeNote        varchar(max) not null,
+    ChangeNote        varchar(max),
     constraint CurrentObsolete_pk
         primary key (SpeciesID, ObsoleteSpeciesID, ChangeDate)
-)
-go
-
-create table SubSpecies
-(
-    SubSpeciesID       int not null
-        constraint PK_SubSpecies
-            primary key,
-    SpeciesID          int
-        constraint FK_SubSpecies_Species
-            references Species,
-    SubSpeciesName     varchar(64),
-    SubSpeciesCode     varchar(64),
-    CurrentTaxonFlag   bit,
-    ObsoleteTaxonFlag  bit,
-    Authority          varchar(128),
-    InfraSpecificLevel char(32)
 )
 go
 
@@ -181,18 +166,30 @@ create table SpeciesInventory
     SpeciesInventoryID int not null
         constraint SpeciesInventory_pk
             primary key,
-    CensusID           int
-        constraint SpeciesInventory_Census_CensusID_fk
-            references Census,
+    CensusID           int,
     PlotID             int
         constraint SpeciesInventory_Plots_PlotID_fk
             references Plots,
-    SpeciesID          int
-        constraint FK_SpeciesInventory_Species
-            references Species,
+    SpeciesID          int,
     SubSpeciesID       int
-        constraint FK_SpeciesInventory_SubSpecies
-            references SubSpecies
+)
+go
+
+create table SubSpecies
+(
+    SubSpeciesID       int not null
+        constraint SubSpecies_pk
+            primary key,
+    SubSpeciesCode     varchar(10),
+    SpeciesID          int
+        constraint SubSpecies_Species_SpeciesID_fk
+            references Species
+            on update cascade,
+    CurrentTaxonFlag   bit,
+    ObsoleteTaxonFlag  bit,
+    SubSpeciesName     varchar(max),
+    Authority          varchar(128),
+    InfraSpecificLevel char(32)
 )
 go
 
@@ -203,8 +200,9 @@ create table Trees
             primary key,
     TreeTag   varchar(10),
     SpeciesID int
-        constraint FK_Trees_Species
+        constraint Trees_Species_SpeciesID_fk
             references Species
+            on update cascade
 )
 go
 
@@ -215,10 +213,12 @@ create table Stems
             primary key,
     TreeID          int
         constraint FK_Stems_Trees
-            references Trees,
+            references Trees
+            on update cascade,
     QuadratID       int
         constraint FK_Stems_Quadrats
-            references Quadrats,
+            references Quadrats
+            on update cascade,
     StemNumber      int,
     StemTag         int,
     TreeTag         int,
@@ -237,7 +237,8 @@ create table CoreMeasurements
             primary key,
     CensusID          int
         constraint CoreMeasurements_Census_CensusID_fk
-            references Census,
+            references Census
+            on update cascade,
     PlotID            int
         constraint CoreMeasurements_Plots_PlotID_fk
             references Plots,
@@ -252,10 +253,12 @@ create table CoreMeasurements
             references Stems,
     PersonnelID       int
         constraint CoreMeasurements_Personnel_PersonnelID_fk
-            references Personnel,
+            references Personnel
+            on update cascade,
     MeasurementTypeID int
         constraint CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
-            references MeasurementTypes,
+            references MeasurementTypes
+            on update cascade,
     MeasurementDate   date,
     Measurement       varchar(max),
     IsRemeasurement   bit,
@@ -271,10 +274,12 @@ create table CMAttributes
             primary key,
     CoreMeasurementID int
         constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
-            references CoreMeasurements,
+            references CoreMeasurements
+            on update cascade,
     Code              varchar(10)
         constraint CMAttributes_Attributes_Code_fk
             references Attributes
+            on update cascade
 )
 go
 
@@ -294,10 +299,12 @@ create table CMVErrors
             primary key,
     CoreMeasurementID int
         constraint CMVErrors_CoreMeasurements_CoreMeasurementID_fk
-            references CoreMeasurements,
+            references CoreMeasurements
+            on update cascade,
     ValidationErrorID int
         constraint CMVErrors_ValidationErrors_ValidationErrorID_fk
             references ValidationErrors
+            on update cascade
 )
 go
 

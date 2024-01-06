@@ -21,69 +21,47 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
     switch (endpoint) {
       case '/dashboard':
         return (
-          <>
-            <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard View</h3>
-          </>
+          <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard View</h3>
         );
       case '/coremeasurementshub':
         return (
-          <>
-            <h2 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h2>
-          </>
+          <h2 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h2>
         );
       case '/fileuploadhub':
         return (
-          <>
-            <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub</h3>
-          </>
+          <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub</h3>
         );
       case '/fileuploadhub/arcgisfile':
         return (
-          <>
-            <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub - ArcGIS Files</h3>
-          </>
+          <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub - ArcGIS Files</h3>
         );
       case '/fileuploadhub/csvfile':
         return (
-          <>
-            <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub - CSV Files</h3>
-          </>
+          <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub - CSV Files</h3>
         );
       case '/properties':
         return (
-          <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub</h3>
-          </>
+          <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub</h3>
         );
       case '/properties/attributes':
         return (
-          <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Attributes</h3>
-          </>
+          <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Attributes</h3>
         );
       case '/properties/census':
         return (
-          <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Census</h3>
-          </>
+          <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Census</h3>
         );
       case '/properties/personnel':
         return (
-          <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Personnel</h3>
-          </>
+          <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Personnel</h3>
         );
       case '/properties/quadrats':
         return (
-          <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Quadrats</h3>
-          </>
+          <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Quadrats</h3>
         );
       case '/properties/species':
         return (
-          <>
-            <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Species</h3>
-          </>
+          <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Species</h3>
         );
       default:
         return (
