@@ -60,13 +60,13 @@ export function UploadAndReviewProcess() {
   // etc.
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
-  
+
   const createHandleMenuClick = (menuItem: string) => {
     return () => {
       console.log(`Clicked on ${menuItem}`);
     };
   };
-  
+
   const handleUpload = useCallback(async () => {
     setDialogOpen(false);
     if (acceptedFiles.length == 0) {
@@ -87,7 +87,7 @@ export function UploadAndReviewProcess() {
     // setErrorRows(await data.errorRows);
     setUploaded(true);
   }, [acceptedFiles, currentPlot, session]);
-  
+
   useEffect(() => {
     if (reviewState == ReviewStates.UPLOAD) {
       if (!uploaded) {
@@ -101,7 +101,7 @@ export function UploadAndReviewProcess() {
       }
     }
   }, [errorsData, handleUpload, reviewState, uploaded]);
-  
+
   async function handleInitialSubmit() {
     setParsing(true);
     acceptedFiles.forEach((file: FileWithPath) => {
@@ -122,28 +122,28 @@ export function UploadAndReviewProcess() {
     setParsing(false);
     setReviewState(ReviewStates.REVIEW);
   }
-  
+
   async function handleApproval() {
     setDialogOpen(true);
   }
-  
+
   async function handleCancel() {
     setDialogOpen(false);
   }
-  
+
   async function handleConfirm() {
     setDialogOpen(false);
     setReviewState(ReviewStates.UPLOAD);
   }
-  
+
   async function handleOpenErrDropdown() {
     setErrDropdown(true);
   }
-  
+
   async function handleCloseErrDropdown() {
     setErrDropdown(false);
   }
-  
+
   const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
     setDataViewActive(value);
   };
@@ -158,7 +158,7 @@ export function UploadAndReviewProcess() {
   ) => {
     setUploadTable(newValue!);
   };
-  
+
   switch (reviewState) {
     case ReviewStates.TABLE_SELECT:
       return (

@@ -58,7 +58,7 @@ export default function ViewUploadedFiles() {
       let response = await fetch(`/api/downloadallfiles?plot=${currentPlot!.key}`, {
         method: 'GET',
       });
-      
+
       // if (!response.ok) {
       //   let jsonOutput = await response.json();
       //   console.error('response.statusText', jsonOutput.statusText);
@@ -73,11 +73,11 @@ export default function ViewUploadedFiles() {
       setError(new Error('No plot'));
     }
   }, [currentPlot]);
-  
+
   useEffect(() => {
     getListOfFiles().then();
   }, [getListOfFiles]);
-  
+
   // File Deletion system --> need to reformat the table for selection, etc.
   // const deleteFileByName = useCallback(async () => {
   //   if (deleteFile !== '') {
@@ -99,7 +99,7 @@ export default function ViewUploadedFiles() {
   //       .then(() => setDeleteFile(''));
   //   }
   // }, [deleteFile, setDeleteFile, deleteFileByName]);
-  
+
   if ((!currentPlot || !currentPlot.key)) {
     return (
       <>

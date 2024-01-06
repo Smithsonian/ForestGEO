@@ -91,12 +91,12 @@ export async function PATCH(request: NextRequest) {
     authority: request.nextUrl.searchParams.get('authority'),
     infraSpecificLevel: request.nextUrl.searchParams.get('infraSpecificLevel'),
   }
-  
+
   if (row.subSpeciesID !== oldSubSpeciesID) {
     let newSubSpeciesIDCheck = await runQuery(conn, `SELECT * FROM forestgeo.SubSpecies WHERE [SubSpeciesID] = '${row.subSpeciesID}'`);
     if (!newSubSpeciesIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newSubSpeciesIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-    
+
     let results = await runQuery(conn, `UPDATE forestgeo.SubSpecies
     SET [SubSpeciesID] = ${row.subSpeciesID}, [SpeciesID] = ${row.speciesID}, [CurrentTaxonFlag] = '${row.currentTaxonFlag}',
     [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}', [SubSpeciesName] = '${row.subSpeciesName}', [SubSpeciesCode] = '${row.subSpeciesCode}', [Authority] = '${row.authority}',
@@ -119,7 +119,7 @@ export async function DELETE(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  
+
   const deleteSubSpeciesID = parseInt(request.nextUrl.searchParams.get('subSpeciesID')!);
   let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.SubSpecies WHERE [SubSpeciesID] = ${deleteSubSpeciesID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});

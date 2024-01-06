@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     area: request.nextUrl.searchParams.get('area') ? parseFloat(request.nextUrl.searchParams.get('area')!) : null,
     quadratShape: request.nextUrl.searchParams.get('quadratShape') ? request.nextUrl.searchParams.get('quadratShape')! : null,
   }
-  
+
   let checkQuadratID = await runQuery(conn, `SELECT * FROM forestgeo.Quadrats WHERE [QuadratID] = ${row.quadratID}`);
   if (!checkQuadratID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkQuadratID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
@@ -84,7 +84,7 @@ export async function DELETE(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  
+
   const deleteQuadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!);
   let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Quadrats WHERE [QuadratID] = ${deleteQuadratID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
@@ -96,7 +96,7 @@ export async function PATCH(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  
+
   const oldQuadratID = parseInt(request.nextUrl.searchParams.get('oldQuadratID')!);
   const row: QuadratRDS = {
     id: 0,
@@ -111,12 +111,12 @@ export async function PATCH(request: NextRequest) {
     area: request.nextUrl.searchParams.get('area') ? parseFloat(request.nextUrl.searchParams.get('area')!) : null,
     quadratShape: request.nextUrl.searchParams.get('quadratShape') ? request.nextUrl.searchParams.get('quadratShape')! : null,
   }
-  
+
   if (row.quadratID !== oldQuadratID) { // PRIMARY KEY is being updated, unique key check needs to happen
     let newQuadratIDCheck = await runQuery(conn, `SELECT * FROM forestgeo.Quadrats WHERE [QuadratID] = '${row.quadratID}'`);
     if (!newQuadratIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newQuadratIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-    
+
     let results = await runQuery(conn, `UPDATE forestgeo.Quadrats
     SET [QuadratID] = ${row.quadratID}, [PlotID] = ${row.plotID}, [quadratName] = '${row.quadratName}',
     [QuadratX] = ${row.quadratX}, [QuadratY] = ${row.quadratY}, [QuadratZ] = ${row.quadratZ}, [DimensionX] = ${row.dimensionX},

@@ -71,7 +71,7 @@ export default function Sidebar() {
   const currentPlot = usePlotContext();
   const plotDispatch = usePlotDispatch();
   const plotListContext = usePlotListContext()!;
-  
+
   const [plot, setPlot] = useState<string | null>(null);
   const [openSelectionModal, setOpenSelectionModal] = useState(false);
   const [activeStep, setActiveStep] = React.useState(0);
@@ -79,9 +79,9 @@ export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
-  
+
   const [properties, setProperties] = useState(false);
-  
+
   function MenuRenderToggle(props: SiteConfigProps, menuOpen: boolean, setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>) {
     const Icon = props.icon;
     return (
@@ -104,7 +104,7 @@ export default function Sidebar() {
       </>
     );
   }
-  
+
   /**
    * UNAUTHENTICATED SESSION HANDLING:
    */

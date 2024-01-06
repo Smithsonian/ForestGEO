@@ -16,7 +16,7 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
       redirect('/login');
     },
   });
-  
+
   function renderSwitch(endpoint: string) {
     switch (endpoint) {
       case '/dashboard':
@@ -92,7 +92,7 @@ export default function Endpoint({children,}: { children: React.ReactNode }) {
         );
     }
   }
-  
+
   let pathname = usePathname();
   return (
     <>

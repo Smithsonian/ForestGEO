@@ -8,14 +8,14 @@ export async function POST(request: NextRequest) {
   async function getSqlConnection() {
     return await sql.connect(sqlConfig);
   }
-  
+
   async function runQuery(conn: sql.ConnectionPool, query: string) {
     if (!conn) {
       throw new Error("invalid ConnectionPool object. check connection string settings.")
     }
     return await conn.request().query(query);
   }
-  
+
   /**
    * This code has been commented out b/c it is optimized for the first-iteration application
    * --> file upload and DB storage needs to be reworked to fit the new schema, but the core logic here is sound and should be retained
@@ -209,6 +209,6 @@ export async function POST(request: NextRequest) {
   //     {status: HTTPResponses.ERRORS_IN_FILE}
   //   );
   // }
-  
+
   return new NextResponse();
 }

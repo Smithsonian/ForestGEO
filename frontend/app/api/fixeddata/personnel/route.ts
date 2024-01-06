@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     lastName: request.nextUrl.searchParams.get('lastName'),
     role: request.nextUrl.searchParams.get('role'),
   }
-  
+
   let checkPersonnelID = await runQuery(conn, `SELECT * FROM forestgeo.Personnel WHERE [PersonnelID] = ${row.personnelID}`);
   if (!checkPersonnelID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkPersonnelID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  
+
   const oldPersonnelID = parseInt(request.nextUrl.searchParams.get('oldPersonnelID')!);
   const row: PersonnelRDS = {
     id: 0,
@@ -80,13 +80,13 @@ export async function PATCH(request: NextRequest) {
     lastName: request.nextUrl.searchParams.get('lastName')!,
     role: request.nextUrl.searchParams.get('role')!,
   };
-  
+
   // check to ensure new code is not already taken
   if (row.personnelID !== oldPersonnelID) { // if CODE is being updated, this check needs to happen
     let newCodeCheck = await runQuery(conn, `SELECT * FROM forestgeo.Personnel WHERE [PersonnelID] = '${row.personnelID}'`);
     if (!newCodeCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newCodeCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-    
+
     let results = await runQuery(conn,
       `UPDATE forestgeo.Personnel SET [PersonnelID] = ${row.personnelID}, [FirstName] = '${row.firstName}', [LastName] = '${row.lastName}', [Role] = '${row.role}' WHERE [PersonnelID] = '${oldPersonnelID}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
@@ -104,7 +104,7 @@ export async function DELETE(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  
+
   const deletePersonnelID = parseInt(request.nextUrl.searchParams.get('personnelID')!);
   let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Personnel WHERE [PersonnelID] = ${deletePersonnelID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});

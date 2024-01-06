@@ -17,50 +17,48 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     plotListReducer,
     plots
   )
-  
+
   const [quadratList, quadratListDispatch] = useReducer(
     quadratListReducer,
     []
   )
-  
+
   const [censusList, censusListDispatch] = useReducer(
     censusListReducer,
     []
   )
-  
+
   const [firstLoad, firstLoadDispatch] = useReducer(
     firstLoadReducer,
     true
   )
-  
-  
+
+
   return (
-    <>
-      <PlotListContext.Provider value={plotList}>
-        <PlotListDispatchContext.Provider value={plotListDispatch}>
-          <QuadratListContext.Provider value={quadratList}>
-            <QuadratListDispatchContext.Provider value={quadratListDispatch}>
-              <CensusListContext.Provider value={censusList}>
-                <CensusListDispatchContext.Provider value={censusListDispatch}>
-                  <FirstLoadContext.Provider value={firstLoad}>
-                    <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
-                      <PlotProvider>
-                        {children}
-                      </PlotProvider>
-                    </FirstLoadDispatchContext.Provider>
-                  </FirstLoadContext.Provider>
-                </CensusListDispatchContext.Provider>
-              </CensusListContext.Provider>
-            </QuadratListDispatchContext.Provider>
-          </QuadratListContext.Provider>
-        </PlotListDispatchContext.Provider>
-      </PlotListContext.Provider>
-    </>
+    <PlotListContext.Provider value={plotList}>
+      <PlotListDispatchContext.Provider value={plotListDispatch}>
+        <QuadratListContext.Provider value={quadratList}>
+          <QuadratListDispatchContext.Provider value={quadratListDispatch}>
+            <CensusListContext.Provider value={censusList}>
+              <CensusListDispatchContext.Provider value={censusListDispatch}>
+                <FirstLoadContext.Provider value={firstLoad}>
+                  <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+                    <PlotProvider>
+                      {children}
+                    </PlotProvider>
+                  </FirstLoadDispatchContext.Provider>
+                </FirstLoadContext.Provider>
+              </CensusListDispatchContext.Provider>
+            </CensusListContext.Provider>
+          </QuadratListDispatchContext.Provider>
+        </QuadratListContext.Provider>
+      </PlotListDispatchContext.Provider>
+    </PlotListContext.Provider>
   );
 }
 
 function firstLoadReducer(currentState: any, action: { firstLoad: boolean | null }) {
-  if (action.firstLoad == false && currentState) return action.firstLoad;
+  if (!action.firstLoad && currentState) return action.firstLoad;
   else return currentState;
 }
 
