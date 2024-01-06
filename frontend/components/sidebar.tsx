@@ -43,11 +43,11 @@ function SimpleToggler({
                          isOpen,
                          renderToggle,
                          children,
-                       }: {
+                       }: Readonly<{
   isOpen: boolean;
   children: React.ReactNode;
   renderToggle: any;
-}) {
+}>) {
   return (
     <React.Fragment>
       {renderToggle}
