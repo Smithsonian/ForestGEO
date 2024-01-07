@@ -252,7 +252,7 @@ export default function Sidebar() {
                       isOpen={properties}
                     >
                       <List sx={{gap: 0.5}} size={"sm"}>
-                        {item.expanded.map((link, linkIndex) => {
+                        {item.expanded.map((link) => {
                           const SubIcon = link.icon;
                           return (
                             <ListItem sx={{marginTop: 0.5}} key={link.href}>
