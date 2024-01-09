@@ -1,16 +1,15 @@
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {FileErrors, ReviewStates} from "@/config/macros";
+import {FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
-import {parse} from "papaparse";
+import {parse, ParseResult} from "papaparse";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 import {useSession} from "next-auth/react";
 import {
   Button,
   Card,
   CardContent,
-  ClickAwayListener,
   Dialog,
   DialogActions,
   DialogContent,
@@ -18,24 +17,21 @@ import {
   DialogTitle,
   LinearProgress,
   Pagination,
-  Typography,
 } from "@mui/material";
-import LoadingButton from '@mui/lab/LoadingButton';
-import {Dropdown, Menu, MenuButton, MenuItem, menuItemClasses} from "@mui/base";
+import {LoadingButton} from '@mui/lab';
 import {styled} from '@mui/system';
 import Divider from "@mui/joy/Divider";
 import {DropzoneLogic} from "@/components/fileupload/dropzone";
 import {FileDisplay} from "@/components/fileupload/filelist";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
-import {Box, Stack} from "@mui/joy";
-import {SchemaTableNames} from "@/config/sqlmacros";
+import {Box, Grid, Tab, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
+import SelectFormType from "@/components/fileupload/groupedformselection";
+import ViewUploadedCSVFiles from "@/components/fileupload/viewuploadedfiles";
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
   const initState: { fileName: string; data: DataStructure[] }[] = [];
   // select schema table that file should be uploaded to --> state
-  const [uploadTable, setUploadTable] = useState("");
+  const [uploadForm, setUploadForm] = useState("");
   // in progress state --> data is being parsed
   const [parsing, setParsing] = useState(false);
   // in progress state --> async upload function has completed
@@ -46,61 +42,23 @@ export function UploadAndReviewProcess() {
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   // validated error storage
   const [errorsData, setErrorsData] = useState<FileErrors>({});
-  // validated error storage by row
-  // const [errorRows, setErrorRows] = useState<{ [fileName: string]: RowDataStructure[] }>({})
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
   const [parsedData, setParsedData] = useState(initState);
-  // Error report generation menu states:
-  const [errDropdown, setErrDropdown] = useState(false);
-  const [errMenuSelected, setErrMenuSelected] = useState("");
   // Confirmation menu states:
-  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [confirmationDialogOpen, setConfirmationDialogOpen] = React.useState(false);
+  const [receivedHeaders, setReceivedHeaders] = useState<string[]>([]);
+  const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   // etc.
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
 
-  const createHandleMenuClick = (menuItem: string) => {
-    return () => {
-      console.log(`Clicked on ${menuItem}`);
-    };
-  };
-
-  const handleUpload = useCallback(async () => {
-    setDialogOpen(false);
-    if (acceptedFiles.length == 0) {
-      console.log("accepted files is empty for some reason??");
-    }
-    const fileToFormData = new FormData();
-    let i = 0;
-    for (const file of acceptedFiles) {
-      fileToFormData.append(`file_${i}`, file);
-      i++;
-    }
-    const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
-      method: 'POST',
-      body: fileToFormData,
-    });
-    const data = await response.json();
-    setErrorsData(await data.errors);
-    // setErrorRows(await data.errorRows);
-    setUploaded(true);
-  }, [acceptedFiles, currentPlot, session]);
-
-  useEffect(() => {
-    if (reviewState == ReviewStates.UPLOAD) {
-      if (!uploaded) {
-        handleUpload().then();
-      } else {
-        if (Object.keys(errorsData).length !== 0) {
-          setReviewState(ReviewStates.ERRORS);
-        } else {
-          setReviewState(ReviewStates.UPLOADED);
-        }
-      }
-    }
-  }, [errorsData, handleUpload, reviewState, uploaded]);
+  function areHeadersValid(actualHeaders: string[] | undefined): boolean {
+    if (!actualHeaders) return false;
+    // Check if every expected header is present in actual headers
+    return expectedHeaders.every(expectedHeader => actualHeaders.includes(expectedHeader));
+  }
 
   async function handleInitialSubmit() {
     setParsing(true);
@@ -108,257 +66,330 @@ export function UploadAndReviewProcess() {
       parse(file, {
         header: true,
         skipEmptyLines: true,
-        complete: function (results: any) {
+        complete: function (results: ParseResult<any>) {
           try {
-            // eslint-disable-next-line array-callback-return
-            tempData.push({fileName: file.name, data: results.data});
+            // Check if headers match
+            setReceivedHeaders(results.meta.fields!); // This contains the headers from the file
+            if (!areHeadersValid(receivedHeaders)) {
+              throw new Error("Invalid file headers.");
+            }
+
+            // Process file data
+            tempData.push({ fileName: file.name, data: results.data });
             setParsedData(tempData);
+            setReviewState(ReviewStates.REVIEW);
           } catch (e) {
-            console.log(e);
+            console.error(e);
+            // Update state to reflect error
+            setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+            // For example, set an error message in state to display to the user
+          } finally {
+            setParsing(false);
           }
         },
       });
     });
-    setParsing(false);
-    setReviewState(ReviewStates.REVIEW);
   }
+  async function handleMismatchToStart() {
+    setReviewState(ReviewStates.TABLE_SELECT);
+  }
+  // handlers
+  const handleUpload = useCallback(async () => {
+    try {
+      setConfirmationDialogOpen(false);
+      if (acceptedFiles.length === 0) {
+        throw new Error("No files selected for upload.");
+      }
+      const fileToFormData = new FormData();
+      acceptedFiles.forEach((file, index) => {
+        fileToFormData.append(`file_${index}`, file);
+      });
+      const response = await fetch(`/api/upload?plot=${currentPlot?.key}&user=${session?.user?.name}&formType=${uploadForm}`, {
+        method: 'POST',
+        body: fileToFormData,
+      });
+      if (!response.ok) {
+        throw new Error("Upload failed with status: " + response.status);
+      }
+      const data = await response.json();
+      setErrorsData(data.errors);
+      setUploaded(true);
+    } catch (error: any) {
+      console.error("Upload Error: ", error.message);
+      // Optionally, update the UI to reflect the error
+    }
+  }, [acceptedFiles, currentPlot, session]);
+
+  useEffect(() => {
+    setExpectedHeaders(TableHeadersByFormType[uploadForm].map(item => item.label));
+    if (reviewState == ReviewStates.UPLOAD) {
+      if (!uploaded) {
+        handleUpload().then();
+      } else if (Object.keys(errorsData).length !== 0) {
+        setReviewState(ReviewStates.ERRORS);
+      } else {
+        setReviewState(ReviewStates.UPLOADED);
+      }
+    }
+  }, [errorsData, handleUpload, reviewState, uploaded]);
+
 
   async function handleApproval() {
-    setDialogOpen(true);
+    setConfirmationDialogOpen(true);
   }
 
   async function handleCancel() {
-    setDialogOpen(false);
+    setConfirmationDialogOpen(false);
   }
 
   async function handleConfirm() {
-    setDialogOpen(false);
+    setConfirmationDialogOpen(false);
     setReviewState(ReviewStates.UPLOAD);
   }
 
-  async function handleOpenErrDropdown() {
-    setErrDropdown(true);
-  }
-
-  async function handleCloseErrDropdown() {
-    setErrDropdown(false);
-  }
-
-  const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
+  const handleChange = (_event: React.ChangeEvent<unknown>, value: number) => {
     setDataViewActive(value);
   };
-// useEffect(() => {
-  //   if (errMenuSelected != '') {
-  //
-  //   }
-  // }, [errMenuSelected]);
-  const handleTableSelectChange = (
-    event: React.SyntheticEvent | null,
-    newValue: string | null,
-  ) => {
-    setUploadTable(newValue!);
-  };
+
+  const TableSelectState = () => (
+    <Grid container spacing={2}>
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+          <Typography>
+            Your file will need the correct headers in order to be uploaded to your intended table
+            destination. Please review the table header requirements before continuing:
+          </Typography>
+          <Box sx={{display: 'flex', justifyContent: 'center'}}>
+            <SelectFormType
+              externalState={uploadForm}
+              updateExternalState={setUploadForm}
+            />
+          </Box>
+        </Box>
+      </Grid>
+
+      <Grid xs={2}>
+        <Divider orientation="vertical" sx={{my: 4}}/>
+      </Grid>
+
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+          <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
+            <Typography>
+              {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
+            </Typography>
+          </Box>
+          <LoadingButton disabled={uploadForm === ''} onClick={() => setReviewState(ReviewStates.PARSE)}>
+            Continue
+          </LoadingButton>
+        </Box>
+      </Grid>
+    </Grid>
+  )
+  const ParseState = () => (
+    <Grid container spacing={2}>
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+          <DropzoneLogic onChange={(acceptedFiles: FileWithPath[]) => {
+            // rejectFile handling needs to go somewhere
+            setAcceptedFiles((files) => acceptedFiles.concat(files));
+          }}/>
+        </Box>
+      </Grid>
+
+      <Grid xs={2}>
+        <Divider orientation="vertical" sx={{my: 4}}/>
+      </Grid>
+
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+          <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
+            <FileDisplay acceptedFiles={acceptedFiles}/>
+          </Box>
+          <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
+            Review Files
+          </LoadingButton>
+        </Box>
+      </Grid>
+    </Grid>
+  )
+  const ReviewState = () => (
+    <Grid container spacing={2}>
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+          {parsedData && DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) ?? {
+            fileName: '',
+            data: [],
+          }, uploadForm)}
+          <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
+        </Box>
+      </Grid>
+
+      <Grid xs={2}>
+        <Divider orientation="vertical" sx={{my: 4}}/>
+      </Grid>
+
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+          <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/4 h-1/6 justify-center"}>
+            Confirm Changes
+          </Button>
+        </Box>
+      </Grid>
+      <Dialog
+        open={confirmationDialogOpen}
+        onClose={handleCancel}
+        aria-labelledby="alert-dialog-title"
+        aria-describedby="alert-dialog-description"
+      >
+        <DialogTitle id="alert-dialog-title">
+          {"Do your files look correct?"}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="alert-dialog-description">
+            Please press Confirm to upload your files to storage.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancel}>Cancel</Button>
+          <Button onClick={handleConfirm} autoFocus>
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Grid>
+  )
+
+  const FileMismatchErrorState = () => (
+    <Grid container spacing={2}>
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+          <Typography>
+            You attempted to upload a file with the following headers:
+          </Typography>
+          <Typography>{receivedHeaders.join(', ')}</Typography>
+        </Box>
+      </Grid>
+
+      <Grid xs={2}>
+        <Divider orientation="vertical" sx={{my: 4}}/>
+      </Grid>
+
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+          <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
+            <Typography>However, you selected form {uploadForm}</Typography>
+            <Typography>Which has headers: {expectedHeaders.join(', ')}</Typography>
+          </Box>
+          <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleMismatchToStart}>
+            Return to Table Selection
+          </LoadingButton>
+        </Box>
+      </Grid>
+    </Grid>
+  )
+
+  const UploadState = () => (
+    <Box>
+      <LinearProgress
+        color={"primary"}
+        aria-label="Uploading..."
+        className="w-auto"
+      />
+    </Box>
+  )
+  const ErrorState = () => {
+    const filesWithErrorsList: FileWithPath[] = [];
+    console.log(`ERRORS FOUND`);
+    if (Object.keys(errorsData).length) {
+      acceptedFiles.forEach((file: FileWithPath) => {
+        if (Object.keys(errorsData).includes(file.name.toString())) {
+          filesWithErrorsList.push(file);
+        }
+      });
+    }
+    // Show errors with the data that were uploaded
+    return (
+      <Grid container spacing={2}>
+        <Grid xs={5}>
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+            <DisplayErrorTable
+              fileName={filesWithErrorsList[dataViewActive - 1].name}
+              fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) ?? {
+                fileName: '',
+                data: [],
+              }}
+              errorMessage={errorsData} formType={uploadForm}/>
+            <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
+          </Box>
+        </Grid>
+
+        <Grid xs={2}>
+          <Divider orientation="vertical" sx={{my: 4}}/>
+        </Grid>
+
+        <Grid xs={5}>
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+            <Card>
+              <CardContent>
+                <Typography sx={{fontSize: 16, color: 'red', fontWeight: 'bold'}}>WARNING!</Typography>
+                <Typography sx={{fontSize: 14, color: 'red'}}>Errors were found in your file (highlighted in
+                  red).</Typography>
+                <Typography sx={{fontSize: 14, color: 'red'}}>All rows not highlighted red were successfully
+                  uploaded to storage.</Typography>
+                <Typography sx={{fontSize: 14, color: 'red'}}>The submitted file was saved to storage and has been
+                  marked as containing errors.</Typography>
+              </CardContent>
+            </Card>
+          </Box>
+        </Grid>
+      </Grid>
+    );
+  }
+  const UploadedState = () => (
+    <Grid container spacing={2}>
+      <Grid xs={5}>
+        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+          {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) ?? {
+            fileName: '',
+            data: [],
+          }, uploadForm)}
+          <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
+        </Box>
+      </Grid>
+
+      <Grid xs={2}>
+        <Divider orientation="vertical" sx={{my: 4}}/>
+      </Grid>
+
+      <Grid xs={5}>
+        <Box className={"flex justify-center"}>
+          Data was successfully uploaded! <br/>
+          Please visit the Data page to view updated data.
+        </Box>
+      </Grid>
+    </Grid>
+  )
 
   switch (reviewState) {
     case ReviewStates.TABLE_SELECT:
-      return (
-        <>
-          <Box className={"grid grid-cols-2"}>
-            <Box>
-              <Select size={"md"} onChange={handleTableSelectChange} placeholder={"Upload this file to table: "}
-                      sx={{display: 'flex', flex: 1}}>
-                {SchemaTableNames.map((table) => <Option value={table.name}>{table.name}</Option>)}
-              </Select>
-            </Box>
-            <Box className={"flex flex-col m-auto"}>
-              <Stack direction={"column"} className={"flex justify-center"}>
-                <Box sx={{display: 'flex', flex: 1, mb: 10, marginRight: 50}}>
-                  <Typography>Your file will need the correct headers in order to be uploaded to your intended table
-                    destination. Please review the table header requirements before continuing:</Typography>
-                </Box>
-                <Box sx={{display: 'flex', flex: 1, marginLeft: 50}}>
-                  {uploadTable !== '' && SchemaTableNames.find(obj => obj["name"] === uploadTable)!.columns.map(obj => obj["headerName"]).join(', ')}
-                </Box>
-              </Stack>
-              <Divider className={"my-4"}/>
-              <Box className={"flex justify-center"}>
-                <LoadingButton disabled={uploadTable == ''} onClick={() => setReviewState(ReviewStates.PARSE)}>
-                  Continue
-                </LoadingButton>
-              </Box>
-            </Box>
-          </Box>
-        </>
-      );
+      return <TableSelectState/>;
     case ReviewStates.PARSE:
-      return (
-        <>
-          <Box className={"grid grid-cols-2"}>
-            <Box>
-              <DropzoneLogic onChange={(acceptedFiles: FileWithPath[]) => {
-                // @todo: what about rejectedFiles?
-                setAcceptedFiles((files) => acceptedFiles.concat(files));
-              }}/>
-            </Box>
-            <Box className={"flex flex-col m-auto"}>
-              <Box className={"flex justify-center"}>
-                <FileDisplay acceptedFiles={acceptedFiles}/>
-              </Box>
-              <Divider className={"my-4"}/>
-              <Box className={"flex justify-center"}>
-                <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
-                  Review Files
-                </LoadingButton>
-              </Box>
-            </Box>
-          </Box>
-        </>
-      );
+      return <ParseState/>;
     case ReviewStates.REVIEW:
-      if (!parsedData) throw new Error("parsing the accepted files failed. parsedData empty");
-      return (
-        <>
-          <Box className={"grid grid-cols-2"}>
-            <Box className={"mr-4"}>
-              {/*{DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {*/}
-              {/*  fileName: '',*/}
-              {/*  data: [],*/}
-              {/*})}*/}
-              <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-            </Box>
-            <Box className={"flex justify-center w-2/4"}>
-              <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/4 h-1/6 justify-center"}>
-                Confirm Changes
-              </Button>
-            </Box>
-          </Box>
-          <Box>
-            <Dialog
-              open={dialogOpen}
-              onClose={handleCancel}
-              aria-labelledby="alert-dialog-title"
-              aria-describedby="alert-dialog-description"
-            >
-              <DialogTitle id="alert-dialog-title">
-                {"Do your files look correct?"}
-              </DialogTitle>
-              <DialogContent>
-                <DialogContentText id="alert-dialog-description">
-                  Please press Confirm to upload your files to storage.
-                </DialogContentText>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={handleCancel}>Cancel</Button>
-                <Button onClick={handleConfirm} autoFocus>
-                  Confirm
-                </Button>
-              </DialogActions>
-            </Dialog>
-          </Box>
-        </>
-      );
+      return <ReviewState/>;
     case ReviewStates.UPLOAD:
-      return (
-        <>
-          <Box>
-            <LinearProgress
-              color={"primary"}
-              aria-label="Uploading..."
-              className="w-auto"
-            />
-          </Box>
-        </>
-      );
+      return <UploadState/>;
     case ReviewStates.ERRORS:
-      const filesWithErrorsList: FileWithPath[] = [];
-      console.log(`ERRORS FOUND`);
-      if (Object.keys(errorsData).length) {
-        acceptedFiles.forEach((file: FileWithPath) => {
-          if (Object.keys(errorsData).includes(file.name.toString())) {
-            filesWithErrorsList.push(file);
-          }
-        });
-      }
-      // Show errors with the data that were uploaded
-      return (
-        <>
-          <Box className={"flex flex-row gap-5 w-auto h-auto justify-center"}>
-            <Box className={"grid grid-cols-2"}>
-              <Box className={"flex flex-col flex-1 gap-5 w-auto h-auto justify-left"}>
-                <DisplayErrorTable
-                  fileName={filesWithErrorsList[dataViewActive - 1].name}
-                  fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
-                    fileName: '',
-                    data: [],
-                  }}
-                  errorMessage={errorsData}/>
-                <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-              </Box>
-              <Box>
-                <ClickAwayListener onClickAway={handleCloseErrDropdown}>
-                  <Dropdown onOpenChange={handleOpenErrDropdown}>
-                    <TriggerButton>Dashboard</TriggerButton>
-                    <Menu slots={{listbox: StyledListbox}}>
-                      <StyledMenuItem onClick={createHandleMenuClick('Profile')}>
-                        Profile
-                      </StyledMenuItem>
-                      <StyledMenuItem onClick={createHandleMenuClick('My account')}>
-                        My account
-                      </StyledMenuItem>
-                      <StyledMenuItem onClick={createHandleMenuClick('Log out')}>
-                        Log out
-                      </StyledMenuItem>
-                    </Menu>
-                  </Dropdown>
-                </ClickAwayListener>
-                <Card>
-                  <CardContent>
-                    <Typography sx={{fontSize: 16, color: 'red', fontWeight: 'bold'}}>WARNING!</Typography>
-                    <Typography sx={{fontSize: 14, color: 'red'}}>Errors were found in your file (highlighted in
-                      red).</Typography>
-                    <Typography sx={{fontSize: 14, color: 'red'}}>All rows not highlighted red were successfully
-                      uploaded to storage.</Typography>
-                    <Typography sx={{fontSize: 14, color: 'red'}}>The submitted file was saved to storage and has been
-                      marked as containing errors.</Typography>
-                  </CardContent>
-                </Card>
-              </Box>
-            </Box>
-          </Box>
-        </>
-      );
-    case ReviewStates.UPLOADED: // UPLOADED
-      return (
-        <>
-          <Box className={"grid grid-cols-2"}>
-            <Box className={"mr-4"}>
-              {DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) || {
-                fileName: '',
-                data: [],
-              })}
-              <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-            </Box>
-            <Box className={"flex justify-center"}>
-              Data was successfully uploaded! <br/>
-              Please visit the Data page to view updated data.
-            </Box>
-          </Box>
-        </>
-      );
+      return <ErrorState/>;
+    case ReviewStates.UPLOADED:
+      return <UploadedState/>;
+    case ReviewStates.FILE_MISMATCH_ERROR:
+      return <FileMismatchErrorState />;
+    default:
+      return <div>Invalid State</div>;
   }
 }
-
-const blue = {
-  50: '#F0F7FF',
-  100: '#DAECFF',
-  200: '#99CCF3',
-  300: '#66B2FF',
-  400: '#3399FF',
-  500: '#007FFF',
-  600: '#0072E5',
-  900: '#003A75',
-};
-
 const grey = {
   50: '#f6f8fa',
   100: '#eaeef2',
@@ -371,8 +402,7 @@ const grey = {
   800: '#32383f',
   900: '#24292f',
 };
-
-const StyledListbox = styled('ul')(
+styled('ul')(
   ({theme}) => `
   font-family: IBM Plex Sans, sans-serif;
   font-size: 0.875rem;
@@ -391,61 +421,36 @@ const StyledListbox = styled('ul')(
   `,
 );
 
-const StyledMenuItem = styled(MenuItem)(
-  ({theme}) => `
-  list-style: none;
-  padding: 8px;
-  border-radius: 8px;
-  cursor: default;
-  user-select: none;
-
-  &:last-of-type {
-    border-bottom: none;
+export function FileTabView() {
+  const currentPlot = usePlotContext();
+  if (!currentPlot) {
+    return (
+      <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
+        <p>You must select a <b>plot</b> to continue!</p>
+      </Box>
+    );
+  } else {
+    // Tab system -- Browse page, Upload page
+    return (
+      <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
+        <Typography level={"title-lg"} color={"primary"}>
+          Drag and drop files into the box to upload them to storage
+        </Typography>
+        <Box sx={{mt: 5, mr: 5, width: '95%'}}>
+          <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
+            <TabList sticky={"top"}>
+              <Tab>Browse Uploaded Files</Tab>
+              <Tab>Upload New Files</Tab>
+            </TabList>
+            <TabPanel value={0}>
+              <ViewUploadedCSVFiles/>
+            </TabPanel>
+            <TabPanel value={1}>
+              <UploadAndReviewProcess/>
+            </TabPanel>
+          </Tabs>
+        </Box>
+      </Box>
+    );
   }
-
-  &.${menuItemClasses.focusVisible} {
-    outline: 3px solid ${theme.palette.mode === 'dark' ? blue[600] : blue[200]};
-    background-color: ${theme.palette.mode === 'dark' ? grey[800] : grey[100]};
-    color: ${theme.palette.mode === 'dark' ? grey[300] : grey[900]};
-  }
-
-  &.${menuItemClasses.disabled} {
-    color: ${theme.palette.mode === 'dark' ? grey[700] : grey[400]};
-  }
-
-  &:hover:not(.${menuItemClasses.disabled}) {
-    background-color: ${theme.palette.mode === 'dark' ? grey[800] : grey[100]};
-    color: ${theme.palette.mode === 'dark' ? grey[300] : grey[900]};
-  }
-  `,
-);
-
-const TriggerButton = styled(MenuButton)(
-  ({theme}) => `
-  font-family: IBM Plex Sans, sans-serif;
-  font-weight: 600;
-  font-size: 0.875rem;
-  box-sizing: border-box;
-  border-radius: 8px;
-  padding: 8px 16px;
-  line-height: 1.5;
-  background: transparent;
-  border: 1px solid ${theme.palette.mode === 'dark' ? grey[800] : grey[200]};
-  color: ${theme.palette.mode === 'dark' ? blue[300] : blue[500]};
-  cursor: pointer;
-
-  transition-property: all;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 120ms;
-
-  &:hover {
-    background: ${theme.palette.mode === 'dark' ? grey[800] : grey[50]};
-    border-color: ${theme.palette.mode === 'dark' ? grey[600] : grey[300]};
-  }
-
-  &:focus-visible {
-    border-color: ${blue[400]};
-    outline: 3px solid ${theme.palette.mode === 'dark' ? blue[500] : blue[200]};
-  }
-  `,
-);
+}

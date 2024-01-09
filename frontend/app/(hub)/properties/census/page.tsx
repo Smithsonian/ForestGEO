@@ -34,7 +34,7 @@ interface EditToolbarProps {
   setRefresh: (newState: boolean) => void;
 }
 
-function EditToolbar(props: EditToolbarProps) {
+function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {setRows, setRowModesModel, setRefresh} = props;
 
   const handleClick = async () => {
@@ -44,8 +44,8 @@ function EditToolbar(props: EditToolbarProps) {
       censusID: 0,
       plotID: 0,
       plotCensusNumber: 0,
-      startDate: new Date(),
-      endDate: new Date(),
+      startDate: null,
+      endDate: null,
       description: '',
       isNew: true
     }]);

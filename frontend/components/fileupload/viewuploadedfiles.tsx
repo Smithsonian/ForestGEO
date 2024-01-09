@@ -27,47 +27,45 @@ import Typography from "@mui/joy/Typography";
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
 function LoadingFiles() {
   return (
-    <>
-      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
-        <CardHeader>
-          <div className="flex flex-col">
-            <h5 className="text-md">Loading Files...</h5>
-          </div>
-        </CardHeader>
-        <Divider className={"mt-6 mb-6"}/>
-        <CardContent>
-          <div className="flex flex-col">
-            <CircularProgress value={60} size={"lg"}>
-              Retrieving files...
-            </CircularProgress>
-          </div>
-        </CardContent>
-      </Card>
-    </>
+    <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+      <CardHeader>
+        <div className="flex flex-col">
+          <h5 className="text-md">Loading Files...</h5>
+        </div>
+      </CardHeader>
+      <Divider className={"mt-6 mb-6"}/>
+      <CardContent>
+        <div className="flex flex-col">
+          <CircularProgress value={60} size={"lg"}>
+            Retrieving files...
+          </CircularProgress>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 export default function ViewUploadedFiles() {
   let currentPlot = usePlotContext();
-  const [error, setError] = useState<Error>(new Error());
+  const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
-  // const [deleteFile, setDeleteFile] = useState("");
   const getListOfFiles = useCallback(async () => {
-    if (currentPlot && currentPlot.key !== undefined) {
-      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot!.key}`, {
+    if (currentPlot?.key !== undefined) {
+      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot.key}`, {
         method: 'GET',
       });
 
-      // if (!response.ok) {
-      //   let jsonOutput = await response.json();
-      //   console.error('response.statusText', jsonOutput.statusText);
-      //   setError(new Error(`API response: ${jsonOutput.statusText}`));
-      // } else {
-      //   let data = await response.json();
-      //   setFileRows(data.blobData);
-      //   setIsLoaded(true);
-      // }
+      if (!response.ok) {
+        let jsonOutput = await response.json();
+        console.error('response.statusText', jsonOutput.statusText);
+        setError(new Error(`API response: ${jsonOutput.statusText}`));
+      } else {
+        console.log(response.status + ", " + response.statusText);
+        let data = await response.json();
+        setFileRows(data.blobData);
+        setIsLoaded(true);
+      }
     } else {
       console.log('Plot is undefined');
       setError(new Error('No plot'));
@@ -78,40 +76,17 @@ export default function ViewUploadedFiles() {
     getListOfFiles().then();
   }, [getListOfFiles]);
 
-  // File Deletion system --> need to reformat the table for selection, etc.
-  // const deleteFileByName = useCallback(async () => {
-  //   if (deleteFile !== '') {
-  //     const response = await fetch('/api/deletefilebyname?plot=' + localPlot!.key + '&filename=' + deleteFile, {
-  //       method: 'DELETE',
-  //     });
-  //     let data = await response.json();
-  //     const blobResponse = data.blobResponse;
-  //     if (!blobResponse.errorCode) {
-  //       console.log(`deleted blob ${deleteFile}`);
-  //     }
-  //   }
-  // }, [deleteFile, localPlot]);
-  //
-  // useEffect(() => {
-  //   if (deleteFile != '') {
-  //     deleteFileByName()
-  //       .catch(console.error)
-  //       .then(() => setDeleteFile(''));
-  //   }
-  // }, [deleteFile, setDeleteFile, deleteFileByName]);
-
-  if ((!currentPlot || !currentPlot.key)) {
+  if ((!currentPlot?.key)) {
     return (
-      <>
-        <h1 className={title()}>Please select a plot to continue.</h1>
-      </>
+      <h1 className={title()}>Please select a plot to continue.</h1>
     );
   } else if (error) {
+    console.log(error);
     return BrowseError(error);
   } else if (!isLoaded || !fileRows) {
     return <LoadingFiles/>
   } else {
-    let sortedFileData = fileRows!.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    let sortedFileData = fileRows.toSorted((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     let i = 1;
     sortedFileData.forEach((row) => {
       row.key = i;
@@ -133,46 +108,44 @@ export default function ViewUploadedFiles() {
                 <TableHead>
                   <TableRow>
                     <TableCell sx={tableHeaderSettings}>File Count</TableCell>
-                    {fileColumns.map((item, index) => (
-                      <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
+                    {fileColumns.map((item) => (
+                      <TableCell key={item.key} sx={tableHeaderSettings}>{item.label}</TableCell>
                     ))}
                     <TableCell sx={tableHeaderSettings}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileData!.filter((row) => row.name.toLowerCase().endsWith('.csv')).map((row, index) => {
+                  {sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.csv')).map((row) => {
                     let errs = row.errors == "false";
                     return (
-                      <>
-                        <TableRow key={index}>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{new Date(row.date).toString()}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{new Date(row.version).toString()}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
-                          <TableCell align="center">
-                            <Button>
-                              <DownloadIcon/>
-                            </Button>
-                            <Button>
-                              <EditIcon/>
-                            </Button>
-                            <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
-                              <DeleteIcon/>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      </>
+                      <TableRow key={row.key}>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
+                        <TableCell sx={(errs) ? {
+                          color: 'red',
+                          fontWeight: 'bold'
+                        } : {}}>{new Date(row.date).toString()}</TableCell>
+                        <TableCell sx={(errs) ? {
+                          color: 'red',
+                          fontWeight: 'bold'
+                        } : {}}>{new Date(row.version).toString()}</TableCell>
+                        <TableCell sx={(errs) ? {
+                          color: 'red',
+                          fontWeight: 'bold'
+                        } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                        <TableCell align="center">
+                          <Button>
+                            <DownloadIcon/>
+                          </Button>
+                          <Button>
+                            <EditIcon/>
+                          </Button>
+                          <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                            <DeleteIcon/>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
                 </TableBody>
@@ -194,46 +167,44 @@ export default function ViewUploadedFiles() {
                 <TableHead>
                   <TableRow>
                     <TableCell sx={tableHeaderSettings}>File Count</TableCell>
-                    {fileColumns.map((item, index) => (
-                      <TableCell key={index} sx={tableHeaderSettings}>{item.label}</TableCell>
+                    {fileColumns.map((item) => (
+                      <TableCell key={item.key} sx={tableHeaderSettings}>{item.label}</TableCell>
                     ))}
                     <TableCell sx={tableHeaderSettings}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileData!.filter((row) => row.name.toLowerCase().endsWith('.xlsx')).map((row, index) => {
+                  {sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.xlsx')).map((row) => {
                     let errs = row.errors == "false";
                     return (
-                      <>
-                        <TableRow key={index}>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{new Date(row.date).toString()}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{new Date(row.version).toString()}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
-                          <TableCell align="center">
-                            <Button>
-                              <DownloadIcon/>
-                            </Button>
-                            <Button>
-                              <EditIcon/>
-                            </Button>
-                            <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
-                              <DeleteIcon/>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      </>
+                      <TableRow key={row.key}>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
+                        <TableCell sx={(errs) ? {
+                          color: 'red',
+                          fontWeight: 'bold'
+                        } : {}}>{new Date(row.date).toString()}</TableCell>
+                        <TableCell sx={(errs) ? {
+                          color: 'red',
+                          fontWeight: 'bold'
+                        } : {}}>{new Date(row.version).toString()}</TableCell>
+                        <TableCell sx={(errs) ? {
+                          color: 'red',
+                          fontWeight: 'bold'
+                        } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                        <TableCell align="center">
+                          <Button>
+                            <DownloadIcon/>
+                          </Button>
+                          <Button>
+                            <EditIcon/>
+                          </Button>
+                          <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                            <DeleteIcon/>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
                 </TableBody>

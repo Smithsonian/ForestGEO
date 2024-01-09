@@ -1,6 +1,22 @@
+import {BlobDeleteIfExistsResponse, BlobDeleteOptions, BlobServiceClient} from "@azure/storage-blob";
 import {NextRequest, NextResponse} from "next/server";
-import {getContainerClient} from "@/config/macros";
-import {BlobDeleteIfExistsResponse, BlobDeleteOptions} from "@azure/storage-blob";
+
+async function getContainerClient(plot: string) {
+  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  console.log('Connection String:', storageAccountConnectionString);
+
+  if (!storageAccountConnectionString) {
+    console.error("process envs failed");
+    throw new Error("process envs failed");
+  }
+  // create client pointing to AZ storage system from connection string from Azure portal
+  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
+  if (!blobServiceClient) throw new Error("blob service client creation failed");
+  // attempt connection to pre-existing container --> additional check to see if container was found
+  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
+  if (!(await containerClient.exists())) await containerClient.create();
+  else return containerClient;
+}
 
 export async function DELETE(request: NextRequest) {
   const plot = request.nextUrl.searchParams.get('plot')!;

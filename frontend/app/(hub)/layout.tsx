@@ -1,12 +1,12 @@
 import Endpoint from "@/components/client/endpoint";
 import React from "react";
 
-export default function EndpointLayout({children,}: { children: React.ReactNode }) {
+
+export default function EndpointLayout({children,}: Readonly<{ children: React.ReactNode }>) {
+
   return (
-    <>
-      <Endpoint>
-        {children}
-      </Endpoint>
-    </>
+    <Endpoint>
+      {children}
+    </Endpoint>
   );
 }

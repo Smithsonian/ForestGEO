@@ -1,22 +1,5 @@
 "use client";
-import React, {useState} from 'react';
-import {useSession} from "next-auth/react";
-import {FileErrors, UploadValidationProps} from "@/config/macros";
-import {ValidationTable} from "@/components/fileupload/validationtable";
-import {usePlotContext} from "@/app/contexts/userselectioncontext";
-import {FileWithPath} from 'react-dropzone';
-
 import '@/styles/dropzone.css';
-import {subtitle} from "@/config/primitives";
-import {Tab, TabList, TabPanel, Tabs} from "@mui/joy";
-import Divider from "@mui/joy/Divider";
-import LoadingButton from "@mui/lab/LoadingButton";
-import {DropzoneLogic} from "@/components/fileupload/dropzone";
-import {FileDisplay} from "@/components/fileupload/filelist";
-import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
-import {UploadAndReviewProcess} from "@/components/fileupload/uploadreviewcycle";
-import ViewUploadedFiles from './viewuploadedfiles';
 
 /** COMPONENT STORAGE FOR FILE UPLOAD FUNCTIONS
  *
@@ -31,170 +14,127 @@ import ViewUploadedFiles from './viewuploadedfiles';
 /**
  * For uploading and validating drag and dropped CSV files.
  */
-function UploadAndValidateFiles({
-                                  uploadDone,
-                                  isUploading,
-                                  errorsData,
-                                  acceptedFiles,
-                                  handleUpload,
-                                  handleAcceptedFiles,
-                                }: UploadValidationProps) {
-  if (uploadDone) {
-    if (errorsData && Object.keys(errorsData).length == 0) {
-      return (
-        <div>
-          {/*REVIEW UPLOAD CONTENT HERE*/}
-          <p className={subtitle()}>
-            Successfully uploaded.
-          </p>
-        </div>
-      );
-    } else {
-      const filesWithErrorsList: FileWithPath[] = [];
-      if (Object.keys(errorsData).length) {
-        acceptedFiles.forEach((file: FileWithPath) => {
-          if (Object.keys(errorsData).includes(file.name.toString())) {
-            filesWithErrorsList.push(file);
-          }
-        });
-      }
+// function UploadAndValidateFiles({
+//                                   uploadDone,
+//                                   formType,
+//                                   isUploading,
+//                                   errorsData,
+//                                   acceptedFiles,
+//                                   handleUpload,
+//                                   handleAcceptedFiles,
+//                                 }: Readonly<UploadValidationProps>) {
+//   if (uploadDone) {
+//     if (errorsData && Object.keys(errorsData).length == 0) {
+//       return (
+//         <div>
+//           {/*REVIEW UPLOAD CONTENT HERE*/}
+//           <p className={subtitle()}>
+//             Successfully uploaded.
+//           </p>
+//         </div>
+//       );
+//     } else {
+//       const filesWithErrorsList: FileWithPath[] = [];
+//       if (Object.keys(errorsData).length) {
+//         acceptedFiles.forEach((file: FileWithPath) => {
+//           if (Object.keys(errorsData).includes(file.name.toString())) {
+//             filesWithErrorsList.push(file);
+//           }
+//         });
+//       }
+//
+//       // Show errors with the data that were uploaded
+//       return (
+//         <div className={"flex flex-col gap-5 w-3/5 h-3/5 justify-center"}>
+//           <ValidationTable
+//             errorMessage={errorsData}
+//             uploadedData={filesWithErrorsList}
+//             formType={formType}
+//             headers={[
+//               // @todo: these are hardcoded.
+//               {label: 'Tag'},
+//               {label: 'Subquadrat'},
+//               {label: 'SpCode'},
+//               {label: 'DBH'},
+//               {label: 'Htmeas'},
+//               {label: 'Codes'},
+//               {label: 'Comments'},
+//             ]}
+//           />
+//         </div>
+//       );
+//     }
+//   }
+//
+//   return (
+//     <div className={"grid grid-cols-2"}>
+//       <div>
+//         <DropzoneLogic onChange={handleAcceptedFiles}/>
+//       </div>
+//       <div className={"flex flex-col m-auto"}>
+//         <div className={"flex justify-center"}>
+//           <FileDisplay acceptedFiles={acceptedFiles}/>
+//         </div>
+//         <Divider className={"my-4"}/>
+//         <div className={"flex justify-center"}>
+//           <LoadingButton disabled={acceptedFiles.length <= 0} loading={isUploading} onClick={handleUpload}>
+//             Upload to server
+//           </LoadingButton>
+//         </div>
+//       </div>
+//     </div>
+//   );
+// }
 
-      // Show errors with the data that were uploaded
-      return (
-        <>
-          <div className={"flex flex-col gap-5 w-3/5 h-3/5 justify-center"}>
-            <ValidationTable
-              errorMessage={errorsData}
-              uploadedData={filesWithErrorsList}
-              headers={[
-                // @todo: these are hardcoded.
-                {label: 'Tag'},
-                {label: 'Subquadrat'},
-                {label: 'SpCode'},
-                {label: 'DBH'},
-                {label: 'Htmeas'},
-                {label: 'Codes'},
-                {label: 'Comments'},
-              ]}
-            />
-          </div>
-        </>
-      );
-    }
-  }
-
-  return (
-    <>
-      <div className={"grid grid-cols-2"}>
-        <div>
-          <DropzoneLogic onChange={handleAcceptedFiles}/>
-        </div>
-        <div className={"flex flex-col m-auto"}>
-          <div className={"flex justify-center"}>
-            <FileDisplay acceptedFiles={acceptedFiles}/>
-          </div>
-          <Divider className={"my-4"}/>
-          <div className={"flex justify-center"}>
-            <LoadingButton disabled={acceptedFiles.length <= 0} loading={isUploading} onClick={handleUpload}>
-              Upload to server
-            </LoadingButton>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-export function FileHandling() {
-  const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [errorsData, setErrorsData] = useState<FileErrors>({});
-  const [uploadDone, setUploadDone] = useState(false);
-  let currentPlot = usePlotContext();
-  const {data: session} = useSession();
-
-  async function handleUpload() {
-    setIsUploading(true);
-    setUploadDone(false);
-    if (acceptedFiles.length == 0 || acceptedFiles) {
-      console.log("accepted files is empty for some reason??");
-    }
-    const fileToFormData = new FormData();
-    let i = 0;
-    for (const file of acceptedFiles) {
-      fileToFormData.append(`file_${i}`, file);
-      i++;
-    }
-
-    const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
-      method: 'POST',
-      body: fileToFormData,
-    });
-    const data = await response.json();
-    setErrorsData(data.errors);
-    setIsUploading(false);
-    setUploadDone(true);
-  }
-
-  if (!currentPlot || !currentPlot.key || !currentPlot.num) {
-    return (
-      <>
-        <p>params doesn&apos;t exist OR plotkey doesn&apos;t exist OR plotnum doesn&apos;t exist</p>
-      </>
-    );
-  }
-  return (
-    <>
-      <UploadAndValidateFiles
-        uploadDone={uploadDone}
-        isUploading={isUploading}
-        errorsData={errorsData}
-        plot={currentPlot}
-        acceptedFiles={acceptedFiles}
-        handleUpload={handleUpload}
-        handleAcceptedFiles={(acceptedFiles: FileWithPath[]) => {
-          // @todo: what about rejectedFiles?
-          setAcceptedFiles((files) => acceptedFiles.concat(files));
-        }}
-      />
-    </>
-  );
-}
-
-export function FileTabView() {
-  const currentPlot = usePlotContext();
-  if (!currentPlot) {
-    return (
-      <>
-        <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-          <p>You must select a <b>plot</b> to continue!</p>
-        </Box>
-      </>
-    );
-  } else {
-    // Tab system -- Browse page, Upload page
-    return (
-      <>
-        <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
-          <Typography level={"title-lg"} color={"primary"}>
-            Drag and drop files into the box to upload them to storage
-          </Typography>
-          <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-            <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
-              <TabList sticky={"top"}>
-                <Tab>Browse Uploaded Files</Tab>
-                <Tab>Upload New Files</Tab>
-              </TabList>
-              <TabPanel value={0}>
-                <ViewUploadedFiles/>
-              </TabPanel>
-              <TabPanel value={1}>
-                <UploadAndReviewProcess/>
-              </TabPanel>
-            </Tabs>
-          </Box>
-        </Box>
-      </>
-    );
-  }
-}
+// export function FileHandling() {
+//   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
+//   const [isUploading, setIsUploading] = useState(false);
+//   const [errorsData, setErrorsData] = useState<FileErrors>({});
+//   const [uploadDone, setUploadDone] = useState(false);
+//   let currentPlot = usePlotContext();
+//   const {data: session} = useSession();
+//
+//   async function handleUpload() {
+//     setIsUploading(true);
+//     setUploadDone(false);
+//     if (acceptedFiles.length == 0 || acceptedFiles) {
+//       console.log("accepted files is empty for some reason??");
+//     }
+//     const fileToFormData = new FormData();
+//     let i = 0;
+//     for (const file of acceptedFiles) {
+//       fileToFormData.append(`file_${i}`, file);
+//       i++;
+//     }
+//
+//     const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name!, {
+//       method: 'POST',
+//       body: fileToFormData,
+//     });
+//     const data = await response.json();
+//     setErrorsData(data.errors);
+//     setIsUploading(false);
+//     setUploadDone(true);
+//   }
+//
+//   if (!currentPlot?.key || !currentPlot?.num) {
+//     return (
+//       <p>params doesn&apos;t exist OR plotkey doesn&apos;t exist OR plotnum doesn&apos;t exist</p>
+//     );
+//   }
+//   return (
+//     <UploadAndValidateFiles
+//       formType={}
+//       uploadDone={uploadDone}
+//       isUploading={isUploading}
+//       errorsData={errorsData}
+//       plot={currentPlot}
+//       acceptedFiles={acceptedFiles}
+//       handleUpload={handleUpload}
+//       handleAcceptedFiles={(acceptedFiles: FileWithPath[]) => {
+//         // @todo: what about rejectedFiles?
+//         setAcceptedFiles((files) => acceptedFiles.concat(files));
+//       }}
+//     />
+//   );
+// }
