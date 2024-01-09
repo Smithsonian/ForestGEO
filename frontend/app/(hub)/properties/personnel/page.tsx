@@ -165,8 +165,8 @@ export default function Page() {
           &firstName=${newRow.firstName}
           &lastName=${newRow.lastName}
           &role=${newRow.role}`, {
-              method: 'POST'
-            });
+            method: 'POST'
+          });
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
           else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));

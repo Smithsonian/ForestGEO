@@ -47,13 +47,6 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   },
 }));
 
-function objectToQueryString(obj: any) {
-  const keys = Object.keys(obj);
-  const keyValuePairs = keys.map(key => {
-    return encodeURIComponent(key) + '=' + encodeURIComponent(obj[key]);
-  });
-  return keyValuePairs.join('&');
-}
 
 export interface AttributeRDS {
   id: number;
@@ -199,7 +192,7 @@ export interface CoreMeasurementRDS {
 
 
 export const CoreMeasurementGridColumns: GridColDef[] = [
-  {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left'},
@@ -527,26 +520,4 @@ export const ValidationErrorGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
   },
-]
-
-export const SchemaTableNames = [
-  {name: "Attributes", columns: AttributeGridColumns},
-  {name: "Census", columns: CensusGridColumns},
-  {name: "CMAttributes", columns: CMAttributeGridColumns},
-  {name: "CMVErrors", columns: CMVErrorGridColumns},
-  {name: "CoreMeasurements", columns: CoreMeasurementGridColumns},
-  {name: "CurrentObsolete", columns: CurrentObsoleteGridColumns},
-  {name: "Family", columns: FamilyGridColumns},
-  {name: "Genus", columns: GenusGridColumns},
-  {name: "MeasurementTypes", columns: MeasurementTypeGridColumns},
-  {name: "Personnel", columns: PersonnelGridColumns},
-  {name: "Plots", columns: PlotGridColumns},
-  {name: "Quadrats", columns: QuadratGridColumns},
-  {name: "Reference", columns: ReferenceGridColumns},
-  {name: "Species", columns: SpeciesGridColumns},
-  {name: "SpeciesInventory", columns: SpeciesInventoryGridColumns},
-  {name: "Stems", columns: StemGridColumns},
-  {name: "SubSpecies", columns: SubSpeciesGridColumns},
-  {name: "Trees", columns: TreeGridColumns},
-  {name: "ValidationErrors", columns: ValidationErrorGridColumns}
 ]

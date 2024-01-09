@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   useAttributeLoadDispatch,
   useCensusLoadDispatch,
@@ -10,11 +10,7 @@ import {
   useSpeciesLoadDispatch,
   useSubSpeciesLoadDispatch,
 } from '@/app/contexts/fixeddatacontext';
-import {
-  useFirstLoadContext,
-  useFirstLoadDispatch,
-  usePlotListDispatch,
-} from '@/app/contexts/generalcontext';
+import {useFirstLoadContext, useFirstLoadDispatch, usePlotListDispatch,} from '@/app/contexts/generalcontext';
 import {
   Button,
   DialogActions,
@@ -28,9 +24,8 @@ import {
 } from '@mui/joy';
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
-import { redirect } from 'next/navigation';
-import { Plot } from '@/config/macros';
-import { PlotRDS, QuadratRDS } from '@/config/sqlmacros';
+import {redirect} from 'next/navigation';
+import {PlotRDS} from '@/config/sqlmacros';
 
 interface PlotData {
   key: string;
@@ -57,23 +52,23 @@ export default function EntryModal() {
   const fetchData = async (url: string, dispatch: Function | null, actionType: string) => {
     setLoading(loading + interval);
     setLoadingMsg(`Retrieving ${actionType}...`);
-    const response = await fetch(url, { method: 'GET' });
+    const response = await fetch(url, {method: 'GET'});
     setLoading(loading + interval);
     setLoadingMsg('Dispatching...');
     if (dispatch) {
-      dispatch({ [actionType]: await response.json() });
+      dispatch({[actionType]: await response.json()});
     }
   };
 
   const fetchAndDispatchPlots = async () => {
     setLoading(loading + interval);
     setLoadingMsg('Retrieving Plots...');
-    const response = await fetch('/api/fixeddata/plots', { method: 'GET' });
+    const response = await fetch('/api/fixeddata/plots', {method: 'GET'});
     setLoading(loading + interval);
     setLoadingMsg('Dispatching...');
     const plotRDSLoad: PlotRDS[] = await response.json();
     if (plotsLoadDispatch) {
-      plotsLoadDispatch({ plotsLoad: plotRDSLoad });
+      plotsLoadDispatch({plotsLoad: plotRDSLoad});
     }
 
     const plotList: PlotData[] = plotRDSLoad.map((plotRDS) => ({
@@ -84,7 +79,7 @@ export default function EntryModal() {
 
     setLoadingMsg('Dispatching Plot List...');
     if (plotsListDispatch) {
-      plotsListDispatch({ plotList });
+      plotsListDispatch({plotList});
     }
   };
 

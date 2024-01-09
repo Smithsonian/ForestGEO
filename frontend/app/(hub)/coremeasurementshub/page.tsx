@@ -12,19 +12,23 @@ import {
   GridToolbarContainer
 } from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
-import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
+import {Alert, AlertProps, Button, Dialog, Snackbar} from "@mui/material";
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import React, {useEffect, useState} from "react";
+import React, {useCallback, useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {ErrorMessages} from "@/config/macros";
+import {ErrorMessages, FileErrors} from "@/config/macros";
 import {useCoreMeasurementLoadContext} from "@/app/contexts/fixeddatacontext";
 import {CoreMeasurementGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
+import {DialogActions, DialogContent, DialogTitle} from "@mui/joy";
+import {UploadAndReviewProcess} from "@/components/fileupload/uploadreviewcycle";
+import {useSession} from "next-auth/react";
+import {FileWithPath} from "react-dropzone";
 
 interface EditToolbarProps {
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
@@ -34,8 +38,40 @@ interface EditToolbarProps {
   setRefresh: (newState: boolean) => void;
 }
 
-function EditToolbar(props: EditToolbarProps) {
+function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {setRows, setRowModesModel, setRefresh} = props;
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const {data: session} = useSession();
+  const currentPlot = usePlotContext();
+  const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
+  const [errorsData, setErrorsData] = useState<FileErrors>({});
+
+  const handleDialogOpen = () => {
+    setDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+  };
+
+  const handleUpload = useCallback(async () => {
+    if (acceptedFiles.length == 0) {
+      console.log("accepted files is empty for some reason??");
+    }
+    const fileToFormData = new FormData();
+    let i = 0;
+    for (const file of acceptedFiles) {
+      fileToFormData.append(`file_${i}`, file);
+      i++;
+    }
+    const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name! + '&table=CoreMeasurements', {
+      method: 'POST',
+      body: fileToFormData,
+    });
+    const data = await response.json();
+    setErrorsData(await data.errors);
+    setDialogOpen(false);
+  }, [acceptedFiles, currentPlot, session]);
 
   const handleClick = async () => {
     const id = randomId();
@@ -76,9 +112,24 @@ function EditToolbar(props: EditToolbarProps) {
       <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
         Add CoreMeasurement
       </Button>
+      <Button color="primary" startIcon={<AddIcon/>} onClick={handleDialogOpen}>
+        Upload CoreMeasurement File
+      </Button>
       <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
+      <Dialog open={dialogOpen} onClose={handleCloseDialog}>
+        <DialogTitle>File Upload</DialogTitle>
+        <DialogContent>
+          <UploadAndReviewProcess/>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Cancel</Button>
+          <Button onClick={handleUpload} color="primary">
+            Upload
+          </Button>
+        </DialogActions>
+      </Dialog>
     </GridToolbarContainer>
   );
 }

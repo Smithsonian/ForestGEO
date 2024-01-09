@@ -1,4 +1,4 @@
-import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
+import {ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css'
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -10,8 +10,6 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
-import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 import React from "react";
 
 // INTERFACES
@@ -29,6 +27,76 @@ export interface UploadedFileData {
   version: string;
   isCurrentVersion: boolean;
   date: Date;
+}
+
+const arcgisHeaderString: string = "OBJECTID Q20 P5 Lx Ly Px Py SPP TAG STEMTAG DBH Viejo HOM Viejo Códigos Viejos Tallo Principal DBH HOM Tipo Arbol Estado Censo STEMTAG GlobalID Códigos D - Dead N - Tag and tree missing L - Leaning CYL - Trunk cylindrical for B trees R - Resprout B - Buttressed tree Q - Broken above 1.3 m M - Multiple-stemmed P - Problem A - Needs checking Ss - Dead stem still standing Cs - Dead stem fallen Ns - Stemtag and stem missing Ts - Stemtag found, stem missing Ascender DBH a 1.30 DOS - Dos placas EM - Error de medida ID - Problema identificación MED - Problema medida NC - No califica NUM - Número Equivocado PP - Placa Perdida Placa Repuesta POSIBLE - Placa/Planta dudosa VIVO - Posiblemente muerto MAP - Problema mapeo Problemas Comentarios Censado Por UTM X (m) UTM Y (m) Fecha Captura Mensaje DBH Equipo x y";
+
+const arcgisHeaderArr: string[] = arcgisHeaderString.split(/\s+/);
+
+interface HeaderObject {
+  label: string;
+}
+
+const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
+  label: header
+}));
+
+export const TableHeadersByFormType: Record<string, { label: string }[]> = {
+  "fixeddata_codes.txt": [{label: "Code"}, {label: "Description"}, {label: "Status"}],
+  "fixeddata_role.txt": [{label: "Role"}],
+  "fixeddata_personnel.txt": [{label: "FirstName"}, {label: "LastName"}, {label: "Role"}],
+  "fixeddata_species.txt": [{label: "SpCode"}, {label: "Genus"}, {label: "Species"}, {label: "IDLevel"}, {label: "Family"}, {label: "Authority"}],
+  "fixeddata_quadrat.txt": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
+  "fixeddata_census.txt": [{label: "Tag"}, {label: "StemTag"}, {label: "SpCode"}, {label: "lx"}, {label: "ly"}, {label: "DBH"}, {label: "Codes"}, {label: "HOM"}, {label: "Date"}],
+  "ctfsweb_New_Plants_Form": [{label: "Subquadrat"}, {label: "Tag"}, {label: "StemTag"}, {label: "SpCode"}, {label: "DBH"}, {label: "Codes"}, {label: "Comments"}],
+  "ctfsweb_Old_Tree_Form": [{label: "Subquadrat"}, {label: "Tag"}, {label: "StemTag"}, {label: "SpCode"}, {label: "OldDBH"}, {label: "OldHOM"}, {label: "DBH"}, {label: "Codes"}, {label: "Comments"}],
+  "ctfsweb_Multiple_Stems_Form": [{label: "Subquadrat"}, {label: "Tag"}, {label: "StemTag"}, {label: "DBH"}, {label: "Codes"}, {label: "Comments"}],
+  "ctfsweb_Big_Trees_Form": [{label: "Quadrat"}, {label: "Subquadrat"}, {label: "Tag"}, {label: "MultiStemTag"}, {label: "Species"}, {label: "DBH"}, {label: "HOM"}, {label: "Comments"}],
+  "arcgis_xlsx": arcgisHeaders
+};
+export const DBInputForms: string[] = [
+  "fixeddata_codes.txt",
+  "fixeddata_role.txt",
+  "fixeddata_personnel.txt",
+  "fixeddata_species.txt",
+  "fixeddata_quadrat.txt",
+  "fixeddata_census.txt"
+];
+export const CTFSWebInputForms: string[] = [
+  "ctfsweb_New_Plants_Form",
+  "ctfsweb_Old_Tree_Form",
+  "ctfsweb_Multiple_Stems_Form",
+  "ctfsweb_Big_Trees_Form",
+];
+export const FormGroups: Record<string, string[]> = {
+  "Database Forms": DBInputForms,
+  "CTFSWeb Forms": CTFSWebInputForms,
+  "ArcGIS Forms": ["arcgis_xlsx"]
+};
+export type RowDataStructure = Record<string, string>;
+
+export function yourInsertOrUpdateQuery(rowData: RowDataStructure, plot: string) {
+  // Replace 'YourTableName' with the actual name of your database table
+  const tableName = 'YourTableName';
+
+  // Create a list of column names and values from the rowData object
+  const columns = Object.keys(rowData).join(', ');
+  const values = Object.values(rowData).map(value => `'${value}'`).join(', ');
+
+  // Define the SQL query for inserting or updating the row
+  return `
+    MERGE INTO ${tableName} AS target
+    USING (VALUES (${values})) AS source (${columns})
+    ON target.YourUniqueIdentifierColumn = source.YourUniqueIdentifierValue
+    WHEN MATCHED THEN
+      UPDATE SET
+        Column1 = source.Column1,
+        Column2 = source.Column2,
+        -- Add other column updates as needed
+    WHEN NOT MATCHED THEN
+      INSERT (${columns})
+      VALUES (${values});
+  `;
 }
 
 /**
@@ -52,6 +120,32 @@ export interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
 }
 
+export enum HTTPResponses {
+  OK = 200,
+  CREATED = 201,
+  ACCEPTED = 202,
+  NO_CONTENT = 204,
+  BAD_REQUEST = 400,
+  UNAUTHORIZED = 401,
+  FORBIDDEN = 403,
+  NOT_FOUND = 404,
+  METHOD_NOT_ALLOWED = 405,
+  CONFLICT = 409,
+  UNPROCESSABLE_ENTITY = 422,
+  INTERNAL_SERVER_ERROR = 500,
+  NOT_IMPLEMENTED = 501,
+  BAD_GATEWAY = 502,
+  SERVICE_UNAVAILABLE = 503,
+  GATEWAY_TIMEOUT = 504,
+  // Add more as needed
+  SQL_CONNECTION_TIMEOUT = 408, // Custom code, example
+  STORAGE_CONNECTION_FAILURE = 507, // Custom code, example
+  INVALID_REQUEST = 400, // Custom code, example
+  ERRORS_IN_FILE = 422, // Custom code, example
+  EMPTY_FILE = 204, // Custom code, example
+  NO_ERRORS = 200, // Custom code, example
+}
+
 
 export interface UploadValidationProps {
   /** true when the upload is done,
@@ -59,7 +153,7 @@ export interface UploadValidationProps {
    * Also, false when upload hasn't started.
    */
   plot: Plot;
-
+  formType: string;
   uploadDone: boolean;
   /** true when the upload has started but not done. */
   isUploading: boolean;
@@ -79,7 +173,8 @@ export enum ReviewStates {
   REVIEW = "review",
   UPLOAD = "upload",
   UPLOADED = "uploaded",
-  ERRORS = "errors"
+  ERRORS = "errors",
+  FILE_MISMATCH_ERROR = "file_mismatch_error"
 }
 
 export enum ErrorMessages {
@@ -221,20 +316,7 @@ export const siteConfigNav: SiteConfigProps[] = [
     href: "/fileuploadhub",
     tip: 'Upload data',
     icon: FolderIcon,
-    expanded: [
-      {
-        label: 'ArcGIS File Upload',
-        href: '/arcgisfile',
-        tip: 'Upload an ArcGIS File',
-        icon: SatelliteAltIcon,
-      },
-      {
-        label: 'CSV File Upload',
-        href: '/csvfile',
-        tip: 'Upload a CSV file',
-        icon: UploadFileIcon,
-      }
-    ],
+    expanded: [],
   },
   {
     label: "Core Measurements Hub",
@@ -317,17 +399,6 @@ export function selectAllRows(plot: string) {
 /**
  * CONTAINER STORAGE FUNCTIONS
  */
-export async function getContainerClient(plot: string) {
-  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!storageAccountConnectionString) throw new Error("process envs failed");
-  // create client pointing to AZ storage system from connection string from Azure portal
-  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) throw new Error("blob service client creation failed");
-  // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
-  if (!(await containerClient.exists())) await containerClient.create();
-  else return containerClient;
-}
 
 export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string, errors: boolean) {
   const buffer = Buffer.from(await file.arrayBuffer());

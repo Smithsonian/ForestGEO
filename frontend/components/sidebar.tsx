@@ -141,9 +141,6 @@ export default function Sidebar() {
               styles={(theme) => ({
                 ':root': {
                   '--Sidebar-width': '300px',
-                  [theme.breakpoints.up('lg')]: {
-                    '--Sidebar-width': '320px',
-                  },
                 },
               })}
             />
@@ -334,7 +331,8 @@ export default function Sidebar() {
                         >
                           <Option value={null}>None</Option>
                           {plotListContext.map((keyItem) => (
-                            <Option value={keyItem.key} key={keyItem.key}>{keyItem.key}, Quadrats: {keyItem.num}, ID: {keyItem.id}</Option>
+                            <Option value={keyItem.key} key={keyItem.key}>{keyItem.key}, Quadrats: {keyItem.num},
+                              ID: {keyItem.id}</Option>
                           ))}
                         </Select>
                       </Stack>
