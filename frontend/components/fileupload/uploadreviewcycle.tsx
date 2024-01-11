@@ -1,10 +1,15 @@
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {ErrorRowsData, FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
+import {Census, ErrorRowsData, FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse, ParseResult} from "papaparse";
-import {usePlotContext} from "@/app/contexts/userselectioncontext";
+import {
+  useCensusContext,
+  useCensusDispatch,
+  usePlotContext,
+  useQuadratContext, useQuadratDispatch
+} from "@/app/contexts/userselectioncontext";
 import {useSession} from "next-auth/react";
 import {
   Button,
@@ -14,9 +19,11 @@ import {
   DialogActions,
   DialogContent,
   DialogContentText,
-  DialogTitle,
-  LinearProgress,
+  DialogTitle, FormControl, InputLabel,
+  LinearProgress, MenuItem,
   Pagination,
+  Select, SelectChangeEvent,
+  TextField,
 } from "@mui/material";
 import {LoadingButton} from '@mui/lab';
 import {styled} from '@mui/system';
@@ -26,6 +33,12 @@ import {FileDisplay} from "@/components/fileupload/filelist";
 import {Box, Grid, Tab, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
 import SelectFormType from "@/components/fileupload/groupedformselection";
 import ViewUploadedCSVFiles from "@/components/fileupload/viewuploadedfiles";
+import {
+  useCensusListContext,
+  useCensusListDispatch, usePlotListContext,
+  useQuadratListContext,
+  useQuadratListDispatch
+} from "@/app/contexts/generalcontext";
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
@@ -431,7 +444,8 @@ styled('ul')(
 
 export function FileTabView() {
   const currentPlot = usePlotContext();
-  if (!currentPlot) {
+  const currentCensus = useCensusContext();
+  if (!currentPlot || !currentCensus) {
     return (
       <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
         <p>You must select a <b>plot</b> to continue!</p>
@@ -461,4 +475,200 @@ export function FileTabView() {
       </Box>
     );
   }
+}
+export function CensusSelector() {
+  const censusList = useCensusListContext()!;
+  const dispatchCensusList = useCensusListDispatch()!;
+  const plotList = usePlotListContext()!;
+  const [selectedCensus, setSelectedCensus] = useState<Census | null>(null);
+  const [open, setOpen] = useState(false);
+  const [newCensusData, setNewCensusData] = useState({
+    plotID: '',
+    plotCensusNumber: '',
+    startDate: '',
+    endDate: '',
+    description: ''
+  });
+
+  const handleFieldChange = (field: string) => (event: { target: { value: any; }; }) => {
+    setNewCensusData({ ...newCensusData, [field]: event.target.value });
+  };
+
+  const handleCensusChange = (event: SelectChangeEvent<number>) => {
+    const selectedValue = event.target.value as number; // Casting value as number
+    const foundCensus = censusList.find(census => census.plotCensusNumber === selectedValue);
+    setSelectedCensus(foundCensus ?? null);
+  };
+
+  const handleAddCensus = async () => {
+    if (!newCensusData.plotID || newCensusData.plotCensusNumber === '' || !newCensusData.startDate || !newCensusData.endDate) {
+      alert('Please fill in all required fields.');
+      return;
+    }
+
+    const plotID = parseInt(newCensusData.plotID);
+    const plotCensusNumber = parseInt(newCensusData.plotCensusNumber);
+    if (isNaN(plotID) || isNaN(plotCensusNumber)) {
+      alert('Plot ID and Plot Census Number must be valid numbers.');
+      return;
+    }
+
+    const newCensus = {
+      plotID,
+      plotCensusNumber,
+      startDate: new Date(newCensusData.startDate),
+      endDate: new Date(newCensusData.endDate),
+      description: newCensusData.description
+    };
+
+    try {
+      const updatedCensusList = [...censusList, newCensus];
+      dispatchCensusList({ censusList: updatedCensusList });
+      setOpen(false);
+    } catch (error) {
+      console.error('Error adding new census:', error);
+      alert('Failed to add new census.');
+    }
+  };
+
+  return (
+    <>
+      <FormControl fullWidth margin="normal">
+        <InputLabel id="census-select-label">Census</InputLabel>
+        <Select
+          labelId="census-select-label"
+          id="census-select"
+          value={selectedCensus?.plotCensusNumber || ''}
+          label="Census"
+          onChange={handleCensusChange}
+        >
+          {censusList.map(census => (
+            <MenuItem key={census.plotCensusNumber} value={census.plotCensusNumber}>
+              {`Census Number: ${census.plotCensusNumber}`}
+            </MenuItem>
+          ))}
+          <MenuItem value={"add-new"} onClick={() => setOpen(true)}>Add New Census</MenuItem>
+        </Select>
+      </FormControl>
+
+      <Dialog open={open} onClose={() => setOpen(false)}>
+        <DialogTitle>Add New Census</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth margin="dense">
+            <InputLabel id="plot-select-label">Plot</InputLabel>
+            <Select
+              labelId="plot-select-label"
+              id="plot-select"
+              value={newCensusData.plotID}
+              label="Plot"
+              onChange={handleFieldChange('plotID')}
+            >
+              {plotList?.map((plot) => (
+                <MenuItem key={plot.id} value={plot.id}>
+                  {plot.key} - Quadrats: {plot.num} - PlotID: {plot.id}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            label="Plot Census Number"
+            type="number"
+            fullWidth
+            margin="dense"
+            value={newCensusData.plotCensusNumber}
+            onChange={handleFieldChange('plotCensusNumber')}
+          />
+          <TextField
+            label="Start Date"
+            type="date"
+            fullWidth
+            margin="dense"
+            InputLabelProps={{ shrink: true }}
+            value={newCensusData.startDate}
+            onChange={handleFieldChange('startDate')}
+          />
+          <TextField
+            label="End Date"
+            type="date"
+            fullWidth
+            margin="dense"
+            InputLabelProps={{ shrink: true }}
+            value={newCensusData.endDate}
+            onChange={handleFieldChange('endDate')}
+          />
+          <TextField
+            label="Description (Optional)"
+            fullWidth
+            margin="dense"
+            multiline
+            maxRows={4}
+            value={newCensusData.description}
+            onChange={handleFieldChange('description')}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleAddCensus}>Add</Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
+
+export function QuadratSelector() {
+  const quadratList = useQuadratListContext()!;
+  const dispatchQuadratList = useQuadratListDispatch()!;
+  const currentQuadrat = useQuadratContext()!;
+  const dispatchQuadrat = useQuadratDispatch()!;
+  const [open, setOpen] = useState(false);
+  const [newQuadrat, setNewQuadrat] = useState("");
+
+  const handleQuadratChange = (event: { target: { value: any; }; }) => {
+    const value = event.target.value;
+    if (value === "add-new") {
+      setOpen(true); // Open the dialog for adding a new quadrat
+    } else {
+      dispatchQuadrat({ quadrat: parseInt(value) });
+    }
+  };
+
+  const handleAddQuadrat = () => {
+    // Add logic to validate and add new quadrat
+    const newQuadratValue = parseInt(newQuadrat); // Assuming newQuadrat is the value from the dialog
+    const newQuadratList = [...quadratList, newQuadratValue];
+    dispatchQuadratList({ quadratList: newQuadratList });
+    dispatchQuadrat({ quadrat: newQuadratValue });
+    setOpen(false);
+  };
+
+
+  return (
+    <>
+      <FormControl fullWidth>
+        <InputLabel>Quadrat</InputLabel>
+        <Select value={currentQuadrat} label="Quadrat" onChange={handleQuadratChange}>
+          {/* Populate with existing quadrat options */}
+          <MenuItem value={"add-new"}>Add New Quadrat</MenuItem>
+        </Select>
+      </FormControl>
+      <Dialog open={open} onClose={() => setOpen(false)}>
+        <DialogTitle>Add New Quadrat</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Quadrat Name"
+            fullWidth
+            variant="outlined"
+            value={newQuadrat}
+            onChange={(e) => setNewQuadrat(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={handleAddQuadrat}>Add</Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
 }

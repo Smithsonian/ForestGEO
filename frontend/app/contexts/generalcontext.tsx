@@ -1,18 +1,18 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from 'react';
-import {Plot, plots} from "@/config/macros";
+import {Census, Plot, plots} from "@/config/macros";
 import PlotProvider from "@/app/contexts/userselectioncontext";
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const QuadratListContext = createContext<number[] | null>(null);
-export const CensusListContext = createContext<number[] | null>(null);
+export const CensusListContext = createContext<Census[] | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
 export const PlotListDispatchContext = createContext<Dispatch<{ plotList: Plot[] | null }> | null>(null);
 export const QuadratListDispatchContext = createContext<Dispatch<{ quadratList: number[] | null }> | null>(null);
-export const CensusListDispatchContext = createContext<Dispatch<{ censusList: number[] | null }> | null>(null);
+export const CensusListDispatchContext = createContext<Dispatch<{ censusList: Census[] | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
-export function ContextsProvider({children}: { children: React.ReactNode }) {
+export function ContextsProvider({children}: Readonly<{ children: React.ReactNode }>) {
   const [plotList, plotListDispatch] = useReducer(
     plotListReducer,
     plots
@@ -70,7 +70,7 @@ function quadratListReducer(_currentQuadratList: any, action: { quadratList: num
   return action.quadratList;
 }
 
-function censusListReducer(_currentCensusList: any, action: { censusList: number[] | null }) {
+function censusListReducer(_currentCensusList: any, action: { censusList: Census[] | null }) {
   return action.censusList;
 }
 

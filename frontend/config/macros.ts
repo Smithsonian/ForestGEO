@@ -18,13 +18,24 @@ export interface Plot {
   num: number;
   id: number;
 }
+export interface Census {
+  plotID: number;
+  plotCensusNumber: number;
+  startDate: Date;
+  endDate: Date;
+  description: string;
+}
+
+export function containsPlotCensusNumber(censusArray: Census[], plotCensusNumberToCheck: number): boolean {
+  return censusArray.some(census => census.plotCensusNumber === plotCensusNumberToCheck);
+}
 
 export interface PlotAction {
   plotKey: string | null;
 }
 
 export interface CensusAction {
-  census: number | null;
+  census: Census | null;
 }
 
 export interface QuadratsAction {
