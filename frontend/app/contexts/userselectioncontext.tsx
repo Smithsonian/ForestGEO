@@ -1,6 +1,6 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from "react";
-import {allCensus, allQuadrats, Plot, plots} from "@/config/macros";
+import {allCensus, allQuadrats, CensusAction, Plot, PlotAction, plots, QuadratsAction} from "@/config/macros";
 import {useCensusListContext, usePlotListContext, useQuadratListContext} from "@/app/contexts/generalcontext";
 
 export const PlotsContext = createContext<Plot | null>(null);
@@ -11,18 +11,23 @@ export const CensusDispatchContext = createContext<Dispatch<{ census: number | n
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
 
 export default function PlotProvider({children}: { children: React.ReactNode }) {
+  const plotListContext = (usePlotListContext() ?? JSON.parse(localStorage.getItem('plotList') ?? '[]')) || plots;
+  const censusListContext = useCensusListContext() ?? JSON.parse(localStorage.getItem('censusList') ?? JSON.stringify(allCensus));
+  const quadratListContext = useQuadratListContext() ?? JSON.parse(localStorage.getItem('quadratList') ?? JSON.stringify(allQuadrats));
   const [plot, plotDispatch] = useReducer(
-    plotsReducer,
+    (state: Plot | null, action: PlotAction) => plotsReducer(state, action, plotListContext),
     null
   );
   const [census, censusDispatch] = useReducer(
-    censusReducer,
+    (state: number | null, action: CensusAction) => censusReducer(state, action, censusListContext),
     null
   );
+
   const [quadrat, quadratDispatch] = useReducer(
-    quadratReducer,
+    (state: number | null, action: QuadratsAction) => quadratReducer(state, action, quadratListContext),
     null
   );
+
   return (
     <PlotsContext.Provider value={plot}>
       <PlotsDispatchContext.Provider value={plotDispatch}>
@@ -40,44 +45,29 @@ export default function PlotProvider({children}: { children: React.ReactNode }) 
   );
 }
 
-function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
-  let plotListContext = usePlotListContext();
-  if (plotListContext) {
-    if (action.plotKey == null) return null;
-    else if (plotListContext.find((p) => p.key == action.plotKey)) return plotListContext.find((p) => p.key == action.plotKey);
-    else return currentPlot;
-  } else {
-    if (action.plotKey == null) return null;
-    else if (plots.find((p) => p.key == action.plotKey)) return plots.find((p) => p.key == action.plotKey);
-    else return currentPlot;
+function plotsReducer(currentPlot: any, action: { plotKey: string | null }, plotListContext: Plot[]) {
+  if (action.plotKey == null) return null;
+  else {
+    const foundPlot = plotListContext.find((p) => p.key === action.plotKey);
+    return foundPlot || currentPlot;
   }
 }
 
-function censusReducer(currentCensus: any, action: { census: number | null }) {
-  let censusListContext = useCensusListContext();
-  if (censusListContext) {
-    if (action.census == null) return null;
-    else if (censusListContext.includes(action.census)) return action.census;
-    else return currentCensus;
-  } else {
-    if (action.census == null) return null;
-    else if (allCensus.includes(action.census)) return action.census;
-    else return currentCensus;
-  }
+function censusReducer(currentCensus: number | null, action: { census: number | null }, censusListContext: number[]) {
+  if (action.census == null) return null;
+  else if (censusListContext.includes(action.census)) return action.census;
+  else return currentCensus;
 }
 
-function quadratReducer(currentQuadrat: any, action: { quadrat: number | null }) {
-  let quadratListContext = useQuadratListContext();
-  if (quadratListContext) {
-    if (action.quadrat == null) return null;
-    else if (quadratListContext.includes(action.quadrat)) return action.quadrat;
-    else return currentQuadrat;
-  } else {
-    if (action.quadrat == null) return null;
-    else if (allQuadrats.includes(action.quadrat)) return action.quadrat;
-    else return currentQuadrat;
-  }
+
+function quadratReducer(currentQuadrat: number | null, action: {
+  quadrat: number | null
+}, quadratListContext: number[]) {
+  if (action.quadrat == null) return null;
+  else if (quadratListContext.includes(action.quadrat)) return action.quadrat;
+  else return currentQuadrat;
 }
+
 
 export function usePlotContext() {
   return useContext(PlotsContext);

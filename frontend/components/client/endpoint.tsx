@@ -19,7 +19,7 @@ import {
   useSpeciesLoadDispatch,
   useSubSpeciesLoadDispatch
 } from "@/app/contexts/fixeddatacontext";
-import {useFirstLoadContext, useFirstLoadDispatch, usePlotListDispatch} from "@/app/contexts/generalcontext";
+import {usePlotListDispatch} from "@/app/contexts/generalcontext";
 import {PlotRDS} from "@/config/sqlmacros";
 
 function renderSwitch(endpoint: string) {

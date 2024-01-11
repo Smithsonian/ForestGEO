@@ -56,43 +56,86 @@ export default function EntryModal() {
     setLoading(loading + interval);
     setLoadingMsg('Dispatching...');
     if (dispatch) {
-      dispatch({[actionType]: await response.json()});
+      const responseData = await response.json();
+      dispatch({[actionType]: responseData});
+      localStorage.setItem(actionType, JSON.stringify(responseData));
     }
   };
 
   const fetchAndDispatchPlots = async () => {
     setLoading(loading + interval);
     setLoadingMsg('Retrieving Plots...');
-    const response = await fetch('/api/fixeddata/plots', {method: 'GET'});
-    setLoading(loading + interval);
-    setLoadingMsg('Dispatching...');
-    const plotRDSLoad: PlotRDS[] = await response.json();
+
+    // Check if plotsLoad data is available in localStorage
+    const plotsLoadData = JSON.parse(localStorage.getItem('plotsLoad') ?? 'null');
+    let plotRDSLoad: PlotRDS[];
+    if (plotsLoadData) {
+      // Use data from localStorage if available
+      plotRDSLoad = plotsLoadData;
+    } else {
+      // Fetch data from the server if not in localStorage
+      const response = await fetch('/api/fixeddata/plots', {method: 'GET'});
+      plotRDSLoad = await response.json();
+      localStorage.setItem('plotsLoad', JSON.stringify(plotRDSLoad));
+    }
+
     if (plotsLoadDispatch) {
       plotsLoadDispatch({plotsLoad: plotRDSLoad});
     }
 
-    const plotList: PlotData[] = plotRDSLoad.map((plotRDS) => ({
-      key: plotRDS.plotName ? plotRDS.plotName : '',
-      num: quadratsLoadDispatch ? quadratsLoadDispatch.length : 0,
-      id: plotRDS.plotID,
-    }));
+    // Check if plotList data is available in localStorage
+    const plotListData = JSON.parse(localStorage.getItem('plotList') ?? 'null');
+    let plotList: PlotData[];
+    if (plotListData) {
+      // Use data from localStorage if available
+      plotList = plotListData;
+    } else {
+      // Generate plotList from plotRDSLoad if not in localStorage
+      plotList = plotRDSLoad.map((plotRDS) => ({
+        key: plotRDS.plotName ? plotRDS.plotName : '',
+        num: quadratsLoadDispatch ? quadratsLoadDispatch.length : 0,
+        id: plotRDS.plotID,
+      }));
+      localStorage.setItem('plotList', JSON.stringify(plotList));
+    }
 
     setLoadingMsg('Dispatching Plot List...');
     if (plotsListDispatch) {
-      plotsListDispatch({plotList});
+      plotsListDispatch({plotList: plotList});
     }
   };
 
   useEffect(() => {
     const fetchDataEffect = async () => {
       try {
-        await fetchData('/api/coremeasurements', coreMeasurementLoadDispatch, 'coreMeasurementLoad');
-        await fetchData('/api/fixeddata/attributes', attributeLoadDispatch, 'attributeLoad');
-        await fetchData('/api/fixeddata/census', censusLoadDispatch, 'censusLoad');
-        await fetchData('/api/fixeddata/personnel', personnelLoadDispatch, 'personnelLoad');
-        await fetchData('/api/fixeddata/quadrats', quadratsLoadDispatch, 'quadratsLoad');
-        await fetchData('/api/fixeddata/species', speciesLoadDispatch, 'speciesLoad');
-        await fetchData('/api/fixeddata/subspecies', subSpeciesLoadDispatch, 'subSpeciesLoad');
+        const coreMeasurementLoadData = JSON.parse(localStorage.getItem('coreMeasurementLoad') ?? 'null');
+        (coreMeasurementLoadData && coreMeasurementLoadDispatch) ?
+          coreMeasurementLoadDispatch({coreMeasurementLoad: coreMeasurementLoadData}) :
+          await fetchData('/api/coremeasurements', coreMeasurementLoadDispatch, 'coreMeasurementLoad');
+        const attributeLoadData = JSON.parse(localStorage.getItem('attributeLoad') ?? 'null');
+        (attributeLoadData && attributeLoadDispatch) ?
+          attributeLoadDispatch({attributeLoad: attributeLoadData}) :
+          await fetchData('/api/fixeddata/attributes', attributeLoadDispatch, 'attributeLoad');
+        const censusLoadData = JSON.parse(localStorage.getItem('censusLoad') ?? 'null');
+        (censusLoadData && censusLoadDispatch) ?
+          censusLoadDispatch({censusLoad: censusLoadData}) :
+          await fetchData('/api/fixeddata/census', censusLoadDispatch, 'censusLoad');
+        const personnelLoadData = JSON.parse(localStorage.getItem('personnelLoad') ?? 'null');
+        (personnelLoadData && personnelLoadDispatch) ?
+          personnelLoadDispatch({personnelLoad: personnelLoadData}) :
+          await fetchData('/api/fixeddata/personnel', personnelLoadDispatch, 'personnelLoad');
+        const quadratsLoadData = JSON.parse(localStorage.getItem('quadratsLoad') ?? 'null');
+        (quadratsLoadData && quadratsLoadDispatch) ?
+          quadratsLoadDispatch({quadratsLoad: quadratsLoadData}) :
+          await fetchData('/api/fixeddata/quadrats', quadratsLoadDispatch, 'quadratsLoad');
+        const speciesLoadData = JSON.parse(localStorage.getItem('speciesLoad') ?? 'null');
+        (speciesLoadData && speciesLoadDispatch) ?
+          speciesLoadDispatch({speciesLoad: speciesLoadData}) :
+          await fetchData('/api/fixeddata/species', speciesLoadDispatch, 'speciesLoad');
+        const subSpeciesLoadData = JSON.parse(localStorage.getItem('subSpeciesLoad') ?? 'null');
+        (subSpeciesLoadData && subSpeciesLoadDispatch) ?
+          subSpeciesLoadDispatch({subSpeciesLoad: subSpeciesLoadData}) :
+          await fetchData('/api/fixeddata/subspecies', subSpeciesLoadDispatch, 'subSpeciesLoad');
 
         await fetchAndDispatchPlots();
         setLoading(100);

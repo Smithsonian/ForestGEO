@@ -1,6 +1,6 @@
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
+import {ErrorRowsData, FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse, ParseResult} from "papaparse";
@@ -50,6 +50,7 @@ export function UploadAndReviewProcess() {
   const [confirmationDialogOpen, setConfirmationDialogOpen] = React.useState(false);
   const [receivedHeaders, setReceivedHeaders] = useState<string[]>([]);
   const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
+  const [errorRowsData, setErrorRowsData] = useState<ErrorRowsData>({});
   // etc.
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
@@ -75,7 +76,7 @@ export function UploadAndReviewProcess() {
             }
 
             // Process file data
-            tempData.push({ fileName: file.name, data: results.data });
+            tempData.push({fileName: file.name, data: results.data});
             setParsedData(tempData);
             setReviewState(ReviewStates.REVIEW);
           } catch (e) {
@@ -90,9 +91,11 @@ export function UploadAndReviewProcess() {
       });
     });
   }
+
   async function handleMismatchToStart() {
     setReviewState(ReviewStates.TABLE_SELECT);
   }
+
   // handlers
   const handleUpload = useCallback(async () => {
     try {
@@ -112,7 +115,8 @@ export function UploadAndReviewProcess() {
         throw new Error("Upload failed with status: " + response.status);
       }
       const data = await response.json();
-      setErrorsData(data.errors);
+      setErrorsData(data.errors as FileErrors);
+      setErrorRowsData(data.errorRows as ErrorRowsData);
       setUploaded(true);
     } catch (error: any) {
       console.error("Upload Error: ", error.message);
@@ -121,7 +125,7 @@ export function UploadAndReviewProcess() {
   }, [acceptedFiles, currentPlot, session]);
 
   useEffect(() => {
-    setExpectedHeaders(TableHeadersByFormType[uploadForm].map(item => item.label));
+    if (TableHeadersByFormType.hasOwnProperty(uploadForm)) setExpectedHeaders(TableHeadersByFormType[uploadForm].map(item => item.label));
     if (reviewState == ReviewStates.UPLOAD) {
       if (!uploaded) {
         handleUpload().then();
@@ -299,27 +303,30 @@ export function UploadAndReviewProcess() {
     </Box>
   )
   const ErrorState = () => {
-    const filesWithErrorsList: FileWithPath[] = [];
-    console.log(`ERRORS FOUND`);
-    if (Object.keys(errorsData).length) {
-      acceptedFiles.forEach((file: FileWithPath) => {
-        if (Object.keys(errorsData).includes(file.name.toString())) {
-          filesWithErrorsList.push(file);
-        }
-      });
-    }
-    // Show errors with the data that were uploaded
     return (
       <Grid container spacing={2}>
         <Grid xs={5}>
           <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
-            <DisplayErrorTable
-              fileName={filesWithErrorsList[dataViewActive - 1].name}
-              fileData={parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) ?? {
-                fileName: '',
-                data: [],
-              }}
-              errorMessage={errorsData} formType={uploadForm}/>
+            {Object.keys(errorRowsData).map((fileName: string) => {
+              const fileDataStructure = errorRowsData[fileName].map((rowData) => {
+                // Convert each value in RowDataStructure to a string for DataStructure
+                const convertedRow: DataStructure = {};
+                for (const key in rowData) {
+                  convertedRow[key] = String(rowData[key]);
+                }
+                return convertedRow;
+              });
+
+              return (
+                <DisplayErrorTable
+                  key={fileName}
+                  fileName={fileName}
+                  fileData={{ fileName, data: fileDataStructure }}
+                  errorMessage={errorsData[fileName] as unknown as FileErrors} // Cast the type if structures are compatible
+                  formType={uploadForm}
+                />
+              );
+            })}
             <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
           </Box>
         </Grid>
@@ -385,11 +392,12 @@ export function UploadAndReviewProcess() {
     case ReviewStates.UPLOADED:
       return <UploadedState/>;
     case ReviewStates.FILE_MISMATCH_ERROR:
-      return <FileMismatchErrorState />;
+      return <FileMismatchErrorState/>;
     default:
       return <div>Invalid State</div>;
   }
 }
+
 const grey = {
   50: '#f6f8fa',
   100: '#eaeef2',

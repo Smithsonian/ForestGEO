@@ -1,4 +1,4 @@
-import {ContainerClient} from "@azure/storage-blob";
+import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css'
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -17,6 +17,18 @@ export interface Plot {
   key: string;
   num: number;
   id: number;
+}
+
+export interface PlotAction {
+  plotKey: string | null;
+}
+
+export interface CensusAction {
+  census: number | null;
+}
+
+export interface QuadratsAction {
+  quadrat: number | null;
 }
 
 export interface UploadedFileData {
@@ -73,31 +85,6 @@ export const FormGroups: Record<string, string[]> = {
   "CTFSWeb Forms": CTFSWebInputForms,
   "ArcGIS Forms": ["arcgis_xlsx"]
 };
-export type RowDataStructure = Record<string, string>;
-
-export function yourInsertOrUpdateQuery(rowData: RowDataStructure, plot: string) {
-  // Replace 'YourTableName' with the actual name of your database table
-  const tableName = 'YourTableName';
-
-  // Create a list of column names and values from the rowData object
-  const columns = Object.keys(rowData).join(', ');
-  const values = Object.values(rowData).map(value => `'${value}'`).join(', ');
-
-  // Define the SQL query for inserting or updating the row
-  return `
-    MERGE INTO ${tableName} AS target
-    USING (VALUES (${values})) AS source (${columns})
-    ON target.YourUniqueIdentifierColumn = source.YourUniqueIdentifierValue
-    WHEN MATCHED THEN
-      UPDATE SET
-        Column1 = source.Column1,
-        Column2 = source.Column2,
-        -- Add other column updates as needed
-    WHEN NOT MATCHED THEN
-      INSERT (${columns})
-      VALUES (${values});
-  `;
-}
 
 /**
  * These are the only FileWithPath attributes we use.
@@ -118,6 +105,10 @@ export interface FileListProps {
 
 export interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
+}
+
+export interface ErrorRowsData {
+  [fileName: string]: RowDataStructure[];
 }
 
 export enum HTTPResponses {
@@ -365,36 +356,30 @@ export const siteConfigNav: SiteConfigProps[] = [
   },
 ]
 
-export const sqlConfig: any = {
-  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
-  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
-  server: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
-  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
-  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
-  authentication: {
-    type: 'default'
-  },
-  options: {
-    encrypt: true
+
+/**
+ * SQL function storage
+ */
+
+export async function getContainerClient(plot: string, formType: string) {
+  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  console.log('Connection String:', storageAccountConnectionString);
+
+  if (!storageAccountConnectionString) {
+    console.error("process envs failed");
+    throw new Error("process envs failed");
   }
+  // create client pointing to AZ storage system from connection string from Azure portal
+  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
+  if (!blobServiceClient) throw new Error("blob service client creation failed");
+  // attempt connection to pre-existing container --> additional check to see if container was found
+  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase() + '-' + formType);
+  if (!(await containerClient.exists())) await containerClient.create();
+  else return containerClient;
 }
 
-// export function updateOrInsertRDS(row: RowDataStructure, plot: string) {
-//   return `
-//       IF EXISTS (SELECT * FROM [plot_${plot.toLowerCase()}] WHERE Tag = ${parseInt(row.tag)})
-//         UPDATE [plot_${plot.toLowerCase()}]
-//         SET Subquadrat = ${parseInt(row.subquadrat)}, SpCode = ${parseInt(row.spcode)}, DBH = ${parseFloat(row.dbh)}, Htmeas = ${parseFloat(row.htmeas)}, Codes = '${row.codes}', Comments = '${row.comments}'
-//         WHERE Tag = ${parseInt(row.tag)};
-//       ELSE
-//         INSERT INTO [plot_${plot.toLowerCase()}] (Tag, Subquadrat, SpCode, DBH, Htmeas, Codes, Comments)
-//         VALUES (${parseInt(row.tag)}, ${parseInt(row.subquadrat)}, ${parseInt(row.spcode)}, ${parseFloat(row.dbh)}, ${parseFloat(row.htmeas)}, '${row.codes}', '${row.comments}');
-//     `;
-// }
+export type RowDataStructure = { [key: string]: any }; // Generic type for row data
 
-export function selectAllRows(plot: string) {
-  return `SELECT *
-          FROM [plot_${plot.toLowerCase()}]`;
-}
 
 /**
  * CONTAINER STORAGE FUNCTIONS
