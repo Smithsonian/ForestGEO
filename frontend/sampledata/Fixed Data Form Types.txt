@@ -1,0 +1,32 @@
+Fixed Data Form Types:
+
+codes.txt:
+- code --> Attributes.Code
+- description --> Attributes.Description
+- status --> Attributes.Status
+
+role.txt:
+- role --> no mapping (needs to be locally stored! this originally mapped to a Role table but that has since been deprecated and removed)
+
+personnel.txt:
+- firstname --> Personnel.FirstName
+- lastname --> Personnel.LastName
+- role --> Personnel.Role
+
+species.txt:
+- spcode --> Species.SpeciesCode
+- genus --> Genus.GenusName
+- species --> Species.SpeciesName
+- IDLevel --> Species.IDLevel
+- family --> Species.FieldFamily
+- authority --> Species.Authority
+- subspecies --> SubSpecies.SpeciesName
+
+
+quadrat.txt: 
+- quadrat --> Quadrats.QuadratID
+- startx --> Quadrats.QuadratX
+- starty --> Quadrats.QuadratY
+- dimx --> Quadrats.DimensionX
+- dimy --> Quadrats.DimensionY
+

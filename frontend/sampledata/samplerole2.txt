@@ -1,0 +1,6 @@
+role
+field technician
+data entry technician
+plot supervisor
+researcher
+intern

@@ -1,52 +1,19 @@
 import {NextRequest, NextResponse} from "next/server";
 import {
   FileErrors,
+  getContainerClient,
   HTTPResponses,
   RowDataStructure,
-  sqlConfig,
   TableHeadersByFormType,
   uploadFileAsBuffer,
-  yourInsertOrUpdateQuery,
 } from "@/config/macros";
-import sql from "mssql";
 import {parse, ParseConfig} from "papaparse";
-import {BlobServiceClient} from "@azure/storage-blob";
+import {getSqlConnection, insertOrUpdate} from "@/components/processors/processorhelpers";
 
 require("dotenv").config();
 
-async function getContainerClient(plot: string, formType: string) {
-  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  console.log('Connection String:', storageAccountConnectionString);
-
-  if (!storageAccountConnectionString) {
-    console.error("process envs failed");
-    throw new Error("process envs failed");
-  }
-  // create client pointing to AZ storage system from connection string from Azure portal
-  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) throw new Error("blob service client creation failed");
-  // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase() + '-' + formType);
-  if (!(await containerClient.exists())) await containerClient.create();
-  else return containerClient;
-}
-
-async function getSqlConnection() {
-  return await sql.connect(sqlConfig);
-}
-
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
-  }
-  return await conn.request().query(query);
-}
 
 export async function POST(request: NextRequest) {
-  /**
-   * This code has been commented out b/c it is optimized for the first-iteration application
-   * --> file upload and DB storage needs to be reworked to fit the new schema, but the core logic here is sound and should be retained
-   */
   const formData = await request.formData();
   const files = [];
   const plot = request.nextUrl.searchParams.get('plot')!;
@@ -70,9 +37,15 @@ export async function POST(request: NextRequest) {
   const uploadableRows: { [fileName: string]: RowDataStructure[] } = {};
   const errorRows: { [fileName: string]: RowDataStructure[] } = {};
 
-  function createFileEntry(parsedFileName: string) {
-    if (errors[parsedFileName] === undefined) {
-      errors[parsedFileName] = {};
+  function createFileEntry(fileName: string) {
+    if (!errors[fileName]) {
+      errors[fileName] = {};
+    }
+    if (!errorRows[fileName]) {
+      errorRows[fileName] = [];
+    }
+    if (!uploadableRows[fileName]) {
+      uploadableRows[fileName] = [];
     }
   }
 
@@ -88,17 +61,20 @@ export async function POST(request: NextRequest) {
       header: true,
       skipEmptyLines: true,
       transformHeader: (h) => h.trim(),
-      // Add a step to transform each row into RowDataStructure type
       transform: (value, field) => value,
     };
 
     const results = parse(await file.text(), config);
 
+    // Initialize arrays for the file if not already done
+    uploadableRows[file.name] = uploadableRows[file.name] || [];
+    errorRows[file.name] = errorRows[file.name] || [];
+
     results.data.forEach((row: any, rowIndex: number) => {
       const typedRow = row as RowDataStructure;
       const invalidHeaders: string[] = [];
 
-      // Check if all headers have corresponding non-null, non-empty, and non-undefined values
+      // Check for missing or invalid values
       expectedHeaders.forEach(header => {
         const value = typedRow[header.label];
         if (value === null || value === undefined || value === '') {
@@ -106,37 +82,39 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      const dbhValue = parseInt(typedRow['DBH']); // Convert 'DBH' value to integer
+      // Additional checks (e.g., DBH value)
+      const dbhValue = parseInt(typedRow['DBH']);
+      if (!isNaN(dbhValue) && dbhValue < 1) {
+        invalidHeaders.push('DBH');
+      }
 
+      // Categorize the row as valid or invalid
       if (invalidHeaders.length > 0) {
-        const emptyHeadersMessage = invalidHeaders.join(', ');
-        console.error(`Invalid row at index ${rowIndex} in file ${file.name}. Invalid headers: ${emptyHeadersMessage}`);
+        const errorMessage = `Invalid Row: Missing or incorrect values for ${invalidHeaders.join(', ')}`;
+        console.error(`Error at index ${rowIndex} in file ${file.name}: ${errorMessage}`);
         createFileEntry(file.name);
-        errors[file.name][rowIndex] = `Invalid Row Format: Empty Headers - ${emptyHeadersMessage}`;
-      } else if (!isNaN(dbhValue) && dbhValue < 1) {
-        console.error(`Invalid DBH value at index ${rowIndex} in file ${file.name}`);
-        createFileEntry(file.name);
-        errors[file.name][rowIndex] = "Invalid DBH Value";
+        errors[file.name][rowIndex] = errorMessage;
+        errorRows[file.name].push(typedRow);
       } else {
         uploadableRows[file.name].push(typedRow);
       }
     });
 
-    // Handle file-level errors and post-processing
-    // Check for parsing errors
+    // Handle parsing errors for the entire file
     if (results.errors.length) {
-      const firstError = results.errors[0];
-      if (firstError.row !== undefined) {
+      results.errors.forEach(error => {
         createFileEntry(file.name);
-        console.error(`Error on row: ${firstError.row}. ${firstError.message}`);
-        errors[file.name][`${firstError.row}`] = firstError.type + ',' + firstError.code + ',' + firstError.message;
-      } else {
-        // Handle the case when row is undefined
-        console.error(`Error in file: ${file.name}. ${firstError.message}`);
-        errors[file.name]["fileError"] = firstError.type + ',' + firstError.code + ',' + firstError.message;
-      }
+        if (typeof error.row === 'number') {
+          errors[file.name][error.row] = error.message;
+        } else {
+          // If the row number is undefined, handle the error accordingly
+          // For example, adding a generic error message for the file
+          errors[file.name]["fileError"] = error.message;
+        }
+      });
     }
   }
+
 
   for (const file of files) {
     await processFile(file, formType);
@@ -192,13 +170,8 @@ export async function POST(request: NextRequest) {
         // Process each uploadable row in the file
         for (const row of uploadableRows[file.name]) {
           try {
-            // Call your custom function for generating the insert/update query
-            const query = yourInsertOrUpdateQuery(row, plot); // Modify this function as needed
-
-            // Execute the query and log the result
-            let result = await runQuery(conn, query);
-            if (!result) console.error('results undefined');
-            else console.log(`tag ${row.tag} of file ${file.name} submitted to db`);
+            // Call insertOrUpdate function for each row
+            await insertOrUpdate(conn, formType, row, plot);
           } catch (error) {
             if (error instanceof Error) {
               console.error(`Error processing row for file ${file.name}:`, error.message);

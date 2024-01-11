@@ -32,54 +32,46 @@ export function DisplayErrorTable({
                                     fileData,
                                     errorMessage,
                                     formType,
-                                  }: DisplayErrorTableProps & { formType: string }) {
+                                  }: DisplayErrorTableProps) {
   const tableHeaders = TableHeadersByFormType[formType] || [];
 
   return (
     <TableContainer component={Paper}>
       <h3>file: {fileName}</h3>
-
       <Table>
-        {errorMessage[fileName]['headers'] ? (
-          <></>
-        ) : (
-          <>
-            <TableHead>
-              <TableRow>
-                {tableHeaders.map((header) => (
-                  <TableCell key={header.label}>{header.label}</TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {fileData.data.map((data: DataStructure, rowIdx) => {
-                return (
-                  <TableRow key={data.id}>
-                    {tableHeaders.map((header) => {
-                      const cellKey = `${data.id}-${header.label}`;
-                      const cellData = data[header.label];
-                      const cellError = errorMessage[fileName][rowIdx];
+        <TableHead>
+          <TableRow>
+            {tableHeaders.map((header) => (
+              <TableCell key={header.label}>{header.label}</TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {fileData.data.map((data: DataStructure, rowIndex: number) => (
+            <TableRow key={`row-${rowIndex}`}>
+              {tableHeaders.map((header) => {
+                const cellKey = `cell-${rowIndex}-${header.label}`;
+                const cellData = data[header.label];
+                const cellError = errorMessage[fileName] && errorMessage[fileName][rowIndex.toString()];
 
-                      return (
-                        <TableCell key={cellKey} sx={cellError ? {color: 'red', fontWeight: 'bold'} : undefined}>
-                          {cellError ? (
-                            <span>{cellData}<br/>{cellError}</span>
-                          ) : (
-                            cellData
-                          )}
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
+                return (
+                  <TableCell key={cellKey} sx={cellError ? { color: 'red', fontWeight: 'bold' } : undefined}>
+                    {cellError ? (
+                      <span>{cellData}<br/>{cellError}</span>
+                    ) : (
+                      cellData
+                    )}
+                  </TableCell>
                 );
               })}
-            </TableBody>
-          </>
-        )}
+            </TableRow>
+          ))}
+        </TableBody>
       </Table>
     </TableContainer>
   );
 }
+
 
 /**
  * Shows a data table with the possibility of showing errors.

@@ -1,311 +1,300 @@
-create table Attributes
+-- USE forestgeo;
+-- GO
+
+-- Attributes Table
+CREATE TABLE forestgeo.Attributes
 (
-    Code        varchar(10) not null
-        constraint Attributes_pk
-            primary key,
-    Description varchar(max),
-    Status      varchar(20)
-)
-go
+    Code        VARCHAR(10) NOT NULL
+        CONSTRAINT Attributes_pk
+            PRIMARY KEY,
+    Description VARCHAR(MAX),
+    Status      VARCHAR(20)
+);
+GO
 
-create table MeasurementTypes
+-- MeasurementTypes Table
+CREATE TABLE forestgeo.MeasurementTypes
 (
-    MeasurementTypeID          int not null
-        constraint MeasurementTypes_pk
-            primary key,
-    MeasurementTypeDescription int
-)
-go
+    MeasurementTypeID          INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    MeasurementTypeDescription VARCHAR(255)
+);
+GO
 
-create table Personnel
+-- Personnel Table
+CREATE TABLE forestgeo.Personnel
 (
-    PersonnelID int not null
-        constraint Personnel_pk
-            primary key,
-    FirstName   varchar(50),
-    LastName    varchar(50),
-    Role        varchar(150)
-)
-go
+    PersonnelID INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    FirstName   VARCHAR(50),
+    LastName    VARCHAR(50),
+    Role        VARCHAR(150)
+);
+GO
 
-create table Plots
+-- Plots Table
+CREATE TABLE forestgeo.Plots
 (
-    PlotID          int not null
-        constraint PlotID_PK
-            primary key,
-    PlotName        varchar(max),
-    LocationName    varchar(max),
-    CountryName     varchar(max),
-    Area            float,
-    PlotX           float,
-    PlotY           float,
-    PlotZ           float,
-    PlotShape       varchar(max),
-    PlotDescription varchar(max)
-)
-go
+    PlotID          INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    PlotName        VARCHAR(MAX),
+    LocationName    VARCHAR(MAX),
+    CountryName     VARCHAR(MAX),
+    Area            FLOAT,
+    PlotX           FLOAT,
+    PlotY           FLOAT,
+    PlotZ           FLOAT,
+    PlotShape       VARCHAR(MAX),
+    PlotDescription VARCHAR(MAX)
+);
+GO
 
-create table Census
+-- Census Table
+CREATE TABLE forestgeo.Census
 (
-    CensusID    int not null
-        constraint Census_pk
-            primary key,
-    PlotID      int
-        constraint Census_Plots_PlotID_fk
-            references Plots
-            on update cascade,
-    StartDate   date,
-    EndDate     date,
-    Description varchar(max),
-    PCN         int
-)
-go
+    CensusID         INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    PlotID           INT
+        CONSTRAINT Census_Plots_PlotID_fk
+            REFERENCES forestgeo.Plots (PlotID)
+            ON UPDATE CASCADE,
+    StartDate        DATE,
+    EndDate          DATE,
+    Description      VARCHAR(MAX),
+    PlotCensusNumber INT
+);
+GO
 
-create table Quadrats
+-- Quadrats Table
+CREATE TABLE forestgeo.Quadrats
 (
-    QuadratID    int not null
-        constraint Quadrats_PK
-            primary key,
-    PlotID       int
-        constraint Quadrats_Plots_FK
-            references Plots,
-    PersonnelID  int
-        constraint Quadrats_Personnel_fk
-            references Personnel,
-    QuadratName  varchar(max),
-    QuadratX     float,
-    QuadratY     float,
-    QuadratZ     float,
-    DimensionX   int,
-    DimensionY   int,
-    Area         float,
-    QuadratShape varchar(max)
-)
-go
+    QuadratID    INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    PlotID       INT
+        CONSTRAINT Quadrats_Plots_FK
+            REFERENCES forestgeo.Plots (PlotID),
+    PersonnelID  INT
+        CONSTRAINT Quadrats_Personnel_fk
+            REFERENCES forestgeo.Personnel (PersonnelID),
+    QuadratName  VARCHAR(MAX),
+    QuadratX     FLOAT,
+    QuadratY     FLOAT,
+    QuadratZ     FLOAT,
+    DimensionX   INT,
+    DimensionY   INT,
+    Area         FLOAT,
+    QuadratShape VARCHAR(MAX)
+);
+GO
 
-create table Reference
+-- Reference Table
+CREATE TABLE forestgeo.Reference
 (
-    ReferenceID       int not null
-        constraint Reference_pk
-            primary key,
-    PublicationTitle  varchar(64),
-    FullReference     varchar(max),
-    DateOfPublication date,
-    Citation          varchar(50)
-)
-go
+    ReferenceID       INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    PublicationTitle  VARCHAR(64),
+    FullReference     VARCHAR(MAX),
+    DateOfPublication DATE,
+    Citation          VARCHAR(50)
+);
+GO
 
-create table Family
+-- Family Table
+CREATE TABLE forestgeo.Family
 (
-    FamilyID    int not null
-        constraint Family_pk
-            primary key,
-    Family      varchar(32),
-    ReferenceID int
-        constraint Family_Reference_ReferenceID_fk
-            references Reference
-)
-go
+    FamilyID    INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    Family      VARCHAR(32),
+    ReferenceID INT
+        CONSTRAINT Family_Reference_ReferenceID_fk
+            REFERENCES forestgeo.Reference (ReferenceID)
+);
+GO
 
-create table Genus
+-- Genus Table
+CREATE TABLE forestgeo.Genus
 (
-    GenusID     int not null
-        constraint Genus_pk
-            primary key,
-    FamilyID    int
-        constraint Genus_Family_FamilyID_fk
-            references Family,
-    GenusName   varchar(32),
-    ReferenceID int
-        constraint Genus_Reference_ReferenceID_fk
-            references Reference,
-    Authority   varchar(32)
-)
-go
+    GenusID     INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    FamilyID    INT
+        CONSTRAINT Genus_Family_FamilyID_fk
+            REFERENCES forestgeo.Family (FamilyID),
+    GenusName   VARCHAR(32),
+    ReferenceID INT
+        CONSTRAINT Genus_Reference_ReferenceID_fk
+            REFERENCES forestgeo.Reference (ReferenceID),
+    Authority   VARCHAR(32)
+);
+GO
 
-create table Species
+-- Species Table
+CREATE TABLE forestgeo.Species
 (
-    SpeciesID         int not null
-        constraint Species_pk
-            primary key,
-    GenusID           int
-        constraint Species_Genus_GenusID_fk
-            references Genus,
-    CurrentTaxonFlag  bit,
-    ObsoleteTaxonFlag bit,
-    SpeciesName       varchar(64),
-    IDLevel           varchar(8),
-    Authority         varchar(128),
-    FieldFamily       varchar(32),
-    Description       varchar(max),
-    ReferenceID       int
-        constraint Species_Reference_ReferenceID_fk
-            references Reference,
-    SpeciesCode       varchar(25)
-)
-go
+    SpeciesID         INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    GenusID           INT
+        CONSTRAINT Species_Genus_GenusID_fk
+            REFERENCES forestgeo.Genus (GenusID),
+    CurrentTaxonFlag  BIT,
+    ObsoleteTaxonFlag BIT,
+    SpeciesName       VARCHAR(64),
+    IDLevel           VARCHAR(8),
+    Authority         VARCHAR(128),
+    FieldFamily       VARCHAR(32),
+    Description       VARCHAR(MAX),
+    ReferenceID       INT
+        CONSTRAINT Species_Reference_ReferenceID_fk
+            REFERENCES forestgeo.Reference (ReferenceID),
+    SpeciesCode       VARCHAR(25)
+);
+GO
 
-create table CurrentObsolete
+-- CurrentObsolete Table
+CREATE TABLE forestgeo.CurrentObsolete
 (
-    SpeciesID         int  not null
-        constraint CurrentObsolete_Species_SpeciesID_fk
-            references Species,
-    ObsoleteSpeciesID int  not null
-        constraint CurrentObsolete_Species_SpeciesID_fk2
-            references Species,
-    ChangeDate        date not null,
-    ChangeCodeID      int,
-    ChangeNote        varchar(max),
-    constraint CurrentObsolete_pk
-        primary key (SpeciesID, ObsoleteSpeciesID, ChangeDate)
-)
-go
+    SpeciesID         INT  NOT NULL
+        CONSTRAINT CurrentObsolete_Species_SpeciesID_fk
+            REFERENCES forestgeo.Species (SpeciesID),
+    ObsoleteSpeciesID INT  NOT NULL
+        CONSTRAINT CurrentObsolete_Species_SpeciesID_fk2
+            REFERENCES forestgeo.Species (SpeciesID),
+    ChangeDate        DATE NOT NULL,
+    ChangeCodeID      INT,
+    ChangeNote        VARCHAR(MAX),
+    CONSTRAINT CurrentObsolete_pk
+        PRIMARY KEY (SpeciesID, ObsoleteSpeciesID, ChangeDate)
+);
+GO
 
-create table SpeciesInventory
+-- SpeciesInventory Table
+CREATE TABLE forestgeo.SpeciesInventory
 (
-    SpeciesInventoryID int not null
-        constraint SpeciesInventory_pk
-            primary key,
-    CensusID           int,
-    PlotID             int
-        constraint SpeciesInventory_Plots_PlotID_fk
-            references Plots,
-    SpeciesID          int,
-    SubSpeciesID       int
-)
-go
+    SpeciesInventoryID INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    CensusID           INT,
+    PlotID             INT
+        CONSTRAINT SpeciesInventory_Plots_PlotID_fk
+            REFERENCES forestgeo.Plots (PlotID),
+    SpeciesID          INT,
+    SubSpeciesID       INT
+);
+GO
 
-create table SubSpecies
+-- SubSpecies Table
+CREATE TABLE forestgeo.SubSpecies
 (
-    SubSpeciesID       int not null
-        constraint SubSpecies_pk
-            primary key,
-    SubSpeciesCode     varchar(10),
-    SpeciesID          int
-        constraint SubSpecies_Species_SpeciesID_fk
-            references Species
-            on update cascade,
-    CurrentTaxonFlag   bit,
-    ObsoleteTaxonFlag  bit,
-    SubSpeciesName     varchar(max),
-    Authority          varchar(128),
-    InfraSpecificLevel char(32)
-)
-go
+    SubSpeciesID       INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    SubSpeciesCode     VARCHAR(10),
+    SpeciesID          INT
+        CONSTRAINT SubSpecies_Species_SpeciesID_fk
+            REFERENCES forestgeo.Species (SpeciesID)
+            ON UPDATE CASCADE,
+    CurrentTaxonFlag   BIT,
+    ObsoleteTaxonFlag  BIT,
+    SubSpeciesName     VARCHAR(MAX),
+    Authority          VARCHAR(128),
+    InfraSpecificLevel CHAR(32)
+);
+GO
 
-create table Trees
+-- Trees Table
+CREATE TABLE forestgeo.Trees
 (
-    TreeID    int not null
-        constraint PK_Trees
-            primary key,
-    TreeTag   varchar(10),
-    SpeciesID int
-        constraint Trees_Species_SpeciesID_fk
-            references Species
-            on update cascade
-)
-go
+    TreeID       INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    TreeTag      VARCHAR(10),
+    SpeciesID    INT
+        CONSTRAINT Trees_Species_SpeciesID_fk
+            REFERENCES forestgeo.Species (SpeciesID)
+            ON UPDATE CASCADE,
+    SubSpeciesID INT
+        CONSTRAINT Trees_SubSpecies_SubSpeciesID_fk
+            REFERENCES forestgeo.SubSpecies (SubSpeciesID)
+);
+GO
 
-create table Stems
+-- Stems Table
+CREATE TABLE forestgeo.Stems
 (
-    StemID          int not null
-        constraint PK_Stems
-            primary key,
-    TreeID          int
-        constraint FK_Stems_Trees
-            references Trees
-            on update cascade,
-    QuadratID       int
-        constraint FK_Stems_Quadrats
-            references Quadrats
-            on update cascade,
-    StemNumber      int,
-    StemTag         int,
-    TreeTag         int,
-    StemX           float,
-    StemY           float,
-    StemZ           float,
-    Moved           bit,
-    StemDescription varchar(max)
-)
-go
+    StemID          INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    TreeID          INT
+        CONSTRAINT FK_Stems_Trees
+            REFERENCES forestgeo.Trees (TreeID)
+            ON UPDATE CASCADE,
+    QuadratID       INT
+        CONSTRAINT FK_Stems_Quadrats
+            REFERENCES forestgeo.Quadrats (QuadratID)
+            ON UPDATE CASCADE,
+    StemNumber      INT,
+    StemTag         VARCHAR(10),
+    TreeTag         VARCHAR(10),
+    StemX           FLOAT,
+    StemY           FLOAT,
+    StemZ           FLOAT,
+    Moved           BIT,
+    StemDescription VARCHAR(MAX)
+);
+GO
 
-create table CoreMeasurements
+-- CoreMeasurements Table
+CREATE TABLE forestgeo.CoreMeasurements
 (
-    CoreMeasurementID int not null
-        constraint CoreMeasurements_pk
-            primary key,
-    CensusID          int
-        constraint CoreMeasurements_Census_CensusID_fk
-            references Census
-            on update cascade,
-    PlotID            int
-        constraint CoreMeasurements_Plots_PlotID_fk
-            references Plots,
-    QuadratID         int
-        constraint CoreMeasurements_Quadrats_QuadratID_fk
-            references Quadrats,
-    TreeID            int
-        constraint FK_CoreMeasurements_Trees
-            references Trees,
-    StemID            int
-        constraint FK_CoreMeasurements_Stems
-            references Stems,
-    PersonnelID       int
-        constraint CoreMeasurements_Personnel_PersonnelID_fk
-            references Personnel
-            on update cascade,
-    MeasurementTypeID int
-        constraint CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
-            references MeasurementTypes
-            on update cascade,
-    MeasurementDate   date,
-    Measurement       varchar(max),
-    IsRemeasurement   bit,
-    IsCurrent         bit,
-    UserDefinedFields varchar(max)
-)
-go
+    CoreMeasurementID INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    CensusID          INT
+        CONSTRAINT CoreMeasurements_Census_CensusID_fk
+            REFERENCES forestgeo.Census (CensusID)
+            ON UPDATE CASCADE,
+    PlotID            INT
+        CONSTRAINT CoreMeasurements_Plots_PlotID_fk
+            REFERENCES forestgeo.Plots (PlotID),
+    QuadratID         INT
+        CONSTRAINT CoreMeasurements_Quadrats_QuadratID_fk
+            REFERENCES forestgeo.Quadrats (QuadratID),
+    TreeID            INT
+        CONSTRAINT FK_CoreMeasurements_Trees
+            REFERENCES forestgeo.Trees (TreeID),
+    StemID            INT
+        CONSTRAINT FK_CoreMeasurements_Stems
+            REFERENCES forestgeo.Stems (StemID),
+    PersonnelID       INT
+        CONSTRAINT CoreMeasurements_Personnel_PersonnelID_fk
+            REFERENCES forestgeo.Personnel (PersonnelID)
+            ON UPDATE CASCADE,
+    MeasurementTypeID INT
+        CONSTRAINT CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
+            REFERENCES forestgeo.MeasurementTypes (MeasurementTypeID)
+            ON UPDATE CASCADE,
+    MeasurementDate   DATE,
+    Measurement       VARCHAR(MAX),
+    IsRemeasurement   BIT,
+    IsCurrent         BIT,
+    UserDefinedFields VARCHAR(MAX)
+);
+GO
 
-create table CMAttributes
+-- CMAttributes Table
+CREATE TABLE forestgeo.CMAttributes
 (
-    CMAID             int not null
-        constraint CMAttributes_pk
-            primary key,
-    CoreMeasurementID int
-        constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
-            references CoreMeasurements
-            on update cascade,
-    Code              varchar(10)
-        constraint CMAttributes_Attributes_Code_fk
-            references Attributes
-            on update cascade
-)
-go
+    CMAID             INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    CoreMeasurementID INT
+        CONSTRAINT CMAttributes_CoreMeasurements_CoreMeasurementID_fk
+            REFERENCES forestgeo.CoreMeasurements (CoreMeasurementID)
+            ON UPDATE CASCADE,
+    Code              VARCHAR(10)
+        CONSTRAINT CMAttributes_Attributes_Code_fk
+            REFERENCES forestgeo.Attributes (Code)
+            ON UPDATE CASCADE
+);
+GO
 
-create table ValidationErrors
+-- ValidationErrors Table
+CREATE TABLE forestgeo.ValidationErrors
 (
-    ValidationErrorID          int not null
-        constraint ValidationErrors_pk
-            primary key,
-    ValidationErrorDescription varchar(max)
-)
-go
+    ValidationErrorID          INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    ValidationErrorDescription VARCHAR(MAX)
+);
+GO
 
-create table CMVErrors
+-- CMVErrors Table
+CREATE TABLE forestgeo.CMVErrors
 (
-    CMVErrorID        int not null
-        constraint CMVErrors_pk
-            primary key,
-    CoreMeasurementID int
-        constraint CMVErrors_CoreMeasurements_CoreMeasurementID_fk
-            references CoreMeasurements
-            on update cascade,
-    ValidationErrorID int
-        constraint CMVErrors_ValidationErrors_ValidationErrorID_fk
-            references ValidationErrors
-            on update cascade
-)
-go
-
-
+    CMVErrorID        INT IDENTITY (1,1) PRIMARY KEY NOT NULL,
+    CoreMeasurementID INT
+        CONSTRAINT CMVErrors_CoreMeasurements_CoreMeasurementID_fk
+            REFERENCES forestgeo.CoreMeasurements (CoreMeasurementID)
+            ON UPDATE CASCADE,
+    ValidationErrorID INT
+        CONSTRAINT CMVErrors_ValidationErrors_ValidationErrorID_fk
+            REFERENCES forestgeo.ValidationErrors (ValidationErrorID)
+            ON UPDATE CASCADE
+);
+GO

@@ -1,0 +1,7 @@
+code,description,status
+L,leaning,alive
+MS,multiple stems,alive-not measured
+R,resprout,broken below
+D,dead,dead
+M,missing,missing
+SD,stem dead,stem dead
