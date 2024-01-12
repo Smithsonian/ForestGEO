@@ -378,8 +378,10 @@ export const siteConfigNav: SiteConfigProps[] = [
 export async function getContainerClient(plot: string, census: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   console.log('Connection String:', storageAccountConnectionString);
+  const serverName = process.env.AZURE_SQL_SERVER;
+  console.log('sql server name: ' + serverName);
 
-  if (!storageAccountConnectionString) {
+  if (!storageAccountConnectionString || !serverName) {
     console.error("process envs failed");
     throw new Error("process envs failed");
   }
@@ -387,7 +389,7 @@ export async function getContainerClient(plot: string, census: string) {
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
   if (!blobServiceClient) throw new Error("blob service client creation failed");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot + '_' + census);
+  let containerClient = blobServiceClient.getContainerClient(serverName + '_' + plot + '_' + census);
   if (!(await containerClient.exists())) await containerClient.create();
   else return containerClient;
 }
