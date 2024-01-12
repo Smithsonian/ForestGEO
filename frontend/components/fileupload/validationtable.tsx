@@ -55,7 +55,7 @@ export function DisplayErrorTable({
                 const cellError = errorMessage[fileName] && errorMessage[fileName][rowIndex.toString()];
 
                 return (
-                  <TableCell key={cellKey} sx={cellError ? { color: 'red', fontWeight: 'bold' } : undefined}>
+                  <TableCell key={cellKey} sx={cellError ? {color: 'red', fontWeight: 'bold'} : undefined}>
                     {cellError ? (
                       <span>{cellData}<br/>{cellError}</span>
                     ) : (

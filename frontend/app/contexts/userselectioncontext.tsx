@@ -1,29 +1,28 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from "react";
 import {
-  allCensus,
   allQuadrats,
   Census,
   CensusAction,
   containsPlotCensusNumber,
   Plot,
   PlotAction,
-  plots,
+  plots, Quadrat,
   QuadratsAction
 } from "@/config/macros";
 import {useCensusListContext, usePlotListContext, useQuadratListContext} from "@/app/contexts/generalcontext";
 
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<Census | null>(null);
-export const QuadratContext = createContext<number | null>(null);
-export const PlotsDispatchContext = createContext<Dispatch<{ plotKey: string | null }> | null>(null);
+export const QuadratContext = createContext<Quadrat | null>(null);
+export const PlotsDispatchContext = createContext<Dispatch<{ plot: Plot | null }> | null>(null);
 export const CensusDispatchContext = createContext<Dispatch<{ census: Census | null }> | null>(null);
-export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
+export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: Quadrat | null }> | null>(null);
 
 export default function PlotProvider({children}: { children: React.ReactNode }) {
-  const plotListContext = (usePlotListContext() ?? JSON.parse(localStorage.getItem('plotList') ?? '[]')) || plots;
+  const plotListContext = (usePlotListContext() ?? JSON.parse(localStorage.getItem('plotList') ?? '[]'));
   const censusListContext = useCensusListContext() ?? JSON.parse(localStorage.getItem('censusList') ?? '[]');
-  const quadratListContext = useQuadratListContext() ?? JSON.parse(localStorage.getItem('quadratList') ?? JSON.stringify(allQuadrats));
+  const quadratListContext = useQuadratListContext() ?? JSON.parse(localStorage.getItem('quadratList') ?? '[]');
   const [plot, plotDispatch] = useReducer(
     (state: Plot | null, action: PlotAction) => plotsReducer(state, action, plotListContext),
     null
@@ -34,7 +33,7 @@ export default function PlotProvider({children}: { children: React.ReactNode }) 
   );
 
   const [quadrat, quadratDispatch] = useReducer(
-    (state: number | null, action: QuadratsAction) => quadratReducer(state, action, quadratListContext),
+    (state: Quadrat | null, action: QuadratsAction) => quadratReducer(state, action, quadratListContext),
     null
   );
 
@@ -55,24 +54,21 @@ export default function PlotProvider({children}: { children: React.ReactNode }) 
   );
 }
 
-function plotsReducer(currentPlot: any, action: { plotKey: string | null }, plotListContext: Plot[]) {
-  if (action.plotKey == null) return null;
-  else {
-    const foundPlot = plotListContext.find((p) => p.key === action.plotKey);
-    return foundPlot ?? currentPlot;
-  }
+function plotsReducer(currentPlot: any, action: { plot: Plot | null }, plotListContext: Plot[]) {
+  if (action.plot == null) return null;
+  return plotListContext.includes(action.plot) ? action.plot : currentPlot;
 }
 
-function censusReducer(currentCensus: Census | null, action: { census: Census | null }, censusListContext: Census[]) {
+function censusReducer(currentCensus: any, action: { census: Census | null }, censusListContext: Census[]) {
   if (action.census == null) return null;
   else if (containsPlotCensusNumber(censusListContext, action.census.plotCensusNumber)) return action.census;
   else return currentCensus;
 }
 
 
-function quadratReducer(currentQuadrat: number | null, action: {
-  quadrat: number | null
-}, quadratListContext: number[]) {
+function quadratReducer(currentQuadrat: any, action: {
+  quadrat: Quadrat | null
+}, quadratListContext: Quadrat[]) {
   if (action.quadrat == null) return null;
   else if (quadratListContext.includes(action.quadrat)) return action.quadrat;
   else return currentQuadrat;

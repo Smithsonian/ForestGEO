@@ -109,17 +109,34 @@ export async function PATCH(request: NextRequest) {
     if (newSpeciesIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
     let results = await runQuery(conn, `UPDATE forestgeo.Species
-    SET [SpeciesID] = ${row.speciesID}, [GenusID] = ${row.genusID}, [CurrentTaxonFlag] = '${row.currentTaxonFlag}',
-    [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}', [SpeciesName] = '${row.speciesName}', [SpeciesCode] = '${row.speciesCode}', [IDLevel] = '${row.idLevel}',
-    [Authority] = '${row.authority}', [FieldFamily] = '${row.fieldFamily}', [Description] = '${row.description}', [ReferenceID] = ${row.referenceID} WHERE [SpeciesID] = ${oldSpeciesID}`);
+                                        SET [SpeciesID]         = ${row.speciesID},
+                                            [GenusID]           = ${row.genusID},
+                                            [CurrentTaxonFlag]  = '${row.currentTaxonFlag}',
+                                            [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}',
+                                            [SpeciesName]       = '${row.speciesName}',
+                                            [SpeciesCode]       = '${row.speciesCode}',
+                                            [IDLevel]           = '${row.idLevel}',
+                                            [Authority]         = '${row.authority}',
+                                            [FieldFamily]       = '${row.fieldFamily}',
+                                            [Description]       = '${row.description}',
+                                            [ReferenceID]       = ${row.referenceID}
+                                        WHERE [SpeciesID] = ${oldSpeciesID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else {
     let results = await runQuery(conn, `UPDATE forestgeo.Species
-    SET [GenusID] = ${row.genusID}, [CurrentTaxonFlag] = '${row.currentTaxonFlag}',
-    [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}', [SpeciesName] = '${row.speciesName}', [SpeciesCode] = '${row.speciesCode}', [IDLevel] = '${row.idLevel}',
-    [Authority] = '${row.authority}', [FieldFamily] = '${row.fieldFamily}', [Description] = '${row.description}', [ReferenceID] = ${row.referenceID} WHERE [SpeciesID] = ${oldSpeciesID}`);
+                                        SET [GenusID]           = ${row.genusID},
+                                            [CurrentTaxonFlag]  = '${row.currentTaxonFlag}',
+                                            [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}',
+                                            [SpeciesName]       = '${row.speciesName}',
+                                            [SpeciesCode]       = '${row.speciesCode}',
+                                            [IDLevel]           = '${row.idLevel}',
+                                            [Authority]         = '${row.authority}',
+                                            [FieldFamily]       = '${row.fieldFamily}',
+                                            [Description]       = '${row.description}',
+                                            [ReferenceID]       = ${row.referenceID}
+                                        WHERE [SpeciesID] = ${oldSpeciesID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
