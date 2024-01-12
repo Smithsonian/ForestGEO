@@ -18,6 +18,7 @@ export interface Plot {
   num: number;
   id: number;
 }
+
 export interface Census {
   plotID: number;
   plotCensusNumber: number;
@@ -26,12 +27,18 @@ export interface Census {
   description: string;
 }
 
+export interface Quadrat {
+  quadratID: number;
+  plotID: number;
+  quadratName: string;
+}
+
 export function containsPlotCensusNumber(censusArray: Census[], plotCensusNumberToCheck: number): boolean {
   return censusArray.some(census => census.plotCensusNumber === plotCensusNumberToCheck);
 }
 
 export interface PlotAction {
-  plotKey: string | null;
+  plot: Plot | null;
 }
 
 export interface CensusAction {
@@ -39,7 +46,7 @@ export interface CensusAction {
 }
 
 export interface QuadratsAction {
-  quadrat: number | null;
+  quadrat: Quadrat | null;
 }
 
 export interface UploadedFileData {
@@ -126,14 +133,11 @@ export enum HTTPResponses {
   OK = 200,
   CREATED = 201,
   ACCEPTED = 202,
-  NO_CONTENT = 204,
-  BAD_REQUEST = 400,
   UNAUTHORIZED = 401,
   FORBIDDEN = 403,
   NOT_FOUND = 404,
   METHOD_NOT_ALLOWED = 405,
   CONFLICT = 409,
-  UNPROCESSABLE_ENTITY = 422,
   INTERNAL_SERVER_ERROR = 500,
   NOT_IMPLEMENTED = 501,
   BAD_GATEWAY = 502,
@@ -145,7 +149,6 @@ export enum HTTPResponses {
   INVALID_REQUEST = 400, // Custom code, example
   ERRORS_IN_FILE = 422, // Custom code, example
   EMPTY_FILE = 204, // Custom code, example
-  NO_ERRORS = 200, // Custom code, example
 }
 
 
@@ -372,7 +375,7 @@ export const siteConfigNav: SiteConfigProps[] = [
  * SQL function storage
  */
 
-export async function getContainerClient(plot: string, formType: string) {
+export async function getContainerClient(plot: string, census: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   console.log('Connection String:', storageAccountConnectionString);
 
@@ -384,7 +387,7 @@ export async function getContainerClient(plot: string, formType: string) {
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
   if (!blobServiceClient) throw new Error("blob service client creation failed");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase() + '-' + formType);
+  let containerClient = blobServiceClient.getContainerClient(plot + '_' + census);
   if (!(await containerClient.exists())) await containerClient.create();
   else return containerClient;
 }

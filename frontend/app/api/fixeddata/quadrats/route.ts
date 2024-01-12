@@ -119,17 +119,32 @@ export async function PATCH(request: NextRequest) {
     if (newQuadratIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
     let results = await runQuery(conn, `UPDATE forestgeo.Quadrats
-    SET [QuadratID] = ${row.quadratID}, [PlotID] = ${row.plotID}, [quadratName] = '${row.quadratName}',
-    [QuadratX] = ${row.quadratX}, [QuadratY] = ${row.quadratY}, [QuadratZ] = ${row.quadratZ}, [DimensionX] = ${row.dimensionX},
-    [DimensionY] = ${row.dimensionY}, [Area] = ${row.area}, [QuadratShape] = '${row.quadratShape}' WHERE [QuadratID] = ${oldQuadratID}`);
+                                        SET [QuadratID]    = ${row.quadratID},
+                                            [PlotID]       = ${row.plotID},
+                                            [quadratName]  = '${row.quadratName}',
+                                            [QuadratX]     = ${row.quadratX},
+                                            [QuadratY]     = ${row.quadratY},
+                                            [QuadratZ]     = ${row.quadratZ},
+                                            [DimensionX]   = ${row.dimensionX},
+                                            [DimensionY]   = ${row.dimensionY},
+                                            [Area]         = ${row.area},
+                                            [QuadratShape] = '${row.quadratShape}'
+                                        WHERE [QuadratID] = ${oldQuadratID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // other column information is being updated, no PK check required
     let results = await runQuery(conn, `UPDATE forestgeo.Quadrats
-    SET [PlotID] = ${row.plotID}, [quadratName] = '${row.quadratName}',
-    [QuadratX] = ${row.quadratX}, [QuadratY] = ${row.quadratY}, [QuadratZ] = ${row.quadratZ}, [DimensionX] = ${row.dimensionX},
-    [DimensionY] = ${row.dimensionY}, [Area] = ${row.area}, [QuadratShape] = '${row.quadratShape}' WHERE [QuadratID] = ${oldQuadratID}`);
+                                        SET [PlotID]       = ${row.plotID},
+                                            [quadratName]  = '${row.quadratName}',
+                                            [QuadratX]     = ${row.quadratX},
+                                            [QuadratY]     = ${row.quadratY},
+                                            [QuadratZ]     = ${row.quadratZ},
+                                            [DimensionX]   = ${row.dimensionX},
+                                            [DimensionY]   = ${row.dimensionY},
+                                            [Area]         = ${row.area},
+                                            [QuadratShape] = '${row.quadratShape}'
+                                        WHERE [QuadratID] = ${oldQuadratID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});

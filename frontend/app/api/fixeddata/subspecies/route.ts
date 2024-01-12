@@ -99,17 +99,28 @@ export async function PATCH(request: NextRequest) {
     if (newSubSpeciesIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
     let results = await runQuery(conn, `UPDATE forestgeo.SubSpecies
-    SET [SubSpeciesID] = ${row.subSpeciesID}, [SpeciesID] = ${row.speciesID}, [CurrentTaxonFlag] = '${row.currentTaxonFlag}',
-    [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}', [SubSpeciesName] = '${row.subSpeciesName}', [SubSpeciesCode] = '${row.subSpeciesCode}', [Authority] = '${row.authority}',
-    [InfraSpecificLevel] = '${row.infraSpecificLevel}' WHERE [SubSpeciesID] = ${oldSubSpeciesID}`);
+                                        SET [SubSpeciesID]       = ${row.subSpeciesID},
+                                            [SpeciesID]          = ${row.speciesID},
+                                            [CurrentTaxonFlag]   = '${row.currentTaxonFlag}',
+                                            [ObsoleteTaxonFlag]  = '${row.obsoleteTaxonFlag}',
+                                            [SubSpeciesName]     = '${row.subSpeciesName}',
+                                            [SubSpeciesCode]     = '${row.subSpeciesCode}',
+                                            [Authority]          = '${row.authority}',
+                                            [InfraSpecificLevel] = '${row.infraSpecificLevel}'
+                                        WHERE [SubSpeciesID] = ${oldSubSpeciesID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else {
     let results = await runQuery(conn, `UPDATE forestgeo.SubSpecies
-    SET [SpeciesID] = ${row.speciesID}, [CurrentTaxonFlag] = '${row.currentTaxonFlag}',
-    [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}', [SubSpeciesName] = '${row.subSpeciesName}', [SubSpeciesCode] = '${row.subSpeciesCode}', [Authority] = '${row.authority}',
-    [InfraSpecificLevel] = '${row.infraSpecificLevel}' WHERE [SubSpeciesID] = ${oldSubSpeciesID}`);
+                                        SET [SpeciesID]          = ${row.speciesID},
+                                            [CurrentTaxonFlag]   = '${row.currentTaxonFlag}',
+                                            [ObsoleteTaxonFlag]  = '${row.obsoleteTaxonFlag}',
+                                            [SubSpeciesName]     = '${row.subSpeciesName}',
+                                            [SubSpeciesCode]     = '${row.subSpeciesCode}',
+                                            [Authority]          = '${row.authority}',
+                                            [InfraSpecificLevel] = '${row.infraSpecificLevel}'
+                                        WHERE [SubSpeciesID] = ${oldSubSpeciesID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});

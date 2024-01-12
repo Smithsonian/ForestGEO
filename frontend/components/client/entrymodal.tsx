@@ -14,7 +14,7 @@ import {
   useCensusListDispatch,
   useFirstLoadContext,
   useFirstLoadDispatch,
-  usePlotListDispatch, useQuadratListContext,
+  usePlotListDispatch, useQuadratListContext, useQuadratListDispatch,
 } from '@/app/contexts/generalcontext';
 import {
   Button,
@@ -30,8 +30,8 @@ import {
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
-import {CensusRDS, PlotRDS} from '@/config/sqlmacros';
-import {Census, Plot} from "@/config/macros";
+import {CensusRDS, PlotRDS, QuadratRDS} from '@/config/sqlmacros';
+import {Census, Plot, Quadrat} from "@/config/macros";
 export default function EntryModal() {
   const [loading, setLoading] = useState(0);
   const [loadingMsg, setLoadingMsg] = useState('');
@@ -45,6 +45,7 @@ export default function EntryModal() {
   const plotsLoadDispatch = usePlotsLoadDispatch();
   const plotsListDispatch = usePlotListDispatch();
   const censusListDispatch = useCensusListDispatch();
+  const quadratListDispatch = useQuadratListDispatch();
   const firstLoad = useFirstLoadContext();
   const firstLoadDispatch = useFirstLoadDispatch();
   const interval = 5;
@@ -61,6 +62,45 @@ export default function EntryModal() {
       localStorage.setItem(actionType, JSON.stringify(responseData));
     }
   };
+
+  const fetchAndDispatchQuadrats = async() => {
+    setLoading(loading + interval);
+    setLoadingMsg('Retrieving Quadrats...');
+
+    // check if quadratsLoad is available in localStorage
+    const quadratLoadData = JSON.parse(localStorage.getItem('quadratsLoad') ?? 'null');
+    let quadratsRDSLoad: QuadratRDS[];
+    if (quadratLoadData) {
+      quadratsRDSLoad = quadratLoadData;
+    } else {
+      const response = await fetch('/api/fixeddata/quadrats', {method: 'GET'});
+      quadratsRDSLoad = await response.json();
+      localStorage.setItem('quadratsLoad', JSON.stringify(quadratsRDSLoad));
+    }
+
+    if (quadratsLoadDispatch) {
+      quadratsLoadDispatch({ quadratsLoad: quadratsRDSLoad});
+    }
+
+    const quadratListData = JSON.parse(localStorage.getItem('quadratList') ?? 'null');
+    let quadratList: Quadrat[];
+    if (quadratListData) {
+      quadratList = quadratListData;
+    } else {
+      // Generate plotList from plotRDSLoad if not in localStorage
+      quadratList = quadratsRDSLoad.map((quadratRDS) => ({
+        quadratID: quadratRDS.quadratID!,
+        plotID: quadratRDS.plotID!,
+        quadratName: quadratRDS.quadratName!,
+      }));
+      localStorage.setItem('quadratList', JSON.stringify(quadratList));
+    }
+
+    setLoadingMsg('Dispatching Quadrat List...');
+    if (quadratListDispatch) {
+      quadratListDispatch({quadratList: quadratList});
+    }
+  }
 
   const fetchAndDispatchCensus = async () => {
     setLoading(loading + interval);
@@ -87,17 +127,33 @@ export default function EntryModal() {
     const censusListData = JSON.parse(localStorage.getItem('censusList') ?? 'null');
     let censusList: Census[];
     if (censusListData) {
-      // Use data from localStorage if available
       censusList = censusListData;
     } else {
-      // Generate plotList from plotRDSLoad if not in localStorage
-      censusList = censusRDSLoad.map((censusRDS) => ({
-        plotID: censusRDS.plotID ? censusRDS.plotID : 0,
-        plotCensusNumber: censusRDS.plotCensusNumber ? censusRDS.plotCensusNumber : 0,
-        startDate: censusRDS.startDate ? censusRDS.startDate : new Date(),
-        endDate: censusRDS.endDate ? censusRDS.endDate : new Date(),
-        description: censusRDS.description ? censusRDS.description : ''
-      }));
+      const uniqueCensusMap = new Map<number, Census>();
+
+      censusRDSLoad.forEach((censusRDS) => {
+        const plotCensusNumber = censusRDS.plotCensusNumber ? censusRDS.plotCensusNumber : 0;
+        if (!uniqueCensusMap.has(plotCensusNumber)) {
+          // First occurrence of this plotCensusNumber
+          uniqueCensusMap.set(plotCensusNumber, {
+            plotID: censusRDS.plotID ? censusRDS.plotID : 0,
+            plotCensusNumber,
+            startDate: new Date(censusRDS.startDate!),
+            endDate: new Date(censusRDS.endDate!),
+            description: censusRDS.description ? censusRDS.description : ''
+          });
+        } else {
+          // Update existing entry with earliest startDate and latest endDate
+          const existingCensus = uniqueCensusMap.get(plotCensusNumber);
+          if (existingCensus) {
+            existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS.startDate!).getTime()));
+            existingCensus.endDate = new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS.endDate!).getTime()));
+          }
+        }
+      });
+
+      censusList = Array.from(uniqueCensusMap.values());
+      console.log(censusList);
       localStorage.setItem('censusList', JSON.stringify(censusList));
     }
 
@@ -139,7 +195,6 @@ export default function EntryModal() {
       plotList = plotRDSLoad.map((plotRDS) => ({
         key: plotRDS.plotName ? plotRDS.plotName : '',
         num: quadratsLoadDispatch ? quadratsLoadDispatch.length : 0,
-        // num: quadratsLoadContext ? quadratsLoadContext.filter((quadratRDS) => quadratRDS.plotID === plotRDS.plotID).length : 0,
         id: plotRDS.plotID ? plotRDS.plotID : 0,
       }));
       localStorage.setItem('plotList', JSON.stringify(plotList));
@@ -166,10 +221,6 @@ export default function EntryModal() {
         (personnelLoadData && personnelLoadDispatch) ?
           personnelLoadDispatch({personnelLoad: personnelLoadData}) :
           await fetchData('/api/fixeddata/personnel', personnelLoadDispatch, 'personnelLoad');
-        const quadratsLoadData = JSON.parse(localStorage.getItem('quadratsLoad') ?? 'null');
-        (quadratsLoadData && quadratsLoadDispatch) ?
-          quadratsLoadDispatch({quadratsLoad: quadratsLoadData}) :
-          await fetchData('/api/fixeddata/quadrats', quadratsLoadDispatch, 'quadratsLoad');
         const speciesLoadData = JSON.parse(localStorage.getItem('speciesLoad') ?? 'null');
         (speciesLoadData && speciesLoadDispatch) ?
           speciesLoadDispatch({speciesLoad: speciesLoadData}) :
@@ -181,6 +232,7 @@ export default function EntryModal() {
 
         await fetchAndDispatchPlots();
         await fetchAndDispatchCensus();
+        await fetchAndDispatchQuadrats();
         setLoading(100);
       } catch (error) {
         console.error(error);

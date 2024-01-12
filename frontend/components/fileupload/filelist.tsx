@@ -11,7 +11,7 @@ import Divider from "@mui/joy/Divider";
 /**
  * A simple list of files with their sizes.
  */
-export function FileDisplay({acceptedFiles}: Readonly<FileListProps>) {
+export function FileDisplay({acceptedFiles}: FileListProps) {
   const [currentPage, setCurrentPage] = React.useState(1);
   const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
     setCurrentPage(value);

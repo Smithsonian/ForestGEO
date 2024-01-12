@@ -89,12 +89,21 @@ export async function PATCH(request: NextRequest) {
     if (newCodeCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
     let results = await runQuery(conn,
-      `UPDATE forestgeo.Personnel SET [PersonnelID] = ${row.personnelID}, [FirstName] = '${row.firstName}', [LastName] = '${row.lastName}', [Role] = '${row.role}' WHERE [PersonnelID] = '${oldPersonnelID}'`);
+      `UPDATE forestgeo.Personnel
+       SET [PersonnelID] = ${row.personnelID},
+           [FirstName] = '${row.firstName}',
+           [LastName] = '${row.lastName}',
+           [Role] = '${row.role}'
+       WHERE [PersonnelID] = '${oldPersonnelID}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // otherwise updating can focus solely on other columns
-    let results = await runQuery(conn, `UPDATE forestgeo.Personnel SET [FirstName] = '${row.firstName}', [LastName] = '${row.lastName}', [Role] = '${row.role}' WHERE [PersonnelID] = '${oldPersonnelID}'`);
+    let results = await runQuery(conn, `UPDATE forestgeo.Personnel
+                                        SET [FirstName] = '${row.firstName}',
+                                            [LastName]  = '${row.lastName}',
+                                            [Role]      = '${row.role}'
+                                        WHERE [PersonnelID] = '${oldPersonnelID}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});

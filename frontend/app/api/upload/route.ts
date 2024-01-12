@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const files = [];
   const plot = request.nextUrl.searchParams.get('plot')!;
+  const census = request.nextUrl.searchParams.get('census')!;
   const user = request.nextUrl.searchParams.get('user')!;
   const formType = request.nextUrl.searchParams.get('formType')!; // Get form type from URL
 
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
   let conn;
   let containerClient;
   try {
-    containerClient = await getContainerClient(plot, formType);
+    containerClient = await getContainerClient(plot, census);
     conn = await getSqlConnection();
     if (!conn) {
       throw new Error("SQL connection failed");
@@ -209,7 +210,7 @@ export async function POST(request: NextRequest) {
   if (Object.keys(errors).length === 0) {
     return new NextResponse(JSON.stringify({
       responseMessage: "Files uploaded successfully. No errors in file",
-    }), {status: HTTPResponses.NO_ERRORS});
+    }), {status: HTTPResponses.OK});
   } else {
     return new NextResponse(JSON.stringify({
       responseMessage: "Files uploaded successfully. Errors in file",
