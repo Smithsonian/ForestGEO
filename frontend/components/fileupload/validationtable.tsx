@@ -48,7 +48,7 @@ export function DisplayErrorTable({
         </TableHead>
         <TableBody>
           {fileData.data.map((data: DataStructure, rowIndex: number) => (
-            <TableRow key={`row-${rowIndex}`}>
+            <TableRow key={`row-${data.id}`}>
               {tableHeaders.map((header) => {
                 const cellKey = `cell-${rowIndex}-${header.label}`;
                 const cellData = data[header.label];
@@ -76,6 +76,38 @@ export function DisplayErrorTable({
 /**
  * Shows a data table with the possibility of showing errors.
  */
+
+
+export function DisplayParsedData(fileData: { fileName: string; data: DataStructure[] }, formType: string) {
+  const tableHeaders = TableHeadersByFormType[formType] || [];
+
+  return (
+    <TableContainer component={Paper} key={fileData.fileName}>
+      <h3>file: {fileData.fileName}, form: {formType}</h3>
+      <Table>
+        <TableHead>
+          <TableRow>
+            {tableHeaders.map((header) => (
+              <TableCell key={header.label}>{header.label}</TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {fileData.data.map((data: DataStructure) => (
+            <TableRow key={data.id}>
+              {tableHeaders.map((header) => (
+                <TableCell key={`${data.id}-${header.label}`}>
+                  {data[header.label]}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
 export function ValidationTable({uploadedData, errorMessage, formType}: Readonly<ValidationTableProps>) {
   const [data, setData] = useState<{ fileName: string; data: DataStructure[] }[]>([]);
   const tableHeaders = TableHeadersByFormType[formType] || [];
@@ -154,35 +186,5 @@ export function ValidationTable({uploadedData, errorMessage, formType}: Readonly
         </TableContainer>
       ))}
     </>
-  );
-}
-
-export function DisplayParsedData(fileData: { fileName: string; data: DataStructure[] }, formType: string) {
-  const tableHeaders = TableHeadersByFormType[formType] || [];
-
-  return (
-    <TableContainer component={Paper} key={fileData.fileName}>
-      <h3>file: {fileData.fileName}, form: {formType}</h3>
-      <Table>
-        <TableHead>
-          <TableRow>
-            {tableHeaders.map((header) => (
-              <TableCell key={header.label}>{header.label}</TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {fileData.data.map((data: DataStructure) => (
-            <TableRow key={data.id}>
-              {tableHeaders.map((header) => (
-                <TableCell key={`${data.id}-${header.label}`}>
-                  {data[header.label]}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
   );
 }

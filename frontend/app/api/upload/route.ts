@@ -50,6 +50,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  let rowIDCounter = 0;
+
   async function processFile(file: File, formType: string) {
     const expectedHeaders = TableHeadersByFormType[formType];
     if (!expectedHeaders) {
@@ -73,6 +75,8 @@ export async function POST(request: NextRequest) {
 
     results.data.forEach((row: any, rowIndex: number) => {
       const typedRow = row as RowDataStructure;
+      // assign ID to row:
+      typedRow.id = `row-${rowIDCounter++}`;
       const invalidHeaders: string[] = [];
 
       // Check for missing or invalid values
@@ -172,7 +176,11 @@ export async function POST(request: NextRequest) {
         for (const row of uploadableRows[file.name]) {
           try {
             // Call insertOrUpdate function for each row
-            await insertOrUpdate(conn, formType, row, plot);
+            // await insertOrUpdate(conn, formType, row, plot);
+            console.log('row: ' + Object.entries(row).toString());
+            console.log('formType: ' + formType);
+            console.log('plot: ' + plot);
+            console.log('census: ' + census);
           } catch (error) {
             if (error instanceof Error) {
               console.error(`Error processing row for file ${file.name}:`, error.message);
