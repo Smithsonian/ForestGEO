@@ -23,11 +23,13 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
 }
 
 export async function GET(): Promise<NextResponse<CensusRDS[]>> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
   let results = await runQuery(conn, `SELECT *
-                                      FROM forestgeo.Census`);
+                                      FROM ${schema}.Census`);
   if (!results) throw new Error("call failed");
   await conn.close();
   let censusRows: CensusRDS[] = []
@@ -49,6 +51,8 @@ export async function GET(): Promise<NextResponse<CensusRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -63,11 +67,11 @@ export async function POST(request: NextRequest) {
   }
 
   let checkCensusID = await runQuery(conn, `SELECT *
-                                            FROM forestgeo.Census
+                                            FROM ${schema}.Census
                                             WHERE [CensusID] = ${row.censusID}`);
   if (!checkCensusID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkCensusID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Census (CensusID, PlotID, PlotCensusNumber, StartDate, EndDate, Description)
+  let insertRow = await runQuery(conn, `INSERT INTO ${schema}.Census (CensusID, PlotID, PlotCensusNumber, StartDate, EndDate, Description)
                                         VALUES (${row.censusID}, ${row.plotID}, ${row.plotCensusNumber},
                                                 ${row.startDate}, ${row.endDate}, '${row.description}')`);
   if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
@@ -76,13 +80,15 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
 
   const deleteID = parseInt(request.nextUrl.searchParams.get('censusID')!);
   let deleteRow = await runQuery(conn, `DELETE
-                                        FROM forestgeo.Census
+                                        FROM ${schema}.Census
                                         WHERE [CensusID] = ${deleteID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
   await conn.close();
@@ -90,6 +96,8 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -107,12 +115,12 @@ export async function PATCH(request: NextRequest) {
 
   if (row.censusID !== oldCensus) { // PRIMARY KEY is being updated, unique key check needs to happen
     let newCensusIDCheck = await runQuery(conn, `SELECT *
-                                                 FROM forestgeo.Census
+                                                 FROM ${schema}.Census
                                                  WHERE [CensusID] = '${row.censusID}'`);
     if (!newCensusIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newCensusIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
-    let results = await runQuery(conn, `UPDATE forestgeo.Census
+    let results = await runQuery(conn, `UPDATE ${schema}.Census
                                         SET [CensusID]         = ${row.censusID},
                                             [PlotID]           = ${row.plotID},
                                             [PlotCensusNumber] = ${row.plotCensusNumber},
@@ -124,7 +132,7 @@ export async function PATCH(request: NextRequest) {
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // other column information is being updated, no PK check required
-    let results = await runQuery(conn, `UPDATE forestgeo.Census
+    let results = await runQuery(conn, `UPDATE ${schema}.Census
                                         SET [PlotID]           = ${row.plotID},
                                             [PlotCensusNumber] = ${row.plotCensusNumber},
                                             [StartDate]        = ${row.startDate},

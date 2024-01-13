@@ -23,10 +23,12 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
 }
 
 export async function GET(): Promise<NextResponse<QuadratRDS[]>> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Quadrats`);
+  let results = await runQuery(conn, `SELECT * FROM ${schema}.Quadrats`);
   if (!results) throw new Error("call failed");
   await conn.close();
   let quadratRows: QuadratRDS[] = []
@@ -52,6 +54,8 @@ export async function GET(): Promise<NextResponse<QuadratRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -69,11 +73,11 @@ export async function POST(request: NextRequest) {
     quadratShape: request.nextUrl.searchParams.get('quadratShape') ? request.nextUrl.searchParams.get('quadratShape')! : null,
   }
 
-  let checkQuadratID = await runQuery(conn, `SELECT * FROM forestgeo.Quadrats WHERE [QuadratID] = ${row.quadratID}`);
+  let checkQuadratID = await runQuery(conn, `SELECT * FROM ${schema}.Quadrats WHERE [QuadratID] = ${row.quadratID}`);
   if (!checkQuadratID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkQuadratID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
   let insertRow = await runQuery(conn,
-    `INSERT INTO forestgeo.Quadrats (QuadratID, PlotID, QuadratName, QuadratX, QuadratY, QuadratZ,
+    `INSERT INTO ${schema}.Quadrats (QuadratID, PlotID, QuadratName, QuadratX, QuadratY, QuadratZ,
     DimensionX, DimensionY, Area, QuadratShape) VALUES (${row.quadratID}, ${row.plotID}, '${row.quadratName}',
     ${row.quadratX}, ${row.quadratY}, ${row.quadratZ}, ${row.dimensionX}, ${row.dimensionY}, ${row.area}, '${row.quadratShape}')`);
   if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
@@ -82,18 +86,22 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
 
   const deleteQuadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!);
-  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Quadrats WHERE [QuadratID] = ${deleteQuadratID}`);
+  let deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Quadrats WHERE [QuadratID] = ${deleteQuadratID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
   await conn.close();
   return NextResponse.json({message: "Delete successful",}, {status: 200});
 }
 
 export async function PATCH(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -114,11 +122,11 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (row.quadratID !== oldQuadratID) { // PRIMARY KEY is being updated, unique key check needs to happen
-    let newQuadratIDCheck = await runQuery(conn, `SELECT * FROM forestgeo.Quadrats WHERE [QuadratID] = '${row.quadratID}'`);
+    let newQuadratIDCheck = await runQuery(conn, `SELECT * FROM ${schema}.Quadrats WHERE [QuadratID] = '${row.quadratID}'`);
     if (!newQuadratIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newQuadratIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
-    let results = await runQuery(conn, `UPDATE forestgeo.Quadrats
+    let results = await runQuery(conn, `UPDATE ${schema}.Quadrats
                                         SET [QuadratID]    = ${row.quadratID},
                                             [PlotID]       = ${row.plotID},
                                             [quadratName]  = '${row.quadratName}',
@@ -134,7 +142,7 @@ export async function PATCH(request: NextRequest) {
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // other column information is being updated, no PK check required
-    let results = await runQuery(conn, `UPDATE forestgeo.Quadrats
+    let results = await runQuery(conn, `UPDATE ${schema}.Quadrats
                                         SET [PlotID]       = ${row.plotID},
                                             [quadratName]  = '${row.quadratName}',
                                             [QuadratX]     = ${row.quadratX},

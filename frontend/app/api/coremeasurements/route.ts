@@ -2,32 +2,18 @@ import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {ErrorMessages} from "@/config/macros";
 import {CoreMeasurementRDS} from "@/config/sqlmacros";
-import {sqlConfig} from "@/components/processors/processorhelpers";
+import {getSqlConnection, runQuery, sqlConfig} from "@/components/processors/processorhelpers";
 
-async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
-    }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
 
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
-  }
-  return await conn.request().query(query);
-}
 
 export async function GET(): Promise<NextResponse<CoreMeasurementRDS[]>> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
   let results = await runQuery(conn, `SELECT *
-                                      FROM forestgeo.CoreMeasurements`);
+                                      FROM ${schema}.CoreMeasurements`);
   if (!results) throw new Error("call failed");
   await conn.close();
   let coreMeasurementRows: CoreMeasurementRDS[] = []
@@ -71,6 +57,8 @@ export async function GET(): Promise<NextResponse<CoreMeasurementRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -92,11 +80,11 @@ export async function POST(request: NextRequest) {
   }
 
   let checkCoreMeasurementID = await runQuery(conn, `SELECT *
-                                                     FROM forestgeo.CoreMeasurements
+                                                     FROM ${schema}.CoreMeasurements
                                                      WHERE [CoreMeasurementID] = ${row.coreMeasurementID}`);
   if (!checkCoreMeasurementID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkCoreMeasurementID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.CoreMeasurements
+  let insertRow = await runQuery(conn, `INSERT INTO ${schema}.CoreMeasurements
                                         (CoreMeasurementID, CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID,
                                          MeasurementTypeID,
                                          MeasurementDate, Measurement, IsRemeasurement, IsCurrent, UserDefinedFields)
@@ -111,13 +99,15 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
 
   const deleteID = parseInt(request.nextUrl.searchParams.get('coreMeasurementID')!);
   let deleteRow = await runQuery(conn, `DELETE
-                                        FROM forestgeo.CoreMeasurements
+                                        FROM ${schema}.CoreMeasurements
                                         WHERE [CoreMeasurementID] = ${deleteID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
   await conn.close();
@@ -125,6 +115,8 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -149,19 +141,19 @@ export async function PATCH(request: NextRequest) {
 
   if (row.coreMeasurementID !== oldCoreMeasurement) { // PRIMARY KEY is being updated, unique key check needs to happen
     let newCoreMeasurementIDCheck = await runQuery(conn, `SELECT *
-                                                          FROM forestgeo.CoreMeasurements
+                                                          FROM ${schema}.CoreMeasurements
                                                           WHERE [CoreMeasurementID] = '${row.coreMeasurementID}'`);
     if (!newCoreMeasurementIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newCoreMeasurementIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
-    let results = await runQuery(conn, `UPDATE forestgeo.CoreMeasurements
+    let results = await runQuery(conn, `UPDATE ${schema}.CoreMeasurements
                                         SET [CoreMeasurementID] = ${row.coreMeasurementID}, [CensusID] = ${row.censusID}, [PlotID] = ${row.plotID}, [QuadratID] = ${row.quadratID}, [TreeID] = ${row.treeID}, [StemID] = ${row.stemID}, [PersonnelID] = ${row.personnelID}, [MeasurementTypeID] = ${row.measurementTypeID}, [MeasurementDate] = ${row.measurementDate}, [Measurement] = '${row.measurement}', [IsRemeasurement] = ${row.isRemeasurement}, [IsCurrent] = ${row.isCurrent}, [UserDefinedFields] = '${row.userDefinedFields}'
                                         WHERE [CoreMeasurementID] = '${oldCoreMeasurement}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // other column information is being updated, no PK check required
-    let results = await runQuery(conn, `UPDATE forestgeo.CoreMeasurements
+    let results = await runQuery(conn, `UPDATE ${schema}.CoreMeasurements
                                         SET [CensusID] = ${row.censusID}, [PlotID] = ${row.plotID}, [QuadratID] = ${row.quadratID}, [TreeID] = ${row.treeID}, [StemID] = ${row.stemID}, [PersonnelID] = ${row.personnelID}, [MeasurementTypeID] = ${row.measurementTypeID}, [MeasurementDate] = ${row.measurementDate}, [Measurement] = '${row.measurement}', [IsRemeasurement] = ${row.isRemeasurement}, [IsCurrent] = ${row.isCurrent}, [UserDefinedFields] = '${row.userDefinedFields}'
                                         WHERE [CoreMeasurementID] = '${oldCoreMeasurement}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});

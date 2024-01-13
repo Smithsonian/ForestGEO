@@ -23,10 +23,12 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
 }
 
 export async function GET(): Promise<NextResponse<SpeciesRDS[]>> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Species`);
+  let results = await runQuery(conn, `SELECT * FROM ${schema}.Species`);
   if (!results) throw new Error("call failed");
   await conn.close();
   let speciesRows: SpeciesRDS[] = []
@@ -53,6 +55,8 @@ export async function GET(): Promise<NextResponse<SpeciesRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -70,11 +74,11 @@ export async function POST(request: NextRequest) {
     description: request.nextUrl.searchParams.get('description'),
     referenceID: request.nextUrl.searchParams.get('referenceID') ? parseInt(request.nextUrl.searchParams.get('referenceID')!) : null,
   }
-  let checkSpeciesID = await runQuery(conn, `SELECT * FROM forestgeo.Species WHERE [SpeciesID] = ${row.speciesID}`);
+  let checkSpeciesID = await runQuery(conn, `SELECT * FROM ${schema}.Species WHERE [SpeciesID] = ${row.speciesID}`);
   if (!checkSpeciesID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   if (checkSpeciesID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
   let insertRow = await runQuery(conn,
-    `INSERT INTO forestgeo.Species (SpeciesID, GenusID, CurrentTaxonFlag, ObsoleteTaxonFlag, SpeciesName, SpeciesCode,
+    `INSERT INTO ${schema}.Species (SpeciesID, GenusID, CurrentTaxonFlag, ObsoleteTaxonFlag, SpeciesName, SpeciesCode,
     IDLevel, Authority, FieldFamily, Description, ReferenceID) VALUES (${row.speciesID}, ${row.genusID}, '${row.currentTaxonFlag}',
     '${row.obsoleteTaxonFlag}', '${row.speciesName}', '${row.speciesCode}', '${row.idLevel}', '${row.authority}', '${row.fieldFamily}', '${row.description}',
     ${row.referenceID})`);
@@ -84,6 +88,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -104,11 +110,11 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (row.speciesID !== oldSpeciesID) {
-    let newSpeciesIDCheck = await runQuery(conn, `SELECT * FROM forestgeo.Species WHERE [SpeciesID] = '${row.speciesID}'`);
+    let newSpeciesIDCheck = await runQuery(conn, `SELECT * FROM ${schema}.Species WHERE [SpeciesID] = '${row.speciesID}'`);
     if (!newSpeciesIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newSpeciesIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
-    let results = await runQuery(conn, `UPDATE forestgeo.Species
+    let results = await runQuery(conn, `UPDATE ${schema}.Species
                                         SET [SpeciesID]         = ${row.speciesID},
                                             [GenusID]           = ${row.genusID},
                                             [CurrentTaxonFlag]  = '${row.currentTaxonFlag}',
@@ -125,7 +131,7 @@ export async function PATCH(request: NextRequest) {
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else {
-    let results = await runQuery(conn, `UPDATE forestgeo.Species
+    let results = await runQuery(conn, `UPDATE ${schema}.Species
                                         SET [GenusID]           = ${row.genusID},
                                             [CurrentTaxonFlag]  = '${row.currentTaxonFlag}',
                                             [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}',
@@ -144,12 +150,14 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
 
   const deleteSpeciesID = parseInt(request.nextUrl.searchParams.get('speciesID')!);
-  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.SpeciesID WHERE [SpeciesID] = ${deleteSpeciesID}`);
+  let deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SpeciesID WHERE [SpeciesID] = ${deleteSpeciesID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
   await conn.close();
   return NextResponse.json({message: "Delete successful",}, {status: 200});

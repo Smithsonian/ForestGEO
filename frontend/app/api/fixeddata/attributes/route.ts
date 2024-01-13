@@ -24,10 +24,12 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
 
 
 export async function GET(): Promise<NextResponse<AttributeRDS[]>> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Attributes`);
+  let results = await runQuery(conn, `SELECT * FROM ${schema}.Attributes`);
   if (!results) throw new Error("call failed");
   await conn.close();
   let attributeRows: AttributeRDS[] = []
@@ -46,6 +48,8 @@ export async function GET(): Promise<NextResponse<AttributeRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -56,29 +60,33 @@ export async function POST(request: NextRequest) {
     status: request.nextUrl.searchParams.get('stat')
   }
 
-  let validateCode = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${row.code}'`);
+  let validateCode = await runQuery(conn, `SELECT * FROM ${schema}.Attributes WHERE [Code] = '${row.code}'`);
   if (!validateCode) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
   if (validateCode.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
-  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Attributes (Code, Description, Status) VALUES ('${row.code}', '${row.description}', '${row.status}')`);
+  let insertRow = await runQuery(conn, `INSERT INTO ${schema}.Attributes (Code, Description, Status) VALUES ('${row.code}', '${row.description}', '${row.status}')`);
   if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   await conn.close();
   return NextResponse.json({message: "Insert successful"}, {status: 200});
 }
 
 export async function DELETE(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
 
   const deleteCode = request.nextUrl.searchParams.get('code')!;
-  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`);
+  let deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Attributes WHERE [Code] = '${deleteCode}'`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
   await conn.close();
   return NextResponse.json({message: "Update successful",}, {status: 200});
 }
 
 export async function PATCH(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
@@ -93,11 +101,11 @@ export async function PATCH(request: NextRequest) {
 
   // check to ensure new code is not already taken
   if (row.code !== oldCode) { // if CODE is being updated, this check needs to happen
-    let newCodeCheck = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${row.code}'`);
+    let newCodeCheck = await runQuery(conn, `SELECT * FROM ${schema}.Attributes WHERE [Code] = '${row.code}'`);
     if (!newCodeCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
     if (newCodeCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
 
-    let results = await runQuery(conn, `UPDATE forestgeo.Attributes
+    let results = await runQuery(conn, `UPDATE ${schema}.Attributes
                                         SET [Code]        = '${row.code}',
                                             [Description] = '${row.description}',
                                             [Status]      = '${row.status}'
@@ -106,7 +114,7 @@ export async function PATCH(request: NextRequest) {
     await conn.close();
     return NextResponse.json({message: "Update successful",}, {status: 200});
   } else { // otherwise updating can focus solely on other columns
-    let results = await runQuery(conn, `UPDATE forestgeo.Attributes
+    let results = await runQuery(conn, `UPDATE ${schema}.Attributes
                                         SET [Description] = '${row.description}',
                                             [Status]      = '${row.status}'
                                         WHERE [Code] = '${oldCode}'`);
