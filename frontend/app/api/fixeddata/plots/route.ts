@@ -1,32 +1,15 @@
 import {NextResponse} from "next/server";
 import sql from "mssql";
 import {PlotRDS} from "@/config/sqlmacros";
-import {sqlConfig} from "@/components/processors/processorhelpers";
-
-async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
-    }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
-
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
-  }
-  return await conn.request().query(query);
-}
-
+import {getSqlConnection, runQuery, sqlConfig} from "@/components/processors/processorhelpers";
 
 export async function GET(): Promise<NextResponse<PlotRDS[]>> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Plots`);
+  let results = await runQuery(conn, `SELECT * FROM ${schema}.Plots`);
   if (!results) throw new Error("call failed");
   await conn.close();
   let plotRows: PlotRDS[] = []
