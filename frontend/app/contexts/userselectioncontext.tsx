@@ -1,13 +1,12 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useReducer} from "react";
 import {
-  allQuadrats,
   Census,
   CensusAction,
   containsPlotCensusNumber,
   Plot,
   PlotAction,
-  plots, Quadrat,
+  Quadrat,
   QuadratsAction
 } from "@/config/macros";
 import {useCensusListContext, usePlotListContext, useQuadratListContext} from "@/app/contexts/generalcontext";

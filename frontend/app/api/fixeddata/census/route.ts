@@ -1,6 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
-import {ErrorMessages} from "@/config/macros";
+import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
 import {sqlConfig} from "@/components/processors/processorhelpers";
 
@@ -46,7 +46,7 @@ export async function GET(): Promise<NextResponse<CensusRDS[]>> {
   })
   return new NextResponse(
     JSON.stringify(censusRows),
-    {status: 200}
+    {status: HTTPResponses.OK}
   );
 }
 
@@ -92,7 +92,7 @@ export async function DELETE(request: NextRequest) {
                                         WHERE [CensusID] = ${deleteID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
   await conn.close();
-  return NextResponse.json({message: "Update successful",}, {status: 200});
+  return NextResponse.json({message: "Update successful",}, {status: HTTPResponses.CREATED});
 }
 
 export async function PATCH(request: NextRequest) {
@@ -141,6 +141,6 @@ export async function PATCH(request: NextRequest) {
                                         WHERE [CensusID] = '${row.censusID}'`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
+    return NextResponse.json({message: "Update successful",}, {status: HTTPResponses.ACCEPTED});
   }
 }

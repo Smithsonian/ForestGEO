@@ -3,10 +3,10 @@ create table forestgeo.Attributes
     Code        varchar(10) not null
         constraint Attributes_pk
             primary key,
-    Description varchar(max),
+    Description varchar(max
+) ,
     Status      varchar(20)
-)
-go
+) go
 
 create table forestgeo.MeasurementTypes
 (
@@ -15,7 +15,7 @@ create table forestgeo.MeasurementTypes
             primary key,
     MeasurementTypeDescription varchar(255)
 )
-go
+    go
 
 create table forestgeo.Personnel
 (
@@ -26,14 +26,15 @@ create table forestgeo.Personnel
     LastName    varchar(50),
     Role        varchar(150)
 )
-go
+    go
 
 create table forestgeo.Plots
 (
-    PlotID          int not null
+    PlotID   int not null
         constraint PlotID_PK
             primary key,
-    PlotName        varchar(max),
+    PlotName varchar(max
+) ,
     LocationName    varchar(max),
     CountryName     varchar(max),
     Area            float,
@@ -42,37 +43,37 @@ create table forestgeo.Plots
     PlotZ           float,
     PlotShape       varchar(max),
     PlotDescription varchar(max)
-)
-go
+) go
 
 create table forestgeo.Census
 (
-    CensusID         int not null
+    CensusID    int not null
         constraint Census_pk
             primary key,
-    PlotID           int
+    PlotID      int
         constraint Census_Plots_PlotID_fk
             references forestgeo.Plots
             on update cascade,
-    StartDate        date,
-    EndDate          date,
-    Description      varchar(max),
+    StartDate   date,
+    EndDate     date,
+    Description varchar(max
+) ,
     PlotCensusNumber int
-)
-go
+) go
 
 create table forestgeo.Quadrats
 (
-    QuadratID    int not null
+    QuadratID   int not null
         constraint Quadrats_PK
             primary key,
-    PlotID       int
+    PlotID      int
         constraint Quadrats_Plots_FK
             references forestgeo.Plots,
-    PersonnelID  int
+    PersonnelID int
         constraint Quadrats_Personnel_fk
             references forestgeo.Personnel,
-    QuadratName  varchar(max),
+    QuadratName varchar(max
+) ,
     QuadratX     float,
     QuadratY     float,
     QuadratZ     float,
@@ -80,20 +81,19 @@ create table forestgeo.Quadrats
     DimensionY   int,
     Area         float,
     QuadratShape varchar(max)
-)
-go
+) go
 
 create table forestgeo.Reference
 (
-    ReferenceID       int not null
+    ReferenceID      int not null
         constraint Reference_pk
             primary key,
-    PublicationTitle  varchar(64),
-    FullReference     varchar(max),
+    PublicationTitle varchar(64),
+    FullReference    varchar(max
+) ,
     DateOfPublication date,
     Citation          varchar(50)
-)
-go
+) go
 
 create table forestgeo.Family
 (
@@ -105,7 +105,7 @@ create table forestgeo.Family
         constraint Family_Reference_ReferenceID_fk
             references forestgeo.Reference
 )
-go
+    go
 
 create table forestgeo.Genus
 (
@@ -121,7 +121,7 @@ create table forestgeo.Genus
             references forestgeo.Reference,
     Authority   varchar(32)
 )
-go
+    go
 
 create table forestgeo.Species
 (
@@ -137,13 +137,13 @@ create table forestgeo.Species
     IDLevel           varchar(8),
     Authority         varchar(128),
     FieldFamily       varchar(32),
-    Description       varchar(max),
+    Description       varchar(max
+) ,
     ReferenceID       int
         constraint Species_Reference_ReferenceID_fk
             references forestgeo.Reference,
     SpeciesCode       varchar(25)
-)
-go
+) go
 
 create table forestgeo.CurrentObsolete
 (
@@ -155,11 +155,11 @@ create table forestgeo.CurrentObsolete
             references forestgeo.Species,
     ChangeDate        date not null,
     ChangeCodeID      int,
-    ChangeNote        varchar(max),
+    ChangeNote        varchar(max
+) ,
     constraint CurrentObsolete_pk
         primary key (SpeciesID, ObsoleteSpeciesID, ChangeDate)
-)
-go
+) go
 
 create table forestgeo.SpeciesInventory
 (
@@ -173,25 +173,25 @@ create table forestgeo.SpeciesInventory
     SpeciesID          int,
     SubSpeciesID       int
 )
-go
+    go
 
 create table forestgeo.SubSpecies
 (
-    SubSpeciesID       int not null
+    SubSpeciesID      int not null
         constraint SubSpecies_pk
             primary key,
-    SubSpeciesCode     varchar(10),
-    SpeciesID          int
+    SubSpeciesCode    varchar(10),
+    SpeciesID         int
         constraint SubSpecies_Species_SpeciesID_fk
             references forestgeo.Species
             on update cascade,
-    CurrentTaxonFlag   bit,
-    ObsoleteTaxonFlag  bit,
-    SubSpeciesName     varchar(max),
+    CurrentTaxonFlag  bit,
+    ObsoleteTaxonFlag bit,
+    SubSpeciesName    varchar(max
+) ,
     Authority          varchar(128),
     InfraSpecificLevel char(32)
-)
-go
+) go
 
 create table forestgeo.Trees
 (
@@ -207,7 +207,7 @@ create table forestgeo.Trees
         constraint Trees_SubSpecies_SubSpeciesID_fk
             references forestgeo.SubSpecies
 )
-go
+    go
 
 create table forestgeo.Stems
 (
@@ -229,9 +229,9 @@ create table forestgeo.Stems
     StemY           float,
     StemZ           float,
     Moved           bit,
-    StemDescription varchar(max)
+    StemDescription varchar(max
 )
-go
+    ) go
 
 create table forestgeo.CoreMeasurements
 (
@@ -263,12 +263,12 @@ create table forestgeo.CoreMeasurements
             references forestgeo.MeasurementTypes
             on update cascade,
     MeasurementDate   date,
-    Measurement       varchar(max),
+    Measurement       varchar(max
+) ,
     IsRemeasurement   bit,
     IsCurrent         bit,
     UserDefinedFields varchar(max)
-)
-go
+) go
 
 create table forestgeo.CMAttributes
 (
@@ -284,16 +284,16 @@ create table forestgeo.CMAttributes
             references forestgeo.Attributes
             on update cascade
 )
-go
+    go
 
 create table forestgeo.ValidationErrors
 (
     ValidationErrorID          int not null
         constraint ValidationErrors_pk
             primary key,
-    ValidationErrorDescription varchar(max)
+    ValidationErrorDescription varchar(max
 )
-go
+    ) go
 
 create table forestgeo.CMVErrors
 (
@@ -309,5 +309,5 @@ create table forestgeo.CMVErrors
             references forestgeo.ValidationErrors
             on update cascade
 )
-go
+    go
 

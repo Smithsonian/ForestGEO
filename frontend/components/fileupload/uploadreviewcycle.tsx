@@ -60,6 +60,7 @@ export function UploadAndReviewProcess() {
   const [errorRowsData, setErrorRowsData] = useState<ErrorRowsData>({});
   // etc.
   let currentPlot = usePlotContext();
+  let currentCensus = useCensusContext();
   const {data: session} = useSession();
 
   function areHeadersValid(actualHeaders: string[] | undefined): boolean {
@@ -385,23 +386,27 @@ export function UploadAndReviewProcess() {
     </Grid>
   )
 
-  switch (reviewState) {
-    case ReviewStates.TABLE_SELECT:
-      return <TableSelectState/>;
-    case ReviewStates.PARSE:
-      return <ParseState/>;
-    case ReviewStates.REVIEW:
-      return <ReviewState/>;
-    case ReviewStates.UPLOAD:
-      return <UploadState/>;
-    case ReviewStates.ERRORS:
-      return <ErrorState/>;
-    case ReviewStates.UPLOADED:
-      return <UploadedState/>;
-    case ReviewStates.FILE_MISMATCH_ERROR:
-      return <FileMismatchErrorState/>;
-    default:
-      return <div>Invalid State</div>;
+  if (currentCensus) {
+    switch (reviewState) {
+      case ReviewStates.TABLE_SELECT:
+        return <TableSelectState/>;
+      case ReviewStates.PARSE:
+        return <ParseState/>;
+      case ReviewStates.REVIEW:
+        return <ReviewState/>;
+      case ReviewStates.UPLOAD:
+        return <UploadState/>;
+      case ReviewStates.ERRORS:
+        return <ErrorState/>;
+      case ReviewStates.UPLOADED:
+        return <UploadedState/>;
+      case ReviewStates.FILE_MISMATCH_ERROR:
+        return <FileMismatchErrorState/>;
+      default:
+        return <div>Invalid State</div>;
+    }
+  } else {
+    return <Typography>You must select a census to continue!</Typography>
   }
 }
 
@@ -437,8 +442,8 @@ styled('ul')(
 );
 
 export function FileTabView() {
-  const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
+  let currentPlot = usePlotContext();
+  let currentCensus = useCensusContext();
   useEffect(() => {
     console.log(currentCensus?.plotCensusNumber);
   }, []);

@@ -1,5 +1,6 @@
 import {BlobDeleteIfExistsResponse, BlobDeleteOptions, BlobServiceClient} from "@azure/storage-blob";
 import {NextRequest, NextResponse} from "next/server";
+import {HTTPResponses} from "@/config/macros";
 
 async function getContainerClient(plot: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -27,7 +28,7 @@ export async function DELETE(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Error(s)",
       }),
-      {status: 403}
+      {status: HTTPResponses.STORAGE_CONNECTION_FAILURE}
     );
   }
   const blockBlobClient = containerClient.getBlockBlobClient(filename);
@@ -36,7 +37,7 @@ export async function DELETE(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Error(s)",
       }),
-      {status: 403}
+      {status: HTTPResponses.STORAGE_CONNECTION_FAILURE}
     );
   }
   const options: BlobDeleteOptions = {
@@ -51,7 +52,7 @@ export async function DELETE(request: NextRequest) {
       JSON.stringify({
         responseMessage: "File Delete FAILURE",
       }),
-      {status: 400}
+      {status: HTTPResponses.GATEWAY_TIMEOUT}
     );
   }
   return new NextResponse(
@@ -59,6 +60,6 @@ export async function DELETE(request: NextRequest) {
       responseMessage: "File Deleted",
       blobResponse: blobDeleteIfExistsResponse,
     }),
-    {status: 201}
+    {status: HTTPResponses.OK}
   );
 }

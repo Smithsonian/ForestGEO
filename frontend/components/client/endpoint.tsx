@@ -119,7 +119,7 @@ export default function Endpoint({children,}: Readonly<{ children: React.ReactNo
     }
   };
 
-  const fetchAndDispatchQuadrats = async() => {
+  const fetchAndDispatchQuadrats = async () => {
     setLoading(loading + interval);
     setLoadingMsg('Retrieving Census...');
 
@@ -135,7 +135,7 @@ export default function Endpoint({children,}: Readonly<{ children: React.ReactNo
     }
 
     if (quadratsLoadDispatch) {
-      quadratsLoadDispatch({ quadratsLoad: quadratsRDSLoad});
+      quadratsLoadDispatch({quadratsLoad: quadratsRDSLoad});
     }
 
     const quadratListData = JSON.parse(localStorage.getItem('quadratList') ?? 'null');

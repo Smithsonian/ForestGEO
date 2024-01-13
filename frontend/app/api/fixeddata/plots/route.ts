@@ -1,7 +1,6 @@
 import {NextResponse} from "next/server";
-import sql from "mssql";
 import {PlotRDS} from "@/config/sqlmacros";
-import {getSqlConnection, runQuery, sqlConfig} from "@/components/processors/processorhelpers";
+import {getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
 
 export async function GET(): Promise<NextResponse<PlotRDS[]>> {
   const schema = process.env.AZURE_SQL_SCHEMA;

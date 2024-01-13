@@ -19,29 +19,27 @@ import {
   usePlotContext,
   usePlotDispatch
 } from "@/app/contexts/userselectioncontext";
-import {usePathname, useRouter} from "next/navigation";
+import {redirect, usePathname, useRouter} from "next/navigation";
 import {
   Breadcrumbs,
   Button,
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormLabel,
   Link,
   Modal,
   ModalDialog,
   Stack,
-  Step,
-  StepIndicator,
-  Stepper
 } from "@mui/joy";
-import {Slide} from "@mui/material";
 import CommitIcon from "@mui/icons-material/Commit";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
-import {Check} from "@mui/icons-material";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import {useCensusListContext, usePlotListContext} from "@/app/contexts/generalcontext";
+import {useCensusListContext, useCensusListDispatch, usePlotListContext} from "@/app/contexts/generalcontext";
 import {AppRouterInstance} from "next/dist/shared/lib/app-router-context.shared-runtime";
+import {TextField} from "@mui/material";
+import Add from '@mui/icons-material/Add';
 
 
 function SimpleToggler({
@@ -101,22 +99,80 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
 }
 
 export default function Sidebar() {
-  const currentPlot = usePlotContext();
-  const plotDispatch = usePlotDispatch();
-  const plotListContext = usePlotListContext()!;
-  const currentCensus = useCensusContext();
-  const censusDispatch = useCensusDispatch();
-  const censusListContext = useCensusListContext()!;
+  let currentPlot = usePlotContext();
+  let plotDispatch = usePlotDispatch();
+  let plotListContext = usePlotListContext()!;
+  let currentCensus = useCensusContext();
+  let censusDispatch = useCensusDispatch();
+  let censusListContext = useCensusListContext()!;
+  let censusListDispatch = useCensusListDispatch()!;
 
   const [plot, setPlot] = useState<Plot | null>(null);
   const [census, setCensus] = useState<Census | null>(null);
   const [openPlotSelectionModal, setOpenPlotSelectionModal] = useState(false);
   const [openCensusSelectionModal, setOpenCensusSelectionModal] = useState(false);
+  const [openAddCensusSelectionModal, setOpenAddCensusSelectionModal] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
 
   const [properties, setProperties] = useState(false);
+  const [newCensusData, setNewCensusData] = useState({
+    plotID: '',
+    plotCensusNumber: '',
+    startDate: '',
+    endDate: '',
+    description: ''
+  });
+
+  const handleFieldChange = (field: string) => (_event: any, newValue: any) => {
+    setNewCensusData({...newCensusData, [field]: newValue});
+  };
+
+  const handleInputChange = (field: string) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    setNewCensusData({...newCensusData, [field]: event.target.value});
+  };
+
+
+  const handleCensusChange = (event: React.ChangeEvent<{ value: any }>) => {
+    const selectedValue = event.target.value as number; // Casting value as number
+    const foundCensus = censusListContext.find(census => census.plotCensusNumber === selectedValue);
+    setCensus(foundCensus ?? null);
+    if (censusDispatch) {
+      censusDispatch({census: census});
+    }
+  };
+
+  const handleAddCensus = async () => {
+    if (!newCensusData.plotID || newCensusData.plotCensusNumber === '' || !newCensusData.startDate || !newCensusData.endDate) {
+      alert('Please fill in all required fields.');
+      return;
+    }
+
+    const plotID = parseInt(newCensusData.plotID);
+    const plotCensusNumber = parseInt(newCensusData.plotCensusNumber);
+    if (isNaN(plotID) || isNaN(plotCensusNumber)) {
+      alert('Plot ID and Plot Census Number must be valid numbers.');
+      return;
+    }
+
+    const newCensus = {
+      plotID,
+      plotCensusNumber,
+      startDate: new Date(newCensusData.startDate),
+      endDate: new Date(newCensusData.endDate),
+      description: newCensusData.description
+    };
+
+    try {
+      const updatedCensusList = [...censusListContext, newCensus];
+      censusListDispatch({censusList: updatedCensusList});
+      setOpenAddCensusSelectionModal(false);
+    } catch (error) {
+      console.error('Error adding new census:', error);
+      alert('Failed to add new census.');
+    }
+  };
 
   /**
    * UNAUTHENTICATED SESSION HANDLING:
@@ -124,55 +180,7 @@ export default function Sidebar() {
   useSession({
     required: true,
     onUnauthenticated() {
-      return (
-        <Stack direction={"row"} overflow={'hidden'}>
-          <Box
-            className="Sidebar"
-            sx={{
-              position: {
-                md: 'sticky',
-              },
-              height: '100dvh',
-              width: 'calc(var(--Sidebar-width) )',
-              top: 0,
-              p: 2,
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-              borderRight: '1px solid',
-              borderColor: 'divider',
-            }}
-            ref={containerRef}
-          >
-            <GlobalStyles
-              styles={(theme) => ({
-                ':root': {
-                  '--Sidebar-width': '300px',
-                },
-              })}
-            />
-            <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-              <Typography level="h1">ForestGEO</Typography>
-            </Box>
-            <Box
-              sx={{
-                minHeight: 0,
-                overflow: 'hidden auto',
-                flexGrow: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                [`& .${listItemButtonClasses.root}`]: {
-                  gap: 1.5,
-                },
-              }}
-            >
-            </Box>
-            <Divider/>
-            <LoginLogout/>
-          </Box>
-        </Stack>
-      );
+      redirect('/login');
     }
   });
   /**
@@ -360,6 +368,8 @@ export default function Sidebar() {
                 <DialogContent sx={{width: 750}}>
                   <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
                     <Stack direction={"column"} spacing={2}>
+                      <Button startDecorator={<Add/>} onClick={() => setOpenAddCensusSelectionModal(true)}>New
+                        Census</Button>
                       <Typography level={"title-sm"}>Select Census:</Typography>
                       <Select
                         placeholder="Select a Census"
@@ -396,6 +406,67 @@ export default function Sidebar() {
                       Submit Census
                     </Button>
                   </Stack>
+                </DialogActions>
+              </ModalDialog>
+            </Modal>
+            <Modal open={openAddCensusSelectionModal} onClose={() => {
+              setOpenAddCensusSelectionModal(false);
+            }}>
+              <ModalDialog variant={"outlined"} role={"alertdialog"}>
+                <DialogTitle>Add New Census</DialogTitle>
+                <DialogContent>
+                  <FormLabel id="plot-select-label">Plot</FormLabel>
+                  <Select
+                    placeholder="Select a Plot"
+                    name="None"
+                    required
+                    autoFocus
+                    size="sm"
+                    onChange={(event, newValue) => handleFieldChange('plotID')(event, newValue)}
+                  >
+                    {plotListContext.map((item) => (
+                      <Option value={item} key={item.key}>{item.key}, Quadrats: {item.num}, ID: {item.id}</Option>
+                    ))}
+                  </Select>
+                  <TextField
+                    label="Plot Census Number"
+                    type="number"
+                    fullWidth
+                    margin="dense"
+                    value={newCensusData.plotCensusNumber}
+                    onChange={handleInputChange('plotCensusNumber')}
+                  />
+                  <TextField
+                    label="Start Date"
+                    type="date"
+                    fullWidth
+                    margin="dense"
+                    InputLabelProps={{shrink: true}}
+                    value={newCensusData.startDate}
+                    onChange={handleInputChange('startDate')}
+                  />
+                  <TextField
+                    label="End Date"
+                    type="date"
+                    fullWidth
+                    margin="dense"
+                    InputLabelProps={{shrink: true}}
+                    value={newCensusData.endDate}
+                    onChange={handleInputChange('endDate')}
+                  />
+                  <TextField
+                    label="Description (Optional)"
+                    fullWidth
+                    margin="dense"
+                    multiline
+                    maxRows={4}
+                    value={newCensusData.description}
+                    onChange={handleInputChange('description')}
+                  />
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={() => setOpenAddCensusSelectionModal(false)}>Cancel</Button>
+                  <Button onClick={handleAddCensus}>Add</Button>
                 </DialogActions>
               </ModalDialog>
             </Modal>
