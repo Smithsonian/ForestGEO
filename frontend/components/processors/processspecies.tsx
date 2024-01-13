@@ -3,6 +3,8 @@ import {RowDataStructure} from "@/config/macros";
 import {getColumnValueByColumnName} from "@/components/processors/processorhelpers";
 
 export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   const transaction = new sql.Transaction(conn);
   await transaction.begin();
 
@@ -12,7 +14,7 @@ export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataS
     // Check if Genus exists, insert if not
     const genusID = await getColumnValueByColumnName(
       transaction,
-      'forestgeo.Genus',
+      'Genus',
       'GenusID',
       'GenusName',
       rowData.genus
@@ -22,7 +24,7 @@ export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataS
       // Insert into Genus table if genus does not exist
       await request.input('GenusName', sql.VarChar, rowData.genus)
         .query(`
-                    INSERT INTO forestgeo.Genus (GenusName)
+                    INSERT INTO ${schema}.Genus (GenusName)
                     VALUES (@GenusName);
                   `);
     }
@@ -35,7 +37,7 @@ export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataS
       .input('FieldFamily', sql.VarChar, rowData.family)
       .input('Authority', sql.VarChar, rowData.authority)
       .query(`
-        MERGE INTO forestgeo.Species AS target
+        MERGE INTO ${schema}.Species AS target
         USING (VALUES (@SpeciesCode, @SpeciesName, @IDLevel, @FieldFamily, @Authority)) AS source (SpeciesCode, SpeciesName, IDLevel, FieldFamily, Authority)
         ON target.SpeciesCode = source.SpeciesCode
         WHEN NOT MATCHED THEN
@@ -48,8 +50,8 @@ export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataS
       await request
         .input('SubSpeciesName', sql.VarChar, rowData.subspecies)
         .query(`
-          INSERT INTO forestgeo.SubSpecies (SubSpeciesName, SpeciesID)
-          VALUES (@SubSpeciesName, (SELECT SpeciesID FROM forestgeo.Species WHERE SpeciesCode = @SpeciesCode));
+          INSERT INTO ${schema}.SubSpecies (SubSpeciesName, SpeciesID)
+          VALUES (@SubSpeciesName, (SELECT SpeciesID FROM ${schema}.Species WHERE SpeciesCode = @SpeciesCode));
         `);
     }
 

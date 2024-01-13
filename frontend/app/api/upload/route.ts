@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
   const errors: FileErrors = {};
   const uploadableRows: { [fileName: string]: RowDataStructure[] } = {};
   const errorRows: { [fileName: string]: RowDataStructure[] } = {};
+  const warningRows: { [fileName: string]: RowDataStructure[] } = {};
 
   function createFileEntry(fileName: string) {
     if (!errors[fileName]) {
@@ -47,6 +48,9 @@ export async function POST(request: NextRequest) {
     }
     if (!uploadableRows[fileName]) {
       uploadableRows[fileName] = [];
+    }
+    if (!warningRows[fileName]) {
+      warningRows[fileName] = [];
     }
   }
 
@@ -128,8 +132,9 @@ export async function POST(request: NextRequest) {
   let conn;
   let containerClient;
   try {
+    let i = 0;
     containerClient = await getContainerClient(plot, census);
-    conn = await getSqlConnection();
+    conn = await getSqlConnection(i);
     if (!conn) {
       throw new Error("SQL connection failed");
     }
@@ -176,11 +181,7 @@ export async function POST(request: NextRequest) {
         for (const row of uploadableRows[file.name]) {
           try {
             // Call insertOrUpdate function for each row
-            // await insertOrUpdate(conn, formType, row, plot);
-            console.log('row: ' + Object.entries(row).toString());
-            console.log('formType: ' + formType);
-            console.log('plot: ' + plot);
-            console.log('census: ' + census);
+            await insertOrUpdate(conn, formType, row, plot);
           } catch (error) {
             if (error instanceof Error) {
               console.error(`Error processing row for file ${file.name}:`, error.message);

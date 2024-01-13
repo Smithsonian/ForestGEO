@@ -8,6 +8,8 @@ import {
 } from "@/components/processors/processorhelpers";
 
 export default async function processCensus(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   // need the following IDs --> CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID
   // Start transaction
   const transaction = new sql.Transaction(conn);
@@ -17,13 +19,13 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
 
   try {
     // Foreign key checks and error handling for species, quadrat, and plot
-    const speciesID = await getColumnValueByColumnName(transaction, 'forestgeo.Species', 'SpeciesID', 'SpeciesCode', rowData.spcode);
+    const speciesID = await getColumnValueByColumnName(transaction, 'Species', 'SpeciesID', 'SpeciesCode', rowData.spcode);
     if (!speciesID) throw new Error(`Species with code ${rowData.spcode} does not exist.`);
 
-    const quadratID = await getColumnValueByColumnName(transaction, 'forestgeo.Quadrats', 'QuadratID', 'QuadratName', rowData.quadrat);
+    const quadratID = await getColumnValueByColumnName(transaction, 'Quadrats', 'QuadratID', 'QuadratName', rowData.quadrat);
     if (!quadratID) throw new Error(`Quadrat with name ${rowData.quadrat} does not exist.`);
 
-    const plotID = await getColumnValueByColumnName(transaction, 'forestgeo.Plots', 'PlotID', 'PlotName', plotKey);
+    const plotID = await getColumnValueByColumnName(transaction, 'Plots', 'PlotID', 'PlotName', plotKey);
     if (!plotID) throw new Error(`Plot with name ${plotKey} does not exist.`);
 
     let subSpeciesID = null;
@@ -37,7 +39,7 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
       .input('SpeciesID', sql.Int, speciesID)
       .input('SubSpeciesID', sql.Int, subSpeciesID || null) // Handle null if no SubSpecies
       .query(`
-        MERGE INTO forestgeo.Trees AS target
+        MERGE INTO ${schema}.Trees AS target
         USING (VALUES (@TreeTag, @SpeciesID, @SubSpeciesID)) AS source (TreeTag, SpeciesID, SubSpeciesID)
         ON target.TreeTag = source.TreeTag
         WHEN NOT MATCHED THEN
@@ -51,7 +53,7 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
       .input('StemX', sql.Float, rowData.lx)
       .input('StemY', sql.Float, rowData.ly)
       .query(`
-        MERGE INTO forestgeo.Stems AS target
+        MERGE INTO ${schema}.Stems AS target
         USING (VALUES (@StemTag, @StemX, @StemY)) AS source (StemTag, StemX, StemY)
         ON target.StemTag = source.StemTag
         WHEN NOT MATCHED THEN
@@ -62,7 +64,7 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
     // Note: The following assumes that you have a way to link these measurements to a specific Tree and Census
     const dbhTreeID = await getColumnValueByColumnName(
       transaction,
-      'forestgeo.Trees',
+      'Trees',
       'TreeID',
       'TreeTag',
       rowData.tag
@@ -73,7 +75,7 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
     }
 
     const measurementInsertQuery = `
-      INSERT INTO forestgeo.CoreMeasurements (TreeID, MeasurementTypeID, MeasurementDate, Measurement)
+      INSERT INTO ${schema}.CoreMeasurements (TreeID, MeasurementTypeID, MeasurementDate, Measurement)
       VALUES (@TreeID, @MeasurementTypeID, @MeasurementDate, @Measurement);
     `;
 
@@ -99,7 +101,7 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
     // Process CoreMeasurements for hom
     const homTreeID = await getColumnValueByColumnName(
       transaction,
-      'forestgeo.Trees',
+      'Trees',
       'TreeID',
       'TreeTag',
       rowData.tag

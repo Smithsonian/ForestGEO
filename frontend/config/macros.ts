@@ -144,7 +144,7 @@ export enum HTTPResponses {
   SERVICE_UNAVAILABLE = 503,
   GATEWAY_TIMEOUT = 504,
   // Add more as needed
-  SQL_CONNECTION_TIMEOUT = 408, // Custom code, example
+  SQL_CONNECTION_FAILURE = 408, // Custom code, example
   STORAGE_CONNECTION_FAILURE = 507, // Custom code, example
   INVALID_REQUEST = 400, // Custom code, example
   ERRORS_IN_FILE = 422, // Custom code, example

@@ -5,7 +5,7 @@ import {
   useCensusLoadDispatch,
   useCoreMeasurementLoadDispatch,
   usePersonnelLoadDispatch,
-  usePlotsLoadDispatch, useQuadratsLoadContext,
+  usePlotsLoadDispatch,
   useQuadratsLoadDispatch,
   useSpeciesLoadDispatch,
   useSubSpeciesLoadDispatch,
@@ -14,7 +14,8 @@ import {
   useCensusListDispatch,
   useFirstLoadContext,
   useFirstLoadDispatch,
-  usePlotListDispatch, useQuadratListContext, useQuadratListDispatch,
+  usePlotListDispatch,
+  useQuadratListDispatch,
 } from '@/app/contexts/generalcontext';
 import {
   Button,
@@ -32,6 +33,7 @@ import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
 import {CensusRDS, PlotRDS, QuadratRDS} from '@/config/sqlmacros';
 import {Census, Plot, Quadrat} from "@/config/macros";
+
 export default function EntryModal() {
   const [loading, setLoading] = useState(0);
   const [loadingMsg, setLoadingMsg] = useState('');
@@ -63,7 +65,7 @@ export default function EntryModal() {
     }
   };
 
-  const fetchAndDispatchQuadrats = async() => {
+  const fetchAndDispatchQuadrats = async () => {
     setLoading(loading + interval);
     setLoadingMsg('Retrieving Quadrats...');
 
@@ -79,7 +81,7 @@ export default function EntryModal() {
     }
 
     if (quadratsLoadDispatch) {
-      quadratsLoadDispatch({ quadratsLoad: quadratsRDSLoad});
+      quadratsLoadDispatch({quadratsLoad: quadratsRDSLoad});
     }
 
     const quadratListData = JSON.parse(localStorage.getItem('quadratList') ?? 'null');

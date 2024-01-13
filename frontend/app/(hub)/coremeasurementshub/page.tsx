@@ -42,7 +42,7 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {setRows, setRowModesModel, setRefresh} = props;
   const [dialogOpen, setDialogOpen] = useState(false);
   const {data: session} = useSession();
-  const currentPlot = usePlotContext();
+  let currentPlot = usePlotContext();
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   const [errorsData, setErrorsData] = useState<FileErrors>({});
 

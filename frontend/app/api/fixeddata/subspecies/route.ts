@@ -1,6 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
-import {ErrorMessages} from "@/config/macros";
+import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {SubSpeciesRDS} from "@/config/sqlmacros";
 import {sqlConfig} from "@/components/processors/processorhelpers";
 
@@ -47,7 +47,7 @@ export async function GET(): Promise<NextResponse<SubSpeciesRDS[]>> {
   })
   return new NextResponse(
     JSON.stringify(subSpeciesRows),
-    {status: 200}
+    {status: HTTPResponses.OK}
   );
 }
 
@@ -69,15 +69,15 @@ export async function POST(request: NextRequest) {
     infraSpecificLevel: request.nextUrl.searchParams.get('infraSpecificLevel'),
   }
   let checkSubSpeciesID = await runQuery(conn, `SELECT * FROM ${schema}.SubSpecies WHERE [SubSpeciesID] = ${row.subSpeciesID}`);
-  if (!checkSubSpeciesID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  if (checkSubSpeciesID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
+  if (!checkSubSpeciesID) return NextResponse.json({message: ErrorMessages.ICF}, {status: HTTPResponses.INVALID_REQUEST});
+  if (checkSubSpeciesID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: HTTPResponses.CONFLICT});
   let insertRow = await runQuery(conn,
     `INSERT INTO ${schema}.SubSpecies (SubSpeciesID, SpeciesID, CurrentTaxonFlag, ObsoleteTaxonFlag, SubSpeciesName, SubSpeciesCode,
     Authority, InfraSpecificLevel) VALUES (${row.subSpeciesID}, ${row.speciesID}, '${row.currentTaxonFlag}',
     '${row.obsoleteTaxonFlag}', '${row.subSpeciesName}', '${row.subSpeciesCode}', '${row.authority}', '${row.infraSpecificLevel}')`);
   if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   await conn.close();
-  return NextResponse.json({message: "Insert successful"}, {status: 200});
+  return NextResponse.json({message: "Insert successful"}, {status: HTTPResponses.CREATED});
 }
 
 export async function PATCH(request: NextRequest) {
@@ -129,7 +129,7 @@ export async function PATCH(request: NextRequest) {
                                         WHERE [SubSpeciesID] = ${oldSubSpeciesID}`);
     if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
     await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
+    return NextResponse.json({message: "Update successful",}, {status: HTTPResponses.ACCEPTED});
   }
 }
 
@@ -144,5 +144,5 @@ export async function DELETE(request: NextRequest) {
   let deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SubSpecies WHERE [SubSpeciesID] = ${deleteSubSpeciesID}`);
   if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
   await conn.close();
-  return NextResponse.json({message: "Delete successful",}, {status: 200});
+  return NextResponse.json({message: "Delete successful",}, {status: HTTPResponses.OK});
 }

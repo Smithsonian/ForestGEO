@@ -4,6 +4,8 @@ import {processSpecies} from "@/components/processors/processspecies";
 import processCensus from "@/components/processors/processcensus";
 
 export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string, rowData: RowDataStructure, plotKey: string) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   const mapping = fileMappings[fileType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${fileType}`);
@@ -20,7 +22,7 @@ export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string,
   const values = columns.map(fileColumn => `@${fileColumn}`);
 
   let query = `
-    MERGE INTO ${mapping.tableName} AS target
+    MERGE INTO ${schema}.${mapping.tableName} AS target
     USING (VALUES (${values.join(', ')})) AS source (${tableColumns})
     ON target.UniqueIdentifierColumn = source.UniqueIdentifierColumn
     WHEN MATCHED THEN
@@ -44,11 +46,13 @@ export async function getColumnValueByColumnName<T>(
   columnNameToSearch: string,
   columnValueToSearch: T
 ): Promise<T | null> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   try {
     const request = new sql.Request(transaction); // Use the provided transaction
     const query = `
       SELECT ${columnNameToExtract}
-      FROM ${tableName}
+      FROM ${schema}.${tableName}
       WHERE ${columnNameToSearch} = @columnValue
     `;
 
@@ -75,11 +79,13 @@ export async function getMostRecentRowID(
   tableName: string,
   identityColumn: string
 ): Promise<number | null> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   try {
     const request = new sql.Request(transaction); // Use the provided transaction
     const query = `
       SELECT TOP 1 ${identityColumn}
-      FROM ${tableName}
+      FROM ${schema}.${tableName}
       ORDER BY ${identityColumn} DESC
     `;
 
@@ -105,7 +111,9 @@ export async function getCoreMeasurementID(
   measurementTypeID: number,
   measurementDate: Date
 ): Promise<number | null> {
-  const tableName = 'forestgeo.CoreMeasurements';
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
+  const tableName = `${schema}.CoreMeasurements`;
   const identityColumn = 'CoreMeasurementID';
 
   try {
@@ -123,7 +131,7 @@ export async function getCoreMeasurementID(
     const request = new sql.Request(transaction);
     const query = `
       SELECT ${identityColumn}
-      FROM ${tableName}
+      FROM ${schema}.${tableName}
       WHERE ${identityColumn} = @coreMeasurementID
       AND TreeID = @treeID
       AND MeasurementTypeID = @measurementTypeID
@@ -152,11 +160,13 @@ export async function getSubSpeciesID(
   transaction: sql.Transaction,
   speciesID: number
 ): Promise<number | null> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   try {
     const request = new sql.Request(transaction);
     const query = `
       SELECT SubSpeciesID
-      FROM forestgeo.SubSpecies
+      FROM ${schema}.SubSpecies
       WHERE SpeciesID = @speciesID
     `;
 
@@ -182,13 +192,15 @@ export async function processCode(
   measurementTypeID: number,
   measurementDate: Date
 ) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
   try {
     const request = new sql.Request(transaction);
 
     // Check if the code exists in the Attributes table
     const attributeExistsQuery = `
       SELECT Code
-      FROM forestgeo.Attributes
+      FROM ${schema}.Attributes
       WHERE Code = @Code
     `;
 
@@ -199,7 +211,7 @@ export async function processCode(
     if (attributeResult.recordset.length === 0) {
       // If the code doesn't exist, insert it into the Attributes table
       const insertAttributeQuery = `
-        INSERT INTO forestgeo.Attributes (Code)
+        INSERT INTO ${schema}.Attributes (Code)
         VALUES (@Code)
       `;
 
@@ -208,9 +220,9 @@ export async function processCode(
 
     // Insert the code into the CMAttributes table, linking it to the CoreMeasurement
     const insertCMAttributeQuery = `
-      INSERT INTO forestgeo.CMAttributes (CoreMeasurementID, Code)
+      INSERT INTO ${schema}.CMAttributes (CoreMeasurementID, Code)
       SELECT CM.CoreMeasurementID, @Code
-      FROM forestgeo.CoreMeasurements CM
+      FROM ${schema}.CoreMeasurements CM
       WHERE CM.TreeID = @TreeID
         AND CM.MeasurementTypeID = @MeasurementTypeID
         AND CM.MeasurementDate = @MeasurementDate
