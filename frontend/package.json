@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "tsc": "tsc",
     "bs": "next build; next start",
     "clean": "rm -rf .next node_modules package-lock.json; npm install",
     "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest"
