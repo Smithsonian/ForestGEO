@@ -48,7 +48,7 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
 }));
 
 
-export interface AttributeRDS {
+export interface AttributesRDS {
   id: number;
   code: string;
   description: string | null;
@@ -147,7 +147,7 @@ export const CensusGridColumns: GridColDef[] = [
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
 ]
 
-export interface CMAttributeRDS {
+export interface CMAttributesRDS {
   id: number;
   cmaID: number;
   coreMeasurementID: number | null;
@@ -173,7 +173,7 @@ export const CMVErrorGridColumns: GridColDef[] = [
   {field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left'},
 ]
 
-export interface CoreMeasurementRDS {
+export interface CoreMeasurementsRDS {
   id: number;
   coreMeasurementID: number;
   censusID: number | null;
@@ -191,7 +191,7 @@ export interface CoreMeasurementRDS {
 }
 
 
-export const CoreMeasurementGridColumns: GridColDef[] = [
+export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left'},
@@ -335,7 +335,7 @@ export const PlotGridColumns: GridColDef[] = [
   {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface QuadratRDS {
+export interface QuadratsRDS {
   id: number;
   quadratID: number;
   plotID: number | null;
@@ -350,7 +350,7 @@ export interface QuadratRDS {
 }
 
 
-export const QuadratGridColumns: GridColDef[] = [
+export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},

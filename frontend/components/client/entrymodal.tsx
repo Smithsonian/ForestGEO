@@ -31,7 +31,7 @@ import {
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
-import {CensusRDS, PlotRDS, QuadratRDS} from '@/config/sqlmacros';
+import {CensusRDS, PlotRDS, QuadratsRDS} from '@/config/sqlmacros';
 import {Census, Plot, Quadrat} from "@/config/macros";
 
 export default function EntryModal() {
@@ -71,7 +71,7 @@ export default function EntryModal() {
 
     // check if quadratsLoad is available in localStorage
     const quadratLoadData = JSON.parse(localStorage.getItem('quadratsLoad') ?? 'null');
-    let quadratsRDSLoad: QuadratRDS[];
+    let quadratsRDSLoad: QuadratsRDS[];
     if (quadratLoadData) {
       quadratsRDSLoad = quadratLoadData;
     } else {

@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {ErrorMessages} from "@/config/macros";
-import {QuadratRDS} from "@/config/sqlmacros";
+import {QuadratsRDS} from "@/config/sqlmacros";
 import {sqlConfig} from "@/components/processors/processorhelpers";
 
 async function getSqlConnection(tries: number) {
@@ -22,7 +22,7 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
   return await conn.request().query(query);
 }
 
-export async function GET(): Promise<NextResponse<QuadratRDS[]>> {
+export async function GET(): Promise<NextResponse<QuadratsRDS[]>> {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
@@ -31,7 +31,7 @@ export async function GET(): Promise<NextResponse<QuadratRDS[]>> {
   let results = await runQuery(conn, `SELECT * FROM ${schema}.Quadrats`);
   if (!results) throw new Error("call failed");
   await conn.close();
-  let quadratRows: QuadratRDS[] = []
+  let quadratRows: QuadratsRDS[] = []
   Object.values(results.recordset).map((row, index) => {
     quadratRows.push({
       id: index + 1,
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  const row: QuadratRDS = {
+  const row: QuadratsRDS = {
     id: 0,
     quadratID: parseInt(request.nextUrl.searchParams.get('quadratID')!),
     plotID: request.nextUrl.searchParams.get('plotID') ? parseInt(request.nextUrl.searchParams.get('plotID')!) : null,
@@ -107,7 +107,7 @@ export async function PATCH(request: NextRequest) {
   if (!conn) throw new Error('sql connection failed');
 
   const oldQuadratID = parseInt(request.nextUrl.searchParams.get('oldQuadratID')!);
-  const row: QuadratRDS = {
+  const row: QuadratsRDS = {
     id: 0,
     quadratID: parseInt(request.nextUrl.searchParams.get('quadratID')!),
     plotID: request.nextUrl.searchParams.get('plotID') ? parseInt(request.nextUrl.searchParams.get('plotID')!) : null,

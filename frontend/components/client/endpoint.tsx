@@ -20,7 +20,7 @@ import {
   useSubSpeciesLoadDispatch
 } from "@/app/contexts/fixeddatacontext";
 import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/generalcontext";
-import {CensusRDS, PlotRDS, QuadratRDS} from "@/config/sqlmacros";
+import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
@@ -125,7 +125,7 @@ export default function Endpoint({children,}: Readonly<{ children: React.ReactNo
 
     // check if quadratsLoad is available in localStorage
     const quadratLoadData = JSON.parse(localStorage.getItem('quadratsLoad') ?? 'null');
-    let quadratsRDSLoad: QuadratRDS[];
+    let quadratsRDSLoad: QuadratsRDS[];
     if (quadratLoadData) {
       quadratsRDSLoad = quadratLoadData;
     } else {

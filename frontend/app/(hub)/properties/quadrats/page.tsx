@@ -23,7 +23,7 @@ import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
 import {usePlotsLoadContext, useQuadratsLoadContext} from "@/app/contexts/fixeddatacontext";
-import {QuadratGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {QuadratsGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 
 interface EditToolbarProps {
@@ -228,7 +228,7 @@ export default function Page() {
   };
 
   const columns: GridColDef[] = [
-    ...QuadratGridColumns,
+    ...QuadratsGridColumns,
     {
       field: 'actions',
       type: 'actions',

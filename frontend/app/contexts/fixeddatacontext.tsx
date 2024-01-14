@@ -2,29 +2,29 @@
 
 import React, {createContext, Dispatch, useContext, useReducer} from "react";
 import {
-  AttributeRDS,
+  AttributesRDS,
   CensusRDS,
-  CoreMeasurementRDS,
+  CoreMeasurementsRDS,
   PersonnelRDS,
   PlotRDS,
-  QuadratRDS,
+  QuadratsRDS,
   SpeciesRDS,
   SubSpeciesRDS
 } from "@/config/sqlmacros";
 
-export const CoreMeasurementLoadContext = createContext<CoreMeasurementRDS[] | null>(null);
-export const AttributeLoadContext = createContext<AttributeRDS[] | null>(null);
+export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | null>(null);
+export const AttributeLoadContext = createContext<AttributesRDS[] | null>(null);
 export const CensusLoadContext = createContext<CensusRDS[] | null>(null);
 export const PersonnelLoadContext = createContext<PersonnelRDS[] | null>(null);
-export const QuadratsLoadContext = createContext<QuadratRDS[] | null>(null);
+export const QuadratsLoadContext = createContext<QuadratsRDS[] | null>(null);
 export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
 export const SubSpeciesLoadContext = createContext<SubSpeciesRDS[] | null>(null);
 export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
 export const CoreMeasurementLoadDispatchContext = createContext<Dispatch<{
-  coreMeasurementLoad: CoreMeasurementRDS[] | null
+  coreMeasurementLoad: CoreMeasurementsRDS[] | null
 }> | null>(null);
 export const AttributeLoadDispatchContext = createContext<Dispatch<{
-  attributeLoad: AttributeRDS[] | null
+  attributeLoad: AttributesRDS[] | null
 }> | null>(null);
 export const CensusLoadDispatchContext = createContext<Dispatch<{
   censusLoad: CensusRDS[] | null
@@ -33,7 +33,7 @@ export const PersonnelLoadDispatchContext = createContext<Dispatch<{
   personnelLoad: PersonnelRDS[] | null
 }> | null>(null);
 export const QuadratsLoadDispatchContext = createContext<Dispatch<{
-  quadratsLoad: QuadratRDS[] | null
+  quadratsLoad: QuadratsRDS[] | null
 }> | null>(null);
 export const SpeciesLoadDispatchContext = createContext<Dispatch<{
   speciesLoad: SpeciesRDS[] | null
@@ -42,7 +42,6 @@ export const SubSpeciesLoadDispatchContext = createContext<Dispatch<{
   subSpeciesLoad: SubSpeciesRDS[] | null
 }> | null>(null);
 export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: PlotRDS[] | null }> | null>(null);
-
 export function FixedDataProvider({children}: { children: React.ReactNode }) {
   const [coreMeasurementLoad, coreMeasurementLoadDispatch] = useReducer(
     coreMeasurementLoadReducer,
@@ -115,12 +114,12 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
 }
 
 function coreMeasurementLoadReducer(currentCoreMeasurementLoad: any, action: {
-  coreMeasurementLoad: CoreMeasurementRDS[] | null
+  coreMeasurementLoad: CoreMeasurementsRDS[] | null
 }) {
   return action.coreMeasurementLoad;
 }
 
-function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: AttributeRDS[] | null }) {
+function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: AttributesRDS[] | null }) {
   return action.attributeLoad;
 }
 
@@ -132,7 +131,7 @@ function personnelLoadReducer(currentPersonnelLoad: any, action: { personnelLoad
   return action.personnelLoad;
 }
 
-function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: QuadratRDS[] | null }) {
+function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: QuadratsRDS[] | null }) {
   return action.quadratsLoad;
 }
 
@@ -147,6 +146,7 @@ function subSpeciesLoadReducer(currentSpeciesLoad: any, action: { subSpeciesLoad
 function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: PlotRDS[] | null }) {
   return action.plotsLoad;
 }
+
 
 export function useCoreMeasurementLoadContext() {
   return useContext(CoreMeasurementLoadContext);
