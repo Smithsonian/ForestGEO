@@ -23,7 +23,7 @@ import React, {useCallback, useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages, FileErrors} from "@/config/macros";
 import {useCoreMeasurementLoadContext} from "@/app/contexts/fixeddatacontext";
-import {CoreMeasurementGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {CoreMeasurementsGridColumns, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 import {DialogActions, DialogContent, DialogTitle} from "@mui/joy";
 import {UploadAndReviewProcess} from "@/components/fileupload/uploadreviewcycle";
@@ -41,10 +41,6 @@ interface EditToolbarProps {
 function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {setRows, setRowModesModel, setRefresh} = props;
   const [dialogOpen, setDialogOpen] = useState(false);
-  const {data: session} = useSession();
-  let currentPlot = usePlotContext();
-  const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
-  const [errorsData, setErrorsData] = useState<FileErrors>({});
 
   const handleDialogOpen = () => {
     setDialogOpen(true);
@@ -53,25 +49,6 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
   const handleCloseDialog = () => {
     setDialogOpen(false);
   };
-
-  const handleUpload = useCallback(async () => {
-    if (acceptedFiles.length == 0) {
-      console.log("accepted files is empty for some reason??");
-    }
-    const fileToFormData = new FormData();
-    let i = 0;
-    for (const file of acceptedFiles) {
-      fileToFormData.append(`file_${i}`, file);
-      i++;
-    }
-    const response = await fetch('/api/upload?plot=' + currentPlot!.key + '&user=' + session!.user!.name! + '&table=CoreMeasurements', {
-      method: 'POST',
-      body: fileToFormData,
-    });
-    const data = await response.json();
-    setErrorsData(await data.errors);
-    setDialogOpen(false);
-  }, [acceptedFiles, currentPlot, session]);
 
   const handleClick = async () => {
     const id = randomId();
@@ -125,9 +102,9 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleUpload} color="primary">
-            Upload
-          </Button>
+          {/*<Button onClick={handleUpload} color="primary">*/}
+          {/*  Upload*/}
+          {/*</Button>*/}
         </DialogActions>
       </Dialog>
     </GridToolbarContainer>
@@ -294,7 +271,7 @@ export default function Page() {
   };
 
   const columns: GridColDef[] = [
-    ...CoreMeasurementGridColumns,
+    ...CoreMeasurementsGridColumns,
     {
       field: 'actions',
       type: 'actions',

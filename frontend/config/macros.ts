@@ -33,6 +33,7 @@ export interface Quadrat {
   quadratName: string;
 }
 
+
 export function containsPlotCensusNumber(censusArray: Census[], plotCensusNumberToCheck: number): boolean {
   return censusArray.some(census => census.plotCensusNumber === plotCensusNumberToCheck);
 }

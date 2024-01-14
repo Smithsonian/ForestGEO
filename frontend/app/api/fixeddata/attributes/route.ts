@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import sql from "mssql";
 import {ErrorMessages} from "@/config/macros";
-import {AttributeRDS} from "@/config/sqlmacros";
+import {AttributesRDS} from "@/config/sqlmacros";
 import {sqlConfig} from "@/components/processors/processorhelpers";
 
 async function getSqlConnection(tries: number) {
@@ -23,7 +23,7 @@ async function runQuery(conn: sql.ConnectionPool, query: string) {
 }
 
 
-export async function GET(): Promise<NextResponse<AttributeRDS[]>> {
+export async function GET(): Promise<NextResponse<AttributesRDS[]>> {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
@@ -32,7 +32,7 @@ export async function GET(): Promise<NextResponse<AttributeRDS[]>> {
   let results = await runQuery(conn, `SELECT * FROM ${schema}.Attributes`);
   if (!results) throw new Error("call failed");
   await conn.close();
-  let attributeRows: AttributeRDS[] = []
+  let attributeRows: AttributesRDS[] = []
   Object.values(results.recordset).map((row, index) => {
     attributeRows.push({
       id: index + 1,
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  const row: AttributeRDS = {
+  const row: AttributesRDS = {
     id: 0,
     code: request.nextUrl.searchParams.get('code')!,
     description: request.nextUrl.searchParams.get('desc'),
@@ -92,7 +92,7 @@ export async function PATCH(request: NextRequest) {
   if (!conn) throw new Error('sql connection failed');
 
   const oldCode = request.nextUrl.searchParams.get('oldCode')!;
-  const row: AttributeRDS = {
+  const row: AttributesRDS = {
     id: 0,
     code: request.nextUrl.searchParams.get('newCode')!,
     description: request.nextUrl.searchParams.get('newDesc')!,

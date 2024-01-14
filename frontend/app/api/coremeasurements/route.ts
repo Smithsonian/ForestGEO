@@ -1,10 +1,10 @@
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages} from "@/config/macros";
-import {CoreMeasurementRDS} from "@/config/sqlmacros";
+import {CoreMeasurementsRDS} from "@/config/sqlmacros";
 import {getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
 
 
-export async function GET(): Promise<NextResponse<CoreMeasurementRDS[]>> {
+export async function GET(): Promise<NextResponse<CoreMeasurementsRDS[]>> {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   let i = 0;
@@ -14,7 +14,7 @@ export async function GET(): Promise<NextResponse<CoreMeasurementRDS[]>> {
                                       FROM ${schema}.CoreMeasurements`);
   if (!results) throw new Error("call failed");
   await conn.close();
-  let coreMeasurementRows: CoreMeasurementRDS[] = []
+  let coreMeasurementRows: CoreMeasurementsRDS[] = []
   /**
    *   coreMeasurementID: number;
    *   censusID: number | null;
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
   let i = 0;
   let conn = await getSqlConnection(i);
   if (!conn) throw new Error('sql connection failed');
-  const row: CoreMeasurementRDS = {
+  const row: CoreMeasurementsRDS = {
     id: 0,
     coreMeasurementID: parseInt(request.nextUrl.searchParams.get('coreMeasurementID')!),
     censusID: request.nextUrl.searchParams.get('censusID') ? parseInt(request.nextUrl.searchParams.get('censusID')!) : null,
@@ -120,7 +120,7 @@ export async function PATCH(request: NextRequest) {
   if (!conn) throw new Error('sql connection failed');
 
   const oldCoreMeasurement = parseInt(request.nextUrl.searchParams.get('oldCoreMeasurementID')!);
-  const row: CoreMeasurementRDS = {
+  const row: CoreMeasurementsRDS = {
     id: 0,
     coreMeasurementID: parseInt(request.nextUrl.searchParams.get('coreMeasurementID')!),
     censusID: request.nextUrl.searchParams.get('censusID') ? parseInt(request.nextUrl.searchParams.get('censusID')!) : null,
