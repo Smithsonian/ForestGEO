@@ -1,7 +1,14 @@
 
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {Census, ErrorRowsData, FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
+import {
+  Census,
+  ErrorRowsData,
+  FileErrors,
+  ReviewStates,
+  RowDataStructure,
+  TableHeadersByFormType
+} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse, ParseResult} from "papaparse";
@@ -80,9 +87,7 @@ export function UploadAndReviewProcess() {
           try {
             // Check if headers match
             setReceivedHeaders(results.meta.fields!); // This contains the headers from the file
-            if (!areHeadersValid(receivedHeaders)) {
-              throw new Error("Invalid file headers.");
-            }
+            if (!areHeadersValid(receivedHeaders)) throw new Error("Invalid file headers.");
 
             // Process file data
             tempData.push({fileName: file.name, data: results.data});

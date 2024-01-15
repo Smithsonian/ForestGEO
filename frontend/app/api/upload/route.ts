@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {
+  ErrorRowsData,
   FileErrors,
   getContainerClient,
   HTTPResponses,
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
 
   const errors: FileErrors = {};
   const uploadableRows: { [fileName: string]: RowDataStructure[] } = {};
-  const errorRows: { [fileName: string]: RowDataStructure[] } = {};
+  const errorRows: ErrorRowsData = {};
   const warningRows: { [fileName: string]: RowDataStructure[] } = {};
 
   function createFileEntry(fileName: string) {
@@ -169,6 +170,8 @@ export async function POST(request: NextRequest) {
   }
 
   for (const file of files) {
+    if (errorRows[file.name].length !== 0) break;
+
     let uploadResponse;
     try {
       uploadResponse = await uploadFileAsBuffer(containerClient, file, user, (Object.keys(errors).length == 0));
