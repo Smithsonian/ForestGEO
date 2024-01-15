@@ -235,38 +235,40 @@ create table forestgeo_id.Stems
 
 create table forestgeo_id.CoreMeasurements
 (
-    CoreMeasurementID int identity
+    CoreMeasurementID   int identity
         constraint CoreMeasurements_pk
         primary key,
-    CensusID          int
+    CensusID            int
         constraint CoreMeasurements_Census_CensusID_fk
             references forestgeo_id.Census
             on update cascade,
-    PlotID            int
+    PlotID              int
         constraint CoreMeasurements_Plots_PlotID_fk
             references forestgeo_id.Plots,
-    QuadratID         int
+    QuadratID           int
         constraint CoreMeasurements_Quadrats_QuadratID_fk
             references forestgeo_id.Quadrats,
-    TreeID            int
+    TreeID              int
         constraint FK_CoreMeasurements_Trees
             references forestgeo_id.Trees,
-    StemID            int
+    StemID              int
         constraint FK_CoreMeasurements_Stems
             references forestgeo_id.Stems,
-    PersonnelID       int
+    PersonnelID         int
         constraint CoreMeasurements_Personnel_PersonnelID_fk
             references forestgeo_id.Personnel
             on update cascade,
-    MeasurementTypeID int
+    MeasurementTypeID   int
         constraint CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
             references forestgeo_id.MeasurementTypes
             on update cascade,
-    MeasurementDate   date,
-    Measurement       varchar(max),
-    IsRemeasurement   bit,
-    IsCurrent         bit,
-    UserDefinedFields varchar(max)
+    MeasurementDate     date,
+    Measurement         varchar(max),
+    IsRemeasurement     bit,
+    IsCurrent           bit,
+    UserDefinedFields   varchar(max),
+    Description         varchar(max),
+    MasterMeasurementID int
 )
     go
 

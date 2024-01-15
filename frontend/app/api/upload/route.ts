@@ -181,7 +181,7 @@ export async function POST(request: NextRequest) {
         for (const row of uploadableRows[file.name]) {
           try {
             // Call insertOrUpdate function for each row
-            await insertOrUpdate(conn, formType, row, plot);
+            await insertOrUpdate(conn, formType, row, plot, census, user);
           } catch (error) {
             if (error instanceof Error) {
               console.error(`Error processing row for file ${file.name}:`, error.message);

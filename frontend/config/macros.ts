@@ -73,16 +73,16 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
 }));
 
 export const TableHeadersByFormType: Record<string, { label: string }[]> = {
-  "fixeddata_codes.txt": [{label: "Code"}, {label: "Description"}, {label: "Status"}],
-  "fixeddata_role.txt": [{label: "Role"}],
-  "fixeddata_personnel.txt": [{label: "FirstName"}, {label: "LastName"}, {label: "Role"}],
-  "fixeddata_species.txt": [{label: "SpCode"}, {label: "Genus"}, {label: "Species"}, {label: "IDLevel"}, {label: "Family"}, {label: "Authority"}],
+  "fixeddata_codes.txt": [{label: "code"}, {label: "description"}, {label: "status"}],
+  // "fixeddata_role.txt": [{label: "role"}],
+  "fixeddata_personnel.txt": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
+  "fixeddata_species.txt": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
   "fixeddata_quadrat.txt": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
-  "fixeddata_census.txt": [{label: "Tag"}, {label: "StemTag"}, {label: "SpCode"}, {label: "lx"}, {label: "ly"}, {label: "DBH"}, {label: "Codes"}, {label: "HOM"}, {label: "Date"}],
-  "ctfsweb_New_Plants_Form": [{label: "Subquadrat"}, {label: "Tag"}, {label: "StemTag"}, {label: "SpCode"}, {label: "DBH"}, {label: "Codes"}, {label: "Comments"}],
-  "ctfsweb_Old_Tree_Form": [{label: "Subquadrat"}, {label: "Tag"}, {label: "StemTag"}, {label: "SpCode"}, {label: "OldDBH"}, {label: "OldHOM"}, {label: "DBH"}, {label: "Codes"}, {label: "Comments"}],
-  "ctfsweb_Multiple_Stems_Form": [{label: "Subquadrat"}, {label: "Tag"}, {label: "StemTag"}, {label: "DBH"}, {label: "Codes"}, {label: "Comments"}],
-  "ctfsweb_Big_Trees_Form": [{label: "Quadrat"}, {label: "Subquadrat"}, {label: "Tag"}, {label: "MultiStemTag"}, {label: "Species"}, {label: "DBH"}, {label: "HOM"}, {label: "Comments"}],
+  "fixeddata_census.txt": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
+  "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
+  "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
+  "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
+  "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}, {label: "comments"}],
   "arcgis_xlsx": arcgisHeaders
 };
 export const DBInputForms: string[] = [
@@ -94,10 +94,10 @@ export const DBInputForms: string[] = [
   "fixeddata_census.txt"
 ];
 export const CTFSWebInputForms: string[] = [
-  "ctfsweb_New_Plants_Form",
-  "ctfsweb_Old_Tree_Form",
-  "ctfsweb_Multiple_Stems_Form",
-  "ctfsweb_Big_Trees_Form",
+  "ctfsweb_new_plants_form",
+  "ctfsweb_old_tree_form",
+  "ctfsweb_multiple_stems_form",
+  "ctfsweb_big_trees_form",
 ];
 export const FormGroups: Record<string, string[]> = {
   "Database Forms": DBInputForms,

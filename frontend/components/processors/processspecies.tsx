@@ -2,7 +2,7 @@ import sql from "mssql";
 import {RowDataStructure} from "@/config/macros";
 import {getColumnValueByColumnName} from "@/components/processors/processorhelpers";
 
-export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string) {
+export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   const transaction = new sql.Transaction(conn);
@@ -22,11 +22,12 @@ export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataS
 
     if (!genusID) {
       // Insert into Genus table if genus does not exist
-      await request.input('GenusName', sql.VarChar, rowData.genus)
+      await request
+        .input('GenusName', sql.VarChar, rowData.genus)
         .query(`
-                    INSERT INTO ${schema}.Genus (GenusName)
-                    VALUES (@GenusName);
-                  `);
+          INSERT INTO ${schema}.Genus (GenusName)
+          VALUES (@GenusName);
+        `);
     }
 
     // Insert or update Species
@@ -49,6 +50,7 @@ export async function processSpecies(conn: sql.ConnectionPool, rowData: RowDataS
     if (rowData.subspecies) {
       await request
         .input('SubSpeciesName', sql.VarChar, rowData.subspecies)
+        .input('SpeciesCode', sql.VarChar, rowData.spcode)
         .query(`
           INSERT INTO ${schema}.SubSpecies (SubSpeciesName, SpeciesID)
           VALUES (@SubSpeciesName, (SELECT SpeciesID FROM ${schema}.Species WHERE SpeciesCode = @SpeciesCode));

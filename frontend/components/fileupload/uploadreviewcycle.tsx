@@ -67,7 +67,7 @@ export function UploadAndReviewProcess() {
   function areHeadersValid(actualHeaders: string[] | undefined): boolean {
     if (!actualHeaders) return false;
     // Check if every expected header is present in actual headers
-    return expectedHeaders.every(expectedHeader => actualHeaders.includes(expectedHeader));
+    return expectedHeaders.every((expectedHeader) => actualHeaders.includes(expectedHeader.toLowerCase()));
   }
 
   async function handleInitialSubmit() {
@@ -116,7 +116,7 @@ export function UploadAndReviewProcess() {
       acceptedFiles.forEach((file, index) => {
         fileToFormData.append(`file_${index}`, file);
       });
-      const response = await fetch(`/api/upload?plot=${currentPlot?.key}&user=${session?.user?.name}&formType=${uploadForm}`, {
+      const response = await fetch(`/api/upload?plot=${currentPlot?.key}&census=${currentCensus?.plotCensusNumber}&user=${session?.user?.name}&formType=${uploadForm}`, {
         method: 'POST',
         body: fileToFormData,
       });
