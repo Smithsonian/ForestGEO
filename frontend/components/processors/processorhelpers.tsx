@@ -1,9 +1,13 @@
-import sql from "mssql";
+import sql, {ConnectionPool, Transaction} from "mssql";
 import {RowDataStructure} from "@/config/macros";
 import {processSpecies} from "@/components/processors/processspecies";
 import processCensus from "@/components/processors/processcensus";
+import processNewPlantsForm from "@/components/processors/processnewplantsform";
+import processOldTreeForm from "@/components/processors/processoldtreeform";
+import processBigTreesForm from "@/components/processors/processbigtreesform";
+import processMultipleStemsForm from "@/components/processors/processmultiplestemsform";
 
-export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string, rowData: RowDataStructure, plotKey: string) {
+export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   const mapping = fileMappings[fileType];
@@ -12,7 +16,7 @@ export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string,
   }
 
   if (mapping.specialProcessing) {
-    await mapping.specialProcessing(conn, rowData, plotKey);
+    await mapping.specialProcessing(conn, rowData, plotKey, censusID, fullName);
     return;
   }
 
@@ -40,36 +44,33 @@ export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string,
 }
 
 export async function getColumnValueByColumnName<T>(
-  transaction: sql.Transaction, // Pass the transaction explicitly
+  transaction: sql.Transaction,
   tableName: string,
   columnNameToExtract: string,
   columnNameToSearch: string,
   columnValueToSearch: T
 ): Promise<T | null> {
   const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+
   try {
-    const request = new sql.Request(transaction); // Use the provided transaction
+    const request = new sql.Request(transaction);
     const query = `
       SELECT ${columnNameToExtract}
       FROM ${schema}.${tableName}
       WHERE ${columnNameToSearch} = @columnValue
     `;
 
-    // Provide the parameter value
     request.input('columnValue', columnValueToSearch);
-
     const result = await request.query(query);
 
     if (result.recordset.length > 0) {
-      // Return the extracted column value if found
       return result.recordset[0][columnNameToExtract];
     } else {
-      // Return null if no matching record found
       return null;
     }
   } catch (err: any) {
-    console.error(`Error retrieving ${columnNameToExtract}:`, err.message);
+    console.error(`Error retrieving ${columnNameToExtract} from ${tableName}:`, err.message);
     throw err;
   }
 }
@@ -104,58 +105,6 @@ export async function getMostRecentRowID(
   }
 }
 
-
-export async function getCoreMeasurementID(
-  transaction: sql.Transaction, // Pass the transaction explicitly
-  treeID: number,
-  measurementTypeID: number,
-  measurementDate: Date
-): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  const tableName = `${schema}.CoreMeasurements`;
-  const identityColumn = 'CoreMeasurementID';
-
-  try {
-    const mostRecentCoreMeasurementID = await getMostRecentRowID(
-      transaction,
-      tableName,
-      identityColumn
-    );
-
-    if (mostRecentCoreMeasurementID === null) {
-      return null;
-    }
-
-    // Check if the retrieved CoreMeasurement corresponds to the specific measurement criteria
-    const request = new sql.Request(transaction);
-    const query = `
-      SELECT ${identityColumn}
-      FROM ${schema}.${tableName}
-      WHERE ${identityColumn} = @coreMeasurementID
-      AND TreeID = @treeID
-      AND MeasurementTypeID = @measurementTypeID
-      AND MeasurementDate = @measurementDate
-    `;
-
-    const result = await request
-      .input('coreMeasurementID', mostRecentCoreMeasurementID)
-      .input('treeID', treeID)
-      .input('measurementTypeID', measurementTypeID)
-      .input('measurementDate', sql.Date, measurementDate)
-      .query(query);
-
-    if (result.recordset.length > 0) {
-      return mostRecentCoreMeasurementID;
-    } else {
-      return null;
-    }
-  } catch (error: any) {
-    console.error('Error retrieving CoreMeasurementID:', error.message);
-    throw error;
-  }
-}
-
 export async function getSubSpeciesID(
   transaction: sql.Transaction,
   speciesID: number
@@ -187,58 +136,148 @@ export async function getSubSpeciesID(
 
 export async function processCode(
   transaction: sql.Transaction,
-  code: string,
-  treeID: number,
-  measurementTypeID: number,
-  measurementDate: Date
+  codesArray: string[],
+  collectedMeasurements: any[],
 ) {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   try {
     const request = new sql.Request(transaction);
 
-    // Check if the code exists in the Attributes table
     const attributeExistsQuery = `
       SELECT Code
       FROM ${schema}.Attributes
       WHERE Code = @Code
     `;
 
-    const attributeResult = await request
-      .input('Code', sql.VarChar, code)
-      .query(attributeExistsQuery);
+    for (const measurementID of collectedMeasurements) {
+      const coreMeasurementExistsQuery = `
+      SELECT CoreMeasurementID
+      FROM ${schema}.CoreMeasurements
+      WHERE CoreMeasurementID = @CoreMeasurementID
+    `;
+      const coreMeasurementResult = await request
+        .input('CoreMeasurementID', sql.Int, measurementID)
+        .query(coreMeasurementExistsQuery);
 
-    if (attributeResult.recordset.length === 0) {
-      // If the code doesn't exist, insert it into the Attributes table
-      const insertAttributeQuery = `
-        INSERT INTO ${schema}.Attributes (Code)
-        VALUES (@Code)
-      `;
-
-      await request.query(insertAttributeQuery);
+      if (coreMeasurementResult.recordset.length === 0) {
+        throw new Error("The CoreMeasurementID you are trying to use does not exist in SQL");
+      }
     }
 
     // Insert the code into the CMAttributes table, linking it to the CoreMeasurement
     const insertCMAttributeQuery = `
       INSERT INTO ${schema}.CMAttributes (CoreMeasurementID, Code)
-      SELECT CM.CoreMeasurementID, @Code
-      FROM ${schema}.CoreMeasurements CM
-      WHERE CM.TreeID = @TreeID
-        AND CM.MeasurementTypeID = @MeasurementTypeID
-        AND CM.MeasurementDate = @MeasurementDate
+      VALUES ($CoreMeasurementID, @Code);
     `;
+    // Check if the code exists in the Attributes table
+    for (const code of codesArray) {
+      const attributeResult = await request
+        .input('Code', sql.VarChar, code)
+        .query(attributeExistsQuery);
 
-    await request
-      .input('Code', sql.VarChar, code)
-      .input('TreeID', sql.Int, treeID)
-      .input('MeasurementTypeID', sql.Int, measurementTypeID)
-      .input('MeasurementDate', sql.Date, measurementDate)
-      .query(insertCMAttributeQuery);
+      if (attributeResult.recordset.length === 0) {
+        throw new Error("The attribute you are trying to set does not exist in SQL")
+      }
+
+      for (const measurementID of collectedMeasurements) {
+        await request
+          .input('CoreMeasurementID', sql.Int, measurementID)
+          .input('Code', sql.VarChar, code)
+          .query(insertCMAttributeQuery);
+      }
+    }
   } catch (error: any) {
     console.error('Error processing code:', error.message);
     throw error;
   }
 }
+
+export async function processTrees(transaction: Transaction, treeTag: any, speciesID: any, subSpeciesID: any | null) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
+
+  try {
+    const request = new sql.Request(transaction);
+
+    // Insert or update Trees with SpeciesID and SubSpeciesID
+    await request
+      .input('TreeTag', sql.VarChar, treeTag)
+      .input('SpeciesID', sql.Int, speciesID)
+      .input('SubSpeciesID', sql.Int, subSpeciesID) // Handle null if no SubSpecies
+      .query(`
+        MERGE INTO ${schema}.Trees AS target
+        USING (VALUES (@TreeTag, @SpeciesID, @SubSpeciesID)) AS source (TreeTag, SpeciesID, SubSpeciesID)
+        ON target.TreeTag = source.TreeTag
+        WHEN NOT MATCHED THEN
+          INSERT (TreeTag, SpeciesID, SubSpeciesID) VALUES (@TreeTag, @SpeciesID, @SubSpeciesID);
+      `);
+  } catch (error: any) {
+    console.error('Error processing code:', error.message);
+    throw error;
+  }
+}
+
+export async function processStems(transaction: Transaction, stemTag: any, treeID: any, quadratID: any, stemX: any, stemY: any) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("environmental variable extraction for schema failed");
+
+  try {
+    const request = new sql.Request(transaction);
+
+    // Insert or update Stems
+    await request
+      .input('TreeID', sql.Int, treeID)
+      .input('QuadratID', sql.Int, quadratID)
+      .input('StemTag', sql.VarChar, stemTag)
+      .input('StemX', sql.Float, stemX)
+      .input('StemY', sql.Float, stemY)
+      .query(`
+        MERGE INTO ${schema}.Stems AS target
+        USING (VALUES (@TreeID, @QuadratID, @StemTag, @StemX, @StemY)) AS source (TreeID, QuadratID, StemTag, StemX, StemY)
+        ON target.StemTag = source.StemTag
+        WHEN NOT MATCHED THEN
+          INSERT (TreeID, QuadratID, StemTag, StemX, StemY) VALUES (@TreeID, @QuadratID, @StemTag, @StemX, @StemY);
+      `);
+  } catch (error: any) {
+    console.error('Error processing code:', error.message);
+    throw error;
+  }
+}
+export async function getPersonnelIDByName(transaction: sql.Transaction, fullName: string): Promise<number | null> {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+
+  // Split the full name into first and last names
+  const [firstName, lastName] = fullName.split(" ");
+  if (!firstName || !lastName) {
+    throw new Error("Full name must include both first and last names.");
+  }
+
+  try {
+    const request = new sql.Request(transaction);
+    const query = `
+      SELECT PersonnelID
+      FROM ${schema}.Personnel
+      WHERE FirstName = @FirstName AND LastName = @LastName
+    `;
+
+    request.input('FirstName', sql.VarChar, firstName.trim());
+    request.input('LastName', sql.VarChar, lastName.trim());
+
+    const result = await request.query(query);
+
+    if (result.recordset.length > 0) {
+      return result.recordset[0].PersonnelID;
+    } else {
+      return null; // No matching personnel found
+    }
+  } catch (err: any) {
+    console.error('Error retrieving PersonnelID:', err.message);
+    throw err;
+  }
+}
+
 
 export const sqlConfig: any = {
   user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
@@ -268,12 +307,12 @@ export async function getSqlConnection(tries: number) {
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string) => Promise<void>;
+  specialProcessing?: (conn: ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) => Promise<void>;
 };
 
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
-  "codes.txt": {
+  "fixeddata_codes.txt": {
     tableName: "Attributes",
     columnMappings: {
       "code": "Code",
@@ -281,7 +320,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "status": "Status"
     }
   },
-  "personnel.txt": {
+  "fixeddata_personnel.txt": {
     tableName: "Personnel",
     columnMappings: {
       "firstname": "FirstName",
@@ -289,7 +328,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "role": "Role"
     }
   },
-  "species.txt": {
+  "fixeddata_species.txt": {
     tableName: "",
     columnMappings: {
       "spcode": "Species.SpeciesCode",
@@ -301,7 +340,7 @@ export const fileMappings: Record<string, FileMapping> = {
     },
     specialProcessing: processSpecies
   },
-  "quadrat.txt": {
+  "fixeddata_quadrat.txt": {
     tableName: "Quadrats",
     columnMappings: {
       "quadrat": "Quadrats.QuadratName",
@@ -311,8 +350,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "dimy": "Quadrats.DimensionY"
     }
   },
-  // ...other mappings...
-  "census.txt": {
+  "fixeddata_census.txt": {
     tableName: "", // Multiple tables involved
     columnMappings: {
       "tag": "Trees.TreeTag",
@@ -327,8 +365,61 @@ export const fileMappings: Record<string, FileMapping> = {
       "date": "CoreMeasurement.MeasurementDate",
     },
     specialProcessing: processCensus
-  }
-  // ...add other file types...
+  },
+  "ctfsweb_new_plants_form": {
+    tableName: "",
+    columnMappings: {
+      "quadrat": "Quadrats.QuadratName",
+      "tag": "Trees.TreeTag",
+      "stemtag": "Stems.StemTag",
+      "spcode": "Species.SpeciesCode",
+      "dbh": "CoreMeasurements.Measurement",
+      "codes": "Attributes.Code",
+      "comments": "CoreMeasurements.Description"
+    },
+    specialProcessing: processNewPlantsForm
+  },
+  "ctfsweb_old_tree_form": {
+    tableName: "",
+    columnMappings: {
+      "quadrat": "Quadrats.QuadratName",
+      "tag": "Trees.TreeTag",
+      "stemtag": "Stems.StemTag",
+      "spcode": "Species.SpeciesCode",
+      "olddbh": "CoreMeasurements.Measurement",
+      "oldhom": "CoreMeasurements.Measurement",
+      "dbh": "CoreMeasurements.Measurement",
+      "codes": "Attributes.Code",
+      "comments": "CoreMeasurements.Description"
+    },
+    specialProcessing: processOldTreeForm
+  },
+  "ctfsweb_multiple_stems_form": {
+    tableName: "",
+    columnMappings: {
+      "quadrat": "Quadrats.QuadratName",
+      "tag": "Trees.TreeTag",
+      "stemtag": "Stems.StemTag",
+      "dbh": "CoreMeasurements.Measurements",
+      "codes": "Attributes.Code",
+      "comments": "CoreMeasurements.Description"
+    },
+    specialProcessing: processMultipleStemsForm
+  },
+  "ctfsweb_big_trees_form": {
+    tableName: "",
+    columnMappings: {
+      "quadrat": "Quadrats.QuadratName",
+      "subquadrat": "",
+      "tag": "Trees.TreeTag",
+      "multistemtag": "Stems.StemTag",
+      "species": "Species.SpeciesName",
+      "dbh": "CoreMeasurements.Measurement",
+      "hom": "CoreMeasurements.Measurement",
+      "comments": "CoreMeasurements.Measurement"
+    },
+    specialProcessing: processBigTreesForm
+  },
 };
 
 export async function runQuery(conn: sql.ConnectionPool, query: string) {

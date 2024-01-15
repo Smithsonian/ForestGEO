@@ -1,13 +1,24 @@
 import sql from "mssql";
 import {RowDataStructure} from "@/config/macros";
 import {
-  getColumnValueByColumnName,
-  getPersonnelIDByName,
-  getSubSpeciesID,
-  processCode, processStems, processTrees
+  getColumnValueByColumnName, getPersonnelIDByName,
+  getSubSpeciesID, processCode,
+  processStems,
+  processTrees
 } from "@/components/processors/processorhelpers";
 
-export default async function processCensus(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
+export default async function processBigTreesForm(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
+  /**
+   *       "quadrat": "Quadrats.QuadratName",
+   *       "subquadrat": "",
+   *       "tag": "Trees.TreeTag",
+   *       "multistemtag": "Stems.StemTag",
+   *       "species": "Species.SpeciesName",
+   *       "dbh": "CoreMeasurements.Measurement",
+   *       "hom": "CoreMeasurements.Measurement",
+   *       "comments": "CoreMeasurements.Measurement"
+   */
+
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   // need the following IDs --> CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID
@@ -19,8 +30,8 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
 
   try {
     // Foreign key checks and error handling for species, quadrat, and plot
-    const speciesID = await getColumnValueByColumnName(transaction, 'Species', 'SpeciesID', 'SpeciesCode', rowData.spcode);
-    if (!speciesID) throw new Error(`Species with code ${rowData.spcode} does not exist.`);
+    const speciesID = await getColumnValueByColumnName(transaction, 'Species', 'SpeciesID', 'SpeciesName', rowData.species);
+    if (!speciesID) throw new Error(`Species with code ${rowData.species} does not exist.`);
 
     const quadratID = await getColumnValueByColumnName(transaction, 'Quadrats', 'QuadratID', 'QuadratName', rowData.quadrat);
     if (!quadratID) throw new Error(`Quadrat with name ${rowData.quadrat} does not exist.`);
@@ -36,27 +47,14 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
     // Insert or update Trees with SpeciesID and SubSpeciesID
     await processTrees(transaction, rowData.treeTag, speciesID, subSpeciesID || null);
 
-    const treeID = await getColumnValueByColumnName(
-      transaction,
-      'Trees',
-      'TreeID',
-      'TreeTag',
-      rowData.tag
-    );
-    if (treeID === null) {
-      throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
-    }
+    const treeID = await getColumnValueByColumnName(transaction, 'Trees', 'TreeID', 'TreeTag', rowData.tag);
+    if (treeID === null) throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
 
     // Insert or update Stems
-    await processStems(transaction, rowData.stemTag, treeID, quadratID, rowData.lx, rowData.ly);
+    await processStems(transaction, rowData.multistemtag, treeID, quadratID, rowData.lx, rowData.ly);
 
-    const stemID = await getColumnValueByColumnName(
-      transaction,
-      'Stems',
-      'StemID',
-      'StemTag',
-      rowData.stemTag
-    )
+    const stemID = await getColumnValueByColumnName(transaction, 'Stems', 'StemID', 'StemTag', rowData.multistemtag);
+    if (stemID === null) throw new Error(`Stem with tag ${rowData.multistemtag} does not exist`);
 
     const personnelID = await getPersonnelIDByName(transaction, fullName);
     if (personnelID === null){
@@ -65,16 +63,9 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
 
     // Process CoreMeasurements for dbh
     // Note: The following assumes that you have a way to link these measurements to a specific Tree and Census
-    let measurementTypeID = await getColumnValueByColumnName(
-      transaction,
-      'MeasurementTypes',
-      'MeasurementTypeID',
-      'MeasurementTypeDescription',
-      "dbh"
-    );
-    if (measurementTypeID === null) {
-      throw new Error(`MeasurementType with description "dbh" does not exist.`);
-    }
+    let measurementTypeID = await getColumnValueByColumnName(transaction, 'MeasurementTypes', 'MeasurementTypeID',
+      'MeasurementTypeDescription', "dbh");
+    if (measurementTypeID === null) throw new Error(`MeasurementType with description "dbh" does not exist.`);
 
     let collectedMeasurements = [];
 

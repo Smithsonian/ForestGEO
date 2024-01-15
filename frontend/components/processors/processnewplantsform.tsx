@@ -1,13 +1,24 @@
 import sql from "mssql";
-import {RowDataStructure} from "@/config/macros";
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
-  getSubSpeciesID,
-  processCode, processStems, processTrees
+  getSubSpeciesID, processCode, processStems, processTrees
 } from "@/components/processors/processorhelpers";
+import {RowDataStructure} from "@/config/macros";
 
-export default async function processCensus(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
+export default async function processNewPlantsForm(conn: sql.ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
+  /**
+   * for all stems on new recruits
+   *
+   * Mapping:
+   * "quadrat": "Quadrats.QuadratName",
+   * "tag": "Trees.TreeTag",
+   * "stemtag": "Stems.StemTag",
+   * "spcode": "Species.SpeciesCode",
+   * "dbh": "CoreMeasurements.Measurement",
+   * "codes": "Attributes.Code",
+   * "comments": "CoreMeasurements.Description"
+   */
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("environmental variable extraction for schema failed");
   // need the following IDs --> CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID
@@ -28,13 +39,8 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
     const plotID = await getColumnValueByColumnName(transaction, 'Plots', 'PlotID', 'PlotName', plotKey);
     if (!plotID) throw new Error(`Plot with name ${plotKey} does not exist.`);
 
-    let subSpeciesID = null;
-    if (speciesID) {
-      subSpeciesID = await getSubSpeciesID(transaction, speciesID);
-    }
-
     // Insert or update Trees with SpeciesID and SubSpeciesID
-    await processTrees(transaction, rowData.treeTag, speciesID, subSpeciesID || null);
+    await processTrees(transaction, rowData.treeTag, speciesID, null);
 
     const treeID = await getColumnValueByColumnName(
       transaction,
@@ -48,7 +54,7 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
     }
 
     // Insert or update Stems
-    await processStems(transaction, rowData.stemTag, treeID, quadratID, rowData.lx, rowData.ly);
+    await processStems(transaction, rowData.stemTag, treeID, quadratID, null, null);
 
     const stemID = await getColumnValueByColumnName(
       transaction,
@@ -57,6 +63,9 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
       'StemTag',
       rowData.stemTag
     )
+    if (stemID === null) {
+      throw new Error(`Stem with stemtag ${rowData.stemTag} could be found`);
+    }
 
     const personnelID = await getPersonnelIDByName(transaction, fullName);
     if (personnelID === null){
@@ -84,42 +93,6 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
       OUTPUT INSERTED.CoreMeasurementID
       VALUES (@CensusID, @PlotID, @QuadratID, @TreeID, @StemID, @PersonnelID, @MeasurementTypeID, @MeasurementDate, @Measurement, @IsRemeasurement, @IsCurrent, @UserDefinedFields, @Description, @MasterMeasurementID);
     `;
-    const dbhResult = await request
-      .input('CensusID', sql.Int, censusID)
-      .input('PlotID', sql.Int, plotID)
-      .input('QuadratID', sql.Int, quadratID)
-      .input('TreeID', sql.Int, treeID)
-      .input('StemID', sql.Int, stemID)
-      .input('PersonnelID', sql.Int, personnelID)
-      .input('MeasurementTypeID', sql.Int, measurementTypeID) // DBH Measurement Type
-      .input('MeasurementDate', sql.Date, rowData.date)
-      .input('Measurement', sql.VarChar, rowData.dbh.toString())
-      .input('IsRemeasurement', sql.Bit, null)
-      .input('IsCurrent', sql.Bit, 1)
-      .input('UserDefinedFields', sql.VarChar, null)
-      .input('Description', sql.VarChar, null)
-      .input('MasterMeasurementID', sql.Int, null)
-      .query(measurementInsertQuery);
-    if (dbhResult.recordset.length <= 0) {
-      throw new Error(`No matching CoreMeasurement found for DBH.`);
-    }
-    const dbhCMID = dbhResult.recordset[0].CoreMeasurementID;
-    if (dbhCMID === null) {
-      throw new Error(`the DBH insertion's CoreMeasurementID is null.`);
-    }
-    collectedMeasurements.push(dbhCMID);
-
-    measurementTypeID = await getColumnValueByColumnName(
-      transaction,
-      'MeasurementTypes',
-      'MeasurementTypeID',
-      'MeasurementTypeDescription',
-      "hom"
-    );
-    if (measurementTypeID === null) {
-      throw new Error(`MeasurementType with description "hom" does not exist.`);
-    }
-
     const result = await request
       .input('CensusID', sql.Int, censusID)
       .input('PlotID', sql.Int, plotID)
@@ -133,17 +106,17 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
       .input('IsRemeasurement', sql.Bit, null)
       .input('IsCurrent', sql.Bit, 1)
       .input('UserDefinedFields', sql.VarChar, null)
-      .input('Description', sql.VarChar, null)
-      .input('MasterMeasurementID', sql.Int, dbhCMID)
+      .input('Description', sql.VarChar, rowData.comments)
+      .input('MasterMeasurementID', sql.Int, null)
       .query(measurementInsertQuery);
     if (result.recordset.length <= 0) {
       throw new Error(`No matching CoreMeasurement found for DBH.`);
     }
-    const homCMID = result.recordset[0].CoreMeasurementID;
-    if (homCMID === null) {
-      throw new Error(`the HOM insertion's CoreMeasurementID is null.`);
+    const dbhCMID = result.recordset[0].CoreMeasurementID;
+    if (dbhCMID === null) {
+      throw new Error(`the DBH insertion's CoreMeasurementID is null.`);
     }
-    collectedMeasurements.push(homCMID);
+    collectedMeasurements.push(dbhCMID);
 
     // Process Attributes and CMAttributes for codes
     const codesArray = rowData.codes.split(';');
@@ -152,7 +125,6 @@ export default async function processCensus(conn: sql.ConnectionPool, rowData: R
       codesArray,
       collectedMeasurements,
     );
-
     // Commit transaction
     await transaction.commit();
   } catch (error) {
