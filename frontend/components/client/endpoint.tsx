@@ -1,35 +1,13 @@
 "use client";
 import * as React from "react";
-import {useEffect, useState} from "react";
 import {useSession} from "next-auth/react";
 import {redirect, usePathname} from "next/navigation";
 import {subtitle, title} from "@/config/primitives";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
-import {
-  Box,
-  Button,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  LinearProgress,
-  Modal,
-  ModalDialog,
-  Stack,
-  Typography
-} from "@mui/joy";
+import {Box} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import {siteConfig} from "@/config/macros";
-import {
-  useAttributeLoadDispatch,
-  useCensusLoadDispatch,
-  usePersonnelLoadDispatch,
-  usePlotsLoadDispatch,
-  useQuadratsLoadDispatch,
-  useSpeciesLoadDispatch
-} from "@/app/contexts/fixeddatacontext";
-import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/generalcontext";
-import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 
 export default function Endpoint({children,}: { children: React.ReactNode }) {
   useSession({
