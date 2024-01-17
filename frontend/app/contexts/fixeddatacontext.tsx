@@ -163,6 +163,10 @@ export function useSpeciesLoadDispatch() {
   return useContext(SpeciesLoadDispatchContext);
 }
 
+export function useSubSpeciesLoadDispatch() {
+  return useContext(SubSpeciesLoadDispatchContext);
+}
+
 export function usePlotsLoadContext() {
   return useContext(PlotsLoadContext);
 }
