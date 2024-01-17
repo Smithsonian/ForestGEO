@@ -1,34 +1,10 @@
 "use client";
 import React, {useEffect, useState} from "react";
 import {useSession} from "next-auth/react";
-import {redirect} from "next/navigation";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
 import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
-import {
-  useAttributeLoadDispatch,
-  useCensusLoadDispatch,
-  usePersonnelLoadDispatch,
-  usePlotsLoadDispatch,
-  useQuadratsLoadDispatch,
-  useSpeciesLoadDispatch,
-  useSubSpeciesLoadDispatch
-} from "@/app/contexts/fixeddatacontext";
-import {
-  Button,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  LinearProgress,
-  Modal,
-  ModalDialog,
-  Stack,
-  Typography
-} from "@mui/joy";
-import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
-import Divider from "@mui/joy/Divider";
-import {useFirstLoadContext, useFirstLoadDispatch} from "@/app/contexts/generalcontext";
 import EntryModal from "@/components/client/entrymodal";
 
 const slides = [
@@ -61,11 +37,10 @@ export default function Page() {
   if (status == "authenticated") {
     return (
       <>
-        <EntryModal />
+        <EntryModal/>
       </>
     );
-  }
-  else
+  } else
     return (
       <>
         <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
