@@ -1,14 +1,6 @@
-
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {
-  Census,
-  ErrorRowsData,
-  FileErrors,
-  ReviewStates,
-  RowDataStructure,
-  TableHeadersByFormType
-} from "@/config/macros";
+import {Census, ErrorRowsData, FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse, ParseResult} from "papaparse";
@@ -74,11 +66,13 @@ export function UploadAndReviewProcess() {
   function areHeadersValid(actualHeaders: string[] | undefined): boolean {
     if (!actualHeaders) return false;
     // Check if every expected header is present in actual headers
-    return expectedHeaders.every((expectedHeader) => actualHeaders.includes(expectedHeader.toLowerCase()));
+    // check if every actual header is in expected
+    return actualHeaders.every((actualHeader) => expectedHeaders.includes(actualHeader.trim().toLowerCase()));
   }
 
   async function handleInitialSubmit() {
     setParsing(true);
+    console.log("in initial submit");
     acceptedFiles.forEach((file: FileWithPath) => {
       parse(file, {
         header: true,
@@ -87,10 +81,16 @@ export function UploadAndReviewProcess() {
           try {
             // Check if headers match
             setReceivedHeaders(results.meta.fields!); // This contains the headers from the file
-            if (!areHeadersValid(receivedHeaders)) throw new Error("Invalid file headers.");
+            console.log("expected: " + expectedHeaders.toString());
+            console.log("received: " + results.meta.fields!.toString());
+            if (!areHeadersValid(receivedHeaders)) {
+              console.log("invalid file headers");
+              throw new Error("Invalid file headers.");
+            }
 
             // Process file data
             tempData.push({fileName: file.name, data: results.data});
+            console.log(tempData.toString());
             setParsedData(tempData);
             setReviewState(ReviewStates.REVIEW);
           } catch (e) {
@@ -115,6 +115,7 @@ export function UploadAndReviewProcess() {
     try {
       setConfirmationDialogOpen(false);
       if (acceptedFiles.length === 0) {
+        console.log("No files selected for upload.");
         throw new Error("No files selected for upload.");
       }
       const fileToFormData = new FormData();
@@ -126,6 +127,7 @@ export function UploadAndReviewProcess() {
         body: fileToFormData,
       });
       if (!response.ok) {
+        console.log("Upload failed with status: " + response.status);
         throw new Error("Upload failed with status: " + response.status);
       }
       const data = await response.json();
@@ -296,7 +298,7 @@ export function UploadAndReviewProcess() {
       <Grid xs={5}>
         <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
           <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
-            <Typography>However, you selected form {uploadForm}</Typography>
+            <Typography>However, you selected form {uploadForm}</Typography> <br/>
             <Typography>Which has headers: {expectedHeaders.join(', ')}</Typography>
           </Box>
           <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleMismatchToStart}>

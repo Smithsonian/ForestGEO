@@ -1,5 +1,5 @@
 "use client";
-import React, {createContext, Dispatch, useContext, useReducer} from "react";
+import React, {createContext, Dispatch, useContext, useEffect, useReducer, useState} from "react";
 import {
   Census,
   CensusAction,
@@ -9,7 +9,13 @@ import {
   Quadrat,
   QuadratsAction
 } from "@/config/macros";
-import {useCensusListContext, usePlotListContext, useQuadratListContext} from "@/app/contexts/generalcontext";
+import {
+  useCensusListContext, useCensusListDispatch,
+  usePlotListContext,
+  usePlotListDispatch,
+  useQuadratListContext, useQuadratListDispatch
+} from "@/app/contexts/generalcontext";
+import {getData} from "@/config/db";
 
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<Census | null>(null);
@@ -19,22 +25,41 @@ export const CensusDispatchContext = createContext<Dispatch<{ census: Census | n
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: Quadrat | null }> | null>(null);
 
 export default function PlotProvider({children}: { children: React.ReactNode }) {
-  const plotListContext = (usePlotListContext() ?? JSON.parse(localStorage.getItem('plotList') ?? '[]'));
-  const censusListContext = useCensusListContext() ?? JSON.parse(localStorage.getItem('censusList') ?? '[]');
-  const quadratListContext = useQuadratListContext() ?? JSON.parse(localStorage.getItem('quadratList') ?? '[]');
+  const plotListContext = usePlotListContext();
+  const plotListDispatch = usePlotListDispatch();
+  const censusListContext = useCensusListContext();
+  const censusListDispatch = useCensusListDispatch();
+  const quadratListContext = useQuadratListContext();
+  const quadratListDispatch = useQuadratListDispatch();
+
   const [plot, plotDispatch] = useReducer(
-    (state: Plot | null, action: PlotAction) => plotsReducer(state, action, plotListContext),
+    (state: Plot | null, action: PlotAction) => plotsReducer(state, action, plotListContext!),
     null
   );
   const [census, censusDispatch] = useReducer(
-    (state: Census | null, action: CensusAction) => censusReducer(state, action, censusListContext),
+    (state: Census | null, action: CensusAction) => censusReducer(state, action, censusListContext!),
+    null
+  );
+  const [quadrat, quadratDispatch] = useReducer(
+    (state: Quadrat | null, action: QuadratsAction) => quadratReducer(state, action, quadratListContext!),
     null
   );
 
-  const [quadrat, quadratDispatch] = useReducer(
-    (state: Quadrat | null, action: QuadratsAction) => quadratReducer(state, action, quadratListContext),
-    null
-  );
+  useEffect(() => {
+    const fetchData = async () => {
+      const plotListData = await getData('plotList');
+      if (plotListDispatch) plotListDispatch({plotList: plotListData});
+
+      const censusListData = await getData('censusList');
+      if (censusListDispatch) censusDispatch({census: censusListData});
+
+      const quadratListData = await getData('quadratList');
+      if (quadratListDispatch) quadratListDispatch({quadratList: quadratListData});
+    };
+
+    if (!plotListContext || !censusListContext || !quadratListContext) fetchData().catch(console.error);
+  }, []);
+
 
   return (
     <PlotsContext.Provider value={plot}>

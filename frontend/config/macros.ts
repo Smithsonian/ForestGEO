@@ -10,7 +10,8 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
-import React from "react";
+import React, {Dispatch} from "react";
+import {setData} from "@/config/db";
 
 // INTERFACES
 export interface Plot {
@@ -371,6 +372,52 @@ export const siteConfigNav: SiteConfigProps[] = [
   },
 ]
 
+export type Action<T> = {
+  type: string;
+  payload: T;
+};
+
+// Define a type for the enhanced dispatch function
+export type EnhancedDispatch<T> = (payload: { [key: string]: T | null }) => Promise<void>;
+
+export function createEnhancedDispatch<T>(
+  dispatch: Dispatch<LoadAction<T>>,
+  actionType: string
+): EnhancedDispatch<T> {
+  return async (payload: { [key: string]: T | null }) => {
+    // Save to IndexedDB only if payload is not null
+    if (payload[actionType] !== null) {
+      await setData(actionType, payload[actionType]);
+      console.log(`setData call on key ${actionType} with value ${payload[actionType]} completed.`);
+    }
+
+    // Dispatch the action
+    dispatch({ type: actionType, payload });
+    console.log(`Dispatch of type ${actionType} placed`);
+  };
+}
+
+export type LoadAction<T> = {
+  type: string;
+  payload: { [key: string]: T | null };
+};
+
+// Generic reducer function
+export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T | null {
+  switch (action.type) {
+    case 'coreMeasurementLoad':
+    case 'attributeLoad':
+    case 'censusLoad':
+    case 'personnelLoad':
+    case 'quadratsLoad':
+    case 'speciesLoad':
+    case 'subSpeciesLoad':
+    case 'plotsLoad':
+      return action.payload[action.type] ?? state;
+    default:
+      return state;
+  }
+}
 
 /**
  * SQL function storage
@@ -379,10 +426,8 @@ export const siteConfigNav: SiteConfigProps[] = [
 export async function getContainerClient(plot: string, census: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   console.log('Connection String:', storageAccountConnectionString);
-  const serverName = process.env.AZURE_SQL_SERVER;
-  console.log('sql server name: ' + serverName);
 
-  if (!storageAccountConnectionString || !serverName) {
+  if (!storageAccountConnectionString ) {
     console.error("process envs failed");
     throw new Error("process envs failed");
   }
@@ -390,7 +435,7 @@ export async function getContainerClient(plot: string, census: string) {
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
   if (!blobServiceClient) throw new Error("blob service client creation failed");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(serverName + '_' + plot + '_' + census);
+  let containerClient = blobServiceClient.getContainerClient(plot + '_' + census);
   if (!(await containerClient.exists())) await containerClient.create();
   else return containerClient;
 }

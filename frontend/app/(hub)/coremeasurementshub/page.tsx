@@ -9,54 +9,50 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbarContainer
+  GridToolbarContainer, GridValidRowModel
 } from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
-import {Alert, AlertProps, Button, Dialog, Snackbar} from "@mui/material";
+import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import React, {useCallback, useEffect, useState} from "react";
+import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {ErrorMessages, FileErrors} from "@/config/macros";
-import {useCoreMeasurementLoadContext} from "@/app/contexts/fixeddatacontext";
-import {CoreMeasurementsGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {ErrorMessages, Plot} from "@/config/macros";
+import {useCoreMeasurementLoadContext, useCoreMeasurementLoadDispatch} from "@/app/contexts/fixeddatacontext";
+import {CoreMeasurementsGridColumns, CoreMeasurementsRDS, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
-import {DialogActions, DialogContent, DialogTitle} from "@mui/joy";
-import {UploadAndReviewProcess} from "@/components/fileupload/uploadreviewcycle";
-import {useSession} from "next-auth/react";
-import {FileWithPath} from "react-dropzone";
 
 interface EditToolbarProps {
+  rows: GridRowsProp;
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
   setRowModesModel: (
     newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
   ) => void;
   setRefresh: (newState: boolean) => void;
+  currentPlot: Plot;
+  coreMeasurementLoadDispatch:  React.Dispatch<{coreMeasurementLoad: CoreMeasurementsRDS[] | null}> | null;
 }
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
-  const {setRows, setRowModesModel, setRefresh} = props;
-  const [dialogOpen, setDialogOpen] = useState(false);
-
-  const handleDialogOpen = () => {
-    setDialogOpen(true);
-  };
-
-  const handleCloseDialog = () => {
-    setDialogOpen(false);
-  };
+  const {rows, setRows, setRowModesModel, setRefresh, currentPlot, coreMeasurementLoadDispatch} = props;
 
   const handleClick = async () => {
     const id = randomId();
+
+    const highestCoreMeasurementID = Math.max(
+      ...rows.map((row) => row.coreMeasurementID),
+      0
+    );
+
     setRows((oldRows) => [...oldRows, {
       id,
-      coreMeasurementID: 0,
+      coreMeasurementID: highestCoreMeasurementID + 1,
       censusID: 0,
-      plotID: 0,
+      plotID: currentPlot.id,
       quadratID: 0,
       treeID: 0,
       stemID: 0,
@@ -67,7 +63,8 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
       isRemeasurement: false,
       isCurrent: false,
       userDefinedFields: '',
-      isNew: true
+      masterMeasurementID: 0,
+      isNew: true,
     }]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
@@ -81,6 +78,9 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
       method: 'GET'
     });
     setRows(await response.json());
+    if (coreMeasurementLoadDispatch) {
+      coreMeasurementLoadDispatch({coreMeasurementLoad: rows as CoreMeasurementsRDS[]})
+    }
     setRefresh(false);
   }
 
@@ -89,42 +89,21 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
       <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
         Add CoreMeasurement
       </Button>
-      <Button color="primary" startIcon={<AddIcon/>} onClick={handleDialogOpen}>
-        Upload CoreMeasurement File
-      </Button>
       <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
-      <Dialog open={dialogOpen} onClose={handleCloseDialog}>
-        <DialogTitle>File Upload</DialogTitle>
-        <DialogContent>
-          <UploadAndReviewProcess/>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          {/*<Button onClick={handleUpload} color="primary">*/}
-          {/*  Upload*/}
-          {/*</Button>*/}
-        </DialogActions>
-      </Dialog>
     </GridToolbarContainer>
   );
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  return newRow.coreMeasurementID !== oldRow.coreMeasurementID ||
-    newRow.censusID !== oldRow.censusID ||
-    newRow.plotID !== oldRow.plotID ||
-    newRow.quadratID !== oldRow.quadratID ||
-    newRow.treeID !== oldRow.treeID ||
-    newRow.stemID !== oldRow.stemID ||
-    newRow.personnelID !== oldRow.personnelID ||
-    newRow.measurementTypeID !== oldRow.measurementTypeID ||
-    newRow.measurementDate !== oldRow.measurementDate ||
-    newRow.measurement !== oldRow.measurement ||
-    newRow.isRemeasurement !== oldRow.isRemeasurement ||
-    newRow.isCurrent !== oldRow.isCurrent ||
-    newRow.userDefinedFields !== oldRow.userDefinedFields;
+  const fields: Array<keyof CoreMeasurementsRDS> = [
+    'censusID', 'plotID', 'quadratID', 'treeID', 'stemID', 'personnelID',
+    'measurementTypeID', 'measurementDate', 'measurement', 'isRemeasurement',
+    'isCurrent', 'userDefinedFields', 'masterMeasurementID'
+  ];
+
+  return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
 export default function Page() {
@@ -144,16 +123,18 @@ export default function Page() {
       isRemeasurement: false,
       isCurrent: false,
       userDefinedFields: '',
+      masterMeasurementID: 0,
     },
   ]
   const [rows, setRows] = React.useState(initialRows);
-  const coreMeasurementLoad = useCoreMeasurementLoadContext();
+  const coreMeasurementLoadContext = useCoreMeasurementLoadContext();
+  const coreMeasurementLoadDispatch = useCoreMeasurementLoadDispatch();
   let currentPlot = usePlotContext();
   useEffect(() => {
-    if (coreMeasurementLoad) {
-      setRows(coreMeasurementLoad);
+    if (coreMeasurementLoadContext) {
+      setRows(coreMeasurementLoadContext);
     }
-  }, [coreMeasurementLoad, setRows]);
+  }, [coreMeasurementLoadContext, setRows]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
@@ -166,6 +147,9 @@ export default function Page() {
       method: 'GET'
     });
     setRows(await response.json());
+    if (coreMeasurementLoadDispatch) {
+      coreMeasurementLoadDispatch({coreMeasurementLoad: rows as CoreMeasurementsRDS[]});
+    }
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -188,7 +172,9 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/coremeasurements?coreMeasurementID=${rows.find((row) => row.id == id)!.coreMeasurementID}`, {method: 'DELETE'});
+    const response = await fetch(`/api/coremeasurements?coreMeasurementID=${rows.find((row) => row.id == id)!.coreMeasurementID}`, {
+      method: 'DELETE'
+    });
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -217,49 +203,40 @@ export default function Page() {
           reject(new Error("Primary key CoreMeasurementID cannot be empty!"));
         } else if (oldRow.coreMeasurementID == '') {
           // inserting a row
-          const response = await fetch(`/api/coremeasurements?
-          coreMeasurementID=${newRow.coreMeasurementID}
-          &censusID=${newRow.censusID}
-          &plotID=${newRow.plotID}
-          &quadratID=${newRow.quadratID}
-          &treeID=${newRow.treeID}
-          &stemID=${newRow.stemID}
-          &personnelID=${newRow.personnelID}
-          &measurementTypeID=${newRow.measurementTypeID}
-          &measurementDate=${newRow.measurementDate}
-          &measurement=${newRow.measurement}
-          &isRemeasurement=${newRow.isRemeasurement}
-          &isCurrent=${newRow.isCurrent}
-          &userDefinedFields=${newRow.userDefinedFields}`, {
-            method: 'POST'
+          const response = await fetch('/api/coremeasurements', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(newRow),
           });
+
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
-          setSnackbar({children: `New row added!`, severity: 'success'});
-          resolve(newRow);
+          else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+          else if (!response.ok) reject(new Error(responseJSON.message));
+          else {
+            setSnackbar({children: `New row added!`, severity: 'success'});
+            resolve(newRow);
+          }
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/coremeasurements?
-            coreMeasurementID=${newRow.coreMeasurementID}
-            &censusID=${newRow.censusID}
-            &plotID=${newRow.plotID}
-            &quadratID=${newRow.quadratID}
-            &treeID=${newRow.treeID}
-            &stemID=${newRow.stemID}
-            &personnelID=${newRow.personnelID}
-            &measurementTypeID=${newRow.measurementTypeID}
-            &measurementDate=${newRow.measurementDate}
-            &measurement=${newRow.measurement}
-            &isRemeasurement=${newRow.isRemeasurement}
-            &isCurrent=${newRow.isCurrent}
-            &userDefinedFields=${newRow.userDefinedFields}`, {
-              method: 'PATCH'
+            const response = await fetch(`/api/coremeasurements`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(newRow),
             })
             const responseJSON = await response.json();
-            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Row edits saved!`, severity: 'success'});
-            resolve(newRow);
+            if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+            else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            else if (!response.ok) reject(new Error(responseJSON.message));
+            else {
+              setSnackbar({children: `New row added!`, severity: 'success'});
+              resolve(newRow);
+            }
           }
         }
         await refreshData();
@@ -353,12 +330,12 @@ export default function Page() {
                             toolbar: EditToolbar,
                           }}
                           slotProps={{
-                            toolbar: {setRows, setRowModesModel, setRefresh},
+                            toolbar: {rows, setRows, setRowModesModel, setRefresh, currentPlot, coreMeasurementLoadDispatch},
                           }}
                           initialState={{
                             filter: {
                               filterModel: {
-                                items: [{field: 'plotID', operator: 'equals', value: `${currentPlot.id.toString()}`}],
+                                items: [{field: 'plotID', operator: 'equals', value: `${currentPlot.id}`}],
                               },
                             },
                           }}

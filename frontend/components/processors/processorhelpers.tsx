@@ -1,50 +1,64 @@
-import sql, {ConnectionPool, Transaction} from "mssql";
+import mysql, {PoolConnection, RowDataPacket} from 'mysql2/promise';
 import {RowDataStructure} from "@/config/macros";
+
 import {processSpecies} from "@/components/processors/processspecies";
 import processCensus from "@/components/processors/processcensus";
 import processNewPlantsForm from "@/components/processors/processnewplantsform";
 import processOldTreeForm from "@/components/processors/processoldtreeform";
 import processBigTreesForm from "@/components/processors/processbigtreesform";
 import processMultipleStemsForm from "@/components/processors/processmultiplestemsform";
+import * as fs from "fs";
 
-export async function insertOrUpdate(conn: sql.ConnectionPool, fileType: string, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
+
+export async function insertOrUpdate(
+  connection: PoolConnection, // Change the parameter type to PoolConnection
+  fileType: string,
+  rowData: RowDataStructure,
+  plotKey: string,
+  censusID: string,
+  fullName: string
+) {
   const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
   const mapping = fileMappings[fileType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${fileType}`);
   }
 
   if (mapping.specialProcessing) {
-    await mapping.specialProcessing(conn, rowData, plotKey, censusID, fullName);
+    try {
+      await mapping.specialProcessing(connection, rowData, plotKey, censusID, fullName);
+    } catch (error) {
+      throw error;
+    }
     return;
   }
 
-  const request = new sql.Request(conn);
   const columns = Object.keys(mapping.columnMappings);
   const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
-  const values = columns.map(fileColumn => `@${fileColumn}`);
+  const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
+  const values = columns.map(fileColumn => rowData[fileColumn]);
 
   let query = `
-    MERGE INTO ${schema}.${mapping.tableName} AS target
-    USING (VALUES (${values.join(', ')})) AS source (${tableColumns})
-    ON target.UniqueIdentifierColumn = source.UniqueIdentifierColumn
-    WHEN MATCHED THEN
-      UPDATE SET ${tableColumns.split(', ').map(column => `${column} = source.${column}`).join(', ')}
-    WHEN NOT MATCHED THEN
-      INSERT (${tableColumns})
-      VALUES (${values.join(', ')});
+    INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
+    VALUES (${placeholders})
+    ON DUPLICATE KEY UPDATE 
+    ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
   `;
 
-  columns.forEach(column => {
-    request.input(column, sql.VarChar, rowData[column]); // Adjust data types based on your schema
-  });
-
-  await request.query(query);
+  try {
+    // Execute the query using the provided connection
+    await connection.query(query, values);
+  } catch (error) {
+    // Rollback the transaction in case of an error
+    await connection.rollback();
+    throw error; // Re-throw the error after rollback
+  }
 }
 
+
 export async function getColumnValueByColumnName<T>(
-  transaction: sql.Transaction,
+  connection: PoolConnection,
   tableName: string,
   columnNameToExtract: string,
   columnNameToSearch: string,
@@ -54,77 +68,47 @@ export async function getColumnValueByColumnName<T>(
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
   try {
-    const request = new sql.Request(transaction);
     const query = `
       SELECT ${columnNameToExtract}
       FROM ${schema}.${tableName}
-      WHERE ${columnNameToSearch} = @columnValue
+      WHERE ${columnNameToSearch} = ?
     `;
 
-    request.input('columnValue', columnValueToSearch);
-    const result = await request.query(query);
+    const [rows] = await connection.query<RowDataPacket[]>(query, [columnValueToSearch]);
+    const result = rows; // Type assertion
 
-    if (result.recordset.length > 0) {
-      return result.recordset[0][columnNameToExtract];
+    if (result.length > 0) {
+      return result[0][columnNameToExtract] as T;
     } else {
       return null;
     }
-  } catch (err: any) {
-    console.error(`Error retrieving ${columnNameToExtract} from ${tableName}:`, err.message);
-    throw err;
-  }
-}
-
-export async function getMostRecentRowID(
-  transaction: sql.Transaction, // Pass the transaction explicitly
-  tableName: string,
-  identityColumn: string
-): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  try {
-    const request = new sql.Request(transaction); // Use the provided transaction
-    const query = `
-      SELECT TOP 1 ${identityColumn}
-      FROM ${schema}.${tableName}
-      ORDER BY ${identityColumn} DESC
-    `;
-
-    const result = await request.query(query);
-
-    if (result.recordset.length > 0) {
-      // Return the ID of the most recent row
-      return result.recordset[0][identityColumn];
-    } else {
-      // Return null if the table is empty
-      return null;
-    }
-  } catch (err: any) {
-    console.error(`Error retrieving most recent ${identityColumn}:`, err.message);
-    throw err;
+  } catch (error: any) {
+    console.error(`Error retrieving ${columnNameToExtract} from ${tableName}:`, error.message);
+    throw error;
   }
 }
 
 export async function getSubSpeciesID(
-  transaction: sql.Transaction,
+  connection: PoolConnection,
   speciesID: number
 ): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
+  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+
   try {
-    const request = new sql.Request(transaction);
+    // MySQL query with placeholder for speciesID
     const query = `
       SELECT SubSpeciesID
       FROM ${schema}.SubSpecies
-      WHERE SpeciesID = @speciesID
+      WHERE SpeciesID = ?
     `;
 
-    const result = await request
-      .input('speciesID', speciesID)
-      .query(query);
+    // Execute the query with speciesID as the placeholder value
+    const [rows] = await connection.query<RowDataPacket[]>(query, [speciesID]);
 
-    if (result.recordset.length > 0) {
-      return result.recordset[0].SubSpeciesID;
+    // Check if any rows are returned and return the SubSpeciesID
+    if (rows.length > 0) {
+      return rows[0].SubSpeciesID as number;
     } else {
       return null;
     }
@@ -135,117 +119,152 @@ export async function getSubSpeciesID(
 }
 
 export async function processCode(
-  transaction: sql.Transaction,
+  connection: PoolConnection,
   codesArray: string[],
-  collectedMeasurements: any[],
+  collectedMeasurements: any[] // Assuming these are coreMeasurementIDs
 ) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  try {
-    const request = new sql.Request(transaction);
+  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
+  try {
+    // Prepare the query to check if the attribute exists
     const attributeExistsQuery = `
       SELECT Code
       FROM ${schema}.Attributes
-      WHERE Code = @Code
+      WHERE Code = ?
     `;
 
-    for (const measurementID of collectedMeasurements) {
-      const coreMeasurementExistsQuery = `
+    // Prepare the query to check if the core measurement exists
+    const coreMeasurementExistsQuery = `
       SELECT CoreMeasurementID
       FROM ${schema}.CoreMeasurements
-      WHERE CoreMeasurementID = @CoreMeasurementID
+      WHERE CoreMeasurementID = ?
     `;
-      const coreMeasurementResult = await request
-        .input('CoreMeasurementID', sql.Int, measurementID)
-        .query(coreMeasurementExistsQuery);
 
-      if (coreMeasurementResult.recordset.length === 0) {
-        throw new Error("The CoreMeasurementID you are trying to use does not exist in SQL");
-      }
-    }
-
-    // Insert the code into the CMAttributes table, linking it to the CoreMeasurement
+    // Prepare the query to insert code into CMAttributes
     const insertCMAttributeQuery = `
       INSERT INTO ${schema}.CMAttributes (CoreMeasurementID, Code)
-      VALUES ($CoreMeasurementID, @Code);
+      VALUES (?, ?);
     `;
-    // Check if the code exists in the Attributes table
-    for (const code of codesArray) {
-      const attributeResult = await request
-        .input('Code', sql.VarChar, code)
-        .query(attributeExistsQuery);
 
-      if (attributeResult.recordset.length === 0) {
-        throw new Error("The attribute you are trying to set does not exist in SQL")
+    // Start a transaction
+    await connection.beginTransaction();
+
+    // Iterate over each coreMeasurementID
+    for (const measurementID of collectedMeasurements) {
+      const [coreMeasurementResult] = await connection.query<RowDataPacket[]>(coreMeasurementExistsQuery, [measurementID]);
+      if (coreMeasurementResult.length === 0) {
+        throw new Error(`The CoreMeasurementID '${measurementID}' does not exist in SQL`);
       }
 
-      for (const measurementID of collectedMeasurements) {
-        await request
-          .input('CoreMeasurementID', sql.Int, measurementID)
-          .input('Code', sql.VarChar, code)
-          .query(insertCMAttributeQuery);
+      // For each coreMeasurementID, iterate over the codesArray
+      for (const code of codesArray) {
+        const [attributeResult] = await connection.query<RowDataPacket[]>(attributeExistsQuery, [code]);
+        if (attributeResult.length === 0) {
+          throw new Error(`The attribute code '${code}' does not exist in SQL`);
+        }
+
+        // Insert each combination of coreMeasurementID and code into CMAttributes
+        await connection.query(insertCMAttributeQuery, [measurementID, code]);
       }
     }
+
+    // Commit the transaction
+    await connection.commit();
   } catch (error: any) {
     console.error('Error processing code:', error.message);
+    // Rollback the transaction in case of an error
+    await connection.rollback();
     throw error;
+  } finally {
+    // Release the connection back to the pool
+    connection.release();
   }
 }
 
-export async function processTrees(transaction: Transaction, treeTag: any, speciesID: any, subSpeciesID: any | null) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
+export async function processTrees(
+  connection: PoolConnection,
+  treeTag: any,
+  speciesID: any,
+  subSpeciesID: any | null
+) {
+  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
   try {
-    const request = new sql.Request(transaction);
+    // Prepare the query
+    const query = `
+      INSERT INTO ${schema}.Trees (TreeTag, SpeciesID, SubSpeciesID)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE SpeciesID = VALUES(SpeciesID), SubSpeciesID = VALUES(SubSpeciesID);
+    `;
 
-    // Insert or update Trees with SpeciesID and SubSpeciesID
-    await request
-      .input('TreeTag', sql.VarChar, treeTag)
-      .input('SpeciesID', sql.Int, speciesID)
-      .input('SubSpeciesID', sql.Int, subSpeciesID) // Handle null if no SubSpecies
-      .query(`
-        MERGE INTO ${schema}.Trees AS target
-        USING (VALUES (@TreeTag, @SpeciesID, @SubSpeciesID)) AS source (TreeTag, SpeciesID, SubSpeciesID)
-        ON target.TreeTag = source.TreeTag
-        WHEN NOT MATCHED THEN
-          INSERT (TreeTag, SpeciesID, SubSpeciesID) VALUES (@TreeTag, @SpeciesID, @SubSpeciesID);
-      `);
+    // Start a transaction
+    await connection.beginTransaction();
+
+    // Execute the query
+    await connection.query(query, [treeTag, speciesID, subSpeciesID]);
+
+    // Commit the transaction
+    await connection.commit();
   } catch (error: any) {
-    console.error('Error processing code:', error.message);
+    console.error('Error processing trees:', error.message);
+    // Rollback the transaction in case of an error
+    await connection.rollback();
     throw error;
+  } finally {
+    // Release the connection back to the pool
+    connection.release();
   }
 }
 
-export async function processStems(transaction: Transaction, stemTag: any, treeID: any, quadratID: any, stemX: any, stemY: any) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
+export async function processStems(
+  connection: PoolConnection,
+  stemTag: any,
+  treeID: any,
+  quadratID: any,
+  stemX: any,
+  stemY: any
+) {
+  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
   try {
-    const request = new sql.Request(transaction);
+    // Prepare the query
+    const query = `
+      INSERT INTO ${schema}.Stems (TreeID, QuadratID, StemTag, StemX, StemY)
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        TreeID = VALUES(TreeID),
+        QuadratID = VALUES(QuadratID),
+        StemX = VALUES(StemX),
+        StemY = VALUES(StemY);
+    `;
 
-    // Insert or update Stems
-    await request
-      .input('TreeID', sql.Int, treeID)
-      .input('QuadratID', sql.Int, quadratID)
-      .input('StemTag', sql.VarChar, stemTag)
-      .input('StemX', sql.Float, stemX)
-      .input('StemY', sql.Float, stemY)
-      .query(`
-        MERGE INTO ${schema}.Stems AS target
-        USING (VALUES (@TreeID, @QuadratID, @StemTag, @StemX, @StemY)) AS source (TreeID, QuadratID, StemTag, StemX, StemY)
-        ON target.StemTag = source.StemTag
-        WHEN NOT MATCHED THEN
-          INSERT (TreeID, QuadratID, StemTag, StemX, StemY) VALUES (@TreeID, @QuadratID, @StemTag, @StemX, @StemY);
-      `);
+    // Start a transaction
+    await connection.beginTransaction();
+
+    // Execute the query
+    await connection.query(query, [treeID, quadratID, stemTag, stemX, stemY]);
+
+    // Commit the transaction
+    await connection.commit();
   } catch (error: any) {
-    console.error('Error processing code:', error.message);
+    console.error('Error processing stems:', error.message);
+    // Rollback the transaction in case of an error
+    await connection.rollback();
     throw error;
+  } finally {
+    // Release the connection back to the pool
+    connection.release();
   }
 }
-export async function getPersonnelIDByName(transaction: sql.Transaction, fullName: string): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
+
+export async function getPersonnelIDByName(
+  connection: PoolConnection,
+  fullName: string
+): Promise<number | null> {
+  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
   // Split the full name into first and last names
@@ -255,59 +274,41 @@ export async function getPersonnelIDByName(transaction: sql.Transaction, fullNam
   }
 
   try {
-    const request = new sql.Request(transaction);
+    // Prepare the query
     const query = `
       SELECT PersonnelID
       FROM ${schema}.Personnel
-      WHERE FirstName = @FirstName AND LastName = @LastName
+      WHERE FirstName = ? AND LastName = ?
     `;
 
-    request.input('FirstName', sql.VarChar, firstName.trim());
-    request.input('LastName', sql.VarChar, lastName.trim());
+    // Execute the query
+    const [result] = await connection.execute(query, [
+      firstName.trim(),
+      lastName.trim(),
+    ]);
 
-    const result = await request.query(query);
+    const rows: RowDataPacket[] = result as RowDataPacket[];
 
-    if (result.recordset.length > 0) {
-      return result.recordset[0].PersonnelID;
-    } else {
-      return null; // No matching personnel found
+    if (rows.length > 0) {
+      return rows[0].PersonnelID as number;
     }
-  } catch (err: any) {
-    console.error('Error retrieving PersonnelID:', err.message);
-    throw err;
+
+    return null; // No matching personnel found
+  } catch (error: any) {
+    console.error('Error retrieving PersonnelID:', error.message);
+    throw error;
+  } finally {
+    // Release the connection back to the pool
+    connection.release();
   }
 }
 
 
-export const sqlConfig: any = {
-  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
-  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
-  server: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
-  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
-  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
-  authentication: {
-    type: 'default'
-  },
-  options: {
-    encrypt: true
-  }
-}
-
-export async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
-    }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
 
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (conn: ConnectionPool, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) => Promise<void>;
+  specialProcessing?: (connection: mysql.PoolConnection, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) => Promise<void>;
 };
 
 // Define the mappings for each file type
@@ -422,9 +423,41 @@ export const fileMappings: Record<string, FileMapping> = {
   },
 };
 
-export async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
+const sqlConfig: any = {
+  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
+  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
+  host: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
+  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
+  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
+  ssl:{ca:fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
+}
+const pool = mysql.createPool(sqlConfig);
+// Function to get a connection from the pool
+export async function getSqlConnection(tries: number): Promise<PoolConnection> {
+  try {
+    const connection = await pool.getConnection();
+    await connection.ping(); // Use ping to check the connection
+    return connection; // Resolve the connection when successful
+  } catch (err) {
+    if (tries == 5) {
+      console.error("!!! Cannot connect !!! Error:", err);
+      throw err;
+    } else {
+      console.log("Connection attempt failed --> trying again");
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait a bit before retrying
+      return getSqlConnection(tries + 1); // Retry and return the promise
+    }
   }
-  return await conn.request().query(query);
+}
+
+export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<RowDataPacket[]> {
+  try {
+    const [rows] = await connection.execute<RowDataPacket[]>(query, params);
+    return rows;
+  } catch (error: any) {
+    console.error('Error executing query:', error.message);
+    throw error;
+  } finally {
+    connection.release(); // Release the connection back to the pool
+  }
 }

@@ -21,28 +21,35 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {ErrorMessages} from "@/config/macros";
-import {useCensusLoadContext} from "@/app/contexts/fixeddatacontext";
-import {CensusGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {ErrorMessages, Plot} from "@/config/macros";
+import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/fixeddatacontext";
+import {CensusGridColumns, CensusRDS, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectioncontext";
 
 interface EditToolbarProps {
+  rows: GridRowsProp;
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
   setRowModesModel: (
     newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
   ) => void;
   setRefresh: (newState: boolean) => void;
+  currentPlot: Plot;
+  censusLoadDispatch: React.Dispatch<{censusLoad: CensusRDS[] | null}> | null;
 }
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
-  const {setRows, setRowModesModel, setRefresh} = props;
+  const {rows, setRows, setRowModesModel, setRefresh, currentPlot, censusLoadDispatch} = props;
 
   const handleClick = async () => {
     const id = randomId();
+    const highestCensusID = Math.max(
+      ...rows.map((row) => row.censusID),
+      0
+    );
     setRows((oldRows) => [...oldRows, {
       id,
-      censusID: 0,
-      plotID: 0,
+      censusID: highestCensusID + 1,
+      plotID: currentPlot.id,
       plotCensusNumber: 0,
       startDate: null,
       endDate: null,
@@ -61,6 +68,9 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
       method: 'GET'
     });
     setRows(await response.json());
+    if (censusLoadDispatch) {
+      censusLoadDispatch({censusLoad: rows as CensusRDS[]})
+    }
     setRefresh(false);
   }
 
@@ -77,12 +87,10 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  return newRow.censusID !== oldRow.censusID ||
-    newRow.plotID !== oldRow.plotID ||
-    newRow.plotCensusNumber !== oldRow.plotCensusNumber ||
-    newRow.startDate !== oldRow.startDate ||
-    newRow.endDate !== oldRow.endDate ||
-    newRow.description !== oldRow.description;
+  const fields: Array<keyof CensusRDS> = [
+    'censusID', 'plotID', 'plotCensusNumber', 'startDate', 'endDate', 'description'
+  ];
+  return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
 export default function Page() {
@@ -99,6 +107,7 @@ export default function Page() {
   ]
   const [rows, setRows] = React.useState(initialRows);
   const censusLoad = useCensusLoadContext();
+  const censusLoadDispatch = useCensusLoadDispatch();
   let currentPlot = usePlotContext();
   useEffect(() => {
     if (censusLoad) {
@@ -117,6 +126,7 @@ export default function Page() {
       method: 'GET'
     });
     setRows(await response.json());
+    if (censusLoadDispatch) censusLoadDispatch({censusLoad: rows as CensusRDS[]});
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -139,7 +149,9 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/census?censusID=${rows.find((row) => row.id == id)!.censusID}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/census?censusID=${rows.find((row) => row.id == id)!.censusID}`, {
+      method: 'DELETE'
+    });
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -168,36 +180,39 @@ export default function Page() {
           reject(new Error("Primary key CensusID cannot be empty!"));
         } else if (oldRow.censusID == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/census?
-          censusID=${newRow.censusID}
-          &plotID=${currentPlot!.id}
-          &plotCensusNumber=${newRow.plotCensusNumber}
-          &startDate=${newRow.startDate}
-          &endDate=${newRow.endDate}
-          &description=${newRow.description}`, {
-            method: 'POST'
-          });
+          const response = await fetch(`/api/fixeddata/census`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(newRow)
+          })
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
-          setSnackbar({children: `New row added!`, severity: 'success'});
-          resolve(newRow);
+          else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+          else if (!response.ok) reject(new Error(responseJSON.message));
+          else {
+            setSnackbar({children: `New row added!`, severity: 'success'});
+            resolve(newRow);
+          }
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/census?
-            oldCensusID=${oldRow.censusID}
-            &censusID=${newRow.censusID}
-            &plotID=${currentPlot!.id}
-            &plotCensusNumber=${newRow.plotCensusNumber}
-            &startDate=${newRow.startDate}
-            &endDate=${newRow.endDate}
-            &description=${newRow.description}`, {
-              method: 'PATCH'
+            const response = await fetch(`/api/fixeddata/census`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(newRow)
             })
             const responseJSON = await response.json();
-            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Row edits saved!`, severity: 'success'});
-            resolve(newRow);
+            if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+            else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            else if (!response.ok) reject(new Error(responseJSON.message));
+            else {
+              setSnackbar({children: `New row added!`, severity: 'success'});
+              resolve(newRow);
+            }
           }
         }
         await refreshData();
@@ -291,7 +306,7 @@ export default function Page() {
                             toolbar: EditToolbar,
                           }}
                           slotProps={{
-                            toolbar: {setRows, setRowModesModel, setRefresh},
+                            toolbar: {rows, setRows, setRowModesModel, setRefresh, currentPlot, censusLoadDispatch},
                           }}
                           initialState={{
                             filter: {

@@ -188,6 +188,7 @@ export interface CoreMeasurementsRDS {
   isRemeasurement: boolean | null;
   isCurrent: boolean | null;
   userDefinedFields: string | null;
+  masterMeasurementID: number | null;
 }
 
 
@@ -215,6 +216,7 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'userDefinedFields', headerName: 'UserDefinedFields', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'masterMeasurementID', headerName: 'MasterMeasurementID', headerClassName: 'header', flex: 1, align: 'left'},
 ]
 
 export interface CurrentObsoleteRDS {

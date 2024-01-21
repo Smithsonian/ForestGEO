@@ -35,7 +35,6 @@ export default function Page() {
     }, []);
   const {status} = useSession();
   if (status == "authenticated") {
-    localStorage.clear();
     return (
       <EntryModal/>
     );

@@ -21,10 +21,21 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {ErrorMessages, Plot} from "@/config/macros";
-import {usePlotsLoadContext, useQuadratsLoadContext, useQuadratsLoadDispatch} from "@/app/contexts/fixeddatacontext";
-import {PersonnelRDS, QuadratsGridColumns, QuadratsRDS, StyledDataGrid} from "@/config/sqlmacros";
-import {usePlotContext} from "@/app/contexts/userselectioncontext";
+import {ErrorMessages} from "@/config/macros";
+import {
+  useSpeciesLoadContext,
+  useSpeciesLoadDispatch,
+  useSubSpeciesLoadContext,
+  useSubSpeciesLoadDispatch
+} from "@/app/contexts/fixeddatacontext";
+import {
+  CoreMeasurementsRDS,
+  SpeciesGridColumns,
+  SpeciesRDS,
+  StyledDataGrid,
+  SubSpeciesGridColumns,
+  SubSpeciesRDS
+} from "@/config/sqlmacros";
 
 interface EditToolbarProps {
   rows: GridRowsProp;
@@ -33,54 +44,49 @@ interface EditToolbarProps {
     newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
   ) => void;
   setRefresh: (newState: boolean) => void;
-  currentPlot: Plot;
-  quadratLoadDispatch: React.Dispatch<{quadratsLoad: QuadratsRDS[] | null}> | null;
+  subSpeciesLoadDispatch: React.Dispatch<{subSpeciesLoad: SubSpeciesRDS[] | null}> | null;
 }
 
 function EditToolbar(props: EditToolbarProps) {
-  const {rows, setRows, setRowModesModel, setRefresh, currentPlot, quadratLoadDispatch} = props;
+  const {rows, setRows, setRowModesModel, setRefresh, subSpeciesLoadDispatch} = props;
 
   const handleClick = async () => {
     const id = randomId();
-    const highestQuadratID = Math.max(
-      ...rows.map((row) => row.quadratID),
+    const highestSpeciesID = Math.max(
+      ...rows.map((row) => row.subSpeciesID),
       0
     );
     setRows((oldRows) => [...oldRows, {
       id,
-      quadratID: highestQuadratID + 1,
-      plotID: currentPlot.id,
-      quadratName: '',
-      quadratX: 0,
-      quadratY: 0,
-      quadratZ: 0,
-      dimensionX: 0,
-      dimensionY: 0,
-      area: 0,
-      quadratShape: ''
+      subSpeciesID: highestSpeciesID + 1,
+      speciesID: 0,
+      subSpeciesName: '',
+      subSpeciesCode: '',
+      currentTaxonFlag: false,
+      obsoleteTaxonFlag: false,
+      authority: '',
+      infraSpecificLevel: ''
     }]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratID'},
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'speciesID'},
     }));
   };
 
   const handleRefresh = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/fixeddata/quadrats`, {
+    const response = await fetch(`/api/fixeddata/subspecies`, {
       method: 'GET'
     });
     setRows(await response.json());
-    if (quadratLoadDispatch) {
-      quadratLoadDispatch({quadratsLoad: rows as QuadratsRDS[]});
-    }
+    if (subSpeciesLoadDispatch) subSpeciesLoadDispatch({subSpeciesLoad: rows as SubSpeciesRDS[]})
     setRefresh(false);
   }
 
   return (
     <GridToolbarContainer>
       <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
-        Add quadrat
+        Add SubSpecies
       </Button>
       <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
@@ -90,9 +96,9 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  const fields: Array<keyof QuadratsRDS> = [
-    'quadratID', 'plotID', 'quadratName', 'quadratX', 'quadratY', 'quadratZ',
-    'dimensionX', 'dimensionY', 'area', 'quadratShape'
+  const fields: Array<keyof SubSpeciesRDS> = [
+    'subSpeciesID', 'speciesID', 'subSpeciesName', 'subSpeciesCode',
+    'currentTaxonFlag', 'obsoleteTaxonFlag', 'authority', 'infraSpecificLevel'
   ]
   return fields.some(field => newRow[field] !== oldRow[field]);
 }
@@ -101,28 +107,24 @@ export default function Page() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      quadratID: 0,
-      plotID: 0,
-      quadratName: '',
-      quadratX: 0,
-      quadratY: 0,
-      quadratZ: 0,
-      dimensionX: 0,
-      dimensionY: 0,
-      area: 0,
-      quadratShape: ''
+      subSpeciesID: 0,
+      speciesID: 0,
+      subSpeciesName: '',
+      subSpeciesCode: '',
+      currentTaxonFlag: false,
+      obsoleteTaxonFlag: false,
+      authority: '',
+      infraSpecificLevel: ''
     },
   ]
   const [rows, setRows] = React.useState(initialRows);
-  let quadratsLoad = useQuadratsLoadContext();
-  let quadratsLoadDispatch = useQuadratsLoadDispatch();
-  let plotsLoad = usePlotsLoadContext();
-  let currentPlot = usePlotContext();
+  const subSpeciesLoad = useSubSpeciesLoadContext();
+  const subSpeciesLoadDispatch = useSubSpeciesLoadDispatch();
   useEffect(() => {
-    if (quadratsLoad) {
-      setRows(quadratsLoad);
+    if (subSpeciesLoad) {
+      setRows(subSpeciesLoad);
     }
-  }, [quadratsLoad, setRows, plotsLoad]);
+  }, [subSpeciesLoad, setRows]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
@@ -131,13 +133,11 @@ export default function Page() {
   const [refresh, setRefresh] = useState(false);
   const refreshData = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/fixeddata/quadrats`, {
+    const response = await fetch(`/api/fixeddata/subspecies`, {
       method: 'GET'
     });
     setRows(await response.json());
-    if (quadratsLoadDispatch) {
-      quadratsLoadDispatch({quadratsLoad: rows as QuadratsRDS[]})
-    }
+    if (subSpeciesLoadDispatch) subSpeciesLoadDispatch({subSpeciesLoad: rows as SubSpeciesRDS[]})
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -160,7 +160,7 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/quadrats?quadratID=${rows.find((row) => row.id == id)!.quadratID}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/subspecies?subspeciesID=${rows.find((row) => row.id == id)!.subSpeciesID}`, {method: 'DELETE'});
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -184,17 +184,17 @@ export default function Page() {
   const processRowUpdate = React.useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>(async (resolve, reject) => {
-        if (newRow.quadratID == '') {
-          reject(new Error("Primary key QuadratID cannot be empty!"));
-        } else if (oldRow.quadratID == '') {
+        if (newRow.subSpeciesID == '') {
+          reject(new Error("Primary key SubSpeciesID cannot be empty!"));
+        } else if (oldRow.subSpeciesID == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/quadrats`, {
+          const response = await fetch(`/api/fixeddata/subspecies`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify(newRow)
-          });
+            body: JSON.stringify(newRow),
+          })
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
           else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
@@ -206,13 +206,13 @@ export default function Page() {
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/quadrats`, {
+            const response = await fetch(`/api/fixeddata/subspecies`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify(newRow)
-            });
+            })
             const responseJSON = await response.json();
             if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
             else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
@@ -232,7 +232,7 @@ export default function Page() {
   };
 
   const columns: GridColDef[] = [
-    ...QuadratsGridColumns,
+    ...SubSpeciesGridColumns,
     {
       field: 'actions',
       type: 'actions',
@@ -285,58 +285,47 @@ export default function Page() {
     },
   ];
 
-  if (!currentPlot) {
-    return <>You must select a plot to continue!</>;
-  } else {
-    return (
-      <Box
-        sx={{
-          width: '100%',
-          '& .actions': {
-            color: 'text.secondary',
-          },
-          '& .textPrimary': {
-            color: 'text.primary',
-          },
-        }}
-      >
-        <Box sx={{width: '100%'}}>
-          <StyledDataGrid sx={{width: '100%'}}
-                          rows={rows}
-                          columns={columns}
-                          editMode="row"
-                          rowModesModel={rowModesModel}
-                          onRowModesModelChange={handleRowModesModelChange}
-                          onRowEditStop={handleRowEditStop}
-                          processRowUpdate={processRowUpdate}
-                          onProcessRowUpdateError={handleProcessRowUpdateError}
-                          loading={refresh}
-                          slots={{
-                            toolbar: EditToolbar,
-                          }}
-                          slotProps={{
-                            toolbar: {rows, setRows, setRowModesModel, setRefresh, currentPlot, quadratsLoadDispatch},
-                          }}
-                          initialState={{
-                            filter: {
-                              filterModel: {
-                                items: [{field: 'plotID', operator: 'equals', value: `${currentPlot.id.toString()}`}],
-                              },
-                            },
-                          }}
-          />
-        </Box>
-        {!!snackbar && (
-          <Snackbar
-            open
-            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
-            onClose={handleCloseSnackbar}
-            autoHideDuration={6000}
-          >
-            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
-          </Snackbar>
-        )}
+  return (
+    <Box
+      sx={{
+        width: '100%',
+        '& .actions': {
+          color: 'text.secondary',
+        },
+        '& .textPrimary': {
+          color: 'text.primary',
+        },
+      }}
+    >
+      <Box sx={{width: '100%'}}>
+        <StyledDataGrid sx={{width: '100%'}}
+                        rows={rows}
+                        columns={columns}
+                        editMode="row"
+                        rowModesModel={rowModesModel}
+                        onRowModesModelChange={handleRowModesModelChange}
+                        onRowEditStop={handleRowEditStop}
+                        processRowUpdate={processRowUpdate}
+                        onProcessRowUpdateError={handleProcessRowUpdateError}
+                        loading={refresh}
+                        slots={{
+                          toolbar: EditToolbar,
+                        }}
+                        slotProps={{
+                          toolbar: {rows, setRows, setRowModesModel, setRefresh, subSpeciesLoadDispatch},
+                        }}
+        />
       </Box>
-    );
-  }
+      {!!snackbar && (
+        <Snackbar
+          open
+          anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
+          onClose={handleCloseSnackbar}
+          autoHideDuration={6000}
+        >
+          <Alert {...snackbar} onClose={handleCloseSnackbar}/>
+        </Snackbar>
+      )}
+    </Box>
+  );
 }

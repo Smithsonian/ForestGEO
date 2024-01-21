@@ -1,7 +1,8 @@
 "use client";
-import React, {createContext, Dispatch, useContext, useReducer} from 'react';
+import React, {createContext, Dispatch, useContext, useEffect, useReducer} from 'react';
 import {Census, Plot, Quadrat} from "@/config/macros";
 import PlotProvider from "@/app/contexts/userselectioncontext";
+import {getData} from "@/config/db";
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const QuadratListContext = createContext<Quadrat[] | null>(null);
@@ -32,6 +33,21 @@ export function ContextsProvider({children}: { children: React.ReactNode }) {
     firstLoadReducer,
     true
   )
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const plotListData = await getData('plotList');
+      plotListDispatch({ plotList: plotListData });
+
+      const quadratListData = await getData('quadratList');
+      quadratListDispatch({ quadratList: quadratListData });
+
+      const censusListData = await getData('censusList');
+      censusListDispatch({ censusList: censusListData });
+    };
+
+    fetchData().catch(console.error);
+  }, []);
 
 
   return (
