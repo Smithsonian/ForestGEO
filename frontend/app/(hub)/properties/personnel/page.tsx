@@ -21,26 +21,32 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {usePersonnelLoadContext} from "@/app/contexts/fixeddatacontext";
-import {PersonnelGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {usePersonnelLoadContext, usePersonnelLoadDispatch} from "@/app/contexts/fixeddatacontext";
+import {CoreMeasurementsRDS, PersonnelGridColumns, PersonnelRDS, StyledDataGrid} from "@/config/sqlmacros";
 import {ErrorMessages} from "@/config/macros";
 
 interface EditToolbarProps {
+  rows: GridRowsProp;
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
   setRowModesModel: (
     newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
   ) => void;
   setRefresh: (newState: boolean) => void;
+  personnelLoadDispatch:  React.Dispatch<{personnelLoad: PersonnelRDS[] | null}> | null;
 }
 
 function EditToolbar(props: EditToolbarProps) {
-  const {setRows, setRowModesModel, setRefresh} = props;
+  const {rows, setRows, setRowModesModel, setRefresh, personnelLoadDispatch} = props;
 
   const handleClick = async () => {
     const id = randomId();
+    const highestPersonnelID = Math.max(
+      ...rows.map((row) => row.personnelID),
+      0
+    );
     setRows((oldRows) => [...oldRows, {
       id,
-      personnelID: 0,
+      personnelID: highestPersonnelID + 1,
       firstName: '',
       lastName: '',
       role: '',
@@ -58,6 +64,9 @@ function EditToolbar(props: EditToolbarProps) {
       method: 'GET'
     });
     setRows(await response.json());
+    if (personnelLoadDispatch) {
+      personnelLoadDispatch({personnelLoad: rows as PersonnelRDS[]});
+    }
     setRefresh(false);
   }
 
@@ -74,10 +83,11 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  return newRow.personnelID !== oldRow.personnelID ||
-    newRow.firstName !== oldRow.firstName ||
-    newRow.lastName !== oldRow.lastName ||
-    newRow.role !== oldRow.role;
+  const fields: Array<keyof PersonnelRDS> = [
+    'personnelID', 'firstName', 'lastName', 'role'
+  ];
+
+  return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
 export default function Page() {
@@ -91,12 +101,13 @@ export default function Page() {
     },
   ]
   const [rows, setRows] = React.useState(initialRows);
-  const personnelLoad = usePersonnelLoadContext();
+  const personnelLoadContext = usePersonnelLoadContext();
+  const personnelLoadDispatch = usePersonnelLoadDispatch();
   useEffect(() => {
-    if (personnelLoad) {
-      setRows(personnelLoad);
+    if (personnelLoadContext) {
+      setRows(personnelLoadContext);
     }
-  }, [personnelLoad, setRows]);
+  }, [personnelLoadContext, setRows]);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
@@ -109,6 +120,9 @@ export default function Page() {
       method: 'GET'
     });
     setRows(await response.json());
+    if (personnelLoadDispatch) {
+      personnelLoadDispatch({personnelLoad: rows as PersonnelRDS[]});
+    }
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -131,7 +145,9 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/personnel?personnelID=${rows.find((row) => row.id == id)!.personnelID}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/personnel?personnelID=${rows.find((row) => row.id == id)!.personnelID}`, {
+      method: 'DELETE'
+    });
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -156,40 +172,42 @@ export default function Page() {
   const processRowUpdate = React.useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>(async (resolve, reject) => {
-        if (newRow.code == '') {
+        if (newRow.personnelID == '') {
           reject(new Error("Primary key Code cannot be empty!"));
-        } else if (oldRow.code == '') {
+        } else if (oldRow.personnelID == '') {
           // inserting a row --> personnelID, firstName, lastName, role
-          const response = await fetch(`/api/fixeddata/personnel?
-          personnelID=${newRow.personnelID}
-          &firstName=${newRow.firstName}
-          &lastName=${newRow.lastName}
-          &role=${newRow.role}`, {
-            method: 'POST'
-          });
+          const response = await fetch(`/api/fixeddata/personnel`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(newRow),
+          })
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
           else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
           else if (!response.ok) reject(new Error(responseJSON.message));
-          setSnackbar({children: `New row added!`, severity: 'success'});
-          resolve(newRow);
+          else {
+            setSnackbar({children: `New row added!`, severity: 'success'});
+            resolve(newRow);
+          }
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(
-              `/api/fixeddata/personnel?
-              oldPersonnelID=${oldRow.personnelID}
-              &personnelID=${newRow.personnelID}
-              &firstName=${newRow.firstName}
-              &lastName=${newRow.lastName}
-              &role=${newRow.role}`, {
-                method: 'PATCH'
-              })
+            const response = await fetch(`/api/fixeddata/personnel`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(newRow),
+            })
             const responseJSON = await response.json();
             if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
             else if (!response.ok) reject(new Error(responseJSON.message));
-            setSnackbar({children: `Row edits saved!`, severity: 'success'});
-            resolve(newRow);
+            else {
+              setSnackbar({children: `Row edits saved!`, severity: 'success'});
+              resolve(newRow);
+            }
           }
         }
         await refreshData();
@@ -281,7 +299,7 @@ export default function Page() {
                           toolbar: EditToolbar,
                         }}
                         slotProps={{
-                          toolbar: {setRows, setRowModesModel, setRefresh},
+                          toolbar: {rows, setRows, setRowModesModel, setRefresh, personnelLoadDispatch},
                         }}
         />
       </Box>

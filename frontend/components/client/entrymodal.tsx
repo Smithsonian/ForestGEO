@@ -33,6 +33,7 @@ import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
 import {CensusRDS, PlotRDS, QuadratsRDS} from '@/config/sqlmacros';
 import {Census, Plot, Quadrat} from "@/config/macros";
+import {clearAllIDBData, getData, setData} from "@/config/db";
 
 export default function EntryModal() {
   const [loading, setLoading] = useState(0);
@@ -55,94 +56,85 @@ export default function EntryModal() {
   const fetchData = async (url: string, dispatch: Function | null, actionType: string) => {
     setLoading(loading + interval);
     setLoadingMsg(`Retrieving ${actionType}...`);
-    const response = await fetch(url, {method: 'GET'});
+    const response = await fetch(url, { method: 'GET' });
     setLoading(loading + interval);
     setLoadingMsg('Dispatching...');
     if (dispatch) {
       const responseData = await response.json();
-      dispatch({[actionType]: responseData});
-      localStorage.setItem(actionType, JSON.stringify(responseData));
+      dispatch({ [actionType]: responseData });
     }
   };
 
   const fetchAndDispatchQuadrats = async () => {
     setLoading(loading + interval);
-    setLoadingMsg('Retrieving Quadrats...');
+    setLoadingMsg('Retrieving Census...');
 
-    // check if quadratsLoad is available in localStorage
-    const quadratLoadData = JSON.parse(localStorage.getItem('quadratsLoad') ?? 'null');
+    // Check if quadratsLoad is available in IndexedDB
+    const quadratsLoadData = await getData('quadratsLoad');
     let quadratsRDSLoad: QuadratsRDS[];
-    if (quadratLoadData) {
-      quadratsRDSLoad = quadratLoadData;
+
+    if (quadratsLoadData) {
+      quadratsRDSLoad = quadratsLoadData;
     } else {
-      const response = await fetch('/api/fixeddata/quadrats', {method: 'GET'});
+      const response = await fetch('/api/fixeddata/quadrats', { method: 'GET' });
       quadratsRDSLoad = await response.json();
-      localStorage.setItem('quadratsLoad', JSON.stringify(quadratsRDSLoad));
+      await setData('quadratsLoad', quadratsRDSLoad); // Save to IndexedDB
     }
 
     if (quadratsLoadDispatch) {
-      quadratsLoadDispatch({quadratsLoad: quadratsRDSLoad});
+      quadratsLoadDispatch({ quadratsLoad: quadratsRDSLoad });
     }
 
-    const quadratListData = JSON.parse(localStorage.getItem('quadratList') ?? 'null');
-    let quadratList: Quadrat[];
-    if (quadratListData) {
-      quadratList = quadratListData;
-    } else {
-      // Generate plotList from plotRDSLoad if not in localStorage
+    // Check if quadratList data is available in IndexedDB
+    let quadratList: Quadrat[] = await getData('quadratList');
+
+    if (!quadratList) {
+      // Generate quadratList from quadratsRDSLoad if not in IndexedDB
       quadratList = quadratsRDSLoad.map((quadratRDS) => ({
-        quadratID: quadratRDS.quadratID!,
-        plotID: quadratRDS.plotID!,
-        quadratName: quadratRDS.quadratName!,
+        quadratID: quadratRDS.quadratID ? quadratRDS.quadratID : 0,
+        plotID: quadratRDS.plotID ? quadratRDS.plotID : 0,
+        quadratName: quadratRDS.quadratName ? quadratRDS.quadratName : '',
       }));
-      localStorage.setItem('quadratList', JSON.stringify(quadratList));
+      await setData('quadratList', quadratList); // Save to IndexedDB
     }
 
-    setLoadingMsg('Dispatching Quadrat List...');
+    setLoadingMsg('Dispatching Census List...');
     if (quadratListDispatch) {
-      quadratListDispatch({quadratList: quadratList});
+      quadratListDispatch({ quadratList: quadratList });
     }
-  }
+  };
 
   const fetchAndDispatchCensus = async () => {
     setLoading(loading + interval);
     setLoadingMsg('Retrieving Census...');
 
-    // Check if plotsLoad data is available in localStorage
-    const censusLoadData = JSON.parse(localStorage.getItem('censusLoad') ?? 'null');
-    let censusRDSLoad: CensusRDS[];
-    if (censusLoadData) {
-      // Use data from localStorage if available
-      censusRDSLoad = censusLoadData;
-    } else {
-      // Fetch data from the server if not in localStorage
-      const response = await fetch('/api/fixeddata/census', {method: 'GET'});
+    // Check if censusLoad data is available in IndexedDB
+    let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
+    if (!censusRDSLoad) {
+      // Fetch data from the server if not in IndexedDB
+      const response = await fetch('/api/fixeddata/census', { method: 'GET' });
       censusRDSLoad = await response.json();
-      localStorage.setItem('censusLoad', JSON.stringify(censusRDSLoad));
+      await setData('censusLoad', censusRDSLoad); // Save to IndexedDB
     }
 
     if (censusLoadDispatch) {
-      censusLoadDispatch({censusLoad: censusRDSLoad});
+      censusLoadDispatch({ censusLoad: censusRDSLoad });
     }
 
-    // Check if plotList data is available in localStorage
-    const censusListData = JSON.parse(localStorage.getItem('censusList') ?? 'null');
-    let censusList: Census[];
-    if (censusListData) {
-      censusList = censusListData;
-    } else {
+    // Check if censusList data is available in IndexedDB
+    let censusList: Census[] = await getData('censusList');
+    if (!censusList) {
       const uniqueCensusMap = new Map<number, Census>();
-
       censusRDSLoad.forEach((censusRDS) => {
-        const plotCensusNumber = censusRDS.plotCensusNumber ? censusRDS.plotCensusNumber : 0;
+        const plotCensusNumber = censusRDS.plotCensusNumber ?? 0;
         if (!uniqueCensusMap.has(plotCensusNumber)) {
           // First occurrence of this plotCensusNumber
           uniqueCensusMap.set(plotCensusNumber, {
-            plotID: censusRDS.plotID ? censusRDS.plotID : 0,
+            plotID: censusRDS.plotID ?? 0,
             plotCensusNumber,
             startDate: new Date(censusRDS.startDate!),
             endDate: new Date(censusRDS.endDate!),
-            description: censusRDS.description ? censusRDS.description : ''
+            description: censusRDS.description ?? ''
           });
         } else {
           // Update existing entry with earliest startDate and latest endDate
@@ -155,22 +147,21 @@ export default function EntryModal() {
       });
 
       censusList = Array.from(uniqueCensusMap.values());
-      console.log(censusList);
-      localStorage.setItem('censusList', JSON.stringify(censusList));
+      await setData('censusList', censusList); // Save to IndexedDB
     }
 
     setLoadingMsg('Dispatching Census List...');
     if (censusListDispatch) {
-      censusListDispatch({censusList: censusList});
+      censusListDispatch({ censusList: censusList });
     }
-  }
+  };
 
   const fetchAndDispatchPlots = async () => {
     setLoading(loading + interval);
     setLoadingMsg('Retrieving Plots...');
 
     // Check if plotsLoad data is available in localStorage
-    const plotsLoadData = JSON.parse(localStorage.getItem('plotsLoad') ?? 'null');
+    const plotsLoadData = await getData('plotsLoad');
     let plotRDSLoad: PlotRDS[];
     if (plotsLoadData) {
       // Use data from localStorage if available
@@ -179,7 +170,7 @@ export default function EntryModal() {
       // Fetch data from the server if not in localStorage
       const response = await fetch('/api/fixeddata/plots', {method: 'GET'});
       plotRDSLoad = await response.json();
-      localStorage.setItem('plotsLoad', JSON.stringify(plotRDSLoad));
+      await setData('plotsLoad', plotRDSLoad);
     }
 
     if (plotsLoadDispatch) {
@@ -187,7 +178,7 @@ export default function EntryModal() {
     }
 
     // Check if plotList data is available in localStorage
-    const plotListData = JSON.parse(localStorage.getItem('plotList') ?? 'null');
+    const plotListData = await getData('plotList');
     let plotList: Plot[];
     if (plotListData) {
       // Use data from localStorage if available
@@ -199,7 +190,7 @@ export default function EntryModal() {
         num: quadratsLoadDispatch ? quadratsLoadDispatch.length : 0,
         id: plotRDS.plotID ? plotRDS.plotID : 0,
       }));
-      localStorage.setItem('plotList', JSON.stringify(plotList));
+      await setData('plotList', plotList);
     }
 
     setLoadingMsg('Dispatching Plot List...');
@@ -211,26 +202,41 @@ export default function EntryModal() {
   useEffect(() => {
     const fetchDataEffect = async () => {
       try {
-        const coreMeasurementLoadData = JSON.parse(localStorage.getItem('coreMeasurementLoad') ?? 'null');
-        (coreMeasurementLoadData && coreMeasurementLoadDispatch) ?
-          coreMeasurementLoadDispatch({coreMeasurementLoad: coreMeasurementLoadData}) :
+        await clearAllIDBData(); // at login for new user, reload all data --> user's permissions may affect what they can see
+        const coreMeasurementLoadData = await getData('coreMeasurementLoad');
+        if (coreMeasurementLoadData && coreMeasurementLoadDispatch) {
+          coreMeasurementLoadDispatch({ coreMeasurementLoad: coreMeasurementLoadData });
+        } else {
           await fetchData('/api/coremeasurements', coreMeasurementLoadDispatch, 'coreMeasurementLoad');
-        const attributeLoadData = JSON.parse(localStorage.getItem('attributeLoad') ?? 'null');
-        (attributeLoadData && attributeLoadDispatch) ?
-          attributeLoadDispatch({attributeLoad: attributeLoadData}) :
+        }
+
+        const attributeLoadData = await getData('attributeLoad');
+        if (attributeLoadData && attributeLoadDispatch) {
+          attributeLoadDispatch({ attributeLoad: attributeLoadData });
+        } else {
           await fetchData('/api/fixeddata/attributes', attributeLoadDispatch, 'attributeLoad');
-        const personnelLoadData = JSON.parse(localStorage.getItem('personnelLoad') ?? 'null');
-        (personnelLoadData && personnelLoadDispatch) ?
-          personnelLoadDispatch({personnelLoad: personnelLoadData}) :
+        }
+
+        const personnelLoadData = await getData('personnelLoad');
+        if (personnelLoadData && personnelLoadDispatch) {
+          personnelLoadDispatch({ personnelLoad: personnelLoadData });
+        } else {
           await fetchData('/api/fixeddata/personnel', personnelLoadDispatch, 'personnelLoad');
-        const speciesLoadData = JSON.parse(localStorage.getItem('speciesLoad') ?? 'null');
-        (speciesLoadData && speciesLoadDispatch) ?
-          speciesLoadDispatch({speciesLoad: speciesLoadData}) :
+        }
+
+        const speciesLoadData = await getData('speciesLoad');
+        if (speciesLoadData && speciesLoadDispatch) {
+          speciesLoadDispatch({ speciesLoad: speciesLoadData });
+        } else {
           await fetchData('/api/fixeddata/species', speciesLoadDispatch, 'speciesLoad');
-        const subSpeciesLoadData = JSON.parse(localStorage.getItem('subSpeciesLoad') ?? 'null');
-        (subSpeciesLoadData && subSpeciesLoadDispatch) ?
-          subSpeciesLoadDispatch({subSpeciesLoad: subSpeciesLoadData}) :
+        }
+
+        const subSpeciesLoadData = await getData('subSpeciesLoad');
+        if (subSpeciesLoadData && subSpeciesLoadDispatch) {
+          subSpeciesLoadDispatch({ subSpeciesLoad: subSpeciesLoadData });
+        } else {
           await fetchData('/api/fixeddata/subspecies', subSpeciesLoadDispatch, 'subSpeciesLoad');
+        }
 
         await fetchAndDispatchPlots();
         await fetchAndDispatchCensus();
@@ -240,7 +246,6 @@ export default function EntryModal() {
         console.error(error);
       }
     };
-
     fetchDataEffect().catch(console.error);
   }, []);
 

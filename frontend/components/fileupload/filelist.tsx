@@ -4,7 +4,6 @@ import {FileListProps} from "@/config/macros";
 
 import '@/styles/dropzone.css';
 import {Card, CardContent, CardHeader, Pagination} from "@mui/material";
-import {Skeleton} from "@mui/joy";
 import Chip from "@mui/joy/Chip";
 import Divider from "@mui/joy/Divider";
 
@@ -16,27 +15,29 @@ export function FileDisplay({acceptedFiles}: FileListProps) {
   const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
     setCurrentPage(value);
   };
+  console.log("in file display view");
   return (
     <Card sx={{display: 'flex', flex: 1, width: '100%'}}>
       <CardHeader>
         File Preview:
       </CardHeader>
       <CardContent sx={{display: 'flex', flex: 1, width: '100%'}}>
-        <Skeleton loading={acceptedFiles?.length > 0} className={"rounded-lg"}>
-          <div className={"flex flex-1 flex-col h-auto rounded-lg"}>
-            <div>
-              File Name: <br/>
-              <Chip
-                color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}</Chip>
-            </div>
-            <Divider className={"my-2"}/>
-            <div>
-              File Size: <br/>
-              <Chip
-                color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size : ''} bytes</Chip>
-            </div>
+        <div className={"flex flex-1 flex-col h-auto rounded-lg"}>
+          <div>
+            File Name: <br/>
+            <Chip
+              color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}</Chip>
           </div>
-        </Skeleton>
+          <Divider className={"my-2"}/>
+          <div>
+            File Size: <br/>
+            <Chip
+              color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size : ''} bytes</Chip>
+          </div>
+        </div>
+        {/*<Skeleton loading={acceptedFiles?.length > 0} className={"rounded-lg"}>*/}
+        {/*  */}
+        {/*</Skeleton>*/}
       </CardContent>
       <div className={"flex justify-center"}>
         {acceptedFiles.length > 1 && <Pagination count={acceptedFiles.length} color={"secondary"} page={currentPage}

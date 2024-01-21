@@ -22,35 +22,41 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
 import {ErrorMessages} from "@/config/macros";
-import {useSpeciesLoadContext} from "@/app/contexts/fixeddatacontext";
-import {SpeciesGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {useSpeciesLoadContext, useSpeciesLoadDispatch} from "@/app/contexts/fixeddatacontext";
+import {CoreMeasurementsRDS, SpeciesGridColumns, SpeciesRDS, StyledDataGrid} from "@/config/sqlmacros";
 
 interface EditToolbarProps {
+  rows: GridRowsProp;
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
   setRowModesModel: (
     newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
   ) => void;
   setRefresh: (newState: boolean) => void;
+  speciesLoadDispatch: React.Dispatch<{speciesLoad: SpeciesRDS[] | null}> | null;
 }
 
 function EditToolbar(props: EditToolbarProps) {
-  const {setRows, setRowModesModel, setRefresh} = props;
+  const {rows, setRows, setRowModesModel, setRefresh, speciesLoadDispatch} = props;
 
   const handleClick = async () => {
     const id = randomId();
+    const highestSpeciesID = Math.max(
+      ...rows.map((row) => row.speciesID),
+      0
+    );
     setRows((oldRows) => [...oldRows, {
       id,
-      speciesID: 0,
-      genusID: null,
-      currentTaxonFlag: null,
-      obsoleteTaxonFlag: null,
-      speciesName: null,
-      speciesCode: null,
-      idLevel: null,
-      authority: null,
-      fieldFamily: null,
-      description: null,
-      referenceID: null
+      speciesID: highestSpeciesID + 1,
+      genusID: 0,
+      currentTaxonFlag: false,
+      obsoleteTaxonFlag: false,
+      speciesName: '',
+      speciesCode: '',
+      idLevel: '',
+      authority: '',
+      fieldFamily: '',
+      description: '',
+      referenceID: 0,
     }]);
     setRowModesModel((oldModel) => ({
       ...oldModel,
@@ -64,6 +70,7 @@ function EditToolbar(props: EditToolbarProps) {
       method: 'GET'
     });
     setRows(await response.json());
+    if (speciesLoadDispatch) speciesLoadDispatch({speciesLoad: rows as SpeciesRDS[]})
     setRefresh(false);
   }
 
@@ -80,17 +87,11 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  return newRow.speciesID !== oldRow.speciesID ||
-    newRow.genusID !== oldRow.genusID ||
-    newRow.currentTaxonFlag !== oldRow.currentTaxonFlag ||
-    newRow.obsoleteTaxonFlag !== oldRow.obsoleteTaxonFlag ||
-    newRow.speciesName !== oldRow.speciesName ||
-    newRow.speciesCode !== oldRow.speciesCode ||
-    newRow.idLevel !== oldRow.idLevel ||
-    newRow.authority !== oldRow.authority ||
-    newRow.fieldFamily !== oldRow.fieldFamily ||
-    newRow.description !== oldRow.description ||
-    newRow.referenceID !== oldRow.referenceID;
+  const fields: Array<keyof SpeciesRDS> = [
+    'speciesID', 'genusID', 'currentTaxonFlag', 'obsoleteTaxonFlag', 'speciesName', 'speciesCode',
+    'idLevel', 'authority', 'fieldFamily', 'description', 'referenceID'
+  ]
+  return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
 export default function Page() {
@@ -112,6 +113,7 @@ export default function Page() {
   ]
   const [rows, setRows] = React.useState(initialRows);
   const speciesLoad = useSpeciesLoadContext();
+  const speciesLoadDispatch = useSpeciesLoadDispatch();
   useEffect(() => {
     if (speciesLoad) {
       setRows(speciesLoad);
@@ -129,6 +131,7 @@ export default function Page() {
       method: 'GET'
     });
     setRows(await response.json());
+    if (speciesLoadDispatch) speciesLoadDispatch({speciesLoad: rows as SpeciesRDS[]})
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -151,7 +154,8 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/species?speciesID=${rows.find((row) => row.id == id)!.speciesID}`, {method: 'DELETE'});
+    const response = await fetch(
+      `/api/fixeddata/species?speciesID=${rows.find((row) => row.id == id)!.speciesID}`, {method: 'DELETE'});
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -177,48 +181,41 @@ export default function Page() {
       new Promise<GridRowModel>(async (resolve, reject) => {
         if (newRow.speciesID == '') {
           reject(new Error("Primary key SpeciesID cannot be empty!"));
-        } else if (oldRow.code == '') {
+        } else if (oldRow.speciesID == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/species?
-          speciesID=${newRow.speciesID}&
-          genusID=${newRow.plotID}&
-          currentTaxonFlag=${newRow.currentTaxonFlag}&
-          obsoleteTaxonFlag=${newRow.obsoleteTaxonFlag}&
-          speciesName=${newRow.speciesName}&
-          speciesCode=${newRow.speciesCode}&
-          idLevel=${newRow.idLevel}&
-          authority=${newRow.authority}&
-          fieldFamily=${newRow.fieldFamily}&
-          description=${newRow.description}&
-          referenceID=${newRow.referenceID}`, {
-            method: 'POST'
-          });
+          const response = await fetch(`/api/fixeddata/species`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(newRow),
+          })
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
-          setSnackbar({children: `New row added!`, severity: 'success'});
-          resolve(newRow);
+          else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+          else if (!response.ok) reject(new Error(responseJSON.message));
+          else {
+            setSnackbar({children: `New row added!`, severity: 'success'});
+            resolve(newRow);
+          }
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/species?
-            oldSpeciesID=${oldRow.speciesID}&
-            speciesID=${newRow.speciesID}&
-            genusID=${newRow.plotID}&
-            currentTaxonFlag=${newRow.currentTaxonFlag}&
-            obsoleteTaxonFlag=${newRow.obsoleteTaxonFlag}&
-            speciesName=${newRow.speciesName}&
-            speciesCode=${newRow.speciesCode}&
-            idLevel=${newRow.idLevel}&
-            authority=${newRow.authority}&
-            fieldFamily=${newRow.fieldFamily}&
-            description=${newRow.description}&
-            referenceID=${newRow.referenceID}`, {
-              method: 'PATCH'
+            const response = await fetch(`/api/fixeddata/species`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(newRow)
             })
             const responseJSON = await response.json();
-            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Row edits saved!`, severity: 'success'});
-            resolve(newRow);
+            if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+            else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            else if (!response.ok) reject(new Error(responseJSON.message));
+            else {
+              setSnackbar({children: `New row added!`, severity: 'success'});
+              resolve(newRow);
+            }
           }
         }
         await refreshData();
@@ -310,7 +307,7 @@ export default function Page() {
                           toolbar: EditToolbar,
                         }}
                         slotProps={{
-                          toolbar: {setRows, setRowModesModel, setRefresh},
+                          toolbar: {rows, setRows, setRowModesModel, setRefresh, speciesLoadDispatch},
                         }}
         />
       </Box>

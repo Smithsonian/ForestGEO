@@ -21,20 +21,22 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {useAttributeLoadContext} from "@/app/contexts/fixeddatacontext";
-import {AttributeGridColumns, StyledDataGrid} from "@/config/sqlmacros";
+import {useAttributeLoadContext, useAttributeLoadDispatch} from "@/app/contexts/fixeddatacontext";
+import {AttributeGridColumns, AttributesRDS, CoreMeasurementsRDS, StyledDataGrid} from "@/config/sqlmacros";
 import {ErrorMessages} from "@/config/macros";
 
 interface EditToolbarProps {
+  rows: GridRowsProp;
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
   setRowModesModel: (
     newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
   ) => void;
   setRefresh: (newState: boolean) => void;
+  attributeLoadDispatch:  React.Dispatch<{attributeLoad: AttributesRDS[] | null}> | null;
 }
 
 function EditToolbar(props: EditToolbarProps) {
-  const {setRows, setRowModesModel, setRefresh} = props;
+  const {rows, setRows, setRowModesModel, setRefresh, attributeLoadDispatch} = props;
 
   const handleClick = async () => {
     const id = randomId();
@@ -51,6 +53,9 @@ function EditToolbar(props: EditToolbarProps) {
       method: 'GET'
     });
     setRows(await response.json());
+    if (attributeLoadDispatch) {
+      attributeLoadDispatch({attributeLoad: rows as AttributesRDS[]})
+    }
     setRefresh(false);
   }
 
@@ -67,8 +72,11 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  return newRow.code !== oldRow.code || newRow.description !== oldRow.description || newRow.status !== oldRow.status;
+  const fields: Array<keyof AttributesRDS> = [
+    'code', 'description', 'status'
+  ];
 
+  return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
 export default function Page() {
@@ -82,6 +90,7 @@ export default function Page() {
   ]
   const [rows, setRows] = React.useState(initialRows);
   const attributeLoad = useAttributeLoadContext();
+  const attributeLoadDispatch = useAttributeLoadDispatch();
   useEffect(() => {
     if (attributeLoad) {
       setRows(attributeLoad);
@@ -99,6 +108,9 @@ export default function Page() {
       method: 'GET'
     });
     setRows(await response.json());
+    if (attributeLoadDispatch) {
+      attributeLoadDispatch({attributeLoad: rows as AttributesRDS[]})
+    }
     setRefresh(false);
   }
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -121,7 +133,9 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/attributes?code=${rows.find((row) => row.id == id)!.code}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/attributes?code=${rows.find((row) => row.id == id)!.code}`, {
+      method: 'DELETE'
+    });
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
@@ -150,33 +164,39 @@ export default function Page() {
           reject(new Error("Primary key Code cannot be empty!"));
         } else if (oldRow.code == '') {
           // inserting a row
-          const response = await fetch(`/api/fixeddata/attributes?
-          code=${newRow.code}
-          &desc=${newRow.description}
-          &stat=${newRow.status}`, {
-            method: 'POST'
-          });
+          const response = await fetch(`/api/fixeddata/attributes`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(newRow),
+          })
           const responseJSON = await response.json();
           if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
           else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
           else if (!response.ok) reject(new Error(responseJSON.message));
-          setSnackbar({children: `New row added!`, severity: 'success'});
-          resolve(newRow);
+          else {
+            setSnackbar({children: `New row added!`, severity: 'success'});
+            resolve(newRow);
+          }
         } else {
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/attributes?
-            oldCode=${oldRow.code}
-            &newCode=${newRow.code}
-            &newDesc=${newRow.description}
-            &newStat=${newRow.status}`, {
-              method: 'PATCH'
+            const response = await fetch(`/api/fixeddata/attributes?oldCode=${oldRow.code}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(newRow),
             })
             const responseJSON = await response.json();
-            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
+            if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
+            else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
             else if (!response.ok) reject(new Error(responseJSON.message));
-            setSnackbar({children: `Row edits saved!`, severity: 'success'});
-            resolve(newRow);
+            else {
+              setSnackbar({children: `New row added!`, severity: 'success'});
+              resolve(newRow);
+            }
           }
         }
         await refreshData();
@@ -268,7 +288,7 @@ export default function Page() {
                         toolbar: EditToolbar,
                       }}
                       slotProps={{
-                        toolbar: {setRows, setRowModesModel, setRefresh},
+                        toolbar: {rows, setRows, setRowModesModel, setRefresh, attributeLoadDispatch},
                       }}
       />
       {!!snackbar && (

@@ -1,164 +1,125 @@
-import {NextRequest, NextResponse} from "next/server";
-import sql from "mssql";
-import {ErrorMessages} from "@/config/macros";
-import {SpeciesRDS} from "@/config/sqlmacros";
-import {sqlConfig} from "@/components/processors/processorhelpers";
-
-async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
-    }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
-
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
-  }
-  return await conn.request().query(query);
-}
+import { NextRequest, NextResponse } from "next/server";
+import { getSqlConnection, runQuery } from "@/components/processors/processorhelpers";
+import { ErrorMessages } from "@/config/macros";
+import { SpeciesRDS } from "@/config/sqlmacros";
+import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
+import {req} from "pino-std-serializers";
 
 export async function GET(): Promise<NextResponse<SpeciesRDS[]>> {
   const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM ${schema}.Species`);
-  if (!results) throw new Error("call failed");
-  await conn.close();
-  let speciesRows: SpeciesRDS[] = []
-  Object.values(results.recordset).map((row, index) => {
-    speciesRows.push({
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+
+  let conn : PoolConnection | null = null;
+  try {
+    conn = await getSqlConnection(0);
+    const query = `SELECT * FROM ${schema}.Species`;
+    const results = await runQuery(conn, query);
+    if (!results) throw new Error("Call failed");
+
+    const speciesRows: SpeciesRDS[] = results.map((row: RowDataPacket, index: number) => ({
       id: index + 1,
-      speciesID: row['SpeciesID'],
-      genusID: row['GenusID'],
-      currentTaxonFlag: row['CurrentTaxonFlag'],
-      obsoleteTaxonFlag: row['ObsoleteTaxonFlag'],
-      speciesName: row['SpeciesName'],
-      speciesCode: row['SpeciesCode'],
-      idLevel: row['IDLevel'],
-      authority: row['Authority'],
-      fieldFamily: row['FieldFamily'],
-      description: row['Description'],
-      referenceID: row['ReferenceID']
-    })
-  })
-  return new NextResponse(
-    JSON.stringify(speciesRows),
-    {status: 200}
-  );
+      speciesID: row.SpeciesID,
+      genusID: row.GenusID,
+      currentTaxonFlag: row.CurrentTaxonFlag,
+      obsoleteTaxonFlag: row.ObsoleteTaxonFlag,
+      speciesName: row.SpeciesName,
+      speciesCode: row.SpeciesCode,
+      idLevel: row.IDLevel,
+      authority: row.Authority,
+      fieldFamily: row.FieldFamily,
+      description: row.Description,
+      referenceID: row.ReferenceID
+    }));
+    return new NextResponse(JSON.stringify(speciesRows), { status: 200 });
+  } catch (error) {
+    console.error('Error:', error);
+    throw new Error("Call failed");
+  } finally {
+    if (conn) conn.release();
+  }
 }
 
 export async function POST(request: NextRequest) {
   const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  const row: SpeciesRDS = {
-    id: 0,
-    speciesID: parseInt(request.nextUrl.searchParams.get('speciesID')!),
-    genusID: request.nextUrl.searchParams.get('genusID') ? parseInt(request.nextUrl.searchParams.get('genusID')!) : null,
-    currentTaxonFlag: request.nextUrl.searchParams.get('currentTaxonFlag') ? JSON.parse(request.nextUrl.searchParams.get('currentTaxonFlag')!) : null,
-    obsoleteTaxonFlag: request.nextUrl.searchParams.get('obsoleteTaxonFlag') ? JSON.parse(request.nextUrl.searchParams.get('obsoleteTaxonFlag')!) : null,
-    speciesName: request.nextUrl.searchParams.get('speciesName'),
-    speciesCode: request.nextUrl.searchParams.get('speciesCode'),
-    idLevel: request.nextUrl.searchParams.get('idLevel'),
-    authority: request.nextUrl.searchParams.get('authority'),
-    fieldFamily: request.nextUrl.searchParams.get('fieldFamily'),
-    description: request.nextUrl.searchParams.get('description'),
-    referenceID: request.nextUrl.searchParams.get('referenceID') ? parseInt(request.nextUrl.searchParams.get('referenceID')!) : null,
-  }
-  let checkSpeciesID = await runQuery(conn, `SELECT * FROM ${schema}.Species WHERE [SpeciesID] = ${row.speciesID}`);
-  if (!checkSpeciesID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  if (checkSpeciesID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-  let insertRow = await runQuery(conn,
-    `INSERT INTO ${schema}.Species (SpeciesID, GenusID, CurrentTaxonFlag, ObsoleteTaxonFlag, SpeciesName, SpeciesCode,
-    IDLevel, Authority, FieldFamily, Description, ReferenceID) VALUES (${row.speciesID}, ${row.genusID}, '${row.currentTaxonFlag}',
-    '${row.obsoleteTaxonFlag}', '${row.speciesName}', '${row.speciesCode}', '${row.idLevel}', '${row.authority}', '${row.fieldFamily}', '${row.description}',
-    ${row.referenceID})`);
-  if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Insert successful"}, {status: 200});
-}
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
-export async function PATCH(request: NextRequest) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  const oldSpeciesID = parseInt(request.nextUrl.searchParams.get('oldSpeciesID')!);
-  const row: SpeciesRDS = {
-    id: 0,
-    speciesID: parseInt(request.nextUrl.searchParams.get('speciesID')!),
-    genusID: request.nextUrl.searchParams.get('genusID') ? parseInt(request.nextUrl.searchParams.get('genusID')!) : null,
-    currentTaxonFlag: request.nextUrl.searchParams.get('currentTaxonFlag') ? JSON.parse(request.nextUrl.searchParams.get('currentTaxonFlag')!) : null,
-    obsoleteTaxonFlag: request.nextUrl.searchParams.get('obsoleteTaxonFlag') ? JSON.parse(request.nextUrl.searchParams.get('obsoleteTaxonFlag')!) : null,
-    speciesName: request.nextUrl.searchParams.get('speciesName'),
-    speciesCode: request.nextUrl.searchParams.get('speciesCode'),
-    idLevel: request.nextUrl.searchParams.get('idLevel'),
-    authority: request.nextUrl.searchParams.get('authority'),
-    fieldFamily: request.nextUrl.searchParams.get('fieldFamily'),
-    description: request.nextUrl.searchParams.get('description'),
-    referenceID: request.nextUrl.searchParams.get('referenceID') ? parseInt(request.nextUrl.searchParams.get('referenceID')!) : null,
-  }
+  let conn : PoolConnection | null = null;
+  try {
+    const requestBody = await request.json();
+    const newRowData = {
+      GenusID: requestBody.genusID ?? null,
+      CurrentTaxonFlag: requestBody.currentTaxonFlag ?? null,
+      ObsoleteTaxonFlag: requestBody.obsoleteTaxonFlag ?? null,
+      SpeciesName: requestBody.speciesName ?? null,
+      SpeciesCode: requestBody.speciesCode ?? null,
+      IDLevel: requestBody.idLevel ?? null,
+      Authority: requestBody.authority ?? null,
+      FieldFamily: requestBody.fieldFamily ?? null,
+      Description: requestBody.description ?? null,
+      ReferenceID: requestBody.referenceID ?? null,
+    }
+    conn = await getSqlConnection(0);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Species`, newRowData]);
+    await runQuery(conn, insertQuery);
 
-  if (row.speciesID !== oldSpeciesID) {
-    let newSpeciesIDCheck = await runQuery(conn, `SELECT * FROM ${schema}.Species WHERE [SpeciesID] = '${row.speciesID}'`);
-    if (!newSpeciesIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
-    if (newSpeciesIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-
-    let results = await runQuery(conn, `UPDATE ${schema}.Species
-                                        SET [SpeciesID]         = ${row.speciesID},
-                                            [GenusID]           = ${row.genusID},
-                                            [CurrentTaxonFlag]  = '${row.currentTaxonFlag}',
-                                            [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}',
-                                            [SpeciesName]       = '${row.speciesName}',
-                                            [SpeciesCode]       = '${row.speciesCode}',
-                                            [IDLevel]           = '${row.idLevel}',
-                                            [Authority]         = '${row.authority}',
-                                            [FieldFamily]       = '${row.fieldFamily}',
-                                            [Description]       = '${row.description}',
-                                            [ReferenceID]       = ${row.referenceID}
-                                        WHERE [SpeciesID] = ${oldSpeciesID}`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
-  } else {
-    let results = await runQuery(conn, `UPDATE ${schema}.Species
-                                        SET [GenusID]           = ${row.genusID},
-                                            [CurrentTaxonFlag]  = '${row.currentTaxonFlag}',
-                                            [ObsoleteTaxonFlag] = '${row.obsoleteTaxonFlag}',
-                                            [SpeciesName]       = '${row.speciesName}',
-                                            [SpeciesCode]       = '${row.speciesCode}',
-                                            [IDLevel]           = '${row.idLevel}',
-                                            [Authority]         = '${row.authority}',
-                                            [FieldFamily]       = '${row.fieldFamily}',
-                                            [Description]       = '${row.description}',
-                                            [ReferenceID]       = ${row.referenceID}
-                                        WHERE [SpeciesID] = ${oldSpeciesID}`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
+    return NextResponse.json({ message: "Insert successful" }, { status: 200 });
+  } catch (error) {
+    console.error('Error:', error);
+    throw new Error("Call failed");
+  } finally {
+    if (conn) conn.release();
   }
 }
 
 export async function DELETE(request: NextRequest) {
   const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
-  const deleteSpeciesID = parseInt(request.nextUrl.searchParams.get('speciesID')!);
-  let deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SpeciesID WHERE [SpeciesID] = ${deleteSpeciesID}`);
-  if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Delete successful",}, {status: 200});
+  let conn : PoolConnection | null = null;
+  try {
+    conn = await getSqlConnection(0);
+    const deleteSpeciesID = parseInt(request.nextUrl.searchParams.get('speciesID')!);
+    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Species WHERE [SpeciesID] = ${deleteSpeciesID}`);
+    if (!deleteRow) return NextResponse.json({ message: ErrorMessages.DCF }, { status: 400 });
+    return NextResponse.json({ message: "Delete successful" }, { status: 200 });
+  } catch (error) {
+    console.error('Error:', error);
+    throw new Error("Call failed");
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+
+  let conn : PoolConnection | null = null;
+  try {
+    const requestBody = await request.json();
+    const speciesID = requestBody.speciesID;
+    const updateData = {
+      GenusID: requestBody.genusID ?? null,
+      CurrentTaxonFlag: requestBody.currentTaxonFlag ?? null,
+      ObsoleteTaxonFlag: requestBody.obsoleteTaxonFlag ?? null,
+      SpeciesName: requestBody.speciesName ?? null,
+      SpeciesCode: requestBody.speciesCode ?? null,
+      IDLevel: requestBody.idLevel ?? null,
+      Authority: requestBody.authority ?? null,
+      FieldFamily: requestBody.fieldFamily ?? null,
+      Description: requestBody.description ?? null,
+      ReferenceID: requestBody.referenceID ?? null,
+    }
+    conn = await getSqlConnection(0);
+    // Build the update query
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SpeciesID = ?', [`${schema}.Species`, updateData, speciesID]);
+    await runQuery(conn, updateQuery);
+
+    return NextResponse.json({ message: "Update successful" }, { status: 200 });
+  } catch (error) {
+    console.error('Error:', error);
+    throw new Error("Call failed");
+  } finally {
+    if (conn) conn.release();
+  }
 }
