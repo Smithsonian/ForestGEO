@@ -1,7 +1,7 @@
 code,description,status
-L,leaning,alive
-MS,multiple stems,alive-not measured
-R,resprout,broken below
-D,dead,dead
-M,missing,missing
-SD,stem dead,stem dead
+ExL,leaning,alive
+ExMS,multiple stems,alive-not measured
+ExR,resprout,broken below
+ExD,dead,dead
+ExM,missing,missing
+ExSD,stem dead,stem dead

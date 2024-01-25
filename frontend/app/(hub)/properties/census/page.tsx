@@ -11,7 +11,6 @@ import {
   GridRowsProp,
   GridToolbarContainer
 } from "@mui/x-data-grid";
-import {randomId} from "@mui/x-data-grid-generator";
 import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -21,62 +20,68 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {ErrorMessages, Plot} from "@/config/macros";
-import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/fixeddatacontext";
+import {EditToolbarProps, ErrorMessages} from "@/config/macros";
 import {CensusGridColumns, CensusRDS, StyledDataGrid} from "@/config/sqlmacros";
-import {usePlotContext} from "@/app/contexts/userselectioncontext";
-
-interface EditToolbarProps {
-  rows: GridRowsProp;
-  setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
-  setRowModesModel: (
-    newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
-  ) => void;
-  setRefresh: (newState: boolean) => void;
-  currentPlot: Plot;
-  censusLoadDispatch: React.Dispatch<{censusLoad: CensusRDS[] | null}> | null;
-}
+import {usePlotContext} from "@/app/contexts/userselectionprovider";
+import {Typography} from "@mui/joy";
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
-  const {rows, setRows, setRowModesModel, setRefresh, currentPlot, censusLoadDispatch} = props;
+  const {
+    rows, setRows, setRowModesModel, setRefresh, currentPlot,
+    rowCount, setRowCount, paginationModel, onPaginationModelChange
+  } = props;
 
-  const handleClick = async () => {
-    const id = randomId();
-    const highestCensusID = Math.max(
-      ...rows.map((row) => row.censusID),
-      0
-    );
-    setRows((oldRows) => [...oldRows, {
-      id,
-      censusID: highestCensusID + 1,
+  const handleAddNewRow = async () => {
+    const nextCensusID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.censusID, max), 0)
+      : 0) + 1;
+    const newRow = {
+      id: nextCensusID,
+      censusID: nextCensusID,
       plotID: currentPlot.id,
       plotCensusNumber: 0,
       startDate: null,
       endDate: null,
       description: '',
       isNew: true
-    }]);
-    setRowModesModel((oldModel) => ({
+    };
+    setRows((oldRows) => [...oldRows, newRow]);
+    // Update the pagination model for the last page
+    const lastPage = Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1;
+    onPaginationModelChange({...paginationModel, page: lastPage});
+
+    // Set new row to edit mode
+    // Note: The state update for setRowModesModel might not immediately reflect
+    setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'censusID'},
+      [newRow.id]: {mode: GridRowModes.Edit}
     }));
   };
 
   const handleRefresh = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/fixeddata/census`, {
-      method: 'GET'
-    });
-    setRows(await response.json());
-    if (censusLoadDispatch) {
-      censusLoadDispatch({censusLoad: rows as CensusRDS[]})
+    try {
+      const response = await fetch(`/api/fixeddata/census?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}`, {
+        method: 'GET'
+      });
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      const data = await response.json();
+
+      // Setting the fetched rows and total row count
+      setRows(data.census);
+      setRowCount(data.totalCount);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      // Handle errors as appropriate for your application
     }
     setRefresh(false);
   }
 
   return (
     <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
+      <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
         Add census
       </Button>
       <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
@@ -93,7 +98,7 @@ function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
   return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
-export default function Page() {
+export default function CensusPage() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
@@ -106,29 +111,41 @@ export default function Page() {
     },
   ]
   const [rows, setRows] = React.useState(initialRows);
-  const censusLoad = useCensusLoadContext();
-  const censusLoadDispatch = useCensusLoadDispatch();
-  let currentPlot = usePlotContext();
-  useEffect(() => {
-    if (censusLoad) {
-      setRows(censusLoad);
-    }
-  }, [censusLoad, setRows]);
+  const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const refreshData = async () => {
+  const [paginationModel, setPaginationModel] = useState({
+    page: 0,
+    pageSize: 10,
+  });
+  let currentPlot = usePlotContext();
+  // Function to fetch paginated data
+  const fetchPaginatedData = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/fixeddata/census`, {
-      method: 'GET'
-    });
-    setRows(await response.json());
-    if (censusLoadDispatch) censusLoadDispatch({censusLoad: rows as CensusRDS[]});
+    try {
+      const response = await fetch(`/api/fixeddata/census?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}&plotID=${currentPlot ? currentPlot.id : undefined}`, {
+        method: 'GET',
+      });
+      const data = await response.json();
+      setRows(data.census); // assuming the API returns an object with census and totalCount
+      console.log(rows);
+      setRowCount(data.totalCount);
+      console.log(rowCount);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setSnackbar({children: 'Error fetching data', severity: 'error'});
+    }
     setRefresh(false);
-  }
+  };
+
+  useEffect(() => {
+    fetchPaginatedData().catch(console.error);
+  }, [paginationModel]);
+
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
     setSnackbar({children: String(error), severity: 'error'});
@@ -156,7 +173,7 @@ export default function Page() {
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
-      await refreshData();
+      await fetchPaginatedData();
     }
   };
 
@@ -172,7 +189,6 @@ export default function Page() {
       setSnackbar({children: "Changes cancelled", severity: 'success'});
     }
   };
-
   const processRowUpdate = React.useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>(async (resolve, reject) => {
@@ -215,7 +231,7 @@ export default function Page() {
             }
           }
         }
-        await refreshData();
+        await fetchPaginatedData();
       }),
     [],
   );
@@ -291,7 +307,8 @@ export default function Page() {
           },
         }}
       >
-        <Box sx={{width: '100%'}}>
+        <Box sx={{width: '100%', flexDirection: 'column'}}>
+          <Typography level={"title-lg"}>Note: The Grid is filtered by your selected Plot and Plot ID</Typography>
           <StyledDataGrid sx={{width: '100%'}}
                           rows={rows}
                           columns={columns}
@@ -302,17 +319,25 @@ export default function Page() {
                           processRowUpdate={processRowUpdate}
                           onProcessRowUpdateError={handleProcessRowUpdateError}
                           loading={refresh}
+                          paginationMode="server"
+                          onPaginationModelChange={setPaginationModel}
+                          paginationModel={paginationModel}
+                          rowCount={rowCount}
+                          pageSizeOptions={[paginationModel.pageSize]}
                           slots={{
                             toolbar: EditToolbar,
                           }}
                           slotProps={{
-                            toolbar: {rows, setRows, setRowModesModel, setRefresh, currentPlot, censusLoadDispatch},
-                          }}
-                          initialState={{
-                            filter: {
-                              filterModel: {
-                                items: [{field: 'plotID', operator: 'equals', value: `${currentPlot.id.toString()}`}],
-                              },
+                            toolbar: {
+                              rows,
+                              setRows,
+                              setRowModesModel,
+                              setRefresh,
+                              currentPlot,
+                              rowCount,
+                              setRowCount,
+                              paginationModel,
+                              onPaginationModelChange: setPaginationModel,
                             },
                           }}
           />

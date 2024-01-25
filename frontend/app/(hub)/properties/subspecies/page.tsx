@@ -11,7 +11,6 @@ import {
   GridRowsProp,
   GridToolbarContainer
 } from "@mui/x-data-grid";
-import {randomId} from "@mui/x-data-grid-generator";
 import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -21,44 +20,24 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, {useEffect, useState} from "react";
 import Box from "@mui/joy/Box";
-import {ErrorMessages} from "@/config/macros";
-import {
-  useSpeciesLoadContext,
-  useSpeciesLoadDispatch,
-  useSubSpeciesLoadContext,
-  useSubSpeciesLoadDispatch
-} from "@/app/contexts/fixeddatacontext";
-import {
-  CoreMeasurementsRDS,
-  SpeciesGridColumns,
-  SpeciesRDS,
-  StyledDataGrid,
-  SubSpeciesGridColumns,
-  SubSpeciesRDS
-} from "@/config/sqlmacros";
+import {EditToolbarProps, ErrorMessages} from "@/config/macros";
+import {StyledDataGrid, SubSpeciesGridColumns, SubSpeciesRDS} from "@/config/sqlmacros";
+import {usePlotContext} from "@/app/contexts/userselectionprovider";
 
-interface EditToolbarProps {
-  rows: GridRowsProp;
-  setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
-  setRowModesModel: (
-    newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
-  ) => void;
-  setRefresh: (newState: boolean) => void;
-  subSpeciesLoadDispatch: React.Dispatch<{subSpeciesLoad: SubSpeciesRDS[] | null}> | null;
-}
+function EditToolbar(props: Readonly<EditToolbarProps>) {
+  const {
+    rows, setRows, setRowModesModel, setRefresh,
+    rowCount, setRowCount, paginationModel, onPaginationModelChange
+  } = props;
 
-function EditToolbar(props: EditToolbarProps) {
-  const {rows, setRows, setRowModesModel, setRefresh, subSpeciesLoadDispatch} = props;
+  const handleAddNewRow = async () => {
+    const nextSubSpeciesID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.speciesID, max), 0)
+      : 0) + 1;
 
-  const handleClick = async () => {
-    const id = randomId();
-    const highestSpeciesID = Math.max(
-      ...rows.map((row) => row.subSpeciesID),
-      0
-    );
-    setRows((oldRows) => [...oldRows, {
-      id,
-      subSpeciesID: highestSpeciesID + 1,
+    const newRow = {
+      id: nextSubSpeciesID,
+      subSpeciesID: nextSubSpeciesID,
       speciesID: 0,
       subSpeciesName: '',
       subSpeciesCode: '',
@@ -66,26 +45,42 @@ function EditToolbar(props: EditToolbarProps) {
       obsoleteTaxonFlag: false,
       authority: '',
       infraSpecificLevel: ''
-    }]);
-    setRowModesModel((oldModel) => ({
+    };
+    setRows((oldRows) => [...oldRows, newRow]);
+    // Update the pagination model for the last page
+    const lastPage = Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1;
+    onPaginationModelChange({...paginationModel, page: lastPage});
+
+    // Set new row to edit mode
+    // Note: The state update for setRowModesModel might not immediately reflect
+    setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'speciesID'},
+      [newRow.id]: {mode: GridRowModes.Edit}
     }));
   };
 
   const handleRefresh = async () => {
-    setRefresh(true);
-    const response = await fetch(`/api/fixeddata/subspecies`, {
-      method: 'GET'
-    });
-    setRows(await response.json());
-    if (subSpeciesLoadDispatch) subSpeciesLoadDispatch({subSpeciesLoad: rows as SubSpeciesRDS[]})
-    setRefresh(false);
-  }
+    try {
+      const response = await fetch(`/api/fixeddata/subspecies?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}`, {
+        method: 'GET'
+      });
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      const data = await response.json();
 
+      // Setting the fetched rows and total row count
+      setRows(data.subSpecies);
+      setRowCount(data.totalCount);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      // Handle errors as appropriate for your application
+    }
+    setRefresh(false);
+  };
   return (
     <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
+      <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
         Add SubSpecies
       </Button>
       <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
@@ -103,7 +98,7 @@ function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
   return fields.some(field => newRow[field] !== oldRow[field]);
 }
 
-export default function Page() {
+export default function SubSpeciesPage() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
@@ -118,28 +113,41 @@ export default function Page() {
     },
   ]
   const [rows, setRows] = React.useState(initialRows);
-  const subSpeciesLoad = useSubSpeciesLoadContext();
-  const subSpeciesLoadDispatch = useSubSpeciesLoadDispatch();
-  useEffect(() => {
-    if (subSpeciesLoad) {
-      setRows(subSpeciesLoad);
-    }
-  }, [subSpeciesLoad, setRows]);
+  const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const refreshData = async () => {
+  const [paginationModel, setPaginationModel] = useState({
+    page: 0,
+    pageSize: 10,
+  });
+  let currentPlot = usePlotContext();
+  // Function to fetch paginated data
+  const fetchPaginatedData = async () => {
     setRefresh(true);
-    const response = await fetch(`/api/fixeddata/subspecies`, {
-      method: 'GET'
-    });
-    setRows(await response.json());
-    if (subSpeciesLoadDispatch) subSpeciesLoadDispatch({subSpeciesLoad: rows as SubSpeciesRDS[]})
+    try {
+      const response = await fetch(`/api/fixeddata/subspecies?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}`, {
+        method: 'GET',
+      });
+      const data = await response.json();
+      setRows(data.species); // assuming the API returns an object with coreMeasurements and totalCount
+      console.log(rows);
+      setRowCount(data.totalCount);
+      console.log(rowCount);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setSnackbar({children: 'Error fetching data', severity: 'error'});
+    }
     setRefresh(false);
-  }
+  };
+
+  useEffect(() => {
+    fetchPaginatedData().catch(console.error);
+  }, [paginationModel]);
+
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
     setSnackbar({children: String(error), severity: 'error'});
@@ -160,12 +168,14 @@ export default function Page() {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/subspecies?subspeciesID=${rows.find((row) => row.id == id)!.subSpeciesID}`, {method: 'DELETE'});
+    const response = await fetch(`/api/fixeddata/subspecies?subSpeciesID=${rows.find((row) => row.id == id)!.subSpeciesID}`, {
+      method: 'DELETE'
+    });
     if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
-      await refreshData();
+      await fetchPaginatedData();
     }
   };
 
@@ -223,7 +233,7 @@ export default function Page() {
             }
           }
         }
-        await refreshData();
+        await fetchPaginatedData();
       }),
     [],
   );
@@ -308,11 +318,26 @@ export default function Page() {
                         processRowUpdate={processRowUpdate}
                         onProcessRowUpdateError={handleProcessRowUpdateError}
                         loading={refresh}
+                        paginationMode="server"
+                        onPaginationModelChange={setPaginationModel}
+                        paginationModel={paginationModel}
+                        rowCount={rowCount}
+                        pageSizeOptions={[paginationModel.pageSize]}
                         slots={{
                           toolbar: EditToolbar,
                         }}
                         slotProps={{
-                          toolbar: {rows, setRows, setRowModesModel, setRefresh, subSpeciesLoadDispatch},
+                          toolbar: {
+                            rows,
+                            setRows,
+                            setRowModesModel,
+                            setRefresh,
+                            currentPlot,
+                            rowCount,
+                            setRowCount,
+                            paginationModel,
+                            onPaginationModelChange: setPaginationModel,
+                          },
                         }}
         />
       </Box>

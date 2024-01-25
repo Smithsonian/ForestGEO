@@ -1,6 +1,6 @@
 "use client";
 
-import React, {createContext, Dispatch, SetStateAction, useContext, useEffect, useReducer} from "react";
+import React, {createContext, Dispatch, useContext, useEffect, useReducer} from "react";
 import {
   AttributesRDS,
   CensusRDS,
@@ -11,9 +11,8 @@ import {
   SpeciesRDS,
   SubSpeciesRDS
 } from "@/config/sqlmacros";
-import {getData, setData} from "@/config/db";
+import {getData} from "@/config/db";
 import {createEnhancedDispatch, genericLoadReducer, LoadAction} from "@/config/macros";
-
 
 export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | null>(null);
 export const AttributeLoadContext = createContext<AttributesRDS[] | null>(null);
@@ -46,31 +45,31 @@ export const SubSpeciesLoadDispatchContext = createContext<Dispatch<{
 }> | null>(null);
 export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: PlotRDS[] | null }> | null>(null);
 
-export function FixedDataProvider({children}: { children: React.ReactNode }) {
+export function CoreDataProvider({children}: { children: React.ReactNode }) {
 
   const [coreMeasurementLoad, coreMeasurementLoadDispatch] =
-    useReducer<React.Reducer<CoreMeasurementsRDS[] | null, LoadAction<CoreMeasurementsRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<CoreMeasurementsRDS[] | null, LoadAction<CoreMeasurementsRDS[]>>>(genericLoadReducer, []);
 
   const [attributeLoad, attributeLoadDispatch] =
-    useReducer<React.Reducer<AttributesRDS[] | null, LoadAction<AttributesRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<AttributesRDS[] | null, LoadAction<AttributesRDS[]>>>(genericLoadReducer, []);
 
   const [censusLoad, censusLoadDispatch] =
-    useReducer<React.Reducer<CensusRDS[] | null, LoadAction<CensusRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<CensusRDS[] | null, LoadAction<CensusRDS[]>>>(genericLoadReducer, []);
 
   const [personnelLoad, personnelLoadDispatch] =
-    useReducer<React.Reducer<PersonnelRDS[] | null, LoadAction<PersonnelRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<PersonnelRDS[] | null, LoadAction<PersonnelRDS[]>>>(genericLoadReducer, []);
 
   const [quadratsLoad, quadratsLoadDispatch] =
-    useReducer<React.Reducer<QuadratsRDS[] | null, LoadAction<QuadratsRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<QuadratsRDS[] | null, LoadAction<QuadratsRDS[]>>>(genericLoadReducer, []);
 
   const [speciesLoad, speciesLoadDispatch] =
-    useReducer<React.Reducer<SpeciesRDS[] | null, LoadAction<SpeciesRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<SpeciesRDS[] | null, LoadAction<SpeciesRDS[]>>>(genericLoadReducer, []);
 
   const [subSpeciesLoad, subSpeciesLoadDispatch] =
-    useReducer<React.Reducer<SubSpeciesRDS[] | null, LoadAction<SubSpeciesRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<SubSpeciesRDS[] | null, LoadAction<SubSpeciesRDS[]>>>(genericLoadReducer, []);
 
   const [plotsLoad, plotsLoadDispatch] =
-    useReducer<React.Reducer<PlotRDS[] | null, LoadAction<PlotRDS[]>>>(genericLoadReducer, null);
+    useReducer<React.Reducer<PlotRDS[] | null, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
 
   const enhancedCoreMeasurementLoadDispatch = createEnhancedDispatch(coreMeasurementLoadDispatch, 'coreMeasurementLoad');
   const enhancedAttributeLoadDispatch = createEnhancedDispatch(attributeLoadDispatch, 'attributeLoad');
@@ -87,13 +86,13 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
       coreMeasurementLoadDispatch({type: 'coreMeasurementLoad', payload: coreMeasurementLoad});
 
       const attributeLoad = await getData('attributeLoad');
-      attributeLoadDispatch({ type: 'attributeLoad', payload: attributeLoad });
+      attributeLoadDispatch({type: 'attributeLoad', payload: attributeLoad});
 
       const censusLoad = await getData('censusLoad');
       censusLoadDispatch({type: 'censusLoad', payload: censusLoad});
 
       const personnelLoad = await getData('personnelLoad');
-      personnelLoadDispatch({ type: 'personnelLoad', payload: personnelLoad });
+      personnelLoadDispatch({type: 'personnelLoad', payload: personnelLoad});
 
       const quadratsLoad = await getData('quadratsLoad');
       quadratsLoadDispatch({type: 'quadratsLoad', payload: quadratsLoad});
@@ -147,42 +146,6 @@ export function FixedDataProvider({children}: { children: React.ReactNode }) {
     </CoreMeasurementLoadContext.Provider>
   );
 }
-
-function coreMeasurementLoadReducer(currentCoreMeasurementLoad: any, action: {
-  coreMeasurementLoad: CoreMeasurementsRDS[] | null
-}) {
-  return action.coreMeasurementLoad;
-}
-
-function attributeLoadReducer(currentAttributeLoad: any, action: { attributeLoad: AttributesRDS[] | null }) {
-
-  return action.attributeLoad;
-}
-
-function censusLoadReducer(currentCensusLoad: any, action: { censusLoad: CensusRDS[] | null }) {
-  return action.censusLoad;
-}
-
-function personnelLoadReducer(currentPersonnelLoad: any, action: { personnelLoad: PersonnelRDS[] | null }) {
-  return action.personnelLoad;
-}
-
-function quadratsLoadReducer(currentQuadratsLoad: any, action: { quadratsLoad: QuadratsRDS[] | null }) {
-  return action.quadratsLoad;
-}
-
-function speciesLoadReducer(currentSpeciesLoad: any, action: { speciesLoad: SpeciesRDS[] | null }) {
-  return action.speciesLoad;
-}
-
-function subSpeciesLoadReducer(currentSpeciesLoad: any, action: { subSpeciesLoad: SubSpeciesRDS[] | null }) {
-  return action.subSpeciesLoad;
-}
-
-function plotsLoadReducer(currentPlotsLoad: any, action: { plotsLoad: PlotRDS[] | null }) {
-  return action.plotsLoad;
-}
-
 
 export function useCoreMeasurementLoadContext() {
   return useContext(CoreMeasurementLoadContext);

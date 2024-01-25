@@ -1,5 +1,5 @@
 spcode,genus,species,IDLevel,family,authority
-SHORMA,Shorea,macroptera,species,Dipterocarpaceae,Author A
-SHORMC,Shorea,macrophylla,species,Dipterocarpaceae,Author B
-LITSBL,Litsea,Big Leaf,genus,Lauraceae,
-APORS1,Aporosa,sp. 1,species,Phyllanthaceae,
+SHORMA,Shorea,Exmacroptera,species,Dipterocarpaceae,Author A
+SHORMC,Shorea,Exmacrophylla,species,Dipterocarpaceae,Author B
+LITSBL,Litsea,ExBig Leaf,genus,Lauraceae,
+APORS1,Aporosa,Exsp. 1,species,Phyllanthaceae,

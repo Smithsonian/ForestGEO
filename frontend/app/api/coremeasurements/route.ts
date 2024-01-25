@@ -1,24 +1,64 @@
+// CORE MEASUREMENTS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {ErrorMessages} from "@/config/macros";
+import {bitToBoolean, ErrorMessages} from "@/config/macros";
 import {CoreMeasurementsRDS} from "@/config/sqlmacros";
-import {getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
+import {
+  getSchema,
+  getSqlConnection,
+  parseCoreMeasurementsRequestBody,
+  runQuery
+} from "@/components/processors/processorhelpers";
 import mysql, {PoolConnection} from "mysql2/promise";
 
-export async function GET(): Promise<NextResponse<CoreMeasurementsRDS[]>> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) {
-    throw new Error("Environmental variable extraction for schema failed");
-  }
+
+export async function GET(request: NextRequest): Promise<NextResponse<{
+  coreMeasurements: CoreMeasurementsRDS[],
+  totalCount: number
+}>> {
   let conn: PoolConnection | null = null;
   try {
-    // Initialize the connection attempt counter
-    let attempt = 0;
-    conn = await getSqlConnection(attempt);
+    const schema = getSchema();
+    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+    const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
 
-    // Run the query and get the results
-    const results = await runQuery(conn, `SELECT * FROM ${schema}.CoreMeasurements`);
+    if (isNaN(page) || isNaN(pageSize)) {
+      throw new Error('Invalid page, pageSize, or plotID parameter');
+    }
+    // Initialize the connection attempt counter
+    conn = await getSqlConnection(0);
+    if (conn) console.log('sql conn established')
+
+    /// Calculate the starting row for the query based on the page number and page size
+    const startRow = page * pageSize;
+
+    // Query to get the paginated data
+    let paginatedQuery: string;
+    let queryParams: any[];
+    if (plotID) {
+      paginatedQuery =  `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.CoreMeasurements
+      WHERE PlotID = ?
+      LIMIT ?, ?
+      `;
+      queryParams = [plotID, startRow, pageSize];
+    } else {
+      paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.CoreMeasurements
+      LIMIT ?, ?
+    `;
+      queryParams = [startRow, pageSize];
+    }
+    const paginatedResults = await runQuery(conn, paginatedQuery, queryParams.map(param => param.toString()));
+
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRows = totalRowsResult[0].totalRows;
+    console.log(`totalRows: ${totalRows}`);
     // Map the results to CoreMeasurementsRDS structure
-    let coreMeasurementRows: CoreMeasurementsRDS[] = results.map((row, index) => ({
+    let coreMeasurementRows: CoreMeasurementsRDS[] = paginatedResults.map((row, index) => ({
+      // ... mapping fields ...
       id: index + 1,
       coreMeasurementID: row.CoreMeasurementID,
       censusID: row.CensusID,
@@ -27,17 +67,20 @@ export async function GET(): Promise<NextResponse<CoreMeasurementsRDS[]>> {
       treeID: row.TreeID,
       stemID: row.StemID,
       personnelID: row.PersonnelID,
-      measurementTypeID: row.MeasurementTypeID,
+      isRemeasurement: bitToBoolean(row.IsRemeasurement),
+      isCurrent: bitToBoolean(row.IsCurrent),
       measurementDate: row.MeasurementDate,
-      measurement: row.Measurement,
-      isRemeasurement: row.IsRemeasurement,
-      isCurrent: row.IsCurrent,
+      measuredDBH: row.MeasuredDBH,
+      measuredHOM: row.MeasuredHOM,
+      description: row.Description,
       userDefinedFields: row.UserDefinedFields,
-      masterMeasurementID: row.MasterMeasurementID,
       // ... other fields as needed
     }));
 
-    return new NextResponse(JSON.stringify(coreMeasurementRows), { status: 200 });
+    return new NextResponse(JSON.stringify({
+      coreMeasurements: coreMeasurementRows,
+      totalCount: totalRows
+    }), {status: 200});
   } catch (error: any) {
     throw new Error('SQL query failed: ' + error.message);
   } finally {
@@ -47,40 +90,20 @@ export async function GET(): Promise<NextResponse<CoreMeasurementsRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
-
   let conn;
   try {
     // Parse the request body
-    const requestBody = await request.json();
-
-    // Validate and map the request body to match the CoreMeasurements table structure
-    const newRowData = {
-      CensusID: requestBody.censusID ?? null,
-      PlotID: requestBody.plotID ?? null,
-      QuadratID: requestBody.quadratID ?? null,
-      TreeID: requestBody.treeID ?? null,
-      StemID: requestBody.stemID ?? null,
-      PersonnelID: requestBody.personnelID ?? null,
-      MeasurementTypeID: requestBody.measurementTypeID ?? null,
-      MeasurementDate: requestBody.measurementDate ?? null,
-      Measurement: requestBody.measurement ?? null,
-      IsRemeasurement: requestBody.isRemeasurement ?? null,
-      IsCurrent: requestBody.isCurrent ?? null,
-      UserDefinedFields: requestBody.userDefinedFields ?? null,
-      Description: requestBody.description ?? null,
-      MasterMeasurementID: requestBody.masterMeasurementID ?? null,
-    };
+    const schema = getSchema();
+    const newRowData = await parseCoreMeasurementsRequestBody(request, 'POST');
     conn = await getSqlConnection(0);
     // Insert the new row
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.CoreMeasurements`, newRowData]);
     await runQuery(conn, insertQuery);
 
-    return NextResponse.json({ message: "Insert successful" }, { status: 200 });
+    return NextResponse.json({message: "Insert successful"}, {status: 200});
   } catch (error: any) {
     console.error('Error in POST operation:', error.message);
-    return NextResponse.json({ message: ErrorMessages.ICF }, { status: 400 });
+    return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   } finally {
     if (conn) conn.release();
   }
@@ -88,38 +111,42 @@ export async function POST(request: NextRequest) {
 
 
 export async function PATCH(request: NextRequest) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("environmental variable extraction for schema failed");
   let conn;
   try {
-    const requestBody = await request.json();
-    // Extract the CoreMeasurementID from the request body
-    const coreMeasurementID = requestBody.coreMeasurementID;
-    // Create an object containing the fields to update
-    const updateData = {
-      CensusID: requestBody.censusID ?? null,
-      PlotID: requestBody.plotID ?? null,
-      QuadratID: requestBody.quadratID ?? null,
-      TreeID: requestBody.treeID ?? null,
-      StemID: requestBody.stemID ?? null,
-      PersonnelID: requestBody.personnelID ?? null,
-      MeasurementTypeID: requestBody.measurementTypeID ?? null,
-      MeasurementDate: requestBody.measurementDate ? new Date(requestBody.measurementDate) : null,
-      Measurement: requestBody.measurement ?? null,
-      IsRemeasurement: requestBody.isRemeasurement ?? null,
-      IsCurrent: requestBody.isCurrent ?? null,
-      UserDefinedFields: requestBody.userDefinedFields || null,
-      MasterMeasurementID: requestBody.masterMeasurementID ?? null,
-    };
+    const schema = getSchema();
+    const {coreMeasurementID, updateData} = await parseCoreMeasurementsRequestBody(request, 'PATCH');
     conn = await getSqlConnection(0);
     // Build the update query
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CoreMeasurementID = ?', [`${schema}.CoreMeasurements`, updateData, coreMeasurementID]);
     await runQuery(conn, updateQuery);
 
-    return NextResponse.json({ message: "Update successful" }, { status: 200 });
+    return NextResponse.json({message: "Update successful"}, {status: 200});
   } catch (error: any) {
     console.error('Error in PATCH operation:', error.message);
-    return NextResponse.json({ message: ErrorMessages.UCF }, { status: 400 });
+    return NextResponse.json({message: ErrorMessages.UCF}, {status: 400});
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  try {
+    const schema = getSchema();
+    conn = await getSqlConnection(0);
+
+    const deleteCode = request.nextUrl.searchParams.get('coreMeasurementID')!;
+    if (!deleteCode) {
+      return new NextResponse(JSON.stringify({message: "coremeasurementID is required"}), {status: 400});
+    }
+
+    const deleteQuery = `DELETE FROM ${schema}.CoreMeasurements WHERE CoreMeasurementID = ?`;
+    await runQuery(conn, deleteQuery, [deleteCode]);
+
+    return new NextResponse(JSON.stringify({message: "Delete successful"}), {status: 200});
+  } catch (error) {
+    console.error('Error in DELETE operation:', error);
+    return new NextResponse(JSON.stringify({message: ErrorMessages.DCF}), {status: 400});
   } finally {
     if (conn) conn.release();
   }

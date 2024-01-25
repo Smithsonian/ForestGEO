@@ -1,8 +1,8 @@
 /**
  * macros for sql table props:
  */
-import {DataGrid, GridColDef} from "@mui/x-data-grid";
-import {styled} from "@mui/system";
+import {DataGrid, GridColDef} from '@mui/x-data-grid';
+import {styled} from '@mui/material/styles';
 
 export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   border: 0,
@@ -182,13 +182,13 @@ export interface CoreMeasurementsRDS {
   treeID: number | null;
   stemID: number | null;
   personnelID: number | null;
-  measurementTypeID: number | null;
-  measurementDate: Date | null;
-  measurement: string | null;
   isRemeasurement: boolean | null;
   isCurrent: boolean | null;
+  measurementDate: Date | null;
+  measuredDBH: number | null;
+  measuredHOM: number | null;
+  description: string | null;
   userDefinedFields: string | null;
-  masterMeasurementID: number | null;
 }
 
 
@@ -200,7 +200,8 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'measurementTypeID', headerName: 'MeasurementTypeID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1, align: 'left'},
   {
     field: 'measurementDate',
     headerName: 'MeasurementDate',
@@ -212,11 +213,9 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
       return new Date(params.value);
     }
   },
-  {field: 'measurement', headerName: 'Measurement', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'userDefinedFields', headerName: 'UserDefinedFields', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'masterMeasurementID', headerName: 'MasterMeasurementID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
 ]
 
 export interface CurrentObsoleteRDS {

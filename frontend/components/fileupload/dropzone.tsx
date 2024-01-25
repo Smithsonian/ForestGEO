@@ -57,8 +57,6 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
           const config: ParseConfig = {delimiter: ','};
           const results = parse(binaryStr, config);
 
-          //console.log(JSON.stringify(results.data));
-
           if (results.errors.length) {
             alert(
               `Error on row: ${results.errors[0].row}. ${results.errors[0].message}`

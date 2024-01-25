@@ -1,5 +1,5 @@
 import mysql, {PoolConnection, RowDataPacket} from 'mysql2/promise';
-import {RowDataStructure} from "@/config/macros";
+import {booleanToBit, RowDataStructure} from "@/config/macros";
 
 import {processSpecies} from "@/components/processors/processspecies";
 import processCensus from "@/components/processors/processcensus";
@@ -8,6 +8,7 @@ import processOldTreeForm from "@/components/processors/processoldtreeform";
 import processBigTreesForm from "@/components/processors/processbigtreesform";
 import processMultipleStemsForm from "@/components/processors/processmultiplestemsform";
 import * as fs from "fs";
+import {NextRequest} from "next/server";
 
 
 export async function insertOrUpdate(
@@ -304,7 +305,6 @@ export async function getPersonnelIDByName(
 }
 
 
-
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
@@ -313,7 +313,7 @@ export type FileMapping = {
 
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
-  "fixeddata_codes.txt": {
+  "fixeddata_codes": {
     tableName: "Attributes",
     columnMappings: {
       "code": "Code",
@@ -321,7 +321,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "status": "Status"
     }
   },
-  "fixeddata_personnel.txt": {
+  "fixeddata_personnel": {
     tableName: "Personnel",
     columnMappings: {
       "firstname": "FirstName",
@@ -329,7 +329,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "role": "Role"
     }
   },
-  "fixeddata_species.txt": {
+  "fixeddata_species": {
     tableName: "",
     columnMappings: {
       "spcode": "Species.SpeciesCode",
@@ -341,7 +341,7 @@ export const fileMappings: Record<string, FileMapping> = {
     },
     specialProcessing: processSpecies
   },
-  "fixeddata_quadrat.txt": {
+  "fixeddata_quadrat": {
     tableName: "Quadrats",
     columnMappings: {
       "quadrat": "Quadrats.QuadratName",
@@ -351,7 +351,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "dimy": "Quadrats.DimensionY"
     }
   },
-  "fixeddata_census.txt": {
+  "fixeddata_census": {
     tableName: "", // Multiple tables involved
     columnMappings: {
       "tag": "Trees.TreeTag",
@@ -429,9 +429,10 @@ const sqlConfig: any = {
   host: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
   port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
   database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
-  ssl:{ca:fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
+  ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
 }
 const pool = mysql.createPool(sqlConfig);
+
 // Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
@@ -460,4 +461,230 @@ export async function runQuery(connection: PoolConnection, query: string, params
   } finally {
     connection.release(); // Release the connection back to the pool
   }
+}
+
+export async function parseCoreMeasurementsRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST': {
+      return {
+        CensusID: requestBody.censusID ?? null,
+        PlotID: requestBody.plotID ?? null,
+        QuadratID: requestBody.quadratID ?? null,
+        TreeID: requestBody.treeID ?? null,
+        StemID: requestBody.stemID ?? null,
+        PersonnelID: requestBody.personnelID ?? null,
+        IsRemeasurement: booleanToBit(requestBody.isRemeasurement) ?? null,
+        IsCurrent: booleanToBit(requestBody.isCurrent) ?? null,
+        MeasurementDate: requestBody.measurementDate ? new Date(requestBody.measurementDate) : null,
+        MeasuredDBH: requestBody.measuredDBH ?? null,
+        MeasuredHOM: requestBody.measuredHOM ?? null,
+        Description: requestBody.description ?? null,
+        UserDefinedFields: requestBody.userDefinedFields ?? null,
+      };
+    }
+    case 'PATCH': {
+      const coreMeasurementID = requestBody.coreMeasurementID;
+      const updateData = {
+        CensusID: requestBody.censusID ?? null,
+        PlotID: requestBody.plotID ?? null,
+        QuadratID: requestBody.quadratID ?? null,
+        TreeID: requestBody.treeID ?? null,
+        StemID: requestBody.stemID ?? null,
+        PersonnelID: requestBody.personnelID ?? null,
+        IsRemeasurement: booleanToBit(requestBody.isRemeasurement) ?? null,
+        IsCurrent: booleanToBit(requestBody.isCurrent) ?? null,
+        MeasurementDate: requestBody.measurementDate ? new Date(requestBody.measurementDate) : null,
+        MeasuredDBH: requestBody.measuredDBH ?? null,
+        MeasuredHOM: requestBody.measuredHOM ?? null,
+        Description: requestBody.description ?? null,
+        UserDefinedFields: requestBody.userDefinedFields ?? null,
+      };
+      return {coreMeasurementID, updateData};
+    }
+    default:
+      throw new Error(`invalid parse type -- coremeasurements`);
+  }
+}
+
+export async function parseAttributeRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST':
+      return {
+        Code: requestBody.code,
+        Description: requestBody.description ?? null,
+        Status: requestBody.status ?? null,
+      };
+    case 'PATCH': {
+      return {
+        Code: requestBody.code,
+        Description: requestBody.description ?? null,
+        Status: requestBody.status ?? null,
+      };
+    }
+    default:
+      throw new Error("Invalid parse type -- attributes");
+  }
+}
+
+export async function parseCensusRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST':
+      return {
+        PlotID: requestBody.plotID ?? null,
+        PlotCensusNumber: requestBody.plotCensusNumber ?? null,
+        StartDate: new Date(requestBody.startDate ?? null),
+        EndDate: new Date(requestBody.endDate ?? null),
+        Description: requestBody.description ?? null,
+      }
+    case 'PATCH': {
+      const censusID = requestBody.censusID;
+      const updateData = {
+        PlotID: requestBody.plotID ?? null,
+        PlotCensusNumber: requestBody.plotCensusNumber ?? null,
+        StartDate: new Date(requestBody.startDate ?? null),
+        EndDate: new Date(requestBody.endDate ?? null),
+        Description: requestBody.description ?? null,
+      }
+      return {censusID, updateData};
+    }
+    default:
+      throw new Error('invalid parse type -- census');
+
+  }
+}
+
+export async function parsePersonnelRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST':
+      return {
+        FirstName: requestBody.firstName ?? null,
+        LastName: requestBody.lastName ?? null,
+        Role: requestBody.role ?? null,
+      };
+    case 'PATCH': {
+      const personnelID = requestBody.personnelID;
+      const updateData = {
+        FirstName: requestBody.firstName ?? null,
+        LastName: requestBody.lastName ?? null,
+        Role: requestBody.role ?? null,
+      };
+      return {personnelID, updateData};
+    }
+    default:
+      throw new Error('invalid parse type -- personnel');
+  }
+}
+
+export async function parseQuadratsRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST':
+      return {
+        PlotID: requestBody.plotID,
+        QuadratName: requestBody.quadratName,
+        QuadratX: requestBody.quadratX,
+        QuadratY: requestBody.quadratY,
+        QuadratZ: requestBody.quadratZ,
+        DimensionX: requestBody.dimensionX,
+        DimensionY: requestBody.dimensionY,
+        Area: requestBody.area,
+        QuadratShape: requestBody.quadratShape,
+      }
+    case 'PATCH': {
+      const quadratID = requestBody.quadratID;
+      const updateData = {
+        PlotID: requestBody.plotID,
+        QuadratName: requestBody.quadratName,
+        QuadratX: requestBody.quadratX,
+        QuadratY: requestBody.quadratY,
+        QuadratZ: requestBody.quadratZ,
+        DimensionX: requestBody.dimensionX,
+        DimensionY: requestBody.dimensionY,
+        Area: requestBody.area,
+        QuadratShape: requestBody.quadratShape,
+      }
+      return {quadratID, updateData};
+    }
+    default:
+      throw new Error('invalid parse type -- quadrat');
+  }
+}
+
+export async function parseSpeciesRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST':
+      return {
+        GenusID: requestBody.genusID ?? null,
+        CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
+        ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
+        SpeciesName: requestBody.speciesName ?? null,
+        SpeciesCode: requestBody.speciesCode ?? null,
+        IDLevel: requestBody.idLevel ?? null,
+        Authority: requestBody.authority ?? null,
+        FieldFamily: requestBody.fieldFamily ?? null,
+        Description: requestBody.description ?? null,
+        ReferenceID: requestBody.referenceID ?? null,
+      };
+    case 'PATCH': {
+      const speciesID = requestBody.speciesID;
+      const updateData = {
+        GenusID: requestBody.genusID ?? null,
+        CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
+        ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
+        SpeciesName: requestBody.speciesName ?? null,
+        SpeciesCode: requestBody.speciesCode ?? null,
+        IDLevel: requestBody.idLevel ?? null,
+        Authority: requestBody.authority ?? null,
+        FieldFamily: requestBody.fieldFamily ?? null,
+        Description: requestBody.description ?? null,
+        ReferenceID: requestBody.referenceID ?? null,
+      };
+      return {speciesID, updateData};
+    }
+    default:
+      throw new Error('invalid parse type -- species');
+  }
+}
+
+export async function parseSubSpeciesRequestBody(request: NextRequest, parseType: string) {
+  const requestBody = await request.json();
+  switch (parseType) {
+    case 'POST':
+      return {
+        SpeciesID: requestBody.speciesID ?? null,
+        SubSpeciesName: requestBody.subSpeciesName ?? null,
+        SubSpeciesCode: requestBody.subSpeciesCode ?? null,
+        CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
+        ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
+        Authority: requestBody.authority ?? null,
+        InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
+      };
+    case 'PATCH': {
+      const subSpeciesID = requestBody.subSpeciesID;
+      const updateData = {
+        SpeciesID: requestBody.speciesID ?? null,
+        SubSpeciesName: requestBody.subSpeciesName ?? null,
+        SubSpeciesCode: requestBody.subSpeciesCode ?? null,
+        CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
+        ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
+        Authority: requestBody.authority ?? null,
+        InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
+      };
+      return {subSpeciesID, updateData};
+    }
+    default:
+      throw new Error('invalid parse type -- species');
+  }
+}
+
+// New function to extract environment variables
+export function getSchema() {
+  const schema = process.env.AZURE_SQL_SCHEMA;
+  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+  return schema;
 }

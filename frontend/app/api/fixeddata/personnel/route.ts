@@ -1,19 +1,54 @@
-import { NextRequest, NextResponse } from "next/server";
-import { ErrorMessages } from "@/config/macros";
-import { PersonnelRDS } from "@/config/sqlmacros";
-import { getSqlConnection, runQuery } from "@/components/processors/processorhelpers";
-import mysql, { PoolConnection } from "mysql2/promise";
+// FIXED DATA PERSONNEL ROUTE HANDLERS
+import {NextRequest, NextResponse} from "next/server";
+import {ErrorMessages} from "@/config/macros";
+import {PersonnelRDS} from "@/config/sqlmacros";
+import {
+  getSchema,
+  getSqlConnection,
+  parsePersonnelRequestBody,
+  runQuery
+} from "@/components/processors/processorhelpers";
+import mysql, {PoolConnection} from "mysql2/promise";
 
-export async function GET(): Promise<NextResponse<PersonnelRDS[]>> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
+export async function GET(request: NextRequest): Promise<NextResponse<{
+  personnel: PersonnelRDS[],
+  totalCount: number
+}>> {
   let conn: PoolConnection | null = null;
   try {
-    conn = await getSqlConnection(0);
-    const rows = await runQuery(conn, `SELECT * FROM ${schema}.Personnel`, []);
+    const schema = getSchema();
+    conn = await getSqlConnection(0); // Utilize the retry mechanism effectively
+    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+    if (isNaN(page)) {
+      console.error('page parseInt conversion failed');
+    }
+    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+    if (isNaN(pageSize)) {
+      console.error('pageSize parseInt conversion failed');
+      // handle error or set default
+    }
+    // Initialize the connection attempt counter
+    let attempt = 0;
+    conn = await getSqlConnection(attempt);
+    if (conn) console.log('sql conn established')
 
-    const personnelRows: PersonnelRDS[] = rows.map((row: any, index) => ({
+    /// Calculate the starting row for the query based on the page number and page size
+    const startRow = page * pageSize;
+
+    // Query to get the paginated data
+    const paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Personnel
+      LIMIT ?, ?
+    `;
+    const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
+
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRows = totalRowsResult[0].totalRows;
+    console.log(`totalRows: ${totalRows}`);
+
+    const personnelRows: PersonnelRDS[] = paginatedResults.map((row: any, index) => ({
       id: index + 1,
       personnelID: row.personnelID,
       firstName: row.firstName,
@@ -22,7 +57,7 @@ export async function GET(): Promise<NextResponse<PersonnelRDS[]>> {
       // ... other fields as needed
     }));
 
-    return new NextResponse(JSON.stringify(personnelRows), { status: 200 });
+    return new NextResponse(JSON.stringify({personnel: personnelRows, totalCount: totalRows}), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
     throw new Error('Failed to fetch personnel data');
@@ -32,80 +67,62 @@ export async function GET(): Promise<NextResponse<PersonnelRDS[]>> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   let conn: PoolConnection | null = null;
   try {
-    const requestBody = await request.json();
-
-    const newRowData = {
-      FirstName: requestBody.firstName ?? null,
-      LastName: requestBody.lastName ?? null,
-      Role: requestBody.role ?? null,
-    };
+    const schema = getSchema();
+    const newRowData = await parsePersonnelRequestBody(request, 'POST');
 
     conn = await getSqlConnection(0);
 
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Attributes`, newRowData]);
     await runQuery(conn, insertQuery);
 
-    return NextResponse.json({ message: "Insert successful" }, { status: 200 });
+    return NextResponse.json({message: "Insert successful"}, {status: 200});
   } catch (error) {
     console.error('Error in POST:', error);
-    return NextResponse.json({ message: ErrorMessages.ICF }, { status: 400 });
+    return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
   } finally {
     if (conn) conn.release();
   }
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   let conn: PoolConnection | null = null;
   try {
-    const requestBody = await request.json();
-    const personnelID = requestBody.personnelID;
-    const updateData = {
-      FirstName: requestBody.firstName,
-      LastName: requestBody.lastName,
-      Role: requestBody.role,
-    }
+    const schema = getSchema();
+    const {personnelID, updateData} = await parsePersonnelRequestBody(request, 'PATCH');
     conn = await getSqlConnection(0);
 
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE PersonnelID = ?', [`${schema}.Personnel`, updateData, personnelID]);
     await runQuery(conn, updateQuery);
 
-    return NextResponse.json({ message: "Update successful" }, { status: 200 });
+    return NextResponse.json({message: "Update successful"}, {status: 200});
   } catch (error) {
     console.error('Error in PATCH:', error);
-    return NextResponse.json({ message: ErrorMessages.UCF }, { status: 400 });
+    return NextResponse.json({message: ErrorMessages.UCF}, {status: 400});
   } finally {
     if (conn) conn.release();
   }
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   let conn: PoolConnection | null = null;
   try {
+    const schema = getSchema();
     conn = await getSqlConnection(0);
 
     const deletePersonnelID = parseInt(request.nextUrl.searchParams.get('personnelID')!);
     if (isNaN(deletePersonnelID)) {
-      return NextResponse.json({ message: "Invalid PersonnelID" }, { status: 400 });
+      return NextResponse.json({message: "Invalid PersonnelID"}, {status: 400});
     }
 
     const deleteQuery = `DELETE FROM ${schema}.Personnel WHERE PersonnelID = ?`;
     await runQuery(conn, deleteQuery, [deletePersonnelID]);
 
-    return NextResponse.json({ message: "Delete successful" }, { status: 200 });
+    return NextResponse.json({message: "Delete successful"}, {status: 200});
   } catch (error) {
     console.error('Error in DELETE:', error);
-    return NextResponse.json({ message: ErrorMessages.DCF }, { status: 400 });
+    return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
   } finally {
     if (conn) conn.release();
   }

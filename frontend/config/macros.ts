@@ -12,6 +12,8 @@ import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch} from "react";
 import {setData} from "@/config/db";
+import {CensusRDS} from "@/config/sqlmacros";
+import {GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 
 // INTERFACES
 export interface Plot {
@@ -20,31 +22,18 @@ export interface Plot {
   id: number;
 }
 
-export interface Census {
-  plotID: number;
-  plotCensusNumber: number;
-  startDate: Date;
-  endDate: Date;
-  description: string;
-}
-
 export interface Quadrat {
   quadratID: number;
   plotID: number;
   quadratName: string;
 }
 
-
-export function containsPlotCensusNumber(censusArray: Census[], plotCensusNumberToCheck: number): boolean {
-  return censusArray.some(census => census.plotCensusNumber === plotCensusNumberToCheck);
-}
-
 export interface PlotAction {
   plot: Plot | null;
 }
 
-export interface CensusAction {
-  census: Census | null;
+export interface CensusRDSAction {
+  census: CensusRDS | null;
 }
 
 export interface QuadratsAction {
@@ -74,25 +63,39 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
 }));
 
 export const TableHeadersByFormType: Record<string, { label: string }[]> = {
-  "fixeddata_codes.txt": [{label: "code"}, {label: "description"}, {label: "status"}],
-  // "fixeddata_role.txt": [{label: "role"}],
-  "fixeddata_personnel.txt": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
-  "fixeddata_species.txt": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
-  "fixeddata_quadrat.txt": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
-  "fixeddata_census.txt": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
+  "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
+  // "fixeddata_role.csv": [{label: "role"}],
+  "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
+  "fixeddata_species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
+  "fixeddata_quadrat": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
+  "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
   "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
   "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
   "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
   "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}, {label: "comments"}],
   "arcgis_xlsx": arcgisHeaders
 };
+
+export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
+  "fixeddata_codes": [{label: "code"}],
+  // "fixeddata_role.csv": [{label: "role"}],
+  "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}],
+  "fixeddata_species": [{label: "spcode"}],
+  "fixeddata_quadrat": [{label: "quadrat"}],
+  "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
+  "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
+  "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
+  "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
+  "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}, {label: "comments"}],
+  "arcgis_xlsx": arcgisHeaders
+}
 export const DBInputForms: string[] = [
-  "fixeddata_codes.txt",
-  "fixeddata_role.txt",
-  "fixeddata_personnel.txt",
-  "fixeddata_species.txt",
-  "fixeddata_quadrat.txt",
-  "fixeddata_census.txt"
+  "fixeddata_codes",
+  "fixeddata_role",
+  "fixeddata_personnel",
+  "fixeddata_species",
+  "fixeddata_quadrat",
+  "fixeddata_census"
 ];
 export const CTFSWebInputForms: string[] = [
   "ctfsweb_new_plants_form",
@@ -129,6 +132,23 @@ export interface FileErrors {
 
 export interface ErrorRowsData {
   [fileName: string]: RowDataStructure[];
+}
+
+export interface AllRowsData {
+  [fileName: string]: RowDataStructure[];
+}
+
+export interface EditToolbarProps {
+  setIsNewRowAdded: React.Dispatch<React.SetStateAction<boolean>>;
+  rows: GridRowsProp;
+  setRows: React.Dispatch<React.SetStateAction<GridRowsProp>>;
+  setRowModesModel: React.Dispatch<React.SetStateAction<GridRowModesModel>>;
+  setRefresh: React.Dispatch<React.SetStateAction<boolean>>;
+  currentPlot: Plot;
+  rowCount: number; // Total number of rows across all pages
+  setRowCount: React.Dispatch<React.SetStateAction<number>>;
+  paginationModel: { page: number, pageSize: number };
+  onPaginationModelChange: React.Dispatch<React.SetStateAction<{ page: number, pageSize: number }>>;
 }
 
 export enum HTTPResponses {
@@ -175,7 +195,6 @@ export interface UploadValidationProps {
 }
 
 export enum ReviewStates {
-  TABLE_SELECT = "table_select",
   PARSE = "parse",
   REVIEW = "review",
   UPLOAD = "upload",
@@ -305,6 +324,18 @@ export type SiteConfigProps = {
   }[];
 }
 
+export function bitToBoolean(bitField: any): boolean {
+  if (Buffer.isBuffer(bitField)) {
+    // If the BIT field is a Buffer, use the first byte for conversion
+    return bitField[0] === 1;
+  } else {
+    // If it's not a Buffer, it might be a number or boolean
+    return Boolean(bitField);
+  }
+}
+
+export const booleanToBit = (value: boolean | undefined): number => value ? 1 : 0;
+
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and storage",
@@ -371,12 +402,6 @@ export const siteConfigNav: SiteConfigProps[] = [
     ]
   },
 ]
-
-export type Action<T> = {
-  type: string;
-  payload: T;
-};
-
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | null }) => Promise<void>;
 
@@ -386,13 +411,13 @@ export function createEnhancedDispatch<T>(
 ): EnhancedDispatch<T> {
   return async (payload: { [key: string]: T | null }) => {
     // Save to IndexedDB only if payload is not null
-    if (payload[actionType] !== null) {
-      await setData(actionType, payload[actionType]);
-      console.log(`setData call on key ${actionType} with value ${payload[actionType]} completed.`);
-    }
+    // if (payload[actionType] !== null) {
+    //   await setData(actionType, payload[actionType]);
+    //   console.log(`setData call on key ${actionType} with value ${payload[actionType]} completed.`);
+    // }
 
     // Dispatch the action
-    dispatch({ type: actionType, payload });
+    dispatch({type: actionType, payload});
     console.log(`Dispatch of type ${actionType} placed`);
   };
 }
@@ -404,6 +429,7 @@ export type LoadAction<T> = {
 
 // Generic reducer function
 export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T | null {
+  console.log('Action:', action);
   switch (action.type) {
     case 'coreMeasurementLoad':
     case 'attributeLoad':
@@ -413,10 +439,47 @@ export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T
     case 'speciesLoad':
     case 'subSpeciesLoad':
     case 'plotsLoad':
-      return action.payload[action.type] ?? state;
+    case 'plotList':
+    case 'censusList':
+    case 'quadratList':
+      if (action.type !== null && action.payload && action.type in action.payload) {
+        return action.payload[action.type] ?? state;
+      } else {
+        return state;
+      }
     default:
       return state;
   }
+}
+
+export function genericLoadContextReducer<T>(
+  currentState: T | null,
+  action: LoadAction<T>,
+  listContext: T[],
+  validationFunction?: (list: T[], item: T) => boolean
+): T | null {
+  // Check if the action type is one of the specified types
+  const isRecognizedActionType = ['plot', 'census', 'quadrat'].includes(action.type);
+  if (!isRecognizedActionType) {
+    return currentState;
+  }
+
+  // Check if payload exists and action type is valid key in payload
+  if (!action.payload || !(action.type in action.payload)) {
+    return currentState;
+  }
+
+  const item = action.payload[action.type];
+  // Reset state to null if item is null
+  if (item == null) return null;
+
+  // Use validation function if provided and return current state if item is invalid
+  if (validationFunction && !validationFunction(listContext, item)) {
+    return currentState;
+  }
+
+  // Return the item if it's in the list context or no validation is needed
+  return (!validationFunction || listContext.includes(item)) ? item : currentState;
 }
 
 /**
@@ -426,22 +489,26 @@ export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T
 export async function getContainerClient(plot: string, census: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   console.log('Connection String:', storageAccountConnectionString);
-
-  if (!storageAccountConnectionString ) {
+  console.log(`parameter plot & census: ${plot}, ${census}`);
+  if (!storageAccountConnectionString) {
     console.error("process envs failed");
     throw new Error("process envs failed");
   }
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) throw new Error("blob service client creation failed");
+  if (!blobServiceClient) console.error("blob service client creation failed");
+  else console.error("blob service client created & connected");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot + '_' + census);
-  if (!(await containerClient.exists())) await containerClient.create();
-  else return containerClient;
+  let containerClient = blobServiceClient.getContainerClient(plot.trim() + '-' + census.trim());
+  console.log(containerClient.url);
+  if (!(await containerClient.createIfNotExists())) console.error("container client createifnotexists failure");
+  else {
+    console.log(`container client with name ${plot + '-' + census} created and accessed.`);
+    return containerClient;
+  }
 }
 
 export type RowDataStructure = { [key: string]: any }; // Generic type for row data
-
 
 /**
  * CONTAINER STORAGE FUNCTIONS
@@ -449,6 +516,7 @@ export type RowDataStructure = { [key: string]: any }; // Generic type for row d
 
 export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string, errors: boolean) {
   const buffer = Buffer.from(await file.arrayBuffer());
+  console.log(buffer.toString());
   console.log(`blob name: ${file.name}`);
   let metadata = {
     user: user,

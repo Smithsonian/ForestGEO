@@ -1,10 +1,17 @@
 "use client";
 import React, {useCallback, useEffect, useState} from "react";
-import {Census, ErrorRowsData, FileErrors, ReviewStates, TableHeadersByFormType} from "@/config/macros";
+import {
+  AllRowsData,
+  ErrorRowsData,
+  FileErrors,
+  HTTPResponses,
+  ReviewStates,
+  TableHeadersByFormType
+} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
 import {parse, ParseResult} from "papaparse";
-import {useCensusContext, useCensusDispatch, usePlotContext} from "@/app/contexts/userselectioncontext";
+import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";
 import {
   Button,
@@ -15,24 +22,18 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  FormControl,
-  InputLabel,
+  Grid,
   LinearProgress,
-  MenuItem,
-  Pagination,
-  Select,
-  SelectChangeEvent,
-  TextField,
+  Pagination
 } from "@mui/material";
 import {LoadingButton} from '@mui/lab';
 import {styled} from '@mui/system';
 import Divider from "@mui/joy/Divider";
 import {DropzoneLogic} from "@/components/fileupload/dropzone";
 import {FileDisplay} from "@/components/fileupload/filelist";
-import {Box, Grid, Tab, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
+import {Box, Checkbox, Stack, Tab, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
 import SelectFormType from "@/components/fileupload/groupedformselection";
-import ViewUploadedCSVFiles from "@/components/fileupload/viewuploadedfiles";
-import {useCensusListContext, useCensusListDispatch, usePlotListContext} from "@/app/contexts/generalcontext";
+import ViewUploadedFiles from "@/components/fileupload/viewuploadedfiles";
 
 export function UploadAndReviewProcess() {
   let tempData: { fileName: string; data: DataStructure[] }[] = [];
@@ -44,70 +45,88 @@ export function UploadAndReviewProcess() {
   // in progress state --> async upload function has completed
   const [uploaded, setUploaded] = useState(false);
   // core enum to handle state progression
-  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.TABLE_SELECT);
+  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.PARSE);
   // dropped file storage
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   // validated error storage
   const [errorsData, setErrorsData] = useState<FileErrors>({});
+  const [allRows, setAllRows] = useState<AllRowsData>({});
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
   const [parsedData, setParsedData] = useState(initState);
   // Confirmation menu states:
   const [confirmationDialogOpen, setConfirmationDialogOpen] = React.useState(false);
+  const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
   const [receivedHeaders, setReceivedHeaders] = useState<string[]>([]);
   const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   const [errorRowsData, setErrorRowsData] = useState<ErrorRowsData>({});
+  const [uploadCompleteMessage, setUploadCompleteMessage] = useState("");
+  const [allFileHeaders, setAllFileHeaders] = useState<{ [key: string]: string[] }>({});
   // etc.
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
   const {data: session} = useSession();
 
-  function areHeadersValid(actualHeaders: string[] | undefined): boolean {
-    if (!actualHeaders) return false;
-    // Check if every expected header is present in actual headers
-    // check if every actual header is in expected
-    return actualHeaders.every((actualHeader) => expectedHeaders.includes(actualHeader.trim().toLowerCase()));
+  async function handleReturnToStart() {
+    setDataViewActive(1);
+    setUploaded(false);
+    setAcceptedFiles([]);
+    setParsedData(initState);
+    tempData = [];
+    setErrorsData({});
+    setReviewState(ReviewStates.PARSE);
+    setUploadForm('');
+  }
+
+  function areHeadersValid(actualHeaders: string[]): boolean {
+    const expectedHeadersLower = expectedHeaders.map(header => header.toLowerCase());
+    const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
+
+    const allExpectedHeadersPresent = expectedHeadersLower.every(expectedHeader =>
+      actualHeadersLower.includes(expectedHeader));
+
+    const noAdditionalHeaders = actualHeadersLower.every(actualHeader =>
+      expectedHeadersLower.includes(actualHeader));
+
+    return allExpectedHeadersPresent && noAdditionalHeaders;
   }
 
   async function handleInitialSubmit() {
     setParsing(true);
     console.log("in initial submit");
+    let collectFileHeaders = {...allFileHeaders}; // Create a copy of the current state
+
     acceptedFiles.forEach((file: FileWithPath) => {
       parse(file, {
         header: true,
         skipEmptyLines: true,
         complete: function (results: ParseResult<any>) {
           try {
-            // Check if headers match
-            setReceivedHeaders(results.meta.fields!); // This contains the headers from the file
+            collectFileHeaders[file.name] = results.meta.fields!;
             console.log("expected: " + expectedHeaders.toString());
             console.log("received: " + results.meta.fields!.toString());
-            if (!areHeadersValid(receivedHeaders)) {
-              console.log("invalid file headers");
-              throw new Error("Invalid file headers.");
-            }
 
-            // Process file data
             tempData.push({fileName: file.name, data: results.data});
             console.log(tempData.toString());
-            setParsedData(tempData);
-            setReviewState(ReviewStates.REVIEW);
           } catch (e) {
             console.error(e);
-            // Update state to reflect error
             setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
-            // For example, set an error message in state to display to the user
           } finally {
             setParsing(false);
+            setAllFileHeaders(collectFileHeaders); // Update the state with all headers
           }
         },
       });
     });
+    console.log(collectFileHeaders);
+    setParsedData(tempData);
+    setReviewState(ReviewStates.REVIEW);
   }
 
   async function handleMismatchToStart() {
-    setReviewState(ReviewStates.TABLE_SELECT);
+    setUploadForm('');
+    setReviewState(ReviewStates.PARSE);
   }
 
   // handlers
@@ -122,17 +141,18 @@ export function UploadAndReviewProcess() {
       acceptedFiles.forEach((file, index) => {
         fileToFormData.append(`file_${index}`, file);
       });
-      const response = await fetch(`/api/upload?plot=${currentPlot?.key}&census=${currentCensus?.plotCensusNumber}&user=${session?.user?.name}&formType=${uploadForm}`, {
+      const response = await fetch(`/api/upload?plot=${currentPlot?.key.trim()}&census=${currentCensus?.plotCensusNumber}&user=${session?.user?.name}&formType=${uploadForm.trim()}`, {
         method: 'POST',
         body: fileToFormData,
       });
-      if (!response.ok) {
+      if (!response.ok && response.status !== HTTPResponses.ERRORS_IN_FILE) {
         console.log("Upload failed with status: " + response.status);
         throw new Error("Upload failed with status: " + response.status);
       }
       const data = await response.json();
       setErrorsData(data.errors as FileErrors);
       setErrorRowsData(data.errorRows as ErrorRowsData);
+      setAllRows(data.allRows as AllRowsData);
       setUploaded(true);
     } catch (error: any) {
       console.error("Upload Error: ", error.message);
@@ -141,17 +161,50 @@ export function UploadAndReviewProcess() {
   }, [acceptedFiles, currentPlot, session]);
 
   useEffect(() => {
-    if (TableHeadersByFormType.hasOwnProperty(uploadForm)) setExpectedHeaders(TableHeadersByFormType[uploadForm].map(item => item.label));
+    if (acceptedFiles.length > 0 && dataViewActive <= acceptedFiles.length) {
+      const currentFile = acceptedFiles[dataViewActive - 1];
+      if (currentFile && allFileHeaders[currentFile.name]) {
+        setCurrentFileHeaders(allFileHeaders[currentFile.name]);
+      } else {
+        setCurrentFileHeaders([]);
+      }
+    }
+    if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.PARSE); // if the user removes all files, move back to file drop phase
     if (reviewState == ReviewStates.UPLOAD) {
       if (!uploaded) {
         handleUpload().then();
-      } else if (Object.keys(errorsData).length !== 0) {
+      } else if (errorsData && Object.keys(errorsData).length !== 0) {
         setReviewState(ReviewStates.ERRORS);
       } else {
         setReviewState(ReviewStates.UPLOADED);
       }
     }
-  }, [errorsData, handleUpload, reviewState, uploaded]);
+    switch (uploadForm) {
+      case "fixeddata_codes.csv":
+        setUploadCompleteMessage("Please visit the Attributes view in the Properties menu to review your changes!");
+        break;
+      case "fixeddata_role.csv":
+      case "fixeddata_personnel.csv":
+        setUploadCompleteMessage("Please visit the Personnel view in the Properties menu to review your changes!");
+        break;
+      case "fixeddata_species.csv":
+        setUploadCompleteMessage("Please visit the Species view in the Properties menu to review your changes!");
+        break;
+      case "fixeddata_quadrat.csv":
+        setUploadCompleteMessage("Please visit the Quadrats view in the Properties menu to review your changes!");
+        break;
+      case "fixeddata_census.csv":
+      case "ctfsweb_new_plants_form":
+      case "ctfsweb_old_tree_form":
+      case "ctfsweb_multiple_stems_form":
+      case "ctfsweb_big_trees_form":
+        setUploadCompleteMessage("Please visit the CoreMeasurements view to review your changes!");
+        break;
+      default:
+        setUploadCompleteMessage("");
+        break;
+    }
+  }, [errorsData, handleUpload, reviewState, uploaded, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders, setUploadCompleteMessage, uploadCompleteMessage]);
 
 
   async function handleApproval() {
@@ -171,76 +224,81 @@ export function UploadAndReviewProcess() {
     setDataViewActive(value);
   };
 
-  const TableSelectState = () => (
-    <Grid container spacing={2}>
-      <Grid xs={5}>
-        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
-          <Typography>
-            Your file will need the correct headers in order to be uploaded to your intended table
-            destination. Please review the table header requirements before continuing:
-          </Typography>
-          <Box sx={{display: 'flex', justifyContent: 'center'}}>
-            <SelectFormType
-              externalState={uploadForm}
-              updateExternalState={setUploadForm}
-            />
-          </Box>
-        </Box>
-      </Grid>
+  const handleRemoveCurrentFile = () => {
+    setAcceptedFiles(prevFiles => {
+      // Remove the file at the current index
+      const updatedFiles = prevFiles.filter((_, index) => index !== (dataViewActive - 1));
+      // Adjust the current page if necessary
+      if (dataViewActive > updatedFiles.length) {
+        setDataViewActive(updatedFiles.length);
+      }
+      return updatedFiles;
+    });
+  };
 
-      <Grid xs={2}>
-        <Divider orientation="vertical" sx={{my: 4}}/>
-      </Grid>
-
-      <Grid xs={5}>
-        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
-          <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
-            <Typography>
-              {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
-            </Typography>
-          </Box>
-          <LoadingButton disabled={uploadForm === ''} onClick={() => setReviewState(ReviewStates.PARSE)}>
-            Continue
-          </LoadingButton>
-        </Box>
-      </Grid>
-    </Grid>
-  )
   const ParseState = () => (
-    <Grid container spacing={2}>
-      <Grid xs={5}>
-        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
-          <DropzoneLogic onChange={(acceptedFiles: FileWithPath[]) => {
-            // rejectFile handling needs to go somewhere
-            setAcceptedFiles((files) => acceptedFiles.concat(files));
-          }}/>
+    <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
+      {!TableHeadersByFormType.hasOwnProperty(uploadForm) ? <Stack direction={"column"} sx={{width: 'fit-content'}}>
+        <Typography sx={{mb: 2}}>
+          Your file will need the correct headers in order to be uploaded to your intended table
+          destination.<br/> Please review the table header requirements before continuing:
+        </Typography>
+        <Box sx={{display: 'flex', width: 'fit-content', justifyContent: 'center', mb: 1}}>
+          <SelectFormType
+            externalState={uploadForm}
+            updateExternalState={setUploadForm}
+            updateExternalHeaders={setExpectedHeaders}
+          />
         </Box>
-      </Grid>
-
-      <Grid xs={2}>
-        <Divider orientation="vertical" sx={{my: 4}}/>
-      </Grid>
-
-      <Grid xs={5}>
-        <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
-          <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
-            <FileDisplay acceptedFiles={acceptedFiles}/>
+      </Stack> : <Stack direction={"column"} sx={{width: 'fit-content'}}>
+        <Button onClick={() => setUploadForm('')} sx={{width: 'fit-content'}}>
+          Return to Table Select
+        </Button>
+        <Typography sx={{mb: 2}}>
+          You have selected {uploadForm}. Please ensure that your file has the following headers before continuing:
+        </Typography>
+        <Typography>
+          {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
+        </Typography>
+      </Stack>}
+      {TableHeadersByFormType.hasOwnProperty(uploadForm) && <Grid container spacing={2}>
+        <Grid item xs={5}>
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+            <DropzoneLogic onChange={(acceptedFiles: FileWithPath[]) => {
+              // rejectFile handling needs to go somewhere
+              setAcceptedFiles((files) => acceptedFiles.concat(files));
+            }}/>
           </Box>
-          <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
-            Review Files
-          </LoadingButton>
-        </Box>
-      </Grid>
-    </Grid>
+        </Grid>
+
+        <Grid item xs={2}>
+          <Divider orientation="vertical" sx={{mx: 4}}/>
+        </Grid>
+
+        <Grid item xs={5}>
+          <Stack direction={"column"} sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+            <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
+              <FileDisplay acceptedFiles={acceptedFiles}/>
+            </Box>
+            <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
+              Review Files
+            </LoadingButton>
+          </Stack>
+        </Grid>
+      </Grid>}
+    </Box>
   )
   const ReviewState = () => (
     <Grid container spacing={2}>
       <Grid xs={5}>
         <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
-          {parsedData && DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) ?? {
-            fileName: '',
-            data: [],
-          }, uploadForm)}
+          {acceptedFiles.length > 0 &&
+            acceptedFiles[dataViewActive - 1] &&
+            parsedData &&
+            DisplayParsedData(parsedData.find((file) => file.fileName == acceptedFiles[dataViewActive - 1].name) ?? {
+              fileName: '',
+              data: [],
+            }, uploadForm)}
           <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
         </Box>
       </Grid>
@@ -251,7 +309,31 @@ export function UploadAndReviewProcess() {
 
       <Grid xs={5}>
         <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
-          <Button variant={"outlined"} onClick={handleApproval} className={"flex w-1/4 h-1/6 justify-center"}>
+          <Button variant="contained" color="primary" onClick={handleRemoveCurrentFile} sx={{width: 'fit-content'}}>
+            Remove Current File
+          </Button>
+          <Divider orientation={"horizontal"}/>
+          {currentFileHeaders.length > 0 ? (
+            expectedHeaders.map((header) => (
+              <Checkbox
+                size={"lg"}
+                key={header}
+                disabled
+                checked={currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase())}
+                label={header}
+                color={"success"}
+              />
+            ))
+          ) : (
+            <Typography>No file selected or file has no headers.</Typography>
+          )}
+          <Button
+            variant={"contained"}
+            disabled={!areHeadersValid(currentFileHeaders)}
+            onClick={handleApproval}
+            className={"flex w-1/4 h-1/6 justify-center"}
+            sx={{width: 'fit-content'}}
+          >
             Confirm Changes
           </Button>
         </Box>
@@ -271,10 +353,12 @@ export function UploadAndReviewProcess() {
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCancel}>Cancel</Button>
-          <Button onClick={handleConfirm} autoFocus>
-            Confirm
-          </Button>
+          <Stack direction={"row"}>
+            <Button onClick={handleCancel}>Cancel</Button>
+            <Button onClick={handleConfirm} autoFocus>
+              Confirm
+            </Button>
+          </Stack>
         </DialogActions>
       </Dialog>
     </Grid>
@@ -286,8 +370,12 @@ export function UploadAndReviewProcess() {
         <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
           <Typography>
             You attempted to upload a file with the following headers:
-          </Typography>
+          </Typography> <br/>
           <Typography>{receivedHeaders.join(', ')}</Typography>
+        </Box>
+        <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
+          <Typography>However, you selected form {uploadForm}</Typography> <br/>
+          <Typography>Which has headers: {expectedHeaders.join(', ')}</Typography>
         </Box>
       </Grid>
 
@@ -297,12 +385,8 @@ export function UploadAndReviewProcess() {
 
       <Grid xs={5}>
         <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
-          <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
-            <Typography>However, you selected form {uploadForm}</Typography> <br/>
-            <Typography>Which has headers: {expectedHeaders.join(', ')}</Typography>
-          </Box>
           <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleMismatchToStart}>
-            Return to Table Selection
+            Return to Start
           </LoadingButton>
         </Box>
       </Grid>
@@ -386,18 +470,19 @@ export function UploadAndReviewProcess() {
       </Grid>
 
       <Grid xs={5}>
-        <Box className={"flex justify-center"}>
+        <Box className={"flex justify-center"} sx={{display: 'flex', flexDirection: 'column'}}>
           Data was successfully uploaded! <br/>
-          Please visit the Data page to view updated data.
+          <Typography>{uploadCompleteMessage}</Typography>
+          <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
+            Return to Upload Start
+          </Button>
         </Box>
       </Grid>
     </Grid>
   )
 
-  if (currentCensus) {
+  const renderStateContent = () => {
     switch (reviewState) {
-      case ReviewStates.TABLE_SELECT:
-        return <TableSelectState/>;
       case ReviewStates.PARSE:
         return <ParseState/>;
       case ReviewStates.REVIEW:
@@ -413,9 +498,28 @@ export function UploadAndReviewProcess() {
       default:
         return <div>Invalid State</div>;
     }
-  } else {
-    return <Typography>You must select a census to continue!</Typography>
   }
+  return (
+    <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
+      <Typography level={"title-lg"} color={"primary"}>
+        Drag and drop files into the box to upload them to storage
+      </Typography>
+      <Box sx={{mt: 5, mr: 5, width: '95%'}}>
+        <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
+          <TabList sticky={"top"}>
+            <Tab>Browse Uploaded Files</Tab>
+            <Tab>Upload New Files</Tab>
+          </TabList>
+          <TabPanel value={0}>
+            <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus}/>
+          </TabPanel>
+          <TabPanel value={1}>
+            {currentPlot ? renderStateContent() : <Typography>You must select a plot to continue!</Typography>}
+          </TabPanel>
+        </Tabs>
+      </Box>
+    </Box>
+  );
 }
 
 const grey = {
@@ -449,182 +553,3 @@ styled('ul')(
   `,
 );
 
-export function FileTabView() {
-  let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
-  useEffect(() => {
-    console.log(currentCensus?.plotCensusNumber);
-  }, []);
-  if (!currentPlot) {
-    return (
-      <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-        <p>You must select a <b>plot</b> to continue!</p>
-      </Box>
-    );
-  } else {
-    // Tab system -- Browse page, Upload page
-    return (
-      <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
-        <Typography level={"title-lg"} color={"primary"}>
-          Drag and drop files into the box to upload them to storage
-        </Typography>
-        <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-          <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
-            <TabList sticky={"top"}>
-              <Tab>Browse Uploaded Files</Tab>
-              <Tab>Upload New Files</Tab>
-            </TabList>
-            <TabPanel value={0}>
-              <ViewUploadedCSVFiles/>
-            </TabPanel>
-            <TabPanel value={1}>
-              <UploadAndReviewProcess/>
-            </TabPanel>
-          </Tabs>
-        </Box>
-      </Box>
-    );
-  }
-}
-
-export function CensusSelector() {
-  const censusList = useCensusListContext()!;
-  const dispatchCensusList = useCensusListDispatch()!;
-  const currentCensus = useCensusContext()!;
-  const dispatchCensus = useCensusDispatch()!;
-  const plotList = usePlotListContext()!;
-  const [selectedCensus, setSelectedCensus] = useState<Census | null>(currentCensus);
-  const [open, setOpen] = useState(false);
-  const [newCensusData, setNewCensusData] = useState({
-    plotID: '',
-    plotCensusNumber: '',
-    startDate: '',
-    endDate: '',
-    description: ''
-  });
-
-  const handleFieldChange = (field: string) => (event: { target: { value: any; }; }) => {
-    setNewCensusData({...newCensusData, [field]: event.target.value});
-  };
-
-  const handleCensusChange = (event: SelectChangeEvent<number>) => {
-    const selectedValue = event.target.value as number; // Casting value as number
-    const foundCensus = censusList.find(census => census.plotCensusNumber === selectedValue);
-    setSelectedCensus(foundCensus ?? null);
-    dispatchCensus({census: selectedCensus});
-  };
-
-  const handleAddCensus = async () => {
-    if (!newCensusData.plotID || newCensusData.plotCensusNumber === '' || !newCensusData.startDate || !newCensusData.endDate) {
-      alert('Please fill in all required fields.');
-      return;
-    }
-
-    const plotID = parseInt(newCensusData.plotID);
-    const plotCensusNumber = parseInt(newCensusData.plotCensusNumber);
-    if (isNaN(plotID) || isNaN(plotCensusNumber)) {
-      alert('Plot ID and Plot Census Number must be valid numbers.');
-      return;
-    }
-
-    const newCensus = {
-      plotID,
-      plotCensusNumber,
-      startDate: new Date(newCensusData.startDate),
-      endDate: new Date(newCensusData.endDate),
-      description: newCensusData.description
-    };
-
-    try {
-      const updatedCensusList = [...censusList, newCensus];
-      dispatchCensusList({censusList: updatedCensusList});
-      setOpen(false);
-    } catch (error) {
-      console.error('Error adding new census:', error);
-      alert('Failed to add new census.');
-    }
-  };
-
-  return (
-    <>
-      <FormControl fullWidth margin="normal">
-        <InputLabel id="census-select-label">Census</InputLabel>
-        <Select
-          labelId="census-select-label"
-          id="census-select"
-          value={selectedCensus?.plotCensusNumber ?? ''}
-          label="Census"
-          onChange={handleCensusChange}
-        >
-          {censusList.map(census => (
-            <MenuItem key={census.plotCensusNumber} value={census.plotCensusNumber}>
-              {`Census Number: ${census.plotCensusNumber}, start: ${census.startDate} <--> end: ${census.endDate}`}
-            </MenuItem>
-          ))}
-          <MenuItem value={"add-new"} onClick={() => setOpen(true)}>Add New Census</MenuItem>
-        </Select>
-      </FormControl>
-
-      <Dialog open={open} onClose={() => setOpen(false)}>
-        <DialogTitle>Add New Census</DialogTitle>
-        <DialogContent>
-          <FormControl fullWidth margin="dense">
-            <InputLabel id="plot-select-label">Plot</InputLabel>
-            <Select
-              labelId="plot-select-label"
-              id="plot-select"
-              value={newCensusData.plotID}
-              label="Plot"
-              onChange={handleFieldChange('plotID')}
-            >
-              {plotList?.map((plot) => (
-                <MenuItem key={plot.id} value={plot.id}>
-                  {plot.key} - Quadrats: {plot.num} - PlotID: {plot.id}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            label="Plot Census Number"
-            type="number"
-            fullWidth
-            margin="dense"
-            value={newCensusData.plotCensusNumber}
-            onChange={handleFieldChange('plotCensusNumber')}
-          />
-          <TextField
-            label="Start Date"
-            type="date"
-            fullWidth
-            margin="dense"
-            InputLabelProps={{shrink: true}}
-            value={newCensusData.startDate}
-            onChange={handleFieldChange('startDate')}
-          />
-          <TextField
-            label="End Date"
-            type="date"
-            fullWidth
-            margin="dense"
-            InputLabelProps={{shrink: true}}
-            value={newCensusData.endDate}
-            onChange={handleFieldChange('endDate')}
-          />
-          <TextField
-            label="Description (Optional)"
-            fullWidth
-            margin="dense"
-            multiline
-            maxRows={4}
-            value={newCensusData.description}
-            onChange={handleFieldChange('description')}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleAddCensus}>Add</Button>
-        </DialogActions>
-      </Dialog>
-    </>
-  );
-}

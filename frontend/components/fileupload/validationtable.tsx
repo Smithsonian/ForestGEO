@@ -53,16 +53,27 @@ export function DisplayErrorTable({
                 const cellKey = `cell-${rowIndex}-${header.label}`;
                 const cellData = data[header.label];
                 const cellError = errorMessage[fileName] && errorMessage[fileName][rowIndex.toString()];
-
-                return (
-                  <TableCell key={cellKey} sx={cellError ? {color: 'red', fontWeight: 'bold'} : undefined}>
-                    {cellError ? (
-                      <span>{cellData}<br/>{cellError}</span>
-                    ) : (
-                      cellData
-                    )}
-                  </TableCell>
-                );
+                if (cellData === '') {
+                  return (
+                    <TableCell key={cellKey} sx={cellError ? {backgroundColor: 'red'} : undefined}>
+                      {cellError ? (
+                        <span>{cellData}<br/>{cellError}</span>
+                      ) : (
+                        cellData
+                      )}
+                    </TableCell>
+                  );
+                } else {
+                  return (
+                    <TableCell key={cellKey} sx={cellError ? {color: 'red', fontWeight: 'bold'} : undefined}>
+                      {cellError ? (
+                        <span>{cellData}<br/>{cellError}</span>
+                      ) : (
+                        cellData
+                      )}
+                    </TableCell>
+                  );
+                }
               })}
             </TableRow>
           ))}

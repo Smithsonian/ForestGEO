@@ -8,16 +8,18 @@ import ListDivider from '@mui/joy/ListDivider';
 import ListItem from '@mui/joy/ListItem';
 import Typography from '@mui/joy/Typography';
 import Check from '@mui/icons-material/Check';
-import {FormGroups} from "@/config/macros";
+import {FormGroups, TableHeadersByFormType} from "@/config/macros";
 
 interface SelectFormTypeProps {
   externalState: string;
   updateExternalState: React.Dispatch<React.SetStateAction<string>>;
+  updateExternalHeaders: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
 const SelectFormType: React.FC<SelectFormTypeProps> = ({
                                                          externalState,
                                                          updateExternalState,
+                                                         updateExternalHeaders
                                                        }) => {
 
   const colors: Record<string, 'neutral' | 'primary'> = {
@@ -28,7 +30,10 @@ const SelectFormType: React.FC<SelectFormTypeProps> = ({
     event: React.SyntheticEvent | null,
     newValue: string | null,
   ) => {
-    updateExternalState(newValue!);
+    if (newValue) {
+      updateExternalState(newValue!);
+      updateExternalHeaders(TableHeadersByFormType[newValue!].map(item => item.label));
+    }
   };
 
   return (

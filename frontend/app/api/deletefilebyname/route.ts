@@ -1,3 +1,4 @@
+// DELETE FILE BY NAME ROUTE HANDLER
 import {BlobDeleteIfExistsResponse, BlobDeleteOptions, BlobServiceClient} from "@azure/storage-blob";
 import {NextRequest, NextResponse} from "next/server";
 import {HTTPResponses} from "@/config/macros";

@@ -1,14 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+// UPLOAD ROUTE HANDLERS
+import {NextRequest, NextResponse} from "next/server";
 import {
+  AllRowsData,
   ErrorRowsData,
   FileErrors,
   getContainerClient,
   HTTPResponses,
+  RequiredTableHeadersByFormType,
   RowDataStructure,
   TableHeadersByFormType,
   uploadFileAsBuffer,
 } from "@/config/macros";
-import { parse, ParseConfig } from "papaparse";
+import {parse, ParseConfig} from "papaparse";
 import {getSqlConnection, insertOrUpdate} from "@/components/processors/processorhelpers";
 import {PoolConnection} from "mysql2/promise"; // Import PoolConnection type
 
@@ -17,29 +20,30 @@ require("dotenv").config();
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const files = [];
-  const plot = request.nextUrl.searchParams.get("plot")!;
-  const census = request.nextUrl.searchParams.get("census")!;
-  const user = request.nextUrl.searchParams.get("user")!;
-  const formType = request.nextUrl.searchParams.get("formType")!;
+  const plot = request.nextUrl.searchParams.get("plot")!.trim();
+  const census = request.nextUrl.searchParams.get("census")!.trim();
+  const user = request.nextUrl.searchParams.get("user")!.trim();
+  const formType = request.nextUrl.searchParams.get("formType")!.trim();
 
   if (!formType || !TableHeadersByFormType[formType]) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: "Invalid or missing form type",
       }),
-      { status: HTTPResponses.INVALID_REQUEST }
+      {status: HTTPResponses.INVALID_REQUEST}
     );
   }
 
   for (const key of Array.from(formData.keys())) {
     const file = formData.get(key) as File | null;
-    if (!file) return NextResponse.json({ success: false });
+    if (!file) return NextResponse.json({success: false});
     files.push(file);
   }
 
   const errors: FileErrors = {};
   const uploadableRows: { [fileName: string]: RowDataStructure[] } = {};
   const errorRows: ErrorRowsData = {};
+  const allRows: AllRowsData = {};
   const warningRows: { [fileName: string]: RowDataStructure[] } = {};
 
   function createFileEntry(fileName: string) {
@@ -48,6 +52,9 @@ export async function POST(request: NextRequest) {
     }
     if (!errorRows[fileName]) {
       errorRows[fileName] = [];
+    }
+    if (!allRows[fileName]) {
+      allRows[fileName] = [];
     }
     if (!uploadableRows[fileName]) {
       uploadableRows[fileName] = [];
@@ -61,9 +68,15 @@ export async function POST(request: NextRequest) {
 
   async function processFile(file: File, formType: string) {
     const expectedHeaders = TableHeadersByFormType[formType];
-    if (!expectedHeaders) {
+    const requiredHeaders = RequiredTableHeadersByFormType[formType];
+    if (!expectedHeaders || !requiredHeaders) {
       console.error(`No headers defined for form type: ${formType}`);
-      return;
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: "Retrieving expected headers failed.",
+        }),
+        {status: HTTPResponses.INTERNAL_SERVER_ERROR}
+      );
     }
 
     const config: ParseConfig = {
@@ -78,13 +91,14 @@ export async function POST(request: NextRequest) {
 
     uploadableRows[file.name] = uploadableRows[file.name] || [];
     errorRows[file.name] = errorRows[file.name] || [];
+    allRows[file.name] = allRows[file.name] || [];
 
     results.data.forEach((row: any, rowIndex: number) => {
       const typedRow = row as RowDataStructure;
       typedRow.id = `row-${rowIDCounter++}`;
       const invalidHeaders: string[] = [];
 
-      expectedHeaders.forEach((header) => {
+      requiredHeaders.forEach((header) => {
         const value = typedRow[header.label];
         if (value === null || value === undefined || value === "") {
           invalidHeaders.push(header.label);
@@ -95,7 +109,7 @@ export async function POST(request: NextRequest) {
       if (!isNaN(dbhValue) && dbhValue < 1) {
         invalidHeaders.push("DBH");
       }
-
+      allRows[file.name].push(typedRow);
       if (invalidHeaders.length > 0) {
         const errorMessage = `Invalid Row: Missing or incorrect values for ${invalidHeaders.join(", ")}`;
         console.error(`Error at index ${rowIndex} in file ${file.name}: ${errorMessage}`);
@@ -141,7 +155,7 @@ export async function POST(request: NextRequest) {
           responseMessage: "Processing error",
           error: error.message,
         }),
-        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+        {status: HTTPResponses.INTERNAL_SERVER_ERROR}
       );
     } else {
       console.error("Unknown error processing files:", error);
@@ -149,7 +163,7 @@ export async function POST(request: NextRequest) {
         JSON.stringify({
           responseMessage: "Unknown processing error",
         }),
-        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+        {status: HTTPResponses.INTERNAL_SERVER_ERROR}
       );
     }
   }
@@ -160,47 +174,17 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Container client or SQL connection is undefined",
       }),
-      { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      {status: HTTPResponses.INTERNAL_SERVER_ERROR}
     );
   }
 
   for (const file of files) {
     if (errorRows[file.name].length !== 0) break;
-
     let uploadResponse;
     try {
       uploadResponse = await uploadFileAsBuffer(containerClient, file, user, Object.keys(errors).length == 0);
       console.log(`upload complete: ${uploadResponse.requestId}`);
-
-      if (uploadResponse._response.status >= 200 && uploadResponse._response.status <= 299) {
-        // File upload was successful, proceed with database operations
-        // Process each uploadable row in the file
-        for (const row of uploadableRows[file.name]) {
-          try {
-            // Call insertOrUpdate function for each row, passing the connection object
-            await insertOrUpdate(conn, formType, row, plot, census, user);
-          } catch (error) {
-            if (error instanceof Error) {
-              console.error(`Error processing row for file ${file.name}:`, error.message);
-              return new NextResponse(
-                JSON.stringify({
-                  responseMessage: "Error processing row",
-                  error: error.message,
-                }),
-                { status: HTTPResponses.INTERNAL_SERVER_ERROR }
-              );
-            } else {
-              console.error("Unknown error processing row:", error);
-              return new NextResponse(
-                JSON.stringify({
-                  responseMessage: "Unknown processing error at row",
-                }),
-                { status: HTTPResponses.INTERNAL_SERVER_ERROR }
-              );
-            }
-          }
-        }
-      }
+      if (uploadResponse._response.status <= 200 && uploadResponse._response.status >= 299) throw new Error("Failure: Response status not between 200 & 299");
     } catch (error) {
       if (error instanceof Error) {
         console.error("Error processing files:", error.message);
@@ -209,7 +193,7 @@ export async function POST(request: NextRequest) {
             responseMessage: "Processing error",
             error: error.message,
           }),
-          { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+          {status: HTTPResponses.INTERNAL_SERVER_ERROR}
         );
       } else {
         console.error("Unknown error processing files:", error);
@@ -217,8 +201,34 @@ export async function POST(request: NextRequest) {
           JSON.stringify({
             responseMessage: "Unknown processing error",
           }),
-          { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+          {status: HTTPResponses.INTERNAL_SERVER_ERROR}
         );
+      }
+    }
+
+    for (const row of uploadableRows[file.name]) {
+      try {
+        // Call insertOrUpdate function for each row, passing the connection object
+        await insertOrUpdate(conn, formType, row, plot, census, user);
+      } catch (error) {
+        if (error instanceof Error) {
+          console.error(`Error processing row for file ${file.name}:`, error.message);
+          return new NextResponse(
+            JSON.stringify({
+              responseMessage: "Error processing row",
+              error: error.message,
+            }),
+            {status: HTTPResponses.INTERNAL_SERVER_ERROR}
+          );
+        } else {
+          console.error("Unknown error processing row:", error);
+          return new NextResponse(
+            JSON.stringify({
+              responseMessage: "Unknown processing error at row",
+            }),
+            {status: HTTPResponses.INTERNAL_SERVER_ERROR}
+          );
+        }
       }
     }
   }
@@ -227,8 +237,9 @@ export async function POST(request: NextRequest) {
     return new NextResponse(
       JSON.stringify({
         responseMessage: "Files uploaded successfully. No errors in file",
+        allRows: allRows
       }),
-      { status: HTTPResponses.OK }
+      {status: HTTPResponses.OK}
     );
   } else {
     return new NextResponse(
@@ -236,8 +247,9 @@ export async function POST(request: NextRequest) {
         responseMessage: "Files uploaded successfully. Errors in file",
         errors: errors,
         errorRows: errorRows,
+        allRows: allRows,
       }),
-      { status: HTTPResponses.ERRORS_IN_FILE }
+      {status: HTTPResponses.ERRORS_IN_FILE}
     );
   }
 }

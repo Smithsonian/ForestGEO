@@ -1,24 +1,13 @@
-import {BlobServiceClient} from "@azure/storage-blob";
+// DOWNLOAD ALL FILES ROUTE HANDLER
 import {NextRequest, NextResponse} from "next/server";
+import {getContainerClient} from "@/config/macros";
 
-async function getContainerClient(plot: string) {
-  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!storageAccountConnectionString) {
-    throw new Error("process envs failed");
-  }
-  // create client pointing to AZ storage system from connection string from Azure portal
-  const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) throw new Error("blob service client creation failed");
-  // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot.toLowerCase());
-  if (!(await containerClient.exists())) await containerClient.create();
-  else return containerClient;
-}
 
 export async function GET(request: NextRequest, response: NextResponse) {
-  const plot = request.nextUrl.searchParams.get('plot')!;
+  const plot = request.nextUrl.searchParams.get('plot')!.trim();
+  const census = request.nextUrl.searchParams.get('census')!.trim();
   const blobData: any = [];
-  const containerClient = await getContainerClient(plot);
+  const containerClient = await getContainerClient(plot, census);
   if (!containerClient) {
     return NextResponse.json({statusText: "Container client creation error"}, {status: 400});
   } else {
