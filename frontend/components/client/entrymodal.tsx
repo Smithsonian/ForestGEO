@@ -1,22 +1,12 @@
 "use client";
 import React, {useEffect, useState} from 'react';
+import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch,} from '@/app/contexts/coredataprovider';
 import {
-  useAttributeLoadDispatch,
-  useCensusLoadDispatch,
-  useCoreMeasurementLoadDispatch,
-  usePersonnelLoadDispatch,
-  usePlotsLoadDispatch,
-  useQuadratsLoadDispatch,
-  useSpeciesLoadDispatch,
-  useSubSpeciesLoadDispatch,
-} from '@/app/contexts/fixeddatacontext';
-import {
-  useCensusListDispatch,
   useFirstLoadContext,
   useFirstLoadDispatch,
   usePlotListDispatch,
   useQuadratListDispatch,
-} from '@/app/contexts/generalcontext';
+} from '@/app/contexts/listselectionprovider';
 import {
   Button,
   DialogActions,
@@ -32,62 +22,45 @@ import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
 import {CensusRDS, PlotRDS, QuadratsRDS} from '@/config/sqlmacros';
-import {Census, Plot, Quadrat} from "@/config/macros";
 import {clearAllIDBData, getData, setData} from "@/config/db";
+import {Plot, Quadrat} from "@/config/macros";
+import {usePlotDispatch} from "@/app/contexts/userselectionprovider";
+import {useSession} from "next-auth/react";
 
 export default function EntryModal() {
+  const {data: session, status} = useSession();
   const [loading, setLoading] = useState(0);
   const [loadingMsg, setLoadingMsg] = useState('');
-  const coreMeasurementLoadDispatch = useCoreMeasurementLoadDispatch();
-  const attributeLoadDispatch = useAttributeLoadDispatch();
   const censusLoadDispatch = useCensusLoadDispatch();
-  const personnelLoadDispatch = usePersonnelLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
-  const speciesLoadDispatch = useSpeciesLoadDispatch();
-  const subSpeciesLoadDispatch = useSubSpeciesLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
   const plotsListDispatch = usePlotListDispatch();
-  const censusListDispatch = useCensusListDispatch();
+  const plotDispatch = usePlotDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const firstLoad = useFirstLoadContext();
   const firstLoadDispatch = useFirstLoadDispatch();
-  const interval = 5;
 
-  const fetchData = async (url: string, dispatch: Function | null, actionType: string) => {
-    setLoading(loading + interval);
-    setLoadingMsg(`Retrieving ${actionType}...`);
-    const response = await fetch(url, { method: 'GET' });
-    setLoading(loading + interval);
-    setLoadingMsg('Dispatching...');
-    if (dispatch) {
-      const responseData = await response.json();
-      dispatch({ [actionType]: responseData });
-    }
-  };
-
-  const fetchAndDispatchQuadrats = async () => {
-    setLoading(loading + interval);
-    setLoadingMsg('Retrieving Census...');
+  const fetchAndDispatchCoreData = async () => {
+    setLoadingMsg('Retrieving Quadrats...');
 
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData = await getData('quadratsLoad');
     let quadratsRDSLoad: QuadratsRDS[];
-
+    setLoading(10);
     if (quadratsLoadData) {
       quadratsRDSLoad = quadratsLoadData;
     } else {
-      const response = await fetch('/api/fixeddata/quadrats', { method: 'GET' });
+      const response = await fetch('/api/fetchall/quadrats', {method: 'GET'});
       quadratsRDSLoad = await response.json();
       await setData('quadratsLoad', quadratsRDSLoad); // Save to IndexedDB
     }
-
+    setLoading(20);
     if (quadratsLoadDispatch) {
-      quadratsLoadDispatch({ quadratsLoad: quadratsRDSLoad });
+      quadratsLoadDispatch({quadratsLoad: quadratsRDSLoad});
     }
-
     // Check if quadratList data is available in IndexedDB
     let quadratList: Quadrat[] = await getData('quadratList');
-
+    setLoading(30);
     if (!quadratList) {
       // Generate quadratList from quadratsRDSLoad if not in IndexedDB
       quadratList = quadratsRDSLoad.map((quadratRDS) => ({
@@ -97,67 +70,29 @@ export default function EntryModal() {
       }));
       await setData('quadratList', quadratList); // Save to IndexedDB
     }
-
-    setLoadingMsg('Dispatching Census List...');
+    setLoadingMsg('Dispatching Quadrat List...');
+    setLoading(40)
     if (quadratListDispatch) {
-      quadratListDispatch({ quadratList: quadratList });
+      quadratListDispatch({quadratList: quadratList});
     }
-  };
 
-  const fetchAndDispatchCensus = async () => {
-    setLoading(loading + interval);
+    setLoading(50);
     setLoadingMsg('Retrieving Census...');
 
     // Check if censusLoad data is available in IndexedDB
     let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
     if (!censusRDSLoad) {
       // Fetch data from the server if not in IndexedDB
-      const response = await fetch('/api/fixeddata/census', { method: 'GET' });
+      const response = await fetch('/api/fetchall/census', {method: 'GET'});
       censusRDSLoad = await response.json();
       await setData('censusLoad', censusRDSLoad); // Save to IndexedDB
     }
-
+    setLoading(60);
     if (censusLoadDispatch) {
-      censusLoadDispatch({ censusLoad: censusRDSLoad });
+      censusLoadDispatch({censusLoad: censusRDSLoad});
     }
 
-    // Check if censusList data is available in IndexedDB
-    let censusList: Census[] = await getData('censusList');
-    if (!censusList) {
-      const uniqueCensusMap = new Map<number, Census>();
-      censusRDSLoad.forEach((censusRDS) => {
-        const plotCensusNumber = censusRDS.plotCensusNumber ?? 0;
-        if (!uniqueCensusMap.has(plotCensusNumber)) {
-          // First occurrence of this plotCensusNumber
-          uniqueCensusMap.set(plotCensusNumber, {
-            plotID: censusRDS.plotID ?? 0,
-            plotCensusNumber,
-            startDate: new Date(censusRDS.startDate!),
-            endDate: new Date(censusRDS.endDate!),
-            description: censusRDS.description ?? ''
-          });
-        } else {
-          // Update existing entry with earliest startDate and latest endDate
-          const existingCensus = uniqueCensusMap.get(plotCensusNumber);
-          if (existingCensus) {
-            existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS.startDate!).getTime()));
-            existingCensus.endDate = new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS.endDate!).getTime()));
-          }
-        }
-      });
-
-      censusList = Array.from(uniqueCensusMap.values());
-      await setData('censusList', censusList); // Save to IndexedDB
-    }
-
-    setLoadingMsg('Dispatching Census List...');
-    if (censusListDispatch) {
-      censusListDispatch({ censusList: censusList });
-    }
-  };
-
-  const fetchAndDispatchPlots = async () => {
-    setLoading(loading + interval);
+    setLoading(70);
     setLoadingMsg('Retrieving Plots...');
 
     // Check if plotsLoad data is available in localStorage
@@ -168,10 +103,11 @@ export default function EntryModal() {
       plotRDSLoad = plotsLoadData;
     } else {
       // Fetch data from the server if not in localStorage
-      const response = await fetch('/api/fixeddata/plots', {method: 'GET'});
+      const response = await fetch('/api/fetchall/plots', {method: 'GET'});
       plotRDSLoad = await response.json();
       await setData('plotsLoad', plotRDSLoad);
     }
+    setLoading(80);
 
     if (plotsLoadDispatch) {
       plotsLoadDispatch({plotsLoad: plotRDSLoad});
@@ -187,65 +123,34 @@ export default function EntryModal() {
       // Generate plotList from plotRDSLoad if not in localStorage
       plotList = plotRDSLoad.map((plotRDS) => ({
         key: plotRDS.plotName ? plotRDS.plotName : '',
-        num: quadratsLoadDispatch ? quadratsLoadDispatch.length : 0,
+        num: quadratsRDSLoad.filter((quadrat) => quadrat.plotID === plotRDS.plotID).length,
         id: plotRDS.plotID ? plotRDS.plotID : 0,
       }));
       await setData('plotList', plotList);
     }
-
+    setLoading(90);
     setLoadingMsg('Dispatching Plot List...');
     if (plotsListDispatch) {
       plotsListDispatch({plotList: plotList});
+    }
+    const currentPlotData = await getData('plot');
+    let startingPlot: Plot = (currentPlotData) || null;
+    if (plotDispatch) {
+      plotDispatch({plot: startingPlot});
     }
   };
 
   useEffect(() => {
     const fetchDataEffect = async () => {
       try {
-        await clearAllIDBData(); // at login for new user, reload all data --> user's permissions may affect what they can see
-        const coreMeasurementLoadData = await getData('coreMeasurementLoad');
-        if (coreMeasurementLoadData && coreMeasurementLoadDispatch) {
-          coreMeasurementLoadDispatch({ coreMeasurementLoad: coreMeasurementLoadData });
-        } else {
-          await fetchData('/api/coremeasurements', coreMeasurementLoadDispatch, 'coreMeasurementLoad');
-        }
-
-        const attributeLoadData = await getData('attributeLoad');
-        if (attributeLoadData && attributeLoadDispatch) {
-          attributeLoadDispatch({ attributeLoad: attributeLoadData });
-        } else {
-          await fetchData('/api/fixeddata/attributes', attributeLoadDispatch, 'attributeLoad');
-        }
-
-        const personnelLoadData = await getData('personnelLoad');
-        if (personnelLoadData && personnelLoadDispatch) {
-          personnelLoadDispatch({ personnelLoad: personnelLoadData });
-        } else {
-          await fetchData('/api/fixeddata/personnel', personnelLoadDispatch, 'personnelLoad');
-        }
-
-        const speciesLoadData = await getData('speciesLoad');
-        if (speciesLoadData && speciesLoadDispatch) {
-          speciesLoadDispatch({ speciesLoad: speciesLoadData });
-        } else {
-          await fetchData('/api/fixeddata/species', speciesLoadDispatch, 'speciesLoad');
-        }
-
-        const subSpeciesLoadData = await getData('subSpeciesLoad');
-        if (subSpeciesLoadData && subSpeciesLoadDispatch) {
-          subSpeciesLoadDispatch({ subSpeciesLoad: subSpeciesLoadData });
-        } else {
-          await fetchData('/api/fixeddata/subspecies', subSpeciesLoadDispatch, 'subSpeciesLoad');
-        }
-
-        await fetchAndDispatchPlots();
-        await fetchAndDispatchCensus();
-        await fetchAndDispatchQuadrats();
+        await fetchAndDispatchCoreData();
         setLoading(100);
       } catch (error) {
         console.error(error);
       }
     };
+    console.log(`firstLoad state: ${firstLoad}`);
+    console.log(`entrymodal session state: ${status}`);
     fetchDataEffect().catch(console.error);
   }, []);
 
@@ -255,7 +160,7 @@ export default function EntryModal() {
                           sx={{display: 'flex', flex: 1}}
                           onClose={(_event: React.MouseEvent<HTMLButtonElement>, reason: string) => {
                             if (reason !== 'backdropClick' && reason !== 'escapeKeyDown') {
-                              return firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : null
+                              return firstLoadDispatch ? firstLoadDispatch({firstLoad: false}) : undefined;
                             }
                           }}>
         <ModalDialog variant="outlined" role="alertdialog">

@@ -25,7 +25,7 @@ export const LoginLogout = () => {
           <Typography level="body-xs">your information</Typography>
         </Box>
         <IconButton size="sm" variant="plain" color="neutral"
-                    onClick={() => void signIn("azure-ad", {callbackUrl: '/login'})}>
+                    onClick={() => void signIn("azure-ad")}>
           <LoginRoundedIcon/>
         </IconButton>
       </Box>
@@ -53,31 +53,10 @@ export const LoginLogout = () => {
             </Skeleton>
           </Typography>
         </Box>
-        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({callbackUrl: '/login'})}>
+        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut()}>
           {status == "loading" ? <CircularProgress/> : <LogoutRoundedIcon/>}
         </IconButton>
       </Box>
     );
   }
-  // else { // status == "loading"
-  //   return (
-  //     <>
-  //       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-  //         <Avatar
-  //           variant="outlined"
-  //           size="sm"
-  //           src=''>
-  //           <Skeleton variant={"overlay"} loading={status == "loading"} />
-  //         </Avatar>
-  //         <Box sx={{ minWidth: 0, flex: 1 }}>
-  //           <Typography level="title-sm">{session?.user?.name}</Typography>
-  //           <Typography level="body-xs">{session?.user?.email}</Typography>
-  //         </Box>
-  //         <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({callbackUrl: '/login'})}>
-  //           <LogoutRoundedIcon />
-  //         </IconButton>
-  //       </Box>
-  //     </>
-  //   );
-  // }
 }

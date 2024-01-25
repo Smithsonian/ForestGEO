@@ -1,9 +1,7 @@
 "use client";
 import React, {useCallback, useEffect, useState} from 'react';
-import {fileColumns, tableHeaderSettings, UploadedFileData} from "@/config/macros";
-import {title} from "@/config/primitives";
+import {fileColumns, Plot, tableHeaderSettings, UploadedFileData} from "@/config/macros";
 import {BrowseError} from "@/app/error"
-import {usePlotContext} from "@/app/contexts/userselectioncontext";
 import {
   Button,
   Card,
@@ -22,6 +20,7 @@ import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
+import {CensusRDS} from "@/config/sqlmacros";
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
@@ -45,14 +44,18 @@ function LoadingFiles() {
   );
 }
 
-export default function ViewUploadedFiles() {
-  let currentPlot = usePlotContext();
+interface VUFProps {
+  currentPlot: Plot | null;
+  currentCensus: CensusRDS | null;
+}
+
+export default function ViewUploadedFiles({currentPlot, currentCensus}: VUFProps) {
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   const getListOfFiles = useCallback(async () => {
-    if (currentPlot?.key !== undefined) {
-      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot.key}`, {
+    try {
+      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot?.key.trim() ?? 'plot-undefined'}&census=${currentCensus?.censusID.toString() ?? 'census-undefined'}`, {
         method: 'GET',
       });
 
@@ -66,21 +69,17 @@ export default function ViewUploadedFiles() {
         setFileRows(data.blobData);
         setIsLoaded(true);
       }
-    } else {
-      console.log('Plot is undefined');
-      setError(new Error('No plot'));
+    } catch (error: any) {
+      setError(error)
+      console.log(error.message);
     }
-  }, [currentPlot]);
+  }, [currentPlot, currentCensus]);
 
   useEffect(() => {
     getListOfFiles().then();
   }, [getListOfFiles]);
 
-  if ((!currentPlot?.key)) {
-    return (
-      <h1 className={title()}>Please select a plot to continue.</h1>
-    );
-  } else if (error) {
+  if (error) {
     console.log(error);
     return BrowseError(error);
   } else if (!isLoaded || !fileRows) {
@@ -98,6 +97,9 @@ export default function ViewUploadedFiles() {
         <Box sx={{display: 'flex', flex: 1, flexDirection: "column", mb: 10}}>
           <Box sx={{display: 'flex', flexDirection: "column"}}>
             <Typography level={"title-lg"}>
+              Accessing
+              Container: {currentPlot?.key.trim() ?? 'plot-undefined'}-{currentCensus?.censusID.toString() ?? 'census-undefined'}
+              <br/> <br/>
               Uploaded CSV Files
             </Typography>
           </Box>

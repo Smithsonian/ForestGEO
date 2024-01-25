@@ -6,6 +6,7 @@ import styles from "@/styles/styles.module.css";
 import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
 import EntryModal from "@/components/client/entrymodal";
+import {redirect} from "next/navigation";
 
 const slides = [
   'background-1.jpg',
@@ -14,7 +15,8 @@ const slides = [
   'background-4.jpg',
 ]
 
-export default function Page() {
+export default function LoginPage() {
+  const {data: session, status} = useSession();
   const [index, setIndex] = useState(0);
   const transitions = useTransition(index, {
     key: index,
@@ -33,12 +35,8 @@ export default function Page() {
     () => {
       setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
     }, []);
-  const {status} = useSession();
-  if (status == "authenticated") {
-    return (
-      <EntryModal/>
-    );
-  } else
+
+  if (status === "unauthenticated") {
     return (
       <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
         {transitions((style, i) => (
@@ -52,4 +50,7 @@ export default function Page() {
         <Sidebar/>
       </Box>
     );
+  } else {
+    return <EntryModal />;
+  }
 }

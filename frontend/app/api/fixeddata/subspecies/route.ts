@@ -1,28 +1,58 @@
-import { NextRequest, NextResponse } from "next/server";
-import { ErrorMessages, HTTPResponses } from "@/config/macros";
-import { SubSpeciesRDS } from "@/config/sqlmacros";
-import { getSqlConnection, runQuery } from "@/components/processors/processorhelpers";
+// FIXED DATA SUBSPECIES  ROUTE HANDLERS
+import {NextRequest, NextResponse} from "next/server";
+import {bitToBoolean, ErrorMessages, HTTPResponses} from "@/config/macros";
+import {SubSpeciesRDS} from "@/config/sqlmacros";
+import {
+  getSchema,
+  getSqlConnection,
+  parseSubSpeciesRequestBody,
+  runQuery
+} from "@/components/processors/processorhelpers";
 import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
 
-export async function GET(): Promise<NextResponse<SubSpeciesRDS[]>> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
+export async function GET(request: NextRequest): Promise<NextResponse<{
+  subSpecies: SubSpeciesRDS[],
+  totalCount: number
+}>> {
   let conn: PoolConnection | null = null;
   try {
-    conn = await getSqlConnection(0); // Ensure to specify the connection type
-    if (!conn) throw new Error('SQL connection failed');
+    const schema = getSchema();
+    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+    if (isNaN(page)) {
+      console.error('page parseInt conversion failed');
+    }
+    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+    if (isNaN(pageSize)) {
+      console.error('pageSize parseInt conversion failed');
+      // handle error or set default
+    }
+    // Initialize the connection attempt counter
+    let attempt = 0;
+    conn = await getSqlConnection(attempt);
+    if (conn) console.log('sql conn established')
 
-    const query = `SELECT * FROM ${schema}.SubSpecies`;
-    const results = await runQuery(conn, query);
-    if (!results) throw new Error("Call failed");
+    /// Calculate the starting row for the query based on the page number and page size
+    const startRow = page * pageSize;
 
-    const subSpeciesRows: SubSpeciesRDS[] = results.map((row: RowDataPacket, index: number) => ({
+    // Query to get the paginated data
+    const paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.SubSpecies
+      LIMIT ?, ?
+    `;
+    const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
+
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRows = totalRowsResult[0].totalRows;
+    console.log(`totalRows: ${totalRows}`);
+
+    const subSpeciesRows: SubSpeciesRDS[] = paginatedResults.map((row: RowDataPacket, index: number) => ({
       id: index + 1,
       subSpeciesID: row.SubSpeciesID,
       speciesID: row.SpeciesID,
-      currentTaxonFlag: row.CurrentTaxonFlag,
-      obsoleteTaxonFlag: row.ObsoleteTaxonFlag,
+      currentTaxonFlag: bitToBoolean(row.CurrentTaxonFlag),
+      obsoleteTaxonFlag: bitToBoolean(row.ObsoleteTaxonFlag),
       subSpeciesName: row.SubSpeciesName,
       subSpeciesCode: row.SubSpeciesCode,
       authority: row.Authority,
@@ -30,8 +60,8 @@ export async function GET(): Promise<NextResponse<SubSpeciesRDS[]>> {
     }));
 
     return new NextResponse(
-      JSON.stringify(subSpeciesRows),
-      { status: HTTPResponses.OK }
+      JSON.stringify({subSpecies: subSpeciesRows, totalCount: totalRows}),
+      {status: HTTPResponses.OK}
     );
   } catch (error) {
     console.error('Error:', error);
@@ -42,27 +72,16 @@ export async function GET(): Promise<NextResponse<SubSpeciesRDS[]>> {
 }
 
 export async function POST(request: NextRequest) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   let conn: PoolConnection | null = null;
   try {
-    const requestBody = await request.json();
-    const newRowData = {
-      SpeciesID: requestBody.speciesID ?? null,
-      SubSpeciesName: requestBody.subSpeciesName ?? null,
-      SubSpeciesCode: requestBody.subSpeciesCode ?? null,
-      CurrentTaxonFlag: requestBody.currentTaxonFlag ?? null,
-      ObsoleteTaxonFlag: requestBody.obsoleteTaxonFlag ?? null,
-      Authority: requestBody.authority ?? null,
-      InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
-    }
+    const schema = getSchema();
+    const newRowData = await parseSubSpeciesRequestBody(request, 'POST');
     conn = await getSqlConnection(0);
 
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.SubSpecies`, newRowData]);
     await runQuery(conn, insertQuery);
 
-    return NextResponse.json({ message: "Insert successful" }, { status: HTTPResponses.CREATED });
+    return NextResponse.json({message: "Insert successful"}, {status: HTTPResponses.CREATED});
   } catch (error) {
     console.error('Error:', error);
     throw new Error("Call failed");
@@ -72,27 +91,15 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   let conn: PoolConnection | null = null;
   try {
-    const requestBody = await request.json();
-    const subSpeciesID = requestBody.subSpeciesID;
-    const updateData = {
-      SpeciesID: requestBody.speciesID ?? null,
-      SubSpeciesName: requestBody.subSpeciesName ?? null,
-      SubSpeciesCode: requestBody.subSpeciesCode ?? null,
-      CurrentTaxonFlag: requestBody.currentTaxonFlag ?? null,
-      ObsoleteTaxonFlag: requestBody.obsoleteTaxonFlag ?? null,
-      Authority: requestBody.authority ?? null,
-      InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
-    }
+    const schema = getSchema();
+    const {subSpeciesID, updateData} = await parseSubSpeciesRequestBody(request, 'PATCH');
     conn = await getSqlConnection(0); // Ensure to specify the connection type
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SubSpeciesID = ?', [`${schema}.SubSpecies`, updateData, subSpeciesID]);
     await runQuery(conn, updateQuery);
 
-    return NextResponse.json({ message: "Update successful" }, { status: 200 });
+    return NextResponse.json({message: "Update successful"}, {status: 200});
   } catch (error) {
     console.error('Error:', error);
     throw new Error("Call failed");
@@ -102,19 +109,17 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   let conn: PoolConnection | null = null;
   try {
+    const schema = getSchema();
     conn = await getSqlConnection(0);
     if (!conn) throw new Error('SQL connection failed');
 
     const deleteSubSpeciesID = parseInt(request.nextUrl.searchParams.get('subSpeciesID')!);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SubSpecies WHERE [SubSpeciesID] = ?`, [deleteSubSpeciesID]);
-    if (!deleteRow) return NextResponse.json({ message: ErrorMessages.DCF }, { status: HTTPResponses.INVALID_REQUEST });
+    if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: HTTPResponses.INVALID_REQUEST});
 
-    return NextResponse.json({ message: "Delete successful" }, { status: HTTPResponses.OK });
+    return NextResponse.json({message: "Delete successful"}, {status: HTTPResponses.OK});
   } catch (error) {
     console.error('Error:', error);
     throw new Error("Call failed");

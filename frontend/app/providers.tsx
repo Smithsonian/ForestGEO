@@ -9,14 +9,10 @@ export interface ProvidersProps {
 
 export function Providers({children}: ProvidersProps) {
   return (
-    <>
-      <ThemeRegistry>
-        <SessionProvider>
-          <body>
-          {children}
-          </body>
-        </SessionProvider>
-      </ThemeRegistry>
-    </>
+    <ThemeRegistry>
+      <SessionProvider>
+        {children}
+      </SessionProvider>
+    </ThemeRegistry>
   );
 }

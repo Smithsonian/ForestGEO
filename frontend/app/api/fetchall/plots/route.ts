@@ -1,15 +1,13 @@
-import { NextResponse } from "next/server";
-import { PlotRDS } from "@/config/sqlmacros";
-import { getSqlConnection, runQuery } from "@/components/processors/processorhelpers";
+// FETCH ALL PLOTS ROUTE HANDLERS
+import {NextResponse} from "next/server";
+import {PlotRDS} from "@/config/sqlmacros";
+import {getSchema, getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export async function GET(): Promise<NextResponse<PlotRDS[]>> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) {
-    throw new Error("Environmental variable extraction for schema failed");
-  }
-  let conn : PoolConnection | null = null;
+  let conn: PoolConnection | null = null;
   try {
+    const schema = getSchema();
     conn = await getSqlConnection(0);
     const query = `SELECT * FROM ${schema}.Plots`;
     const results = await runQuery(conn, query);
@@ -28,7 +26,7 @@ export async function GET(): Promise<NextResponse<PlotRDS[]>> {
       plotDescription: row.PlotDescription,
     }));
 
-    return new NextResponse(JSON.stringify(plotRows), { status: 200 });
+    return new NextResponse(JSON.stringify(plotRows), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
     throw new Error('Failed to fetch plot data');
