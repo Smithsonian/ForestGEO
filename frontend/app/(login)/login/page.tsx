@@ -6,7 +6,7 @@ import styles from "@/styles/styles.module.css";
 import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
 import EntryModal from "@/components/client/entrymodal";
-import {redirect} from "next/navigation";
+import {clearAllIDBData} from "@/config/db";
 
 const slides = [
   'background-1.jpg',
@@ -16,8 +16,9 @@ const slides = [
 ]
 
 export default function LoginPage() {
-  const {data: session, status} = useSession();
+  const {data: _session, status} = useSession();
   const [index, setIndex] = useState(0);
+  const [dataIsReset, setDataIsReset] = useState(false);
   const transitions = useTransition(index, {
     key: index,
     from: {opacity: 0},
@@ -31,10 +32,21 @@ export default function LoginPage() {
     },
     exitBeforeEnter: true,
   })
-  useEffect(
-    () => {
-      setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
-    }, []);
+  useEffect(() => {
+    const resetIDBStorage = async () => {
+      if (status === "unauthenticated" && !dataIsReset) {
+        console.log("user not logged in, and data has not been reset");
+        await clearAllIDBData();
+        setDataIsReset(true);
+      } else if (status === "unauthenticated" && dataIsReset) {
+        console.log("user not logged in, data is reset");
+      } else {
+        console.log("user is logged in");
+      }
+    }
+    resetIDBStorage().catch(console.error);
+    setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
+  }, [status, dataIsReset]);
 
   if (status === "unauthenticated") {
     return (
@@ -51,6 +63,6 @@ export default function LoginPage() {
       </Box>
     );
   } else {
-    return <EntryModal />;
+    return <EntryModal/>;
   }
 }
