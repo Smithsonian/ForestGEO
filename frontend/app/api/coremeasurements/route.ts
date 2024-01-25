@@ -55,7 +55,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
-    console.log(`totalRows: ${totalRows}`);
     // Map the results to CoreMeasurementsRDS structure
     let coreMeasurementRows: CoreMeasurementsRDS[] = paginatedResults.map((row, index) => ({
       // ... mapping fields ...
