@@ -340,7 +340,7 @@ export default function Sidebar() {
               <Link component={"button"} onClick={() => {
                 setOpenPlotSelectionModal(true);
               }}>
-                <Typography color={(!currentPlot?.key  || !currentPlot?.id) ? "danger" : undefined}
+                <Typography color={(!currentPlot?.key || !currentPlot?.id) ? "danger" : undefined}
                             level="body-lg">
                   {currentPlot?.key ? `Plot: ${currentPlot.key}` : "No Plot"}
                   {currentPlot?.id ? ` -> ID: ${currentPlot.id}` : ''}

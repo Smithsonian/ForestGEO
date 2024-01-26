@@ -11,7 +11,7 @@ export interface EditToolbarProps {
 
 export const createProcessQuery: ProcessQueryFunction = (gridType: string) => {
   let baseQuery = `/api/`;
-  switch(gridType) {
+  switch (gridType) {
     case 'coreMeasurements':
       baseQuery += `${gridType.toLowerCase()}`
       break;
@@ -30,7 +30,7 @@ export const createProcessQuery: ProcessQueryFunction = (gridType: string) => {
 }
 export const createFetchQuery: FetchQueryFunction = (gridType, page, pageSize, plotID) => {
   let baseQuery = `/api/`;
-  switch(gridType) {
+  switch (gridType) {
     case 'coreMeasurements':
       baseQuery += `${gridType.toLowerCase()}?page=${page}&pageSize=${pageSize}`;
       baseQuery += plotID ? `&plotID=${plotID}` : ``;
@@ -60,20 +60,27 @@ export const createDeleteQuery: ProcessQueryFunction = (gridType: string, deleti
 }
 
 export function getGridID(gridType: string) {
-  switch(gridType) {
-    case 'coreMeasurements': return 'coreMeasurementID';
-    case 'attributes': return 'code';
-    case 'census': return 'censusID';
-    case 'quadrats': return 'quadratID';
-    case 'species': return 'speciesID';
-    case 'subSpecies': return 'subSpeciesID';
-    default: throw new Error('Invalid grid type submitted');
+  switch (gridType) {
+    case 'coreMeasurements':
+      return 'coreMeasurementID';
+    case 'attributes':
+      return 'code';
+    case 'census':
+      return 'censusID';
+    case 'quadrats':
+      return 'quadratID';
+    case 'species':
+      return 'speciesID';
+    case 'subSpecies':
+      return 'subSpeciesID';
+    default:
+      throw new Error('Invalid grid type submitted');
   }
 }
 
 export function computeMutation(gridType: string, newRow: GridRowModel, oldRow: GridRowModel) {
   let fields: string[] = [];
-  switch(gridType) {
+  switch (gridType) {
     case 'coreMeasurements':
       fields = [
         'censusID', 'plotID', 'quadratID', 'treeID', 'stemID', 'personnelID',
@@ -103,7 +110,7 @@ export function computeMutation(gridType: string, newRow: GridRowModel, oldRow: 
       ]
       break;
     case 'species':
-      fields  = [
+      fields = [
         'speciesID', 'genusID', 'currentTaxonFlag', 'obsoleteTaxonFlag', 'speciesName', 'speciesCode',
         'idLevel', 'authority', 'fieldFamily', 'description', 'referenceID'
       ]

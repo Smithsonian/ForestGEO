@@ -1,11 +1,14 @@
 // DataGridCommons.tsx
 "use client";
-import React, {Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState} from 'react';
+import React, {Dispatch, SetStateAction, useEffect, useMemo, useState} from 'react';
 import {
   GridActionsCellItem,
-  GridColDef, GridEventListener, GridRowEditStopReasons,
+  GridColDef,
+  GridEventListener,
+  GridRowEditStopReasons,
   GridRowId,
-  GridRowModel, GridRowModes,
+  GridRowModel,
+  GridRowModes,
   GridRowModesModel,
   GridRowsProp,
   GridToolbarContainer,
@@ -24,7 +27,8 @@ import {
   computeMutation,
   createDeleteQuery,
   createFetchQuery,
-  createProcessQuery, EditToolbarProps,
+  createProcessQuery,
+  EditToolbarProps,
   getGridID
 } from "@/config/datagridhelpers";
 import {Plot} from "@/config/macros";
@@ -54,12 +58,12 @@ export interface DataGridCommonProps {
   setRowCount: Dispatch<SetStateAction<number>>;
   rowModesModel: GridRowModesModel;
   setRowModesModel: Dispatch<SetStateAction<GridRowModesModel>>;
-  snackbar:  Pick<AlertProps, "children" | "severity"> | null;
+  snackbar: Pick<AlertProps, "children" | "severity"> | null;
   setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, "children" | "severity"> | null>>;
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
-  paginationModel: {pageSize: number, page: number};
-  setPaginationModel: Dispatch<SetStateAction<{pageSize: number, page: number}>>;
+  paginationModel: { pageSize: number, page: number };
+  setPaginationModel: Dispatch<SetStateAction<{ pageSize: number, page: number }>>;
   isNewRowAdded: boolean;
   setIsNewRowAdded: Dispatch<SetStateAction<boolean>>;
   shouldAddRowAfterFetch: boolean;
@@ -69,10 +73,12 @@ export interface DataGridCommonProps {
 }
 
 export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
-  const {addNewRowToGrid, gridColumns, gridType, rows, setRows, rowCount, setRowCount, rowModesModel,
-    setRowModesModel,snackbar, setSnackbar, refresh, setRefresh,
+  const {
+    addNewRowToGrid, gridColumns, gridType, rows, setRows, rowCount, setRowCount, rowModesModel,
+    setRowModesModel, snackbar, setSnackbar, refresh, setRefresh,
     paginationModel, setPaginationModel, isNewRowAdded, setIsNewRowAdded,
-    shouldAddRowAfterFetch, setShouldAddRowAfterFetch, currentPlot} = props;
+    shouldAddRowAfterFetch, setShouldAddRowAfterFetch, currentPlot
+  } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
 
@@ -88,7 +94,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setNewLastPage(calculatedNewLastPage); // update newLastPage state
 
     if (isNewPageNeeded) {
-      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
+      setPaginationModel({...paginationModel, page: calculatedNewLastPage});
     } else {
       // If no new page is needed, add the row immediately
       setPaginationModel({...paginationModel, page: existingLastPage});
@@ -124,7 +130,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setRefresh(true);
     let paginatedQuery = createFetchQuery(gridType, pageToFetch, paginationModel.pageSize, currentPlot?.id);
     try {
-      const response = await fetch(paginatedQuery, { method: 'GET' });
+      const response = await fetch(paginatedQuery, {method: 'GET'});
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
       setRows(data[gridType]);
@@ -137,7 +143,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      setSnackbar({ children: 'Error fetching data', severity: 'error' });
+      setSnackbar({children: 'Error fetching data', severity: 'error'});
     }
     setRefresh(false);
   };
@@ -184,24 +190,24 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         if (oldRow[gridID] === '') {
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(newRow),
           });
           responseJSON = await response.json();
           if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Insertion failed");
-          setSnackbar({ children: `New row added!`, severity: 'success' });
+          setSnackbar({children: `New row added!`, severity: 'success'});
         } else {
           // If code is not empty, it's an update
           const mutation = computeMutation(gridType, newRow, oldRow);
           if (mutation) {
             response = await fetch(fetchProcessQuery, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {'Content-Type': 'application/json'},
               body: JSON.stringify(newRow),
             });
             responseJSON = await response.json();
             if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Update failed");
-            setSnackbar({ children: `Row updated!`, severity: 'success' });
+            setSnackbar({children: `Row updated!`, severity: 'success'});
           }
         }
 
@@ -215,7 +221,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
         return newRow;
       } catch (error: any) {
-        setSnackbar({ children: error.message, severity: 'error' });
+        setSnackbar({children: error.message, severity: 'error'});
         throw error;
       }
     },
@@ -245,7 +251,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     console.log('save button');
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.View },
+      [id]: {mode: GridRowModes.View},
     }));
 
     // If the row was newly added, reset isNewRowAdded
@@ -288,15 +294,16 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (isOnlyRowOnNewPage) {
       // Move back to the previous page if it was the only row on a new page
       const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
-      setPaginationModel({ ...paginationModel, page: newPage });
+      setPaginationModel({...paginationModel, page: newPage});
     } else {
       // For existing rows, just switch the mode to view
       setRowModesModel({
         ...rowModesModel,
-        [id]: { mode: GridRowModes.View, ignoreModifications: true },
+        [id]: {mode: GridRowModes.View, ignoreModifications: true},
       });
     }
   };
+
   function getGridActionsColumn(): GridColDef {
     return {
       field: 'actions',
@@ -374,7 +381,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                           onRowModesModelChange={handleRowModesModelChange}
                           onRowEditStop={handleRowEditStop}
                           processRowUpdate={processRowUpdate}
-                          // onProcessRowUpdateError={handleProcessRowUpdateError}
+            // onProcessRowUpdateError={handleProcessRowUpdateError}
                           loading={refresh}
                           paginationMode="server"
                           onPaginationModelChange={setPaginationModel}
