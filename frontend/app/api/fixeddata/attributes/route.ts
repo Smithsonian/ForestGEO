@@ -1,6 +1,6 @@
 // FIXED DATA ATTRIBUTES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {ErrorMessages} from "@/config/macros";
+import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {AttributesRDS} from "@/config/sqlmacros";
 import {
   getSchema,
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch (error: any) {
     if (error.code === 'ER_DUP_ENTRY') {
       // Handle the specific error if the code already exists
-      return new NextResponse(JSON.stringify({message: ErrorMessages.UKAE}), {status: 409});
+      return new NextResponse(JSON.stringify({message: ErrorMessages.UKAE}), {status: HTTPResponses.CONFLICT});
     }
     console.error('Error in POST:', error);
     throw error;
