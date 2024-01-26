@@ -150,7 +150,7 @@ export default function QuadratsPage() {
       ? rows.reduce((max, row) => Math.max(row.quadratID, max), 0)
       : 0) + 1;
     const newRow = {
-      id: nextQuadratID,
+      id: id,
       quadratID: nextQuadratID,
       plotID: currentPlot ? currentPlot.id : 0,
       quadratName: '',
@@ -160,7 +160,8 @@ export default function QuadratsPage() {
       dimensionX: 0,
       dimensionY: 0,
       area: 0,
-      quadratShape: ''
+      quadratShape: '',
+      isNew: true,
     };
     // Add the new row to the state
     setRows(oldRows => [...oldRows, newRow]);

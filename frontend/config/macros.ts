@@ -137,7 +137,12 @@ export interface AllRowsData {
   [fileName: string]: RowDataStructure[];
 }
 
+export type FetchQueryFunction = (gridType: string, page: number, pageSize: number, plotID?: number) => string;
+export type ProcessQueryFunction = (gridType: string, deletionID?: number) => string;
+
 export interface EditToolbarProps {
+  gridType: string;
+  createRefreshQuery: FetchQueryFunction;
   setIsNewRowAdded: React.Dispatch<React.SetStateAction<boolean>>;
   setShouldAddRowAfterFetch: React.Dispatch<React.SetStateAction<boolean>>;
   rows: GridRowsProp;

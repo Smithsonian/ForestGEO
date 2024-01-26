@@ -48,7 +48,7 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
 }));
 
 
-export interface AttributesRDS {
+export type AttributesRDS = {
   id: number;
   code: string;
   description: string | null;
@@ -81,7 +81,7 @@ export const AttributeGridColumns: GridColDef[] = [
   },
 ];
 
-export interface CensusRDS {
+export type CensusRDS = {
   id: number;
   censusID: number;
   plotID: number | null;
@@ -147,7 +147,7 @@ export const CensusGridColumns: GridColDef[] = [
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
 ]
 
-export interface CMAttributesRDS {
+export type CMAttributesRDS = {
   id: number;
   cmaID: number;
   coreMeasurementID: number | null;
@@ -160,7 +160,7 @@ export const CMAttributeGridColumns: GridColDef[] = [
   {field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1, align: 'left'},
 ]
 
-export interface CMVErrorRDS {
+export type CMVErrorRDS = {
   id: number;
   cmvErrorID: number;
   coreMeasurementID: number | null;
@@ -173,7 +173,7 @@ export const CMVErrorGridColumns: GridColDef[] = [
   {field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left'},
 ]
 
-export interface CoreMeasurementsRDS {
+export type CoreMeasurementsRDS = {
   id: number;
   coreMeasurementID: number;
   censusID: number | null;
@@ -218,7 +218,7 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
 ]
 
-export interface CurrentObsoleteRDS {
+export type CurrentObsoleteRDS = {
   id: number;
   speciesID: number;
   obsoleteSpeciesID: number;
@@ -247,7 +247,7 @@ export const CurrentObsoleteGridColumns: GridColDef[] = [
   {field: 'changeNote', headerName: 'ChangeNote', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface FamilyRDS {
+export type FamilyRDS = {
   id: number;
   familyID: number;
   family: string | null;
@@ -260,7 +260,7 @@ export const FamilyGridColumns: GridColDef[] = [
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface GenusRDS {
+export type GenusRDS = {
   id: number;
   genusID: number;
   familyID: number | null;
@@ -277,7 +277,7 @@ export const GenusGridColumns: GridColDef[] = [
   {field: 'authority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface MeasurementTypeRDS {
+export type MeasurementTypeRDS = {
   id: number;
   measurementTypeID: number;
   measurementTypeDescription: string | null;
@@ -309,7 +309,7 @@ export const PersonnelGridColumns: GridColDef[] = [
   {field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface PlotRDS {
+export type PlotRDS = {
   id: number;
   plotID: number;
   plotName: string | null;
@@ -336,7 +336,7 @@ export const PlotGridColumns: GridColDef[] = [
   {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface QuadratsRDS {
+export type QuadratsRDS = {
   id: number;
   quadratID: number;
   plotID: number | null;
@@ -364,7 +364,7 @@ export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratShape', headerName: 'QuadratShape', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface ReferenceRDS {
+export type ReferenceRDS = {
   id: number;
   referenceID: number;
   publicationTitle: string | null;
@@ -391,7 +391,7 @@ export const ReferenceGridColumns: GridColDef[] = [
   },
 ]
 
-export interface SpeciesRDS {
+export type SpeciesRDS = {
   id: number;
   speciesID: number;
   genusID: number | null;
@@ -421,7 +421,7 @@ export const SpeciesGridColumns: GridColDef[] = [
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface SpeciesInventoryRDS {
+export type SpeciesInventoryRDS = {
   id: number;
   speciesInventoryID: number;
   censusID: number | null;
@@ -438,7 +438,7 @@ export const SpeciesInventoryGridColumns: GridColDef[] = [
   {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface StemRDS {
+export type StemRDS = {
   id: number;
   stemID: number;
   treeID: number | null;
@@ -467,7 +467,7 @@ export const StemGridColumns: GridColDef[] = [
   {field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface SubSpeciesRDS {
+export type SubSpeciesRDS = {
   id: number;
   subSpeciesID: number;
   speciesID: number | null;
@@ -491,7 +491,7 @@ export const SubSpeciesGridColumns: GridColDef[] = [
   {field: 'infraSpecificLevel', headerName: 'InfraSpecificLevel', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface TreeRDS {
+export type TreeRDS = {
   id: number;
   treeID: number;
   treeTag: string | null;
@@ -506,7 +506,7 @@ export const TreeGridColumns: GridColDef[] = [
   {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export interface ValidationErrorRDS {
+export type ValidationErrorRDS = {
   id: number;
   validationErrorID: number;
   validationErrorDescription: string | null;
