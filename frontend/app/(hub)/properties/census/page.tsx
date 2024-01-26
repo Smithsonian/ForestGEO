@@ -28,8 +28,9 @@ import {randomId} from "@mui/x-data-grid-generator";
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {
-    setIsNewRowAdded, setShouldAddRowAfterFetch, rows, setRows, setRowModesModel, setRefresh, currentPlot,
-    rowCount, setRowCount, paginationModel, onPaginationModelChange
+    setIsNewRowAdded, setShouldAddRowAfterFetch, setRows,
+    setRefresh, currentPlot, rowCount, setRowCount,
+    paginationModel, onPaginationModelChange
   } = props;
 
   const handleAddNewRow = () => {
