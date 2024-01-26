@@ -29,7 +29,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     // Initialize the connection attempt counter
     let attempt = 0;
     conn = await getSqlConnection(attempt);
-    if (conn) console.log('sql conn established')
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -44,7 +43,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
-    console.log(`totalRows: ${totalRows}`);
 
     const attributeRows: AttributesRDS[] = paginatedResults.map((row, index) => ({
       id: index + 1,
@@ -74,7 +72,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const newRowData = await parseAttributeRequestBody(request, 'POST');
     conn = await getSqlConnection(0);
 
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.CoreMeasurements`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Attributes`, newRowData]);
     await runQuery(conn, insertQuery);
 
     return new NextResponse(JSON.stringify({message: "Insert successful"}), {status: 200});

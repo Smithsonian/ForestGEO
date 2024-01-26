@@ -27,7 +27,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     }
     // Initialize the connection attempt counter
     conn = await getSqlConnection(0);
-    if (conn) console.log('sql conn established')
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -36,7 +35,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     let paginatedQuery: string;
     let queryParams: any[];
     if (plotID) {
-      paginatedQuery =  `
+      paginatedQuery = `
       SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.CoreMeasurements
       WHERE PlotID = ?
       LIMIT ?, ?

@@ -2,7 +2,7 @@
 import * as React from "react";
 import {useEffect, useState} from "react";
 import {useSession} from "next-auth/react";
-import {redirect, usePathname, useRouter} from "next/navigation";
+import {usePathname, useRouter} from "next/navigation";
 import {subtitle, title} from "@/config/primitives";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
@@ -21,7 +21,7 @@ import {
 } from "@/app/contexts/coredataprovider";
 import {usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
 import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
-import {clearAllIDBData, getData, setData} from "@/config/db";
+import {getData, setData} from "@/config/db";
 import {usePlotDispatch} from "@/app/contexts/userselectionprovider";
 
 function renderSwitch(endpoint: string) {

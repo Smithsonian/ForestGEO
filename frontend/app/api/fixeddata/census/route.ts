@@ -19,7 +19,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
     }
     // Initialize the connection attempt counter
     conn = await getSqlConnection(0);
-    if (conn) console.log('sql conn established')
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -28,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
     let paginatedQuery: string;
     let queryParams: any[];
     if (plotID) {
-      paginatedQuery =  `
+      paginatedQuery = `
       SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Census
       WHERE PlotID = ?
       LIMIT ?, ?
@@ -47,7 +46,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
-    console.log(`totalRows: ${totalRows}`);
 
     // Map the results to CensusRDS structure
     const censusRows: CensusRDS[] = paginatedResults.map((row, index) => ({

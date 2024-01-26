@@ -1,16 +1,4 @@
 import Box from "@mui/joy/Box";
-import {Grid} from "@mui/joy";
-import {TemplateCard} from "@/components/iconselection";
-import AttributeBackground from "@/public/attributesiconphoto.jpg";
-import DescriptionIcon from "@mui/icons-material/Description";
-import CensusBackground from "@/public/censusiconphoto.jpg";
-import GridOnIcon from "@mui/icons-material/GridOn";
-import PersonnelBackground from "@/public/personneliconphoto.jpg";
-import AccountCircleIcon from "@mui/icons-material/AccountCircle";
-import QuadratBackground from "@/public/quadraticonphoto.jpg";
-import WidgetsIcon from "@mui/icons-material/Widgets";
-import SpeciesBackground from "@/public/speciesiconphoto.jpg";
-import BugReportIcon from "@mui/icons-material/BugReport";
 import * as React from "react";
 
 export default function PropertiesPage() {
