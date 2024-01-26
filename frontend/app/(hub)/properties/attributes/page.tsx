@@ -25,11 +25,11 @@ export default function AttributesPage() {
 
   const addNewRowToGrid = () => {
     const id = randomId();
-    const newRow = { id, code: '', description: '', status: '', isNew: true };
+    const newRow = {id, code: '', description: '', status: '', isNew: true};
     setRows(oldRows => [...oldRows, newRow]);
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: 'edit', fieldToFocus: 'code' },
+      [id]: {mode: 'edit', fieldToFocus: 'code'},
     }));
   };
 
