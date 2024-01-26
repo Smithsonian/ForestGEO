@@ -340,20 +340,20 @@ export default function Sidebar() {
               <Link component={"button"} onClick={() => {
                 setOpenPlotSelectionModal(true);
               }}>
-                <Typography color={(!currentPlot?.key || !currentPlot?.num || !currentPlot?.id) ? "danger" : undefined}
+                <Typography color={(!currentPlot?.key  || !currentPlot?.id) ? "danger" : undefined}
                             level="body-lg">
                   {currentPlot?.key ? `Plot: ${currentPlot.key}` : "No Plot"}
                   {currentPlot?.id ? ` -> ID: ${currentPlot.id}` : ''}
                 </Typography>
               </Link>
-              <Link component={"button"} onClick={() => {
-                setOpenCensusSelectionModal(true);
-              }}>
-                <Typography color={(!currentCensus?.censusID) ? "danger" : undefined}
-                            level="body-lg">
-                  {currentCensus?.censusID ? `Census: ${currentCensus.censusID}` : 'No Census'}
-                </Typography>
-              </Link>
+              {/*<Link component={"button"} onClick={() => {*/}
+              {/*  setOpenCensusSelectionModal(true);*/}
+              {/*}}>*/}
+              {/*  <Typography color={(!currentCensus?.censusID) ? "danger" : undefined}*/}
+              {/*              level="body-lg">*/}
+              {/*    {currentCensus?.censusID ? `Census: ${currentCensus.censusID}` : 'No Census'}*/}
+              {/*  </Typography>*/}
+              {/*</Link>*/}
             </Breadcrumbs>
             <Divider orientation={"horizontal"}/>
             <Modal open={openPlotSelectionModal} onClose={() => {
