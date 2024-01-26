@@ -19,7 +19,7 @@ import {
   usePlotContext,
   usePlotDispatch
 } from "@/app/contexts/userselectionprovider";
-import {redirect, usePathname, useRouter} from "next/navigation";
+import {usePathname, useRouter} from "next/navigation";
 import {
   Breadcrumbs,
   Button,

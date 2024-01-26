@@ -1,7 +1,6 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useEffect, useReducer} from 'react';
 import {createEnhancedDispatch, genericLoadReducer, LoadAction, Plot, Quadrat} from "@/config/macros";
-import UserSelectionProvider from "@/app/contexts/userselectionprovider";
 import {getData} from "@/config/db";
 
 export const PlotListContext = createContext<Plot[] | null>(null);

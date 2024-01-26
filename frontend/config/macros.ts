@@ -11,7 +11,6 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch} from "react";
-import {setData} from "@/config/db";
 import {CensusRDS} from "@/config/sqlmacros";
 import {GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 
@@ -140,11 +139,12 @@ export interface AllRowsData {
 
 export interface EditToolbarProps {
   setIsNewRowAdded: React.Dispatch<React.SetStateAction<boolean>>;
+  setShouldAddRowAfterFetch: React.Dispatch<React.SetStateAction<boolean>>;
   rows: GridRowsProp;
   setRows: React.Dispatch<React.SetStateAction<GridRowsProp>>;
   setRowModesModel: React.Dispatch<React.SetStateAction<GridRowModesModel>>;
   setRefresh: React.Dispatch<React.SetStateAction<boolean>>;
-  currentPlot: Plot;
+  currentPlot: Plot | null;
   rowCount: number; // Total number of rows across all pages
   setRowCount: React.Dispatch<React.SetStateAction<number>>;
   paginationModel: { page: number, pageSize: number };

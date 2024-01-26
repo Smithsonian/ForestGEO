@@ -21,7 +21,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
     // Initialize the connection attempt counter
     let attempt = 0;
     conn = await getSqlConnection(attempt);
-    if (conn) console.log('sql conn established')
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;

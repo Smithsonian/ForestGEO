@@ -24,46 +24,33 @@ import {EditToolbarProps, ErrorMessages} from "@/config/macros";
 import {QuadratsGridColumns, QuadratsRDS, StyledDataGrid} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {Typography} from "@mui/joy";
+import {randomId} from "@mui/x-data-grid-generator";
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {
-    rows, setRows, setRowModesModel, setRefresh, currentPlot,
+    setIsNewRowAdded, setShouldAddRowAfterFetch, rows, setRows, setRowModesModel, setRefresh, currentPlot,
     rowCount, setRowCount, paginationModel, onPaginationModelChange
   } = props;
 
-  const handleAddNewRow = async () => {
-    const nextQuadratID = (rows.length > 0
-      ? rows.reduce((max, row) => Math.max(row.quadratID, max), 0)
-      : 0) + 1;
-    const newRow = {
-      id: nextQuadratID,
-      quadratID: nextQuadratID,
-      plotID: currentPlot.id,
-      quadratName: '',
-      quadratX: 0,
-      quadratY: 0,
-      quadratZ: 0,
-      dimensionX: 0,
-      dimensionY: 0,
-      area: 0,
-      quadratShape: ''
-    };
-    setRows((oldRows) => [...oldRows, newRow]);
-    // Update the pagination model for the last page
-    const lastPage = Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1;
-    onPaginationModelChange({...paginationModel, page: lastPage});
+  const handleAddNewRow = () => {
+    // Determine if a new page is needed
+    const newRowCount = rowCount + 1;
+    const newLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
+    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1;
 
-    // Set new row to edit mode
-    // Note: The state update for setRowModesModel might not immediately reflect
-    setRowModesModel(oldModel => ({
-      ...oldModel,
-      [newRow.id]: {mode: GridRowModes.Edit}
-    }));
+    // Set flags and update pagination if a new page is needed
+    setIsNewRowAdded(true);
+    setShouldAddRowAfterFetch(isNewPageNeeded);
+
+    if (isNewPageNeeded) {
+      onPaginationModelChange({ ...paginationModel, page: newLastPage });
+    }
   };
+
   const handleRefresh = async () => {
     setRefresh(true);
     try {
-      const response = await fetch(`/api/fixeddata/quadrats?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}`, {
+      const response = await fetch(`/api/fixeddata/quadrats?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}&plotID=${currentPlot ? currentPlot.id : undefined}`, {
         method: 'GET'
       });
       if (!response.ok) {
@@ -129,23 +116,27 @@ export default function QuadratsPage() {
     page: 0,
     pageSize: 10,
   });
+  const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
+  const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   let currentPlot = usePlotContext();
   // Function to fetch paginated data
-  const fetchPaginatedData = async () => {
+  const fetchPaginatedData = async (pageToFetch: number) => {
     setRefresh(true);
     try {
-      const response = await fetch(`/api/fixeddata/quadrats?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}&plotID=${currentPlot ? currentPlot.id : undefined}`, {
+      const response = await fetch(`/api/fixeddata/quadrats?page=${pageToFetch}&pageSize=${paginationModel.pageSize}&plotID=${currentPlot ? currentPlot.id : undefined}`, {
         method: 'GET',
       });
-      console.log(`response status: ${response.status}`);
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
       const data = await response.json();
-      setRows(data.quadrats); // assuming the API returns an object with census and totalCount
-      console.log(rows);
+      if (!response.ok) {
+        throw new Error(data.message || 'Error fetching data');
+      }
+      setRows(data.quadrats); // assuming the API returns an object with coreMeasurements and totalCount
       setRowCount(data.totalCount);
-      console.log(rowCount);
+
+      if (shouldAddRowAfterFetch && isNewRowAdded) {
+        addNewRowToGrid();
+        setShouldAddRowAfterFetch(false); // Reset flag after operation
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
       setSnackbar({children: 'Error fetching data', severity: 'error'});
@@ -153,9 +144,50 @@ export default function QuadratsPage() {
     setRefresh(false);
   };
 
+  const addNewRowToGrid = () => {
+    const id = randomId();
+    const nextQuadratID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.quadratID, max), 0)
+      : 0) + 1;
+    const newRow = {
+      id: nextQuadratID,
+      quadratID: nextQuadratID,
+      plotID: currentPlot ? currentPlot.id : 0,
+      quadratName: '',
+      quadratX: 0,
+      quadratY: 0,
+      quadratZ: 0,
+      dimensionX: 0,
+      dimensionY: 0,
+      area: 0,
+      quadratShape: ''
+    };
+    // Add the new row to the state
+    setRows(oldRows => [...oldRows, newRow]);
+    // Set editing mode for the new row
+    setRowModesModel(oldModel => ({
+      ...oldModel,
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratID' },
+    }));
+    // Reset the new row addition flag
+    setIsNewRowAdded(false);
+  };
+
   useEffect(() => {
-    fetchPaginatedData().catch(console.error);
-  }, [paginationModel]);
+    if (isNewRowAdded) {
+      const pageToFetch = shouldAddRowAfterFetch
+        ? Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1
+        : paginationModel.page;
+      fetchPaginatedData(pageToFetch).catch(console.error);
+    }
+  }, [isNewRowAdded, rowCount, paginationModel, shouldAddRowAfterFetch]);
+
+  // ... useEffect for handling page changes
+  useEffect(() => {
+    if (!isNewRowAdded) {
+      fetchPaginatedData(paginationModel.page).catch(console.error);
+    }
+  }, [paginationModel.page]);
 
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
@@ -172,8 +204,20 @@ export default function QuadratsPage() {
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
 
-  const handleSaveClick = (id: GridRowId) => () => {
-    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
+  const handleSaveClick = (id: GridRowId) => async () => {
+    setRowModesModel((oldModel) => ({
+      ...oldModel,
+      [id]: { mode: GridRowModes.View },
+    }));
+
+    // If the row was newly added, reset isNewRowAdded
+    const row = rows.find((row) => row.id === id);
+    if (row?.isNew) {
+      setIsNewRowAdded(false); // We are done adding a new row
+      // Now we can refetch data for the current page without adding a new row
+      setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
+      await fetchPaginatedData(paginationModel.page);
+    }
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
@@ -184,67 +228,81 @@ export default function QuadratsPage() {
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
-      await fetchPaginatedData();
     }
   };
 
-  const handleCancelClick = (id: GridRowId) => () => {
-    setRowModesModel({
-      ...rowModesModel,
-      [id]: {mode: GridRowModes.View, ignoreModifications: true},
-    });
+  const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
+    // Prevent default action for the event if it exists
+    event?.preventDefault();
 
-    const editedRow = rows.find((row) => row.id === id);
-    if (editedRow!.isNew) {
-      setRows(rows.filter((row) => row.id !== id));
-      setSnackbar({children: "Changes cancelled", severity: 'success'});
+    const isOnlyRowOnNewPage = rowCount % paginationModel.pageSize === 1 && isNewRowAdded;
+
+    // Remove the new row and reset the isNewRowAdded flag
+    setRows((oldRows) => oldRows.filter((row) => row.id !== id));
+    setIsNewRowAdded(false);
+
+    if (isOnlyRowOnNewPage) {
+      // Move back to the previous page if it was the only row on a new page
+      const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
+      setPaginationModel({ ...paginationModel, page: newPage });
+    } else {
+      // For existing rows, just switch the mode to view
+      setRowModesModel({
+        ...rowModesModel,
+        [id]: { mode: GridRowModes.View, ignoreModifications: true },
+      });
     }
   };
+
   const processRowUpdate = React.useCallback(
-    (newRow: GridRowModel, oldRow: GridRowModel) =>
-      new Promise<GridRowModel>(async (resolve, reject) => {
-        if (newRow.quadratID == '') {
-          reject(new Error("Primary key QuadratID cannot be empty!"));
-        } else if (oldRow.quadratID == '') {
-          // inserting a row
-          const response = await fetch(`/api/fixeddata/quadrats`, {
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+      // Validate the primary key
+      if (newRow.quadratID === '') {
+        throw new Error("Primary key 'quadratID' cannot be empty!");
+      }
+
+      try {
+        let response, responseJSON;
+        // If oldRow code is empty, it's a new row insertion
+        if (oldRow.quadratID === '') {
+          response = await fetch('/api/fixeddata/quadrats', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(newRow)
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newRow),
           });
-          const responseJSON = await response.json();
-          if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
-          else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
-          else if (!response.ok) reject(new Error(responseJSON.message));
-          else {
-            setSnackbar({children: `New row added!`, severity: 'success'});
-            resolve(newRow);
-          }
+          responseJSON = await response.json();
+          if (!response.ok) throw new Error(responseJSON.message || "Insertion failed");
+          setSnackbar({ children: `New row added!`, severity: 'success' });
         } else {
+          // If code is not empty, it's an update
           const mutation = computeMutation(newRow, oldRow);
           if (mutation) {
-            const response = await fetch(`/api/fixeddata/quadrats`, {
+            response = await fetch(`/api/fixeddata/quadrats`, {
               method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(newRow)
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newRow),
             });
-            const responseJSON = await response.json();
-            if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
-            else if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
-            else if (!response.ok) reject(new Error(responseJSON.message));
-            else {
-              setSnackbar({children: `New row added!`, severity: 'success'});
-              resolve(newRow);
-            }
+            responseJSON = await response.json();
+            if (!response.ok) throw new Error(responseJSON.message || "Update failed");
+            setSnackbar({ children: `Row updated!`, severity: 'success' });
           }
         }
-        await fetchPaginatedData();
-      }),
-    [],
+
+        // After save or update, reset isNewRowAdded if necessary and refresh data
+        if (oldRow.isNew) {
+          setIsNewRowAdded(false); // We are done adding a new row
+          // Now we can refetch data for the current page without adding a new row
+          setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
+          await fetchPaginatedData(paginationModel.page);
+        }
+
+        return newRow;
+      } catch (error: any) {
+        setSnackbar({ children: error.message, severity: 'error' });
+        throw error;
+      }
+    },
+    [setSnackbar, setIsNewRowAdded, fetchPaginatedData, paginationModel.page]
   );
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
@@ -277,7 +335,7 @@ export default function QuadratsPage() {
               label="Cancel"
               key={"cancel"}
               className="textPrimary"
-              onClick={handleCancelClick(id)}
+              onClick={(event) => handleCancelClick(id, event)}
               color="inherit"
             />,
           ];
@@ -341,6 +399,8 @@ export default function QuadratsPage() {
                           }}
                           slotProps={{
                             toolbar: {
+                              setIsNewRowAdded,
+                              setShouldAddRowAfterFetch,
                               rows,
                               setRows,
                               setRowModesModel,

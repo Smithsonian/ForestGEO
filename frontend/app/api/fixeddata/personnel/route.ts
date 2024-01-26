@@ -30,7 +30,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     // Initialize the connection attempt counter
     let attempt = 0;
     conn = await getSqlConnection(attempt);
-    if (conn) console.log('sql conn established')
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -73,7 +72,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     conn = await getSqlConnection(0);
 
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Attributes`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Personnel`, newRowData]);
     await runQuery(conn, insertQuery);
 
     return NextResponse.json({message: "Insert successful"}, {status: 200});

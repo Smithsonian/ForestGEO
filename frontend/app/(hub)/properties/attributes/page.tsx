@@ -27,34 +27,24 @@ import {randomId} from "@mui/x-data-grid-generator";
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {
-    setIsNewRowAdded, rows, setRows, setRowModesModel, setRefresh,
-    rowCount, setRowCount, paginationModel, onPaginationModelChange
+    setIsNewRowAdded, setShouldAddRowAfterFetch,
+    setRows, setRefresh, rowCount,
+    setRowCount, paginationModel, onPaginationModelChange
   } = props;
 
-  const handleAddNewRow = async () => {
+  const handleAddNewRow = () => {
+    // Determine if a new page is needed
     const newRowCount = rowCount + 1;
-    const lastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
-    const isNewRowFirstOnNewPage = newRowCount % paginationModel.pageSize === 1;
+    const newLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
+    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1;
 
-    if (isNewRowFirstOnNewPage) {
-      // If the new row is the first on a new page, set pagination to the new last page
-      onPaginationModelChange({ ...paginationModel, page: lastPage });
-    }
-
-    // Add the new row at the end
-    const id = randomId();
-    const newRow = { id, code: '', description: '', status: '', isNew: true };
-    setRows((oldRows) => [...oldRows, newRow]);
-    setRowModesModel((oldModel) => ({
-      ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'code' }
-    }));
-
-    // Update rowCount since a new row has been added
-    setRowCount(newRowCount);
-
-    // Set isNewRowAdded flag to true
+    // Set flags and update pagination if a new page is needed
     setIsNewRowAdded(true);
+    setShouldAddRowAfterFetch(isNewPageNeeded);
+
+    if (isNewPageNeeded) {
+      onPaginationModelChange({ ...paginationModel, page: newLastPage });
+    }
   };
 
   const handleRefresh = async () => {
@@ -117,43 +107,64 @@ export default function AttributesPage() {
     pageSize: 10,
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
+  const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   let currentPlot = usePlotContext();
   // Function to fetch paginated data
-  const fetchPaginatedData = async () => {
-    if (!isNewRowAdded) { // Only fetch data if no new row has been added
-      setRefresh(true);
-      try {
-        const response = await fetch(`/api/fixeddata/attributes?page=${paginationModel.page}&pageSize=${paginationModel.pageSize}`, {
-          method: 'GET',
-        });
-        const data = await response.json();
-        setRows(data.attributes);
-        setRowCount(data.totalCount);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setSnackbar({children: 'Error fetching data', severity: 'error'});
+  const fetchPaginatedData = async (pageToFetch: number) => {
+    setRefresh(true);
+    try {
+      const response = await fetch(`/api/fixeddata/attributes?page=${pageToFetch}&pageSize=${paginationModel.pageSize}`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Error fetching data');
       }
-      setRefresh(false);
+
+      setRows(data.attributes);
+      setRowCount(data.totalCount); // Update rowCount here from the fetched data
+
+      if (shouldAddRowAfterFetch && isNewRowAdded) {
+        addNewRowToGrid();
+        setShouldAddRowAfterFetch(false); // Reset flag after operation
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setSnackbar({ children: 'Error fetching data', severity: 'error' });
     }
+    setRefresh(false);
   };
 
+  const addNewRowToGrid = () => {
+    const id = randomId();
+    // New row object
+    const newRow = { id, code: '', description: '', status: '', isNew: true };
+    // Add the new row to the state
+    setRows(oldRows => [...oldRows, newRow]);
+    // Set editing mode for the new row
+    setRowModesModel(oldModel => ({
+      ...oldModel,
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'code' },
+    }));
+    // Reset the new row addition flag
+    setIsNewRowAdded(false);
+  };
+
+  // ... useEffect for handling row addition logic
   useEffect(() => {
-    const lastPage = Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1;
-    if (isNewRowAdded && paginationModel.page === lastPage) {
-      // When we're ready to add the new row and we're on the last page,
-      // we can safely add the new row to the grid.
-      const id = randomId();
-      const newRow = { id, code: '', description: '', status: '', isNew: true };
-      setRows((oldRows) => [...oldRows, newRow]);
-      setRowModesModel((oldModel) => ({
-        ...oldModel,
-        [id]: { mode: GridRowModes.Edit, fieldToFocus: 'code' }
-      }));
-      setIsNewRowAdded(false); // Reset the flag after adding the row
-    } else if (!isNewRowAdded) {
-      fetchPaginatedData().catch(console.error);
+    if (isNewRowAdded) {
+      const pageToFetch = shouldAddRowAfterFetch
+        ? Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1
+        : paginationModel.page;
+      fetchPaginatedData(pageToFetch).catch(console.error);
     }
-  }, [paginationModel.page, paginationModel.pageSize, isNewRowAdded]);
+  }, [isNewRowAdded, rowCount, paginationModel, shouldAddRowAfterFetch]);
+
+  // ... useEffect for handling page changes
+  useEffect(() => {
+    if (!isNewRowAdded) {
+      fetchPaginatedData(paginationModel.page).catch(console.error);
+    }
+  }, [paginationModel.page]);
+
 
   const handleCloseSnackbar = () => setSnackbar(null);
   const handleProcessRowUpdateError = React.useCallback((error: Error) => {
@@ -173,14 +184,16 @@ export default function AttributesPage() {
   const handleSaveClick = (id: GridRowId) => async () => {
     setRowModesModel((oldModel) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.View }
+      [id]: { mode: GridRowModes.View },
     }));
 
-    // If the row was newly added, reset isNewRowAdded and refetch data
+    // If the row was newly added, reset isNewRowAdded
     const row = rows.find((row) => row.id === id);
     if (row?.isNew) {
-      setIsNewRowAdded(false);
-      await fetchPaginatedData();
+      setIsNewRowAdded(false); // We are done adding a new row
+      // Now we can refetch data for the current page without adding a new row
+      setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
+      await fetchPaginatedData(paginationModel.page);
     }
   };
 
@@ -222,14 +235,13 @@ export default function AttributesPage() {
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
       // Validate the primary key
       if (newRow.code === '') {
-        throw new Error("Primary key Code cannot be empty!");
+        throw new Error("Primary key 'Code' cannot be empty!");
       }
 
-      // Attempt to save or update the row
       try {
         let response, responseJSON;
+        // If oldRow code is empty, it's a new row insertion
         if (oldRow.code === '') {
-          // If code is empty, it's a new row insertion
           response = await fetch('/api/fixeddata/attributes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -255,8 +267,10 @@ export default function AttributesPage() {
 
         // After save or update, reset isNewRowAdded if necessary and refresh data
         if (oldRow.isNew) {
-          setIsNewRowAdded(false);
-          await fetchPaginatedData();
+          setIsNewRowAdded(false); // We are done adding a new row
+          // Now we can refetch data for the current page without adding a new row
+          setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
+          await fetchPaginatedData(paginationModel.page);
         }
 
         return newRow;
@@ -265,7 +279,7 @@ export default function AttributesPage() {
         throw error;
       }
     },
-      [setSnackbar, setIsNewRowAdded, fetchPaginatedData]
+    [setSnackbar, setIsNewRowAdded, fetchPaginatedData, paginationModel.page]
   );
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
@@ -360,6 +374,7 @@ export default function AttributesPage() {
                       slotProps={{
                         toolbar: {
                           setIsNewRowAdded,
+                          setShouldAddRowAfterFetch,
                           rows,
                           setRows,
                           setRowModesModel,
