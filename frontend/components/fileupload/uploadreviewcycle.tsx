@@ -9,7 +9,12 @@ import {
   TableHeadersByFormType
 } from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DataStructure, DisplayErrorTable, DisplayParsedData} from "@/components/fileupload/validationtable";
+import {
+  DataStructure,
+  DisplayErrorGrid,
+  DisplayErrorTable,
+  DisplayParsedData
+} from "@/components/fileupload/validationtable";
 import {parse, ParseResult} from "papaparse";
 import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";
@@ -403,6 +408,58 @@ export function UploadAndReviewProcess() {
     </Box>
   )
   const ErrorState = () => {
+    return (
+      <Grid container spacing={2}>
+        <Grid xs={5}>
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+            {Object.keys(errorRowsData).map((fileName: string) => {
+              const fileDataStructure = errorRowsData[fileName].map((rowData) => {
+                // Convert each value in RowDataStructure to a string for DataStructure
+                const convertedRow: DataStructure = {};
+                for (const key in rowData) {
+                  convertedRow[key] = String(rowData[key]);
+                }
+                return convertedRow;
+              });
+
+              return (
+                <DisplayErrorGrid
+                  key={fileName}
+                  fileName={fileName}
+                  fileData={{fileName, data: fileDataStructure}}
+                  errorMessage={errorsData[fileName] as unknown as FileErrors} // Cast the type if structures are compatible
+                  formType={uploadForm}
+                />
+              );
+            })}
+            <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
+          </Box>
+        </Grid>
+
+        <Grid xs={2}>
+          <Divider orientation="vertical" sx={{my: 4}}/>
+        </Grid>
+
+        <Grid xs={5}>
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+            <Card>
+              <CardContent>
+                <Typography sx={{fontSize: 16, color: 'red', fontWeight: 'bold'}}>WARNING!</Typography>
+                <Typography sx={{fontSize: 14, color: 'red'}}>Errors were found in your file (highlighted in
+                  red).</Typography>
+                <Typography sx={{fontSize: 14, color: 'red'}}>All rows not highlighted red were successfully
+                  uploaded to storage.</Typography>
+                <Typography sx={{fontSize: 14, color: 'red'}}>The submitted file was saved to storage and has been
+                  marked as containing errors.</Typography>
+              </CardContent>
+            </Card>
+          </Box>
+        </Grid>
+      </Grid>
+    );
+  }
+
+  const ErrorCorrectionState = () => {
     return (
       <Grid container spacing={2}>
         <Grid xs={5}>

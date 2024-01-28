@@ -76,7 +76,7 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
 };
 
 export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
-  "fixeddata_codes": [{label: "code"}],
+  "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
   // "fixeddata_role.csv": [{label: "role"}],
   "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}],
   "fixeddata_species": [{label: "spcode"}],
@@ -205,6 +205,7 @@ export enum ReviewStates {
   UPLOAD = "upload",
   UPLOADED = "uploaded",
   ERRORS = "errors",
+  ERRORS_CORRECTION = "errors_correction",
   FILE_MISMATCH_ERROR = "file_mismatch_error"
 }
 

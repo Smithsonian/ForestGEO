@@ -1,7 +1,7 @@
-code,description,
+code,description,status
 A,Healthy and alive,alive
-B,Branches damaged,alive
-C,Cankered trunk,alive
+B,,alive
+C,Cankered trunk,
 D,Dead,dead
 E,Eroded base,alive
 F,Fallen,dead

@@ -5,6 +5,7 @@ import React, {useEffect, useState} from 'react';
 import {FileWithPath} from 'react-dropzone';
 import '@/styles/validationtable.css';
 import {FileErrors, TableHeadersByFormType} from "@/config/macros";
+import {DataGrid, GridCellParams, GridColDef} from "@mui/x-data-grid";
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */
@@ -32,7 +33,7 @@ export function DisplayErrorTable({
                                     fileData,
                                     errorMessage,
                                     formType,
-                                  }: DisplayErrorTableProps) {
+                                  }: Readonly<DisplayErrorTableProps>) {
   const tableHeaders = TableHeadersByFormType[formType] || [];
 
   return (
@@ -83,6 +84,56 @@ export function DisplayErrorTable({
   );
 }
 
+
+export function DisplayErrorGrid({
+                                   fileName,
+                                   fileData,
+                                   errorMessage,
+                                   formType,
+                                 }: DisplayErrorTableProps): JSX.Element {
+  const tableHeaders = TableHeadersByFormType[formType] || [];
+
+
+  const columns: GridColDef[] = tableHeaders.map((header) => ({
+    field: header.label,
+    headerName: header.label,
+    flex: 1,
+    renderCell: (params: GridCellParams) => {
+      const rowId = params.id.toString();
+      const cellError = errorMessage[fileName]?.[rowId];
+
+      // Safely convert value to a string for rendering
+      const cellValue = params.value == null ? '' : params.value.toString();
+
+      return (
+        <div style={cellError ? { backgroundColor: 'red', color: 'white' } : undefined}>
+          {cellValue}
+          {cellError && <div>{cellError}</div>}
+        </div>
+      );
+    },
+  }));
+
+  const rows = fileData.data.map((data, index) => ({
+    id: data.id ?? index, // Use data.id if available, otherwise use index
+    ...data,
+  }));
+
+  return (
+    <Paper style={{ height: 400, width: '100%' }}>
+      <h3>file: {fileName}</h3>
+      <DataGrid
+        rows={rows}
+        columns={columns}
+        autoHeight
+        disableColumnMenu
+        disableColumnSelector
+        disableRowSelectionOnClick
+        density="compact"
+      />
+    </Paper>
+  );
+}
 
 /**
  * Shows a data table with the possibility of showing errors.
