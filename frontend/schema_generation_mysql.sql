@@ -29,6 +29,8 @@ create table forestgeo_bci.plots
     PlotName        text  null,
     LocationName    text  null,
     CountryName     text  null,
+    DimensionX      int   null,
+    DimensionY      int   null,
     Area            float null,
     PlotX           float null,
     PlotY           float null,
@@ -205,27 +207,23 @@ create table forestgeo_bci.stems
 
 create table forestgeo_bci.coremeasurements
 (
-    CoreMeasurementID   int auto_increment
+    CoreMeasurementID int auto_increment
         primary key,
-    CensusID            int  null,
-    PlotID              int  null,
-    QuadratID           int  null,
-    TreeID              int  null,
-    StemID              int  null,
-    PersonnelID         int  null,
-    MeasurementTypeID   int  null,
-    MeasurementDate     date null,
-    Measurement         text null,
-    IsRemeasurement     bit  null,
-    IsCurrent           bit  null,
-    UserDefinedFields   text null,
-    Description         text null,
-    MasterMeasurementID int  null,
+    CensusID          int            null,
+    PlotID            int            null,
+    QuadratID         int            null,
+    TreeID            int            null,
+    StemID            int            null,
+    PersonnelID       int            null,
+    IsRemeasurement   bit            null,
+    IsCurrent         bit            null,
+    MeasurementDate   date           null,
+    MeasuredDBH       decimal(10, 2) null,
+    MeasuredHOM       decimal(10, 2) null,
+    Description       text           null,
+    UserDefinedFields text           null,
     constraint CoreMeasurements_Census_CensusID_fk
         foreign key (CensusID) references forestgeo_bci.census (CensusID)
-            on update cascade,
-    constraint CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
-        foreign key (MeasurementTypeID) references forestgeo_bci.measurementtypes (MeasurementTypeID)
             on update cascade,
     constraint CoreMeasurements_Personnel_PersonnelID_fk
         foreign key (PersonnelID) references forestgeo_bci.personnel (PersonnelID)
@@ -237,9 +235,7 @@ create table forestgeo_bci.coremeasurements
     constraint FK_CoreMeasurements_Stems
         foreign key (StemID) references forestgeo_bci.stems (StemID),
     constraint FK_CoreMeasurements_Trees
-        foreign key (TreeID) references forestgeo_bci.trees (TreeID),
-    constraint coremeasurements_coremeasurements_CoreMeasurementID_fk
-        foreign key (MasterMeasurementID) references forestgeo_bci.coremeasurements (CoreMeasurementID)
+        foreign key (TreeID) references forestgeo_bci.trees (TreeID)
 );
 
 create table forestgeo_bci.cmattributes
@@ -249,11 +245,9 @@ create table forestgeo_bci.cmattributes
     CoreMeasurementID int         null,
     Code              varchar(10) null,
     constraint CMAttributes_Attributes_Code_fk
-        foreign key (Code) references forestgeo_bci.attributes (Code)
-            on update cascade,
+        foreign key (Code) references forestgeo_bci.attributes (Code),
     constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
         foreign key (CoreMeasurementID) references forestgeo_bci.coremeasurements (CoreMeasurementID)
-            on update cascade
 );
 
 create table forestgeo_bci.validationerrors
@@ -280,73 +274,190 @@ create table forestgeo_bci.cmverrors
 create
     definer = azureroot@`%` procedure forestgeo_bci.MigrateDBHtoCoreMeasurements()
 BEGIN
-    -- Declare variables to hold data from ctfsweb.dbh
+    -- Declare variables
     DECLARE vCensusID INT;
     DECLARE vStemID INT;
-    DECLARE vDBH FLOAT;
-    DECLARE vHOM FLOAT;
+    DECLARE vDBH DECIMAL(10, 2); -- Ensure compatibility with the table definition
+    DECLARE vHOM DECIMAL(10, 2); -- Ensure compatibility with the table definition
     DECLARE vExactDate DATE;
     DECLARE vComments VARCHAR(128);
     DECLARE vPlotID INT;
     DECLARE vQuadratID INT;
     DECLARE vTreeID INT;
-    DECLARE vLastCoreMeasurementID INT;
+    DECLARE vIsRemeasurement TINYINT(1);
     DECLARE vRowCount INT DEFAULT 0;
+    DECLARE vMaxRows INT; -- Variable to store the maximum number of rows to insert
     DECLARE done INT DEFAULT FALSE;
 
-    DECLARE dbhCursor CURSOR FOR
-        SELECT CensusID, StemID, DBH, HOM, ExactDate, Comments
-        FROM ctfsweb.dbh;
+    -- Declare a cursor for a simulated FULL OUTER JOIN result set from dbh and remeasurements
+    DECLARE combinedCursor CURSOR FOR
+        SELECT d.CensusID, d.StemID, d.DBH, d.HOM, d.ExactDate, d.Comments, 0 AS IsRemeasurement
+        FROM ctfsweb.dbh d
+        LEFT JOIN ctfsweb.remeasurement r ON d.StemID = r.StemID AND d.CensusID = r.CensusID
+        UNION
+        SELECT r.CensusID, r.StemID, r.DBH, r.HOM, r.ExactDate, NULL AS Comments, 1 AS IsRemeasurement
+        FROM ctfsweb.remeasurement r
+        LEFT JOIN ctfsweb.dbh d ON d.StemID = r.StemID AND d.CensusID = r.CensusID
+        WHERE d.StemID IS NULL
+        ORDER BY StemID, ExactDate;
 
     -- Declare the continue handler
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
 
+    -- Set the maximum number of rows to insert (e.g., 100)
+    SET vMaxRows = 2756583;
+
     -- Reset auto-increment of CoreMeasurements to 1
-    ALTER TABLE forestgeo_bci.CoreMeasurements
-        AUTO_INCREMENT = 1;
+    ALTER TABLE forestgeo_bci.CoreMeasurements AUTO_INCREMENT = 1;
 
-    -- Open the cursor
-    OPEN dbhCursor;
+    -- Open the combined cursor
+    OPEN combinedCursor;
 
-    -- Loop through all rows in ctfsweb.dbh
-    read_loop:
+    -- Loop through all rows in the combined result set
+    combined_loop:
     LOOP
+        -- Check if the row count has reached the maximum limit
+        IF vRowCount >= vMaxRows THEN
+            LEAVE combined_loop;
+        END IF;
+
         -- Fetch next row from cursor
-        FETCH dbhCursor INTO vCensusID, vStemID, vDBH, vHOM, vExactDate, vComments;
-        IF done OR vRowCount >= 100000 THEN
-            LEAVE read_loop;
+        FETCH combinedCursor INTO vCensusID, vStemID, vDBH, vHOM, vExactDate, vComments, vIsRemeasurement;
+        IF done THEN
+            LEAVE combined_loop;
         END IF;
 
         -- Retrieve PlotID, QuadratID, and TreeID from forestgeo_bci
         SELECT stems.TreeID,
                stems.QuadratID,
                census.PlotID
-        INTO
-            vTreeID,
-            vQuadratID,
-            vPlotID
+        INTO vTreeID, vQuadratID, vPlotID
         FROM forestgeo_bci.Stems AS stems
-                 JOIN
-             forestgeo_bci.Census AS census ON census.CensusID = vCensusID
+        JOIN forestgeo_bci.Census AS census ON census.CensusID = vCensusID
         WHERE stems.StemID = vStemID;
 
-        -- Insert a row for DBH measurement
-        INSERT INTO forestgeo_bci.CoreMeasurements (CensusID, PlotID, QuadratID, TreeID, StemID, MeasurementTypeID,
-                                                    Measurement, MeasurementDate, Description)
-        VALUES (vCensusID, vPlotID, vQuadratID, vTreeID, vStemID, 1, CAST(vDBH AS CHAR), vExactDate, vComments);
-        SET vLastCoreMeasurementID = LAST_INSERT_ID();
+        -- Insert a row for DBH measurement or remeasurement
+        INSERT INTO forestgeo_bci.CoreMeasurements (CensusID, PlotID, QuadratID, TreeID, StemID, MeasuredDBH,
+                                                    MeasuredHOM, MeasurementDate, Description, IsRemeasurement, IsCurrent)
+        VALUES (vCensusID, vPlotID, vQuadratID, vTreeID, vStemID, CAST(vDBH AS DECIMAL(10, 2)), CAST(vHOM AS DECIMAL(10, 2)), vExactDate, vComments, vIsRemeasurement, FALSE);
 
-        -- Insert a row for HOM measurement
-        INSERT INTO forestgeo_bci.CoreMeasurements (CensusID, PlotID, QuadratID, TreeID, StemID, MeasurementTypeID,
-                                                    Measurement, MasterMeasurementID, MeasurementDate, Description)
-        VALUES (vCensusID, vPlotID, vQuadratID, vTreeID, vStemID, 2, CAST(vHOM AS CHAR), vLastCoreMeasurementID,
-                vExactDate, vComments);
-
-        -- Increment row count
+        -- Increment the row count
         SET vRowCount = vRowCount + 1;
     END LOOP;
 
     -- Close the cursor
-    CLOSE dbhCursor;
+    CLOSE combinedCursor;
+
+    -- Update the IsCurrent field for the most recent measurement of each stem
+    UPDATE forestgeo_bci.CoreMeasurements cm
+    INNER JOIN (
+        SELECT MAX(CoreMeasurementID) AS LatestMeasurementID, StemID
+        FROM forestgeo_bci.CoreMeasurements
+        GROUP BY StemID
+    ) AS latest ON cm.CoreMeasurementID = latest.LatestMeasurementID
+    SET cm.IsCurrent = TRUE;
 END;
+
+create
+    definer = azureroot@`%` procedure forestgeo_bci.checkDuplicateStemTreeTagCombinations()
+BEGIN
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE vCoreMeasurementID INT;
+    DECLARE vStemTag VARCHAR(10);
+    DECLARE vTreeTag VARCHAR(10);
+    DECLARE vValidationErrorID INT;
+    DECLARE vErrorMessage VARCHAR(255) DEFAULT 'Duplicate combination of StemTag and TreeTag';
+
+    -- Cursor for CoreMeasurements
+    DECLARE coreMeasurementsCursor CURSOR FOR
+        SELECT cm.CoreMeasurementID, s.StemTag, t.TreeTag
+        FROM forestgeo_bci.coremeasurements cm
+        JOIN forestgeo_bci.stems s ON cm.StemID = s.StemID
+        JOIN forestgeo_bci.trees t ON cm.TreeID = t.TreeID;
+
+    -- Continue handler for 'no more rows' condition
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+
+    -- Insert the validation error description into ValidationErrors
+    INSERT INTO forestgeo_bci.validationerrors (ValidationErrorDescription)
+    VALUES (vErrorMessage);
+
+    SET vValidationErrorID = LAST_INSERT_ID();
+
+    OPEN coreMeasurementsCursor;
+
+    -- Loop through all rows in CoreMeasurements
+    validation_loop: LOOP
+        FETCH coreMeasurementsCursor INTO vCoreMeasurementID, vStemTag, vTreeTag;
+        IF done THEN
+            LEAVE validation_loop;
+        END IF;
+
+        -- Check for duplicate combination of StemTag and TreeTag
+        IF EXISTS (
+            SELECT 1
+            FROM forestgeo_bci.coremeasurements cm
+            JOIN forestgeo_bci.stems s ON cm.StemID = s.StemID
+            JOIN forestgeo_bci.trees t ON cm.TreeID = t.TreeID
+            WHERE s.StemTag = vStemTag AND t.TreeTag = vTreeTag
+            GROUP BY s.StemTag, t.TreeTag
+            HAVING COUNT(*) > 1
+        ) THEN
+            -- Insert CoreMeasurementID and ValidationErrorID into CMVErrors
+            INSERT INTO forestgeo_bci.cmverrors (CoreMeasurementID, ValidationErrorID)
+            VALUES (vCoreMeasurementID, vValidationErrorID);
+        END IF;
+
+    END LOOP;
+
+    CLOSE coreMeasurementsCursor;
+END;
+
+create
+    definer = azureroot@`%` procedure forestgeo_bci.updatePlotDimensions()
+BEGIN
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE vPlotID INT;
+    DECLARE vPlotShape TEXT;
+    DECLARE totalX, totalY INT;
+    DECLARE currentIndex, nextIndex INT;
+    DECLARE currentDimension TEXT;
+    DECLARE cur CURSOR FOR SELECT PlotID, PlotShape FROM forestgeo_bci.plots;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    OPEN cur;
+
+    read_loop: LOOP
+        FETCH cur INTO vPlotID, vPlotShape;
+        IF done THEN
+            LEAVE read_loop;
+        END IF;
+
+        -- Initialize total dimensions
+        SET totalX = 0;
+        SET totalY = 0;
+
+        IF vPlotShape REGEXP '[0-9]+x[0-9]+' THEN
+            SET currentIndex = 1;
+
+            -- Find each dimension match
+            repeat
+                SET nextIndex = LOCATE('x', vPlotShape, currentIndex);
+                IF nextIndex = 0 THEN
+                    LEAVE read_loop;
+                END IF;
+                SET currentDimension = SUBSTRING(vPlotShape, currentIndex, nextIndex - currentIndex);
+                SET totalX = totalX + CAST(SUBSTRING_INDEX(currentDimension, 'x', 1) AS UNSIGNED);
+                SET totalY = totalY + CAST(SUBSTRING_INDEX(currentDimension, 'x', -1) AS UNSIGNED);
+                SET currentIndex = nextIndex + 1;
+            UNTIL nextIndex = 0 END REPEAT;
+            
+            -- Update the plot dimensions
+            UPDATE forestgeo_bci.plots SET DimensionX = totalX, DimensionY = totalY WHERE PlotID = vPlotID;
+        END IF;
+    END LOOP;
+
+    CLOSE cur;
+END;
+
 

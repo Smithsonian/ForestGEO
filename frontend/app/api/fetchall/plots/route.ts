@@ -18,6 +18,8 @@ export async function GET(): Promise<NextResponse<PlotRDS[]>> {
       plotName: row.PlotName,
       locationName: row.LocationName,
       countryName: row.CountryName,
+      dimensionX: row.DimensionX,
+      dimensionY: row.DimensionY,
       area: row.Area,
       plotX: row.PlotX,
       plotY: row.PlotY,

@@ -315,6 +315,8 @@ export type PlotRDS = {
   plotName: string | null;
   locationName: string | null;
   countryName: string | null;
+  dimensionX: number | null;
+  dimensionY: number | null;
   area: number | null;
   plotX: number | null;
   plotY: number | null;
