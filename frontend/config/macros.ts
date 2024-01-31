@@ -10,9 +10,10 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
-import React, {Dispatch} from "react";
+import React, {Dispatch, SetStateAction} from "react";
 import {CensusRDS} from "@/config/sqlmacros";
 import {GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {setData} from "@/config/db";
 
 // INTERFACES
 export interface Plot {
@@ -82,10 +83,10 @@ export const RequiredTableHeadersByFormType: Record<string, { label: string }[]>
   "fixeddata_species": [{label: "spcode"}],
   "fixeddata_quadrat": [{label: "quadrat"}],
   "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
-  "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
-  "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
-  "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
-  "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}, {label: "comments"}],
+  "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}],
+  "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}],
+  "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}],
+  "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}],
   "arcgis_xlsx": arcgisHeaders
 }
 export const DBInputForms: string[] = [
@@ -137,25 +138,80 @@ export interface AllRowsData {
   [fileName: string]: RowDataStructure[];
 }
 
-export type FetchQueryFunction = (gridType: string, page: number, pageSize: number, plotID?: number) => string;
-export type ProcessQueryFunction = (gridType: string, deletionID?: number) => string;
+export type FileRow = {
+  [header: string]: string; // {header --> value}
+};
 
-export interface EditToolbarProps {
-  gridType: string;
-  createRefreshQuery: FetchQueryFunction;
-  setIsNewRowAdded: React.Dispatch<React.SetStateAction<boolean>>;
-  setShouldAddRowAfterFetch: React.Dispatch<React.SetStateAction<boolean>>;
-  rows: GridRowsProp;
-  setRows: React.Dispatch<React.SetStateAction<GridRowsProp>>;
-  setRowModesModel: React.Dispatch<React.SetStateAction<GridRowModesModel>>;
-  setRefresh: React.Dispatch<React.SetStateAction<boolean>>;
-  currentPlot: Plot | null;
-  rowCount: number; // Total number of rows across all pages
-  setRowCount: React.Dispatch<React.SetStateAction<number>>;
-  paginationModel: { page: number, pageSize: number };
-  onPaginationModelChange: React.Dispatch<React.SetStateAction<{ page: number, pageSize: number }>>;
+export type FileRowSet = {
+  [row: string]: FileRow; // {row --> FileRow}
+};
+
+export type FileCollectionRowSet = {
+  [filename: string]: FileRowSet; // {filename --> FileRowSet}
+};
+export interface UploadParseFilesProps {
+  uploadForm: string;
+  parsing: boolean;
+  acceptedFiles: FileWithPath[];
+  isOverwriteConfirmDialogOpen: boolean;
+  setUploadForm: Dispatch<SetStateAction<string>>;
+  setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
+  setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
+  setIsOverwriteConfirmDialogOpen: Dispatch<SetStateAction<boolean>>;
+  handleInitialSubmit: () => Promise<void>;
+  handleFileReplace: () => void;
+  handleFileChange: (newFiles: FileWithPath[]) => void;
+  setUploadError: Dispatch<SetStateAction<any>>;
+  setErrorComponent: Dispatch<SetStateAction<string>>;
 }
 
+export interface UploadReviewFilesProps {
+  uploadForm: string;
+  acceptedFiles: FileWithPath[];
+  expectedHeaders: string[];
+  parsedData: FileCollectionRowSet;
+  errors: FileCollectionRowSet;
+  errorRows: FileCollectionRowSet;
+  confirmationDialogOpen: boolean;
+  dataViewActive: number;
+  currentFileHeaders: string[];
+  setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  setErrors: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  setUploadError: Dispatch<SetStateAction<any>>;
+  setErrorComponent: Dispatch<SetStateAction<string>>;
+  handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
+  areHeadersValid: (actualHeaders: string[]) => boolean;
+  handleRemoveCurrentFile: () => void;
+  handleApproval: () => Promise<void>;
+  handleCancel: () => Promise<void>;
+  handleConfirm: () => Promise<void>;
+}
+
+export interface UploadFireProps extends UploadReviewFilesProps {
+  setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
+  currentPlot: Plot;
+  currentCensus: CensusRDS;
+  user: string;
+  uploadCompleteMessage: string;
+  setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
+  handleReturnToStart: () => Promise<void>;
+}
+
+export interface UploadErrorProps {
+  error: any;
+  component: string;
+  acceptedFiles: FileWithPath[];
+  setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  handleReturnToStart: () => Promise<void>;
+  resetError: () => Promise<void>;
+}
+
+export type FetchQueryFunction = (gridType: string, page: number, pageSize: number, plotID?: number) => string;
+export type ProcessQueryFunction = (gridType: string, deletionID?: number) => string;
 export enum HTTPResponses {
   OK = 200,
   CREATED = 201,
@@ -417,10 +473,10 @@ export function createEnhancedDispatch<T>(
 ): EnhancedDispatch<T> {
   return async (payload: { [key: string]: T | null }) => {
     // Save to IndexedDB only if payload is not null
-    // if (payload[actionType] !== null) {
-    //   await setData(actionType, payload[actionType]);
-    //   console.log(`setData call on key ${actionType} with value ${payload[actionType]} completed.`);
-    // }
+    if (payload[actionType] !== null) {
+      await setData(actionType, payload[actionType]);
+      console.log(`setData call on key ${actionType} with value ${payload[actionType]} completed.`);
+    }
 
     // Dispatch the action
     dispatch({type: actionType, payload});
@@ -491,11 +547,10 @@ export function genericLoadContextReducer<T>(
 /**
  * SQL function storage
  */
-
-export async function getContainerClient(plot: string, census: string) {
+export async function getContainerClient(containerName: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   console.log('Connection String:', storageAccountConnectionString);
-  console.log(`parameter plot & census: ${plot}, ${census}`);
+  console.log(`container name: ${containerName}`);
   if (!storageAccountConnectionString) {
     console.error("process envs failed");
     throw new Error("process envs failed");
@@ -505,11 +560,11 @@ export async function getContainerClient(plot: string, census: string) {
   if (!blobServiceClient) console.error("blob service client creation failed");
   else console.error("blob service client created & connected");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(plot.trim() + '-' + census.trim());
+  let containerClient = blobServiceClient.getContainerClient(containerName);
   console.log(containerClient.url);
   if (!(await containerClient.createIfNotExists())) console.error("container client createifnotexists failure");
   else {
-    console.log(`container client with name ${plot + '-' + census} created and accessed.`);
+    console.log(`container client with name ${containerName} created and accessed.`);
     return containerClient;
   }
 }
@@ -527,6 +582,18 @@ export async function uploadFileAsBuffer(containerClient: ContainerClient, file:
   let metadata = {
     user: user,
     errors: `${errors}`
+  }
+  // create connection & client facing new blob
+  // async command to upload buffer via client, waiting for response
+  return await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata})
+}
+
+export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  console.log(buffer.toString());
+  console.log(`blob name: ${file.name}`);
+  let metadata = {
+    user: user,
   }
   // create connection & client facing new blob
   // async command to upload buffer via client, waiting for response

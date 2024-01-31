@@ -1,10 +1,10 @@
-import {RowDataStructure} from "@/config/macros";
+import {FileRow, RowDataStructure} from "@/config/macros";
 import {getColumnValueByColumnName, getPersonnelIDByName, processCode} from "@/components/processors/processorhelpers";
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export default async function processOldTreeForm(
   connection: PoolConnection,
-  rowData: RowDataStructure,
+  rowData: FileRow,
   plotKey: string,
   censusID: string,
   fullName: string

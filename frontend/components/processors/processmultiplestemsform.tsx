@@ -1,4 +1,4 @@
-import {RowDataStructure} from "@/config/macros";
+import {FileRow, RowDataStructure} from "@/config/macros";
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
@@ -9,7 +9,7 @@ import {PoolConnection} from "mysql2/promise";
 
 export default async function processMultipleStemsForm(
   connection: PoolConnection,
-  rowData: RowDataStructure,
+  rowData: FileRow,
   plotKey: string,
   censusID: string,
   fullName: string

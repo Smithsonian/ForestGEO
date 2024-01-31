@@ -22,7 +22,7 @@ import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
 import {CensusRDS, PlotRDS, QuadratsRDS} from '@/config/sqlmacros';
-import {getData, setData} from "@/config/db";
+import {clearAllIDBData, getData, setData} from "@/config/db";
 import {Plot, Quadrat} from "@/config/macros";
 import {usePlotDispatch} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";

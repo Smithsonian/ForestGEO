@@ -1,5 +1,5 @@
 import {PoolConnection} from 'mysql2/promise';
-import {RowDataStructure} from '@/config/macros';
+import {FileRow, RowDataStructure} from '@/config/macros';
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
@@ -11,7 +11,7 @@ import {
 
 export default async function processCensus(
   connection: PoolConnection,
-  rowData: RowDataStructure,
+  rowData: FileRow,
   plotKey: string,
   censusID: string,
   fullName: string
@@ -49,7 +49,7 @@ export default async function processCensus(
 
     let subSpeciesID = null;
     if (speciesID) {
-      subSpeciesID = await getSubSpeciesID(connection, speciesID);
+      subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
     }
 
     // Insert or update Trees with SpeciesID and SubSpeciesID

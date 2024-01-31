@@ -1,4 +1,4 @@
-import {RowDataStructure} from "@/config/macros";
+import {FileRow, RowDataStructure} from "@/config/macros";
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
@@ -12,7 +12,7 @@ import {PoolConnection} from "mysql2/promise";
 
 export default async function processBigTreesForm(
   connection: PoolConnection,
-  rowData: RowDataStructure,
+  rowData: FileRow,
   plotKey: string,
   censusID: string,
   fullName: string
@@ -51,7 +51,7 @@ export default async function processBigTreesForm(
 
     let subSpeciesID = null;
     if (speciesID) {
-      subSpeciesID = await getSubSpeciesID(connection, speciesID);
+      subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
     }
 
     // Insert or update Trees with SpeciesID and SubSpeciesID

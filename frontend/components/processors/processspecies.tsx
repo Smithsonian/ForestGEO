@@ -1,7 +1,7 @@
-import {RowDataStructure} from "@/config/macros";
+import {FileRow, RowDataStructure} from "@/config/macros";
 import {PoolConnection} from 'mysql2/promise';
 
-export async function processSpecies(connection: PoolConnection, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) {
+export async function processSpecies(connection: PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 

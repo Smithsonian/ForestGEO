@@ -11,12 +11,11 @@ import {Box, Stack} from "@mui/joy";
 /**
  * A simple list of files with their sizes.
  */
-export function FileDisplay({acceptedFiles}: FileListProps) {
+export function FileDisplay({acceptedFiles}: Readonly<FileListProps>) {
   const [currentPage, setCurrentPage] = React.useState(1);
   const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
     setCurrentPage(value);
   };
-  console.log("in file display view");
   return (
     <Card sx={{display: 'flex', flex: 1, width: '100%'}}>
       <CardHeader>
