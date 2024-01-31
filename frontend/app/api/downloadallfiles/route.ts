@@ -7,7 +7,7 @@ export async function GET(request: NextRequest, response: NextResponse) {
   const plot = request.nextUrl.searchParams.get('plot')!.trim();
   const census = request.nextUrl.searchParams.get('census')!.trim();
   const blobData: any = [];
-  const containerClient = await getContainerClient(plot, census);
+  const containerClient = await getContainerClient(`${plot}-${census}`);
   if (!containerClient) {
     return NextResponse.json({statusText: "Container client creation error"}, {status: 400});
   } else {

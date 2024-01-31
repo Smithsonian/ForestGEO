@@ -22,7 +22,6 @@
     "@emotion/styled": "^11.11.0",
     "@mui/base": "^5.0.0-beta.32",
     "@mui/icons-material": "latest",
-    "@mui/joy": "^5.0.0-beta.23",
     "@mui/lab": "latest",
     "@mui/material": "^5.15.5",
     "@mui/system": "^5.15.5",
@@ -48,6 +47,7 @@
     "typescript": "^5.3.3"
   },
   "devDependencies": {
+    "@mui/joy": "^5.0.0-beta.24",
     "@testing-library/react": "^14.1.2",
     "@types/papaparse": "^5.3.13",
     "@types/react": "latest",

@@ -7,10 +7,10 @@ import {Card, CardContent, CardHeader} from "@mui/material";
 export default function Error({
                                 error,
                                 reset,
-                              }: {
+                              }: Readonly<{
   error: Error
   reset: () => void
-}) {
+}>) {
   useEffect(() => {
     // Log the error to an error files service
     console.error(error)
@@ -33,24 +33,22 @@ export default function Error({
   )
 }
 
-export function BrowseError(error: Error) {
+export function BrowseError(error: Readonly<Error>) {
   return (
-    <>
-      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
-        <CardHeader>
-          <div className="flex flex-col">
-            <h5 className="text-md">Error while loading data.</h5>
-          </div>
-        </CardHeader>
-        <Divider/>
-        <CardContent>
-          <div className="flex flex-col">
-            <h6 className="text-md">Perhaps try reloading the page. If it still doesn&apos;t work, please again
-              a bit later.</h6>
-            <p>{error.message}</p>
-          </div>
-        </CardContent>
-      </Card>
-    </>
+    <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+      <CardHeader>
+        <div className="flex flex-col">
+          <h5 className="text-md">Error while loading data.</h5>
+        </div>
+      </CardHeader>
+      <Divider/>
+      <CardContent>
+        <div className="flex flex-col">
+          <h6 className="text-md">Perhaps try reloading the page. If it still doesn&apos;t work, please again
+            a bit later.</h6>
+          <p>{error.message}</p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

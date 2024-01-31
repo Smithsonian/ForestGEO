@@ -1,10 +1,11 @@
 "use client";
 import * as React from "react";
-import {UploadAndReviewProcess} from "@/components/fileupload/uploadreviewcycle";
+import UploadParent from "@/components/uploadsystem/uploadparent";
 
 // File Hub
 export default function FileUploadPage() {
   return (
-    <UploadAndReviewProcess/>
+    // <UploadAndReviewProcess/>
+    <UploadParent />
   );
 }

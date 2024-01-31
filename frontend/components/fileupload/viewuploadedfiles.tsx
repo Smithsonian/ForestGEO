@@ -49,13 +49,40 @@ interface VUFProps {
   currentCensus: CensusRDS | null;
 }
 
-export default function ViewUploadedFiles({currentPlot, currentCensus}: VUFProps) {
+export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly<VUFProps>) {
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
+  const handleDownload = async (containerName: string, filename: string) => {
+    try {
+      const response = await fetch(`/api/downloadfile?container=${containerName}&filename=${encodeURIComponent(filename)}`);
+      if (!response.ok) throw new Error('Error getting download link');
+
+      const data = await response.json();
+      window.location.href = data.url; // Navigates to the pre-signed URL
+    } catch (error) {
+      console.error('Download error:', error);
+    }
+  };
+
+  const handleDelete = async (containerName: string, filename: string) => {
+    try {
+      const response = await fetch(`/api/deletefile?container=${containerName}&filename=${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Error deleting file');
+
+      // Refresh the file list after successful deletion
+      await getListOfFiles();
+    } catch (error: any) {
+      console.error('Delete error:', error);
+      setError(error);
+    }
+  };
+
   const getListOfFiles = useCallback(async () => {
     try {
-      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot?.key.trim() ?? 'plot-undefined'}&census=${currentCensus?.censusID.toString() ?? 'census-undefined'}`, {
+      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot?.key.trim() ?? 'none'}&census=${currentCensus?.censusID.toString().trim() ?? 'none'}`, {
         method: 'GET',
       });
 
@@ -76,8 +103,10 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: VUFProps
   }, [currentPlot, currentCensus]);
 
   useEffect(() => {
-    getListOfFiles().then();
-  }, [getListOfFiles]);
+    if (currentPlot) {
+      getListOfFiles().then();
+    }
+  }, [getListOfFiles, currentPlot]);
 
   if (error) {
     console.log(error);
@@ -98,7 +127,7 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: VUFProps
           <Box sx={{display: 'flex', flexDirection: "column"}}>
             <Typography level={"title-lg"}>
               Accessing
-              Container: {currentPlot?.key.trim() ?? 'plot-undefined'}-{currentCensus?.censusID.toString() ?? 'census-undefined'}
+              Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.censusID.toString() ?? 'none'}
               <br/> <br/>
               Uploaded CSV Files
             </Typography>
@@ -137,13 +166,10 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: VUFProps
                           fontWeight: 'bold'
                         } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
-                          <Button>
+                          <Button onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DownloadIcon/>
                           </Button>
-                          <Button>
-                            <EditIcon/>
-                          </Button>
-                          <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                          <Button onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DeleteIcon/>
                           </Button>
                         </TableCell>
@@ -196,13 +222,13 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: VUFProps
                           fontWeight: 'bold'
                         } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
-                          <Button>
+                          <Button onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DownloadIcon/>
                           </Button>
                           <Button>
                             <EditIcon/>
                           </Button>
-                          <Button> {/*<Button onClick={() => setDeleteFile(row.name)}>*/}
+                          <Button onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DeleteIcon/>
                           </Button>
                         </TableCell>

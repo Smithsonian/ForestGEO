@@ -114,8 +114,8 @@ export default function Sidebar() {
   let censusLoadContext = useCensusLoadContext()!;
   let censusLoadDispatch = useCensusLoadDispatch();
 
-  const [plot, setPlot] = useState<Plot | null>((currentPlot) ?? null);
-  const [census, setCensus] = useState<CensusRDS | null>((currentCensus) ?? null);
+  const [plot, setPlot] = useState<Plot | null>(currentPlot);
+  const [census, setCensus] = useState<CensusRDS | null>(currentCensus);
   const [openPlotSelectionModal, setOpenPlotSelectionModal] = useState(false);
   const [openCensusSelectionModal, setOpenCensusSelectionModal] = useState(false);
   const [openAddCensusSelectionModal, setOpenAddCensusSelectionModal] = useState(false);
@@ -357,7 +357,7 @@ export default function Sidebar() {
             </Breadcrumbs>
             <Divider orientation={"horizontal"}/>
             <Modal open={openPlotSelectionModal} onClose={() => {
-              setPlot(null);
+              setPlot(currentPlot);
               setOpenPlotSelectionModal(false);
             }}>
               <ModalDialog variant="outlined" role="alertdialog">
@@ -390,7 +390,7 @@ export default function Sidebar() {
                 <DialogActions>
                   <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                     <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
-                      setPlot(null);
+                      setPlot(currentPlot);
                       setOpenPlotSelectionModal(false);
                     }}>
                       Cancel
@@ -399,7 +399,7 @@ export default function Sidebar() {
                       if (plotDispatch) {
                         plotDispatch({plot: plot});
                       }
-                      setPlot(null);
+                      setPlot(currentPlot);
                       setOpenPlotSelectionModal(false);
                     }}>
                       Submit Plot
@@ -409,7 +409,7 @@ export default function Sidebar() {
               </ModalDialog>
             </Modal>
             <Modal open={openCensusSelectionModal} onClose={() => {
-              setCensus(null);
+              setCensus(currentCensus);
               setOpenCensusSelectionModal(false);
             }}>
               <ModalDialog variant="outlined" role="alertdialog">
@@ -445,7 +445,7 @@ export default function Sidebar() {
                 <DialogActions>
                   <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                     <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
-                      setCensus(null);
+                      setCensus(currentCensus);
                       setOpenCensusSelectionModal(false);
                     }}>
                       Cancel
@@ -454,7 +454,7 @@ export default function Sidebar() {
                       if (censusDispatch) {
                         censusDispatch({census: census});
                       }
-                      setCensus(null);
+                      setCensus(currentCensus);
                       setOpenCensusSelectionModal(false);
                     }}>
                       Submit Census

@@ -48,10 +48,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
 
     const personnelRows: PersonnelRDS[] = paginatedResults.map((row: any, index) => ({
       id: index + 1,
-      personnelID: row.personnelID,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      role: row.role
+      personnelID: row.PersonnelID,
+      firstName: row.FirstName,
+      lastName: row.LastName,
+      role: row.Role
       // ... other fields as needed
     }));
 

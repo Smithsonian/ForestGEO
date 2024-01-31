@@ -1,5 +1,5 @@
 import mysql, {PoolConnection, RowDataPacket} from 'mysql2/promise';
-import {booleanToBit, RowDataStructure} from "@/config/macros";
+import {booleanToBit, FileRow, RowDataStructure} from "@/config/macros";
 
 import {processSpecies} from "@/components/processors/processspecies";
 import processCensus from "@/components/processors/processcensus";
@@ -25,8 +25,9 @@ export async function insertOrUpdate(
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${fileType}`);
   }
-
+  console.log('INSERT OR UPDATE: schema & mapping found');
   if (mapping.specialProcessing) {
+    console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
     try {
       await mapping.specialProcessing(connection, rowData, plotKey, censusID, fullName);
     } catch (error) {
@@ -34,27 +35,29 @@ export async function insertOrUpdate(
     }
     return;
   }
-
+  console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
   const columns = Object.keys(mapping.columnMappings);
   const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
   const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
   const values = columns.map(fileColumn => rowData[fileColumn]);
-
   let query = `
     INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
     VALUES (${placeholders})
     ON DUPLICATE KEY UPDATE 
     ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
   `;
+  console.log(`INSERT OR UPDATE: query constructed: ${query}`);
 
   try {
     // Execute the query using the provided connection
     await connection.query(query, values);
   } catch (error) {
     // Rollback the transaction in case of an error
+    console.log(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
     await connection.rollback();
     throw error; // Re-throw the error after rollback
   }
+  console.log('INSERT OR UPDATE: default query completed. Exiting...');
 }
 
 
@@ -308,7 +311,7 @@ export async function getPersonnelIDByName(
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (connection: mysql.PoolConnection, rowData: RowDataStructure, plotKey: string, censusID: string, fullName: string) => Promise<void>;
+  specialProcessing?: (connection: mysql.PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) => Promise<void>;
 };
 
 // Define the mappings for each file type
@@ -511,11 +514,6 @@ export async function parseAttributeRequestBody(request: NextRequest, parseType:
   const requestBody = await request.json();
   switch (parseType) {
     case 'POST':
-      return {
-        Code: requestBody.code,
-        Description: requestBody.description ?? null,
-        Status: requestBody.status ?? null,
-      };
     case 'PATCH': {
       return {
         Code: requestBody.code,

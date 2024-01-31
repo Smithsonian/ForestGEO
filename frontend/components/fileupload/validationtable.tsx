@@ -1,11 +1,18 @@
 "use client";
-import {Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,} from '@mui/material';
+import {Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography,} from '@mui/material';
 import {parse} from 'papaparse';
-import React, {useEffect, useState} from 'react';
+import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import {FileWithPath} from 'react-dropzone';
 import '@/styles/validationtable.css';
-import {FileErrors, TableHeadersByFormType} from "@/config/macros";
-import {DataGrid, GridCellParams, GridColDef} from "@mui/x-data-grid";
+import {
+  FileCollectionRowSet,
+  FileErrors, FileRow,
+  RequiredTableHeadersByFormType,
+  TableHeadersByFormType
+} from "@/config/macros";
+import {DataGrid, GridCellParams, GridColDef, GridRowModel, GridRowsProp} from "@mui/x-data-grid";
+import {fileCollectionToString, fileRowSetToString} from "@/components/uploadsystem/uploadparent";
+import { StyledDataGrid } from '@/config/sqlmacros';
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */
@@ -27,226 +34,140 @@ export interface DisplayErrorTableProps {
 export interface DataStructure {
   [key: string]: string;
 }
+type RowValidationErrors = {
+  [key: string]: string;
+};
 
-export function DisplayErrorTable({
-                                    fileName,
-                                    fileData,
-                                    errorMessage,
-                                    formType,
-                                  }: Readonly<DisplayErrorTableProps>) {
-  const tableHeaders = TableHeadersByFormType[formType] || [];
+const validateRow = (row: FileRow, formType: string): RowValidationErrors | null => {
+  const errors: RowValidationErrors = {};
+  const requiredHeaders = RequiredTableHeadersByFormType[formType];
 
-  return (
-    <TableContainer component={Paper}>
-      <h3>file: {fileName}</h3>
-      <Table>
-        <TableHead>
-          <TableRow>
-            {tableHeaders.map((header) => (
-              <TableCell key={header.label}>{header.label}</TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {fileData.data.map((data: DataStructure, rowIndex: number) => (
-            <TableRow key={`row-${data.id}`}>
-              {tableHeaders.map((header) => {
-                const cellKey = `cell-${rowIndex}-${header.label}`;
-                const cellData = data[header.label];
-                const cellError = errorMessage[fileName] && errorMessage[fileName][rowIndex.toString()];
-                if (cellData === '') {
-                  return (
-                    <TableCell key={cellKey} sx={cellError ? {backgroundColor: 'red'} : undefined}>
-                      {cellError ? (
-                        <span>{cellData}<br/>{cellError}</span>
-                      ) : (
-                        cellData
-                      )}
-                    </TableCell>
-                  );
-                } else {
-                  return (
-                    <TableCell key={cellKey} sx={cellError ? {color: 'red', fontWeight: 'bold'} : undefined}>
-                      {cellError ? (
-                        <span>{cellData}<br/>{cellError}</span>
-                      ) : (
-                        cellData
-                      )}
-                    </TableCell>
-                  );
-                }
-              })}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
+  // Check for required headers
+  requiredHeaders.forEach(header => {
+    const value = row[header.label];
+    if (value === null || value === undefined || value === "") {
+      errors[header.label] = "This field is required.";
+    }
+  });
+
+  // Additional validation for DBH if present
+  if ("DBH" in row) {
+    const dbhValue = parseFloat(row["DBH"]);
+    if (isNaN(dbhValue) || dbhValue <= 1.0) {
+      errors["DBH"] = "DBH must be a decimal value greater than 1.0";
+    }
+  }
+
+  return Object.keys(errors).length > 0 ? errors : null;
+};
+
+export interface DisplayParsedDataProps {
+  parsedData: FileCollectionRowSet;
+  setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  errors: FileCollectionRowSet;
+  setErrors: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  errorRows: FileCollectionRowSet;
+  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
+  fileName: string;
+  formType: string;
 }
 
+export const DisplayParsedDataGrid: React.FC<DisplayParsedDataProps> = (props: Readonly<DisplayParsedDataProps>) => {
+  const {parsedData, setParsedData, errors, setErrors, errorRows, setErrorRows, fileName, formType} = props;
+  const singleFileData = parsedData[fileName] || {};
 
-export function DisplayErrorGrid({
-                                   fileName,
-                                   fileData,
-                                   errorMessage,
-                                   formType,
-                                 }: DisplayErrorTableProps): JSX.Element {
   const tableHeaders = TableHeadersByFormType[formType] || [];
-
-
+  // Update the GridColDef to match your actual DataGrid library import
   const columns: GridColDef[] = tableHeaders.map((header) => ({
     field: header.label,
     headerName: header.label,
     flex: 1,
+    minWidth: 150,
     renderCell: (params: GridCellParams) => {
-      const rowId = params.id.toString();
-      const cellError = errorMessage[fileName]?.[rowId];
+      // Extract the numeric index from the id and construct the error key
+      const rowIndex = params.id.toString().split('-')[1];
+      const errorKey = `row-${rowIndex}`;
+      const cellError = errors[fileName]?.[errorKey]?.[header.label];
 
-      // Safely convert value to a string for rendering
-      const cellValue = params.value == null ? '' : params.value.toString();
+      // Debugging log
+      // console.log('params: ', params);
+      // console.log(`Rendering cell - row: ${errorKey}, field: ${header.label}, error: ${cellError}`);
 
+      // Render the cell value and error message
       return (
-        <div style={cellError ? { backgroundColor: 'red', color: 'white' } : undefined}>
-          {cellValue}
-          {cellError && <div>{cellError}</div>}
-        </div>
+        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+          <Typography>{params.value !== undefined ? params.value?.toString() : ''}</Typography>
+          {cellError && (
+            <Typography sx={{ color: 'error.main', fontSize: '0.75rem', mt: 0.5 }}>
+              {cellError}
+            </Typography>
+          )}
+        </Box>
       );
     },
+    editable: false,
+    width: 150, // Set a default width for each column
   }));
 
-  const rows = fileData.data.map((data, index) => ({
-    id: data.id ?? index, // Use data.id if available, otherwise use index
-    ...data,
-  }));
+  let tempRows: any[] = [];
+
+  Object.entries(singleFileData).forEach(([rowKey, rowData], index) => {
+    if (typeof rowData === 'object' && rowData !== null) {
+      const row = { id: `${fileName}-${index}`, ...rowData };
+      tempRows.push(row);
+    }
+  });
+
+  console.log(tempRows);
+
+  const processRowUpdate = React.useCallback(
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+    const updatedRow = { ...newRow };
+      const rowId = `row-${newRow.id}`;
+      if (!errorRows[fileName]?.[rowId]) {
+        // If no errors for this row, do not allow updates
+        return oldRow;
+      }
+    // Validate the updated row and update error state if necessary
+    const rowErrors = validateRow(updatedRow, formType); // Implement validateRow to check for errors
+    if (rowErrors) {
+      setErrorRows(prevErrors => ({
+        ...prevErrors,
+        [fileName]: { ...prevErrors[fileName], [updatedRow.id]: rowErrors },
+      }));
+    } else {
+      // Remove errors for this row if they exist
+      setErrorRows(prevErrors => {
+        const newErrors = { ...prevErrors };
+        if (newErrors[fileName]?.[updatedRow.id]) {
+          delete newErrors[fileName][updatedRow.id];
+        }
+        return newErrors;
+      });
+    }
+
+    // Update the parsed data state
+    setParsedData(prevData => ({
+      ...prevData,
+      [fileName]: { ...prevData[fileName], [updatedRow.id]: updatedRow },
+    }));
+
+    return updatedRow;
+  }, [setErrorRows, setParsedData, fileName, formType, validateRow]);
+
+  console.log("Rows for DataGrid:", tempRows); // Checking the final rows structure
+  let rows: GridRowsProp = tempRows;
 
   return (
-    <Paper style={{ height: 400, width: '100%' }}>
-      <h3>file: {fileName}</h3>
-      <DataGrid
+    <Paper style={{ height: '100%', width: '100%' }}>
+      <h3>file: {fileName}, form: {formType}</h3>
+      <StyledDataGrid
         rows={rows}
         columns={columns}
+        processRowUpdate={processRowUpdate}
+        pageSizeOptions={[5]}
         autoHeight
-        disableColumnMenu
-        disableColumnSelector
-        disableRowSelectionOnClick
-        density="compact"
       />
     </Paper>
   );
-}
-
-/**
- * Shows a data table with the possibility of showing errors.
- */
-
-
-export function DisplayParsedData(fileData: { fileName: string; data: DataStructure[] }, formType: string) {
-  const tableHeaders = TableHeadersByFormType[formType] || [];
-
-  return (
-    <TableContainer component={Paper} key={fileData.fileName}>
-      <h3>file: {fileData.fileName}, form: {formType}</h3>
-      <Table>
-        <TableHead>
-          <TableRow>
-            {tableHeaders.map((header) => (
-              <TableCell key={header.label}>{header.label}</TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {fileData.data.map((data: DataStructure) => (
-            <TableRow key={data.id}>
-              {tableHeaders.map((header) => (
-                <TableCell key={`${data.id}-${header.label}`}>
-                  {data[header.label]}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-export function ValidationTable({uploadedData, errorMessage, formType}: Readonly<ValidationTableProps>) {
-  const [data, setData] = useState<{ fileName: string; data: DataStructure[] }[]>([]);
-  const tableHeaders = TableHeadersByFormType[formType] || [];
-
-  useEffect(() => {
-    let tempData: { fileName: string; data: DataStructure[] }[] = [];
-    uploadedData.forEach((file: FileWithPath) => {
-      parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: function (results: any) {
-          tempData.push({fileName: file.name, data: results.data});
-        },
-      });
-    });
-    setData(tempData);
-  }, [uploadedData]);
-
-  const displayError = (fileName: string, data: DataStructure, headerLabel: string, errors: FileErrors) => {
-    const errorInfo = errors[fileName]?.[data.id];
-
-    if (errorInfo) {
-      const errorMessage = errorInfo;
-
-      if (errorMessage.includes(`Invalid Row Format: Empty Headers`)) {
-        const emptyHeadersMessage = errorMessage.split('-')[1].trim();
-        if (emptyHeadersMessage.includes(headerLabel)) {
-          return (
-            <>
-              {headerLabel} <br/>
-              <span style={{color: 'red', fontWeight: 'bold'}}>Missing Value!</span>
-            </>
-          );
-        }
-      } else if (errorMessage.includes(`Invalid DBH Value`)) {
-        if (headerLabel === 'DBH') {
-          return (
-            <>
-              {headerLabel} <br/>
-              <span style={{color: 'red', fontWeight: 'bold'}}>Invalid DBH Value</span>
-            </>
-          );
-        }
-      }
-    }
-
-    return data[headerLabel];
-  };
-
-
-  return (
-    <>
-      {data.map(({fileName, data: fileData}) => (
-        <TableContainer component={Paper} key={fileName}>
-          <h3>file: {fileName}, form: {formType}</h3>
-          <Table>
-            <TableHead>
-              <TableRow>
-                {tableHeaders.map((header) => (
-                  <TableCell key={header.label}>{header.label}</TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {fileData.map((data) => (
-                <TableRow key={data.id}>
-                  {tableHeaders.map((header) => (
-                    <TableCell key={`${data.id}-${header.label}`}>
-                      {displayError(fileName, data, header.label, errorMessage)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      ))}
-    </>
-  );
-}
+};
