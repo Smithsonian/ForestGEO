@@ -256,6 +256,24 @@ create table forestgeo_bci.cmattributes
         foreign key (CoreMeasurementID) references forestgeo_bci.coremeasurements (CoreMeasurementID)
 );
 
+create index idx_censusid
+    on forestgeo_bci.coremeasurements (CensusID);
+
+create index idx_plotid
+    on forestgeo_bci.coremeasurements (PlotID);
+
+create index idx_quadratid
+    on forestgeo_bci.coremeasurements (QuadratID);
+
+create index idx_stemid
+    on forestgeo_bci.coremeasurements (StemID);
+
+create index idx_treeid
+    on forestgeo_bci.coremeasurements (TreeID);
+
+create index idx_stemid
+    on forestgeo_bci.stems (StemID);
+
 create table forestgeo_bci.validationerrors
 (
     ValidationErrorID          int auto_increment
