@@ -6,13 +6,6 @@ create table forestgeo_bci.attributes
     primary key (Code)
 );
 
-create table forestgeo_bci.measurementtypes
-(
-    MeasurementTypeID          int auto_increment
-        primary key,
-    MeasurementTypeDescription varchar(255) null
-);
-
 create table forestgeo_bci.personnel
 (
     PersonnelID int auto_increment
