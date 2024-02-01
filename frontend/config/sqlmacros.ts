@@ -524,3 +524,29 @@ export const ValidationErrorGridColumns: GridColDef[] = [
     align: 'left',
   },
 ]
+
+
+// POST CENSUS SUMMARY STATISTICS QUERIES
+export const queryNumLiveTreesInQuadrat = `
+  SELECT COUNT(DISTINCT trees.TreeID) as AliveTrees
+  FROM forestgeo_bci.trees as trees
+  JOIN forestgeo_bci.coremeasurements as coremeasurements ON trees.TreeID = coremeasurements.TreeID
+  JOIN forestgeo_bci.cmattributes as cmattributes ON coremeasurements.CoreMeasurementID = cmattributes.CoreMeasurementID
+  JOIN forestgeo_bci.attributes as attributes ON cmattributes.AttributeCode = attributes.Code
+  WHERE attributes.Description = 'alive'
+  AND coremeasurements.QuadratID = ?
+  AND coremeasurements.PlotID = ?
+  AND coremeasurements.CensusID = ?;
+`;
+
+export const queryNumDeadTreesInCensus = `
+  SELECT 
+    attributes.Status,
+    COUNT(*) as StemCount
+  FROM forestgeo_bci.coremeasurements as coremeasurements
+  JOIN forestgeo_bci.cmattributes as cmattributes ON coremeasurements.CoreMeasurementID = cmattributes.CoreMeasurementID
+  JOIN forestgeo_bci.attributes as attributes ON cmattributes.AttributeCode = attributes.Code
+  WHERE coremeasurements.CensusID = ?
+  AND attributes.Status IN ('dead', 'stem dead', 'missing')
+  GROUP BY attributes.Status;
+`;

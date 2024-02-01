@@ -1,8 +1,8 @@
 create table forestgeo_bci.attributes
 (
-    Code        varchar(10) not null,
-    Description text        null,
-    Status      varchar(20) null,
+    Code        varchar(10)                                                                               not null,
+    Description text                                                                                      null,
+    Status      enum ('alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null,
     primary key (Code)
 );
 
@@ -32,6 +32,9 @@ create table forestgeo_bci.plots
     DimensionX      int   null,
     DimensionY      int   null,
     Area            float null,
+    GlobalX         float null,
+    GlobalY         float null,
+    GlobalZ         float null,
     PlotX           float null,
     PlotY           float null,
     PlotZ           float null,
@@ -98,7 +101,7 @@ create table forestgeo_bci.genus
     GenusID     int auto_increment
         primary key,
     FamilyID    int         null,
-    GenusName   varchar(32) null,
+    Genus       varchar(32) null,
     ReferenceID int         null,
     Authority   varchar(32) null,
     constraint Genus_Family_FamilyID_fk
@@ -191,10 +194,13 @@ create table forestgeo_bci.stems
     QuadratID       int         null,
     StemNumber      int         null,
     StemTag         varchar(10) null,
-    TreeTag         varchar(10) null,
-    StemX           float       null,
-    StemY           float       null,
-    StemZ           float       null,
+    StemPlotX       float       null,
+    StemPlotY       float       null,
+    StemPlotZ       float       null,
+    StemQuadX       float       null,
+    StemQuadY       float       null,
+    StemQuadZ       float       null,
+    IsPrimary       bit         null,
     Moved           bit         null,
     StemDescription text        null,
     constraint FK_Stems_Quadrats
@@ -270,194 +276,4 @@ create table forestgeo_bci.cmverrors
         foreign key (ValidationErrorID) references forestgeo_bci.validationerrors (ValidationErrorID)
             on update cascade
 );
-
-create
-    definer = azureroot@`%` procedure forestgeo_bci.MigrateDBHtoCoreMeasurements()
-BEGIN
-    -- Declare variables
-    DECLARE vCensusID INT;
-    DECLARE vStemID INT;
-    DECLARE vDBH DECIMAL(10, 2); -- Ensure compatibility with the table definition
-    DECLARE vHOM DECIMAL(10, 2); -- Ensure compatibility with the table definition
-    DECLARE vExactDate DATE;
-    DECLARE vComments VARCHAR(128);
-    DECLARE vPlotID INT;
-    DECLARE vQuadratID INT;
-    DECLARE vTreeID INT;
-    DECLARE vIsRemeasurement TINYINT(1);
-    DECLARE vRowCount INT DEFAULT 0;
-    DECLARE vMaxRows INT; -- Variable to store the maximum number of rows to insert
-    DECLARE done INT DEFAULT FALSE;
-
-    -- Declare a cursor for a simulated FULL OUTER JOIN result set from dbh and remeasurements
-    DECLARE combinedCursor CURSOR FOR
-        SELECT d.CensusID, d.StemID, d.DBH, d.HOM, d.ExactDate, d.Comments, 0 AS IsRemeasurement
-        FROM ctfsweb.dbh d
-        LEFT JOIN ctfsweb.remeasurement r ON d.StemID = r.StemID AND d.CensusID = r.CensusID
-        UNION
-        SELECT r.CensusID, r.StemID, r.DBH, r.HOM, r.ExactDate, NULL AS Comments, 1 AS IsRemeasurement
-        FROM ctfsweb.remeasurement r
-        LEFT JOIN ctfsweb.dbh d ON d.StemID = r.StemID AND d.CensusID = r.CensusID
-        WHERE d.StemID IS NULL
-        ORDER BY StemID, ExactDate;
-
-    -- Declare the continue handler
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
-
-    -- Set the maximum number of rows to insert (e.g., 100)
-    SET vMaxRows = 2756583;
-
-    -- Reset auto-increment of CoreMeasurements to 1
-    ALTER TABLE forestgeo_bci.CoreMeasurements AUTO_INCREMENT = 1;
-
-    -- Open the combined cursor
-    OPEN combinedCursor;
-
-    -- Loop through all rows in the combined result set
-    combined_loop:
-    LOOP
-        -- Check if the row count has reached the maximum limit
-        IF vRowCount >= vMaxRows THEN
-            LEAVE combined_loop;
-        END IF;
-
-        -- Fetch next row from cursor
-        FETCH combinedCursor INTO vCensusID, vStemID, vDBH, vHOM, vExactDate, vComments, vIsRemeasurement;
-        IF done THEN
-            LEAVE combined_loop;
-        END IF;
-
-        -- Retrieve PlotID, QuadratID, and TreeID from forestgeo_bci
-        SELECT stems.TreeID,
-               stems.QuadratID,
-               census.PlotID
-        INTO vTreeID, vQuadratID, vPlotID
-        FROM forestgeo_bci.Stems AS stems
-        JOIN forestgeo_bci.Census AS census ON census.CensusID = vCensusID
-        WHERE stems.StemID = vStemID;
-
-        -- Insert a row for DBH measurement or remeasurement
-        INSERT INTO forestgeo_bci.CoreMeasurements (CensusID, PlotID, QuadratID, TreeID, StemID, MeasuredDBH,
-                                                    MeasuredHOM, MeasurementDate, Description, IsRemeasurement, IsCurrent)
-        VALUES (vCensusID, vPlotID, vQuadratID, vTreeID, vStemID, CAST(vDBH AS DECIMAL(10, 2)), CAST(vHOM AS DECIMAL(10, 2)), vExactDate, vComments, vIsRemeasurement, FALSE);
-
-        -- Increment the row count
-        SET vRowCount = vRowCount + 1;
-    END LOOP;
-
-    -- Close the cursor
-    CLOSE combinedCursor;
-
-    -- Update the IsCurrent field for the most recent measurement of each stem
-    UPDATE forestgeo_bci.CoreMeasurements cm
-    INNER JOIN (
-        SELECT MAX(CoreMeasurementID) AS LatestMeasurementID, StemID
-        FROM forestgeo_bci.CoreMeasurements
-        GROUP BY StemID
-    ) AS latest ON cm.CoreMeasurementID = latest.LatestMeasurementID
-    SET cm.IsCurrent = TRUE;
-END;
-
-create
-    definer = azureroot@`%` procedure forestgeo_bci.checkDuplicateStemTreeTagCombinations()
-BEGIN
-    DECLARE done INT DEFAULT FALSE;
-    DECLARE vCoreMeasurementID INT;
-    DECLARE vStemTag VARCHAR(10);
-    DECLARE vTreeTag VARCHAR(10);
-    DECLARE vValidationErrorID INT;
-    DECLARE vErrorMessage VARCHAR(255) DEFAULT 'Duplicate combination of StemTag and TreeTag';
-
-    -- Cursor for CoreMeasurements
-    DECLARE coreMeasurementsCursor CURSOR FOR
-        SELECT cm.CoreMeasurementID, s.StemTag, t.TreeTag
-        FROM forestgeo_bci.coremeasurements cm
-        JOIN forestgeo_bci.stems s ON cm.StemID = s.StemID
-        JOIN forestgeo_bci.trees t ON cm.TreeID = t.TreeID;
-
-    -- Continue handler for 'no more rows' condition
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
-
-    -- Insert the validation error description into ValidationErrors
-    INSERT INTO forestgeo_bci.validationerrors (ValidationErrorDescription)
-    VALUES (vErrorMessage);
-
-    SET vValidationErrorID = LAST_INSERT_ID();
-
-    OPEN coreMeasurementsCursor;
-
-    -- Loop through all rows in CoreMeasurements
-    validation_loop: LOOP
-        FETCH coreMeasurementsCursor INTO vCoreMeasurementID, vStemTag, vTreeTag;
-        IF done THEN
-            LEAVE validation_loop;
-        END IF;
-
-        -- Check for duplicate combination of StemTag and TreeTag
-        IF EXISTS (
-            SELECT 1
-            FROM forestgeo_bci.coremeasurements cm
-            JOIN forestgeo_bci.stems s ON cm.StemID = s.StemID
-            JOIN forestgeo_bci.trees t ON cm.TreeID = t.TreeID
-            WHERE s.StemTag = vStemTag AND t.TreeTag = vTreeTag
-            GROUP BY s.StemTag, t.TreeTag
-            HAVING COUNT(*) > 1
-        ) THEN
-            -- Insert CoreMeasurementID and ValidationErrorID into CMVErrors
-            INSERT INTO forestgeo_bci.cmverrors (CoreMeasurementID, ValidationErrorID)
-            VALUES (vCoreMeasurementID, vValidationErrorID);
-        END IF;
-
-    END LOOP;
-
-    CLOSE coreMeasurementsCursor;
-END;
-
-create
-    definer = azureroot@`%` procedure forestgeo_bci.updatePlotDimensions()
-BEGIN
-    DECLARE done INT DEFAULT FALSE;
-    DECLARE vPlotID INT;
-    DECLARE vPlotShape TEXT;
-    DECLARE totalX, totalY INT;
-    DECLARE currentIndex, nextIndex INT;
-    DECLARE currentDimension TEXT;
-    DECLARE cur CURSOR FOR SELECT PlotID, PlotShape FROM forestgeo_bci.plots;
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
-
-    OPEN cur;
-
-    read_loop: LOOP
-        FETCH cur INTO vPlotID, vPlotShape;
-        IF done THEN
-            LEAVE read_loop;
-        END IF;
-
-        -- Initialize total dimensions
-        SET totalX = 0;
-        SET totalY = 0;
-
-        IF vPlotShape REGEXP '[0-9]+x[0-9]+' THEN
-            SET currentIndex = 1;
-
-            -- Find each dimension match
-            repeat
-                SET nextIndex = LOCATE('x', vPlotShape, currentIndex);
-                IF nextIndex = 0 THEN
-                    LEAVE read_loop;
-                END IF;
-                SET currentDimension = SUBSTRING(vPlotShape, currentIndex, nextIndex - currentIndex);
-                SET totalX = totalX + CAST(SUBSTRING_INDEX(currentDimension, 'x', 1) AS UNSIGNED);
-                SET totalY = totalY + CAST(SUBSTRING_INDEX(currentDimension, 'x', -1) AS UNSIGNED);
-                SET currentIndex = nextIndex + 1;
-            UNTIL nextIndex = 0 END REPEAT;
-            
-            -- Update the plot dimensions
-            UPDATE forestgeo_bci.plots SET DimensionX = totalX, DimensionY = totalY WHERE PlotID = vPlotID;
-        END IF;
-    END LOOP;
-
-    CLOSE cur;
-END;
-
 
