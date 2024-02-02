@@ -11,6 +11,10 @@ export const CensusDispatchContext = createContext<Dispatch<{ census: number | n
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: number | null }> | null>(null);
 
 export default function PlotProvider({children}: { children: React.ReactNode }) {
+  const plotListContext = usePlotListContext();
+  const censusListContext = useCensusListContext();
+  const quadratListContext = useQuadratListContext();
+
   const [plot, plotDispatch] = useReducer(
     plotsReducer,
     null
@@ -43,7 +47,6 @@ export default function PlotProvider({children}: { children: React.ReactNode }) 
 }
 
 function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
-  let plotListContext = usePlotListContext();
   if (plotListContext) {
     if (action.plotKey == null) return null;
     else if (plotListContext.find((p) => p.key == action.plotKey)) return plotListContext.find((p) => p.key == action.plotKey);
@@ -56,7 +59,6 @@ function plotsReducer(currentPlot: any, action: { plotKey: string | null }) {
 }
 
 function censusReducer(currentCensus: any, action: { census: number | null }) {
-  let censusListContext = useCensusListContext();
   if (censusListContext) {
     if (action.census == null) return null;
     else if (censusListContext.includes(action.census)) return action.census;
@@ -69,7 +71,6 @@ function censusReducer(currentCensus: any, action: { census: number | null }) {
 }
 
 function quadratReducer(currentQuadrat: any, action: { quadrat: number | null }) {
-  let quadratListContext = useQuadratListContext();
   if (quadratListContext) {
     if (action.quadrat == null) return null;
     else if (quadratListContext.includes(action.quadrat)) return action.quadrat;

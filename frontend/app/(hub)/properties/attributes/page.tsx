@@ -202,6 +202,7 @@ export default function Page() {
                 color: 'primary.main',
               }}
               onClick={handleSaveClick(id)}
+              key={id + "save"}
             />,
             <GridActionsCellItem
               icon={<CancelIcon/>}
@@ -209,6 +210,7 @@ export default function Page() {
               className="textPrimary"
               onClick={handleCancelClick(id)}
               color="inherit"
+              key={id + "cancel"}
             />,
           ];
         }
@@ -220,12 +222,14 @@ export default function Page() {
             className="textPrimary"
             onClick={handleEditClick(id)}
             color="inherit"
-          />,
+            key={id + "edit"}
+            />,
           <GridActionsCellItem
             icon={<DeleteIcon/>}
             label="Delete"
             onClick={handleDeleteClick(id)}
             color="inherit"
+            key={id + "delete"}
           />,
         ];
       },
