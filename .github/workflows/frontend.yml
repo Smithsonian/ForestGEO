@@ -1,0 +1,62 @@
+name: Build and test frontend
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/**'
+
+jobs:
+  build:
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+        node-version: [ 20.x ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: |
+          pwd
+          cd frontend
+          npm install
+
+      - name: Run linter
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Run type checker
+        run: |
+          cd frontend
+          npm run tsc
+
+      # - name: Run tests
+      #   run: |
+      #     cd frontend
+      #     npm test -- --passWithNoTests
+
+      # - name: Build frontend
+      #   run: |
+      #     cd frontend
+      #     npm run build
+
+      # - name: Build storybook
+      #   run: |
+      #     cd frontend
+      #     npm run build-storybook
