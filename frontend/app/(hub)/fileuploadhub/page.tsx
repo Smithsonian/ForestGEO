@@ -6,6 +6,6 @@ import UploadParent from "@/components/uploadsystem/uploadparent";
 export default function FileUploadPage() {
   return (
     // <UploadAndReviewProcess/>
-    <UploadParent />
+    <UploadParent/>
   );
 }

@@ -166,10 +166,12 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly
                           fontWeight: 'bold'
                         } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
-                          <Button onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                          <Button
+                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DownloadIcon/>
                           </Button>
-                          <Button onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                          <Button
+                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DeleteIcon/>
                           </Button>
                         </TableCell>
@@ -222,13 +224,15 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly
                           fontWeight: 'bold'
                         } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
-                          <Button onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                          <Button
+                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DownloadIcon/>
                           </Button>
                           <Button>
                             <EditIcon/>
                           </Button>
-                          <Button onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                          <Button
+                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
                             <DeleteIcon/>
                           </Button>
                         </TableCell>

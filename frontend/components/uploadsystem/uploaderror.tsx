@@ -4,7 +4,7 @@ import {FileWithPath} from "react-dropzone";
 import {ReviewStates, UploadErrorProps} from "@/config/macros";
 
 const UploadError = (props: Readonly<UploadErrorProps>) => {
-  const { error, component, acceptedFiles, setAcceptedFiles, setReviewState, handleReturnToStart, resetError } = props
+  const {error, component, acceptedFiles, setAcceptedFiles, setReviewState, handleReturnToStart, resetError} = props
   const handleParseError = async () => {
     await resetError();
     await handleReturnToStart();
@@ -54,7 +54,8 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
       <h1>Error Occurred</h1>
       <p>{error.message}</p>
       {renderErrorAction()}
-      <button onClick={resetError}>Retry</button> {/* This is the new button */}
+      <button onClick={resetError}>Retry</button>
+      {/* This is the new button */}
     </Box>
   );
 };

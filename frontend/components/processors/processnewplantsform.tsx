@@ -6,7 +6,7 @@ import {
   processStems,
   processTrees
 } from "@/components/processors/processorhelpers";
-import {FileRow, RowDataStructure} from "@/config/macros";
+import {FileRow} from "@/config/macros";
 
 export default async function processNewPlantsForm(
   connection: PoolConnection,

@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
   const file = formData.get(fileName) as File | null;
   if (!file) return NextResponse.error();
   let containerClient: any = null;
-  try{
+  try {
     containerClient = await getContainerClient(`${plot}-${census}`);
   } catch (error: any) {
     if (error instanceof Error) {

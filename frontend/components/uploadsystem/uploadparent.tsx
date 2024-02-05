@@ -75,7 +75,7 @@ export default function UploadParent() {
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
-  // select schema table that file should be uploaded to --> state
+    // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState("");
   // in progress state --> data is being parsed
   const [parsing, setParsing] = useState(false);
@@ -139,6 +139,7 @@ export default function UploadParent() {
     setErrorRows({});
     setUploadForm('');
   }
+
   async function resetError() {
     setUploadError(null);
     setErrorComponent('');
@@ -275,15 +276,20 @@ export default function UploadParent() {
 
               requiredHeaders.forEach((header) => {
                 const value = typedRow[header.label];
-                if (value === null || value === undefined || value === "") {
+                if (value === null || value === undefined || value === "" || value === "NULL") {
                   rowErrors[header.label] = "This field is required";
                   hasError = true;
                 }
               });
 
-              const dbhValue = parseFloat(typedRow["DBH"]);
+              let dbhValue = parseFloat(typedRow["DBH"]);
               if (!isNaN(dbhValue) && dbhValue < 1) {
                 rowErrors["DBH"] = "DBH must be a number greater than 1";
+                hasError = true;
+              }
+              dbhValue = parseFloat(typedRow['dbh']);
+              if (!isNaN(dbhValue) && dbhValue < 1) {
+                rowErrors["dbh"] = "DBH must be a number greater than 1";
                 hasError = true;
               }
 
@@ -384,7 +390,7 @@ export default function UploadParent() {
           handleChange={handleChange}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
-          />;
+        />;
       case ReviewStates.UPLOAD:
         return <UploadFire
           acceptedFiles={acceptedFiles}
@@ -416,19 +422,19 @@ export default function UploadParent() {
           handleReturnToStart={handleReturnToStart}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
-          />;
+        />;
       default:
         return (
-        <UploadError
-          error={uploadError}
-          component={errorComponent}
-          acceptedFiles={acceptedFiles}
-          setAcceptedFiles={setAcceptedFiles}
-          setReviewState={setReviewState}
-          handleReturnToStart={handleReturnToStart}
-          resetError={resetError}
-        />
-      );
+          <UploadError
+            error={uploadError}
+            component={errorComponent}
+            acceptedFiles={acceptedFiles}
+            setAcceptedFiles={setAcceptedFiles}
+            setReviewState={setReviewState}
+            handleReturnToStart={handleReturnToStart}
+            resetError={resetError}
+          />
+        );
     }
   }
   return (

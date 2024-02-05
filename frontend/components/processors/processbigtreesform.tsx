@@ -1,4 +1,4 @@
-import {FileRow, RowDataStructure} from "@/config/macros";
+import {FileRow} from "@/config/macros";
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,

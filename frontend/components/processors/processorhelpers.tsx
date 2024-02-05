@@ -11,6 +11,30 @@ import * as fs from "fs";
 import {NextRequest} from "next/server";
 
 
+export async function getConn() {
+  let conn: PoolConnection | null = null; // Use PoolConnection type
+
+  try {
+    let i = 0;
+    conn = await getSqlConnection(i);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error("Error processing files:", error.message);
+      throw new Error(error.message);
+    } else {
+      console.error("Unknown error in connecting to SQL:", error);
+      throw new Error('unknown');
+    }
+  }
+
+  if (!conn) {
+    console.error("Container client or SQL connection is undefined.");
+    throw new Error('conn empty');
+  }
+
+  return conn;
+}
+
 export async function insertOrUpdate(
   connection: PoolConnection, // Change the parameter type to PoolConnection
   fileType: string,
@@ -479,6 +503,8 @@ export async function parseCoreMeasurementsRequestBody(request: NextRequest, par
         PersonnelID: requestBody.personnelID ?? null,
         IsRemeasurement: booleanToBit(requestBody.isRemeasurement) ?? null,
         IsCurrent: booleanToBit(requestBody.isCurrent) ?? null,
+        IsPrimaryStem: booleanToBit(requestBody.IsPrimaryStem) ?? null,
+        IsValidated: booleanToBit(requestBody.IsValidated) ?? null,
         MeasurementDate: requestBody.measurementDate ? new Date(requestBody.measurementDate) : null,
         MeasuredDBH: requestBody.measuredDBH ?? null,
         MeasuredHOM: requestBody.measuredHOM ?? null,

@@ -1,4 +1,4 @@
-import {FileRow, RowDataStructure} from "@/config/macros";
+import {FileRow} from "@/config/macros";
 import {PoolConnection} from 'mysql2/promise';
 
 export async function processSpecies(connection: PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) {

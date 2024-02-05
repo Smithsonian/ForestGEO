@@ -4,7 +4,6 @@ import {TableHeadersByFormType, UploadParseFilesProps} from "@/config/macros";
 import SelectFormType from "@/components/fileupload/groupedformselection";
 import {Button, Grid} from "@mui/material";
 import {DropzoneLogic} from "@/components/fileupload/dropzone";
-import {FileWithPath} from "react-dropzone";
 import Divider from "@mui/joy/Divider";
 import {FileDisplay} from "@/components/fileupload/filelist";
 import {LoadingButton} from "@mui/lab";
