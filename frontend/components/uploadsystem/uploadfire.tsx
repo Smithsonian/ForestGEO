@@ -8,7 +8,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
                                                  acceptedFiles, parsedData,
                                                  uploadForm, setIsDataUnsaved,
                                                  currentPlot, currentCensus, uploadCompleteMessage,
-                                                 setUploadCompleteMessage,  handleReturnToStart,
+                                                 setUploadCompleteMessage, handleReturnToStart,
                                                  user, setUploadError, setErrorComponent, setReviewState
                                                }) => {
   const [loading, setLoading] = useState<boolean>(true);
@@ -22,10 +22,10 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setCurrentlyRunning(`File ${fileName} uploading to SQL...`)
       const response = await fetch(
         `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fileData[fileName])
-      });
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(fileData[fileName])
+        });
       // Increment completedOperations when an operation is completed
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       return response.ok ? 'SQL load successful' : 'SQL load failed';
@@ -44,9 +44,9 @@ const UploadFire: React.FC<UploadFireProps> = ({
 
       const response = await fetch(
         `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}`, {
-        method: 'POST',
-        body: formData
-      });
+          method: 'POST',
+          body: formData
+        });
       // Increment completedOperations when an operation is completed
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       return response.ok ? 'Storage load successful' : 'Storage load failed';
@@ -59,11 +59,11 @@ const UploadFire: React.FC<UploadFireProps> = ({
 
   function LinearProgressWithLabel(props: LinearProgressProps & { value: number, currentlyRunningMsg: string }) {
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-        <Box sx={{ width: '100%', mr: 1 }}>
+      <Box sx={{display: 'flex', alignItems: 'center'}}>
+        <Box sx={{width: '100%', mr: 1}}>
           <LinearProgress variant="determinate" {...props} />
         </Box>
-        <Box sx={{ minWidth: 35 }}>
+        <Box sx={{minWidth: 35}}>
           <Typography variant="body2" color="text.secondary">{`${Math.round(
             props.value,
           )}% --> ${props.currentlyRunningMsg}`}</Typography>
@@ -135,7 +135,8 @@ const UploadFire: React.FC<UploadFireProps> = ({
       {loading ? (
         <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4}}>
           <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-          <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100} currentlyRunningMsg={currentlyRunning} />
+          <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
+                                   currentlyRunningMsg={currentlyRunning}/>
         </Box>
       ) : (
         <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4}}>

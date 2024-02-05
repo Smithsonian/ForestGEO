@@ -1,4 +1,4 @@
-import {FileRow, RowDataStructure} from "@/config/macros";
+import {FileRow} from "@/config/macros";
 import {getColumnValueByColumnName, getPersonnelIDByName, processCode} from "@/components/processors/processorhelpers";
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
 

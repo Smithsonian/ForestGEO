@@ -1,5 +1,5 @@
 import {PoolConnection} from 'mysql2/promise';
-import {FileRow, RowDataStructure} from '@/config/macros';
+import {FileRow} from '@/config/macros';
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,

@@ -67,6 +67,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
       personnelID: row.PersonnelID,
       isRemeasurement: bitToBoolean(row.IsRemeasurement),
       isCurrent: bitToBoolean(row.IsCurrent),
+      isPrimaryStem: bitToBoolean(row.IsPrimaryStem),
+      isValidated: bitToBoolean(row.IsValidated),
       measurementDate: row.MeasurementDate,
       measuredDBH: row.MeasuredDBH,
       measuredHOM: row.MeasuredHOM,

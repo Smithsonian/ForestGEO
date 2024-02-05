@@ -12,7 +12,6 @@ import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
 import {CensusRDS} from "@/config/sqlmacros";
-import {GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {setData} from "@/config/db";
 
 // INTERFACES
@@ -149,6 +148,7 @@ export type FileRowSet = {
 export type FileCollectionRowSet = {
   [filename: string]: FileRowSet; // {filename --> FileRowSet}
 };
+
 export interface UploadParseFilesProps {
   uploadForm: string;
   parsing: boolean;
@@ -212,6 +212,7 @@ export interface UploadErrorProps {
 
 export type FetchQueryFunction = (gridType: string, page: number, pageSize: number, plotID?: number) => string;
 export type ProcessQueryFunction = (gridType: string, deletionID?: number) => string;
+
 export enum HTTPResponses {
   OK = 200,
   CREATED = 201,

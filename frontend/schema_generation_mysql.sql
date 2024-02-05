@@ -56,9 +56,6 @@ create table forestgeo_bci.quadrats
     PlotID       int   null,
     PersonnelID  int   null,
     QuadratName  text  null,
-    QuadratX     float null,
-    QuadratY     float null,
-    QuadratZ     float null,
     DimensionX   int   null,
     DimensionY   int   null,
     Area         float null,
@@ -193,7 +190,6 @@ create table forestgeo_bci.stems
     StemQuadX       float       null,
     StemQuadY       float       null,
     StemQuadZ       float       null,
-    IsPrimary       bit         null,
     Moved           bit         null,
     StemDescription text        null,
     constraint FK_Stems_Quadrats
@@ -208,19 +204,21 @@ create table forestgeo_bci.coremeasurements
 (
     CoreMeasurementID int auto_increment
         primary key,
-    CensusID          int            null,
-    PlotID            int            null,
-    QuadratID         int            null,
-    TreeID            int            null,
-    StemID            int            null,
-    PersonnelID       int            null,
-    IsRemeasurement   bit            null,
-    IsCurrent         bit            null,
-    MeasurementDate   date           null,
-    MeasuredDBH       decimal(10, 2) null,
-    MeasuredHOM       decimal(10, 2) null,
-    Description       text           null,
-    UserDefinedFields text           null,
+    CensusID          int              null,
+    PlotID            int              null,
+    QuadratID         int              null,
+    TreeID            int              null,
+    StemID            int              null,
+    PersonnelID       int              null,
+    IsRemeasurement   bit              null,
+    IsCurrent         bit              null,
+    IsPrimaryStem     bit              null,
+    IsValidated       bit default b'0' null,
+    MeasurementDate   date             null,
+    MeasuredDBH       decimal(10, 2)   null,
+    MeasuredHOM       decimal(10, 2)   null,
+    Description       text             null,
+    UserDefinedFields text             null,
     constraint CoreMeasurements_Census_CensusID_fk
         foreign key (CensusID) references forestgeo_bci.census (CensusID)
             on update cascade,
@@ -283,7 +281,7 @@ create table forestgeo_bci.cmverrors
     constraint CMVErrors_CoreMeasurements_CoreMeasurementID_fk
         foreign key (CoreMeasurementID) references forestgeo_bci.coremeasurements (CoreMeasurementID)
             on update cascade,
-    constraint CMVErrors_ValidationErrors_ValidationErrorID_fk
+    constraint cmverrors_validationerrors_ValidationErrorID_fk
         foreign key (ValidationErrorID) references forestgeo_bci.validationerrors (ValidationErrorID)
             on update cascade
 );

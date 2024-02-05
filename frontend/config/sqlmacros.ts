@@ -184,6 +184,8 @@ export type CoreMeasurementsRDS = {
   personnelID: number | null;
   isRemeasurement: boolean | null;
   isCurrent: boolean | null;
+  isPrimaryStem: boolean | null;
+  isValidated: boolean | null;
   measurementDate: Date | null;
   measuredDBH: number | null;
   measuredHOM: number | null;
@@ -202,6 +204,8 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'isPrimaryStem', headerName: 'IsPrimaryStem', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'isValidated', headerName: 'IsValidated', headerClassName: 'header', flex: 1, align: 'left'},
   {
     field: 'measurementDate',
     headerName: 'MeasurementDate',
@@ -264,7 +268,7 @@ export type GenusRDS = {
   id: number;
   genusID: number;
   familyID: number | null;
-  genusName: string | null;
+  genus: string | null;
   referenceID: number | null;
   authority: string | null;
 }
@@ -318,6 +322,9 @@ export type PlotRDS = {
   dimensionX: number | null;
   dimensionY: number | null;
   area: number | null;
+  globalX: number | null;
+  globalY: number | null;
+  globalZ: number | null;
   plotX: number | null;
   plotY: number | null;
   plotZ: number | null;
@@ -343,9 +350,6 @@ export type QuadratsRDS = {
   quadratID: number;
   plotID: number | null;
   quadratName: string | null;
-  quadratX: number | null;
-  quadratY: number | null;
-  quadratZ: number | null;
   dimensionX: number | null;
   dimensionY: number | null;
   area: number | null;
@@ -447,10 +451,12 @@ export type StemRDS = {
   quadratID: number | null;
   stemNumber: number | null;
   stemTag: string | null;
-  treeTag: string | null;
-  stemX: number | null;
-  stemY: number | null;
-  stemZ: number | null;
+  stemPlotX: number | null;
+  stemPlotY: number | null;
+  stemPlotZ: number | null;
+  stemQuadX: number | null;
+  stemQuadY: number | null;
+  stemQuadZ: number | null;
   moved: boolean | null;
   stemDescription: string | null;
 }
@@ -524,29 +530,3 @@ export const ValidationErrorGridColumns: GridColDef[] = [
     align: 'left',
   },
 ]
-
-
-// POST CENSUS SUMMARY STATISTICS QUERIES
-export const queryNumLiveTreesInQuadrat = `
-  SELECT COUNT(DISTINCT trees.TreeID) as AliveTrees
-  FROM forestgeo_bci.trees as trees
-  JOIN forestgeo_bci.coremeasurements as coremeasurements ON trees.TreeID = coremeasurements.TreeID
-  JOIN forestgeo_bci.cmattributes as cmattributes ON coremeasurements.CoreMeasurementID = cmattributes.CoreMeasurementID
-  JOIN forestgeo_bci.attributes as attributes ON cmattributes.AttributeCode = attributes.Code
-  WHERE attributes.Description = 'alive'
-  AND coremeasurements.QuadratID = ?
-  AND coremeasurements.PlotID = ?
-  AND coremeasurements.CensusID = ?;
-`;
-
-export const queryNumDeadTreesInCensus = `
-  SELECT 
-    attributes.Status,
-    COUNT(*) as StemCount
-  FROM forestgeo_bci.coremeasurements as coremeasurements
-  JOIN forestgeo_bci.cmattributes as cmattributes ON coremeasurements.CoreMeasurementID = cmattributes.CoreMeasurementID
-  JOIN forestgeo_bci.attributes as attributes ON cmattributes.AttributeCode = attributes.Code
-  WHERE coremeasurements.CensusID = ?
-  AND attributes.Status IN ('dead', 'stem dead', 'missing')
-  GROUP BY attributes.Status;
-`;

@@ -32,19 +32,11 @@ function renderSwitch(endpoint: string) {
       );
     case '/coremeasurementshub':
       return (
-        <h2 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h2>
+        <h3 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h3>
       );
     case '/fileuploadhub':
       return (
         <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub</h3>
-      );
-    case '/fileuploadhub/arcgisfile':
-      return (
-        <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub - ArcGIS Files</h3>
-      );
-    case '/fileuploadhub/csvfile':
-      return (
-        <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub - CSV Files</h3>
       );
     case '/properties':
       return (
