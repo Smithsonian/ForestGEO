@@ -346,14 +346,14 @@ export default function Sidebar() {
                   {currentPlot?.id ? ` -> ID: ${currentPlot.id}` : ''}
                 </Typography>
               </Link>
-              {/*<Link component={"button"} onClick={() => {*/}
-              {/*  setOpenCensusSelectionModal(true);*/}
-              {/*}}>*/}
-              {/*  <Typography color={(!currentCensus?.censusID) ? "danger" : undefined}*/}
-              {/*              level="body-lg">*/}
-              {/*    {currentCensus?.censusID ? `Census: ${currentCensus.censusID}` : 'No Census'}*/}
-              {/*  </Typography>*/}
-              {/*</Link>*/}
+              <Link disabled={!currentPlot?.key || !currentPlot?.num || !currentPlot?.id} component={"button"} onClick={() => {
+                setOpenCensusSelectionModal(true);
+              }}>
+                <Typography color={(!currentCensus?.censusID) ? "danger" : undefined}
+                            level="body-lg">
+                  {currentCensus?.censusID ? `Census: ${currentCensus.censusID}` : 'No Census'}
+                </Typography>
+              </Link>
             </Breadcrumbs>
             <Divider orientation={"horizontal"}/>
             <Modal open={openPlotSelectionModal} onClose={() => {

@@ -38,10 +38,6 @@ function renderSwitch(endpoint: string) {
       return (
         <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub</h3>
       );
-    case '/properties':
-      return (
-        <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub</h3>
-      );
     case '/properties/attributes':
       return (
         <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Attributes</h3>
