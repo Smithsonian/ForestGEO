@@ -338,6 +338,9 @@ export const PlotGridColumns: GridColDef[] = [
   {field: 'locationName', headerName: 'LocationName', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'countryName', headerName: 'CountryName', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'globalX', headerName: 'GlobalX', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'globalY', headerName: 'GlobalY', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'globalZ', headerName: 'GlobalZ', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotX', headerName: 'PlotX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotY', headerName: 'PlotY', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotZ', headerName: 'PlotZ', headerClassName: 'header', flex: 1, align: 'left',},
@@ -345,11 +348,13 @@ export const PlotGridColumns: GridColDef[] = [
   {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export type QuadratsRDS = {
+export type QuadratRDS = {
   id: number;
   quadratID: number;
   plotID: number | null;
   quadratName: string | null;
+  quadratX: number | null;
+  quadratY: number | null;
   dimensionX: number | null;
   dimensionY: number | null;
   area: number | null;
@@ -363,7 +368,7 @@ export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratY', headerName: 'QuadratY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratZ', headerName: 'QuadratZ', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left',},
@@ -468,9 +473,12 @@ export const StemGridColumns: GridColDef[] = [
   {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'stemTag', headerName: 'StemTag', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemX', headerName: 'StemX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemY', headerName: 'StemY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemZ', headerName: 'StemZ', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemPlotX', headerName: 'StemPlotX', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemPlotY', headerName: 'StemPlotY', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemPlotZ', headerName: 'StemPlotZ', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemQuadX', headerName: 'StemQuadX', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemQuadY', headerName: 'StemQuadY', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemQuadZ', headerName: 'StemQuadZ', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'moved', headerName: 'Moved', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]

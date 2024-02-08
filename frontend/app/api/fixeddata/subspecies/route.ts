@@ -7,7 +7,7 @@ import {
   getSqlConnection,
   parseSubSpeciesRequestBody,
   runQuery
-} from "@/components/processors/processorhelpers";
+} from "@/components/processors/processormacros";
 import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const newRowData = await parseSubSpeciesRequestBody(request, 'POST');
+    const {SubSpeciesID, ...newRowData} = await parseSubSpeciesRequestBody(request);
     conn = await getSqlConnection(0);
 
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.SubSpecies`, newRowData]);
@@ -92,9 +92,9 @@ export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const {subSpeciesID, updateData} = await parseSubSpeciesRequestBody(request, 'PATCH');
+    const {SubSpeciesID, ...updateData} = await parseSubSpeciesRequestBody(request);
     conn = await getSqlConnection(0); // Ensure to specify the connection type
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SubSpeciesID = ?', [`${schema}.SubSpecies`, updateData, subSpeciesID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SubSpeciesID = ?', [`${schema}.SubSpecies`, updateData, SubSpeciesID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});

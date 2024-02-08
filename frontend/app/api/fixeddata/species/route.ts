@@ -1,6 +1,6 @@
 // FIXED DATA SPECIES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {getSchema, getSqlConnection, parseSpeciesRequestBody, runQuery} from "@/components/processors/processorhelpers";
+import {getSchema, getSqlConnection, parseSpeciesRequestBody, runQuery} from "@/components/processors/processormacros";
 import {bitToBoolean, ErrorMessages} from "@/config/macros";
 import {SpeciesRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const newRowData = parseSpeciesRequestBody(request, 'POST');
+    const {SpeciesID, ...newRowData} = await parseSpeciesRequestBody(request);
     conn = await getSqlConnection(0);
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Species`, newRowData]);
     await runQuery(conn, insertQuery);
@@ -99,10 +99,10 @@ export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const {speciesID, updateData} = await parseSpeciesRequestBody(request, 'PATCH');
+    const {SpeciesID, ...updateData} = await parseSpeciesRequestBody(request);
     conn = await getSqlConnection(0);
     // Build the update query
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SpeciesID = ?', [`${schema}.Species`, updateData, speciesID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SpeciesID = ?', [`${schema}.Species`, updateData, SpeciesID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});

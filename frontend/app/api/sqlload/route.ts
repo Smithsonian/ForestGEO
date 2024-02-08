@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getSqlConnection, insertOrUpdate} from "@/components/processors/processorhelpers";
+import {getSqlConnection, insertOrUpdate} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {HTTPResponses} from "@/config/macros";
 

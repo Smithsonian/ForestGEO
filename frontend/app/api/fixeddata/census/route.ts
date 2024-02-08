@@ -2,7 +2,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
-import {getSchema, getSqlConnection, parseCensusRequestBody, runQuery} from "@/components/processors/processorhelpers";
+import {getSchema, getSqlConnection, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
     const totalRows = totalRowsResult[0].totalRows;
 
     // Map the results to CensusRDS structure
-    const censusRows: CensusRDS[] = paginatedResults.map((row, index) => ({
+    const censusRows: CensusRDS[] = paginatedResults.map((row: any, index: number) => ({
       id: index + 1,
       censusID: row.CensusID,
       plotID: row.PlotID,
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
-    const newRowData = await parseCensusRequestBody(request, 'POST');
+    const {CensusID, ...newRowData} = await parseCensusRequestBody(request);
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Census`, newRowData]);
     await runQuery(conn, insertQuery);
     return NextResponse.json({message: "Insert successful"}, {status: 200});
@@ -89,10 +89,10 @@ export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const {censusID, updateData} = await parseCensusRequestBody(request, 'PATCH');
+    const {CensusID, ...updateData} = await parseCensusRequestBody(request);
     conn = await getSqlConnection(0);
 
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CensusID = ?', [`${schema}.Census`, updateData, censusID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CensusID = ?', [`${schema}.Census`, updateData, CensusID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: HTTPResponses.OK});

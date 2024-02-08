@@ -20,6 +20,8 @@ export default function CoreMeasurementsPage() {
       personnelID: 0,
       isRemeasurement: false,
       isCurrent: false,
+      isPrimaryStem: false,
+      isValidated: false,
       measurementDate: new Date(),
       measuredDBH: 0.0,
       measuredHOM: 0.0,
@@ -61,6 +63,8 @@ export default function CoreMeasurementsPage() {
       personnelID: 0,
       isRemeasurement: false,
       isCurrent: false,
+      isPrimaryStem: false,
+      isValidated: false,
       measurementDate: new Date(),
       measuredDBH: 0.0,
       measuredHOM: 0.0,
@@ -77,7 +81,7 @@ export default function CoreMeasurementsPage() {
     }));
   };
 
-  if (!currentPlot?.key) {
+  if (!currentPlot) {
     return <>You must select a plot to continue!</>;
   } else {
     return (

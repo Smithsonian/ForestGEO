@@ -1,7 +1,7 @@
 // FETCH ALL PLOTS ROUTE HANDLERS
 import {NextResponse} from "next/server";
 import {PlotRDS} from "@/config/sqlmacros";
-import {getSchema, getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
+import {getSchema, getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export async function GET(): Promise<NextResponse<PlotRDS[]>> {

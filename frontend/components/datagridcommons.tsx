@@ -232,9 +232,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setRowModesModel(newRowModesModel);
   };
   const handleCloseSnackbar = () => setSnackbar(null);
-  // const handleProcessRowUpdateError = React.useCallback((error: Error) => {
-  //   setSnackbar({children: String(error), severity: 'error'});
-  // }, []);
 
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
@@ -381,7 +378,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                           onRowModesModelChange={handleRowModesModelChange}
                           onRowEditStop={handleRowEditStop}
                           processRowUpdate={processRowUpdate}
-            // onProcessRowUpdateError={handleProcessRowUpdateError}
                           loading={refresh}
                           paginationMode="server"
                           onPaginationModelChange={setPaginationModel}

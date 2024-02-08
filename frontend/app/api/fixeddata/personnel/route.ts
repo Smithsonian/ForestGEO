@@ -7,7 +7,7 @@ import {
   getSqlConnection,
   parsePersonnelRequestBody,
   runQuery
-} from "@/components/processors/processorhelpers";
+} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const personnelRows: PersonnelRDS[] = paginatedResults.map((row: any, index) => ({
+    const personnelRows: PersonnelRDS[] = paginatedResults.map((row: any, index: number) => ({
       id: index + 1,
       personnelID: row.PersonnelID,
       firstName: row.FirstName,
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const newRowData = await parsePersonnelRequestBody(request, 'POST');
+    const {PersonnelID, ...newRowData} = await parsePersonnelRequestBody(request);
 
     conn = await getSqlConnection(0);
 
@@ -88,10 +88,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const {personnelID, updateData} = await parsePersonnelRequestBody(request, 'PATCH');
+    const {PersonnelID, ...updateData} = await parsePersonnelRequestBody(request);
     conn = await getSqlConnection(0);
 
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE PersonnelID = ?', [`${schema}.Personnel`, updateData, personnelID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE PersonnelID = ?', [`${schema}.Personnel`, updateData, PersonnelID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});

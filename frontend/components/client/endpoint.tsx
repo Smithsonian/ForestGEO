@@ -20,7 +20,7 @@ import {
   useSubSpeciesLoadDispatch
 } from "@/app/contexts/coredataprovider";
 import {usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
-import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
+import {CensusRDS, PlotRDS, QuadratRDS} from "@/config/sqlmacros";
 import {getData, setData} from "@/config/db";
 import {usePlotDispatch} from "@/app/contexts/userselectionprovider";
 
@@ -57,6 +57,10 @@ function renderSwitch(endpoint: string) {
     case '/properties/species':
       return (
         <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Species</h3>
+      );
+    case '/forms/census':
+      return (
+        <h3 className={title({color: "sky"})} key={endpoint}>Census Form</h3>
       );
     default:
       return (
@@ -95,7 +99,7 @@ export default function Endpoint({children,}: Readonly<{ children: React.ReactNo
 
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData = await getData('quadratsLoad');
-    let quadratsRDSLoad: QuadratsRDS[];
+    let quadratsRDSLoad: QuadratRDS[];
     setLoading(10);
     if (quadratsLoadData) {
       quadratsRDSLoad = quadratsLoadData;

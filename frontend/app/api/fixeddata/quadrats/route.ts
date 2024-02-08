@@ -1,17 +1,12 @@
 // FIXED DATA QUADRATS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {
-  getSchema,
-  getSqlConnection,
-  parseQuadratsRequestBody,
-  runQuery
-} from "@/components/processors/processorhelpers";
+import {getSchema, getSqlConnection, parseQuadratsRequestBody, runQuery} from "@/components/processors/processormacros";
 import {ErrorMessages} from "@/config/macros";
-import {QuadratsRDS} from "@/config/sqlmacros";
+import {QuadratRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
-  quadrats: QuadratsRDS[],
+  quadrats: QuadratRDS[],
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
@@ -54,14 +49,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const quadratRows: QuadratsRDS[] = paginatedResults.map((row: RowDataPacket, index: number) => ({
+    const quadratRows: QuadratRDS[] = paginatedResults.map((row: RowDataPacket, index: number) => ({
       id: index + 1,
       quadratID: row.QuadratID,
       plotID: row.PlotID,
       quadratName: row.QuadratName,
       quadratX: row.QuadratX,
       quadratY: row.QuadratY,
-      quadratZ: row.QuadratZ,
       dimensionX: row.DimensionX,
       dimensionY: row.DimensionY,
       area: row.Area,
@@ -80,7 +74,7 @@ export async function POST(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const newRowData = await parseQuadratsRequestBody(request, 'POST');
+    const {QuadratID, ...newRowData} = await parseQuadratsRequestBody(request);
     conn = await getSqlConnection(0);
     // Insert the new row
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Quadrats`, newRowData]);
@@ -116,11 +110,11 @@ export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    const {quadratID, updateData} = await parseQuadratsRequestBody(request, 'PATCH');
+    const {QuadratID, ...updateData} = await parseQuadratsRequestBody(request);
     conn = await getSqlConnection(0);
 
     // Build the update query
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE QuadratID = ?', [`${schema}.Quadrats`, updateData, quadratID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE QuadratID = ?', [`${schema}.Quadrats`, updateData, QuadratID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});

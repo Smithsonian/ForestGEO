@@ -7,7 +7,7 @@ import {
   getSqlConnection,
   parseCoreMeasurementsRequestBody,
   runQuery
-} from "@/components/processors/processorhelpers";
+} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
   try {
     // Parse the request body
     const schema = getSchema();
-    const newRowData = await parseCoreMeasurementsRequestBody(request, 'POST');
+    const {CoreMeasurementID, ...newRowData} = await parseCoreMeasurementsRequestBody(request);
     conn = await getSqlConnection(0);
     // Insert the new row
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.CoreMeasurements`, newRowData]);
@@ -114,10 +114,10 @@ export async function PATCH(request: NextRequest) {
   let conn;
   try {
     const schema = getSchema();
-    const {coreMeasurementID, updateData} = await parseCoreMeasurementsRequestBody(request, 'PATCH');
+    const {CoreMeasurementID, ...updateData} = await parseCoreMeasurementsRequestBody(request);
     conn = await getSqlConnection(0);
     // Build the update query
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CoreMeasurementID = ?', [`${schema}.CoreMeasurements`, updateData, coreMeasurementID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CoreMeasurementID = ?', [`${schema}.CoreMeasurements`, updateData, CoreMeasurementID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});

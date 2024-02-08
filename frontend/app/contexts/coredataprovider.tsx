@@ -7,7 +7,7 @@ import {
   CoreMeasurementsRDS,
   PersonnelRDS,
   PlotRDS,
-  QuadratsRDS,
+  QuadratRDS,
   SpeciesRDS,
   SubSpeciesRDS
 } from "@/config/sqlmacros";
@@ -18,7 +18,7 @@ export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | 
 export const AttributeLoadContext = createContext<AttributesRDS[] | null>(null);
 export const CensusLoadContext = createContext<CensusRDS[] | null>(null);
 export const PersonnelLoadContext = createContext<PersonnelRDS[] | null>(null);
-export const QuadratsLoadContext = createContext<QuadratsRDS[] | null>(null);
+export const QuadratsLoadContext = createContext<QuadratRDS[] | null>(null);
 export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
 export const SubSpeciesLoadContext = createContext<SubSpeciesRDS[] | null>(null);
 export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
@@ -35,7 +35,7 @@ export const PersonnelLoadDispatchContext = createContext<Dispatch<{
   personnelLoad: PersonnelRDS[] | null
 }> | null>(null);
 export const QuadratsLoadDispatchContext = createContext<Dispatch<{
-  quadratsLoad: QuadratsRDS[] | null
+  quadratsLoad: QuadratRDS[] | null
 }> | null>(null);
 export const SpeciesLoadDispatchContext = createContext<Dispatch<{
   speciesLoad: SpeciesRDS[] | null
@@ -60,7 +60,7 @@ export function CoreDataProvider({children}: { children: React.ReactNode }) {
     useReducer<React.Reducer<PersonnelRDS[] | null, LoadAction<PersonnelRDS[]>>>(genericLoadReducer, []);
 
   const [quadratsLoad, quadratsLoadDispatch] =
-    useReducer<React.Reducer<QuadratsRDS[] | null, LoadAction<QuadratsRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<QuadratRDS[] | null, LoadAction<QuadratRDS[]>>>(genericLoadReducer, []);
 
   const [speciesLoad, speciesLoadDispatch] =
     useReducer<React.Reducer<SpeciesRDS[] | null, LoadAction<SpeciesRDS[]>>>(genericLoadReducer, []);
