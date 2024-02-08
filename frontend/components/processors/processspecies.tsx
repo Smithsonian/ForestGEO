@@ -1,50 +1,50 @@
-import {FileRow} from "@/config/macros";
+import {booleanToBit, FileRow} from "@/config/macros";
 import {PoolConnection} from 'mysql2/promise';
+import {runQuery} from "@/components/processors/processormacros";
 
 export async function processSpecies(connection: PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
   try {
-    // Check if Genus exists, insert if not
-    const [genusRows] = await connection.execute(`
-      SELECT GenusID FROM ${schema}.Genus WHERE GenusName = ?;
-    `, [rowData.genus]) as any;
+    const genusResult = await runQuery(connection, `
+      SELECT GenusID FROM ${schema}.Genus WHERE Genus = ?;
+    `, [rowData.genus]);
 
-    let genusID = null;
-    if (genusRows.length === 0) {
-      // Insert into Genus table if genus does not exist
-      const [insertGenusResult] = await connection.execute(`
-        INSERT INTO ${schema}.Genus (GenusName)
-        VALUES (?);
-      `, [rowData.genus]) as any;
+    const genusID = genusResult[0].GenusID;
 
-      genusID = insertGenusResult.insertId;
-    } else {
-      genusID = genusRows[0].GenusID;
-    }
+    /**
+     *       "spcode": "Species.SpeciesCode",
+     *       "genus": "Genus.GenusName",
+     *       "species": "Species.SpeciesName",
+     *       "IDLevel": "Species.IDLevel",
+     *       "family": "Species.Family",
+     *       "authority": "Species.Authority"
+     */
 
     // Insert or update Species
-    await connection.execute(`
-      INSERT INTO ${schema}.Species (SpeciesCode, SpeciesName, IDLevel, FieldFamily, Authority)
-      VALUES (?, ?, ?, ?, ?)
+    await runQuery(connection, `
+      INSERT INTO ${schema}.Species (GenusID, SpeciesCode, CurrentTaxonFlag, ObsoleteTaxonFlag, SpeciesName, IDLevel, Authority, FieldFamily, Description)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
+      GenusID = VALUES(GenusID),
       SpeciesCode = VALUES(SpeciesCode),
+      CurrentTaxonFlag = VALUES(CurrentTaxonFlag),
+      ObsoleteTaxonFlag = VALUES(ObsoleteTaxonFlag),
       SpeciesName = VALUES(SpeciesName),
       IDLevel = VALUES(IDLevel),
-      FieldFamily = VALUES(FieldFamily),
-      Authority = VALUES(Authority);
-    `, [rowData.spcode, rowData.species, rowData.IDLevel, rowData.family, rowData.authority]);
-
-    // Insert or update SubSpecies if provided
-    if (rowData.subspecies) {
-      await connection.execute(`
-        INSERT INTO ${schema}.SubSpecies (SubSpeciesName, SpeciesID)
-        VALUES (?, (SELECT SpeciesID FROM ${schema}.Species WHERE SpeciesCode = ?))
-        ON DUPLICATE KEY UPDATE
-        SubSpeciesName = VALUES(SubSpeciesName);
-      `, [rowData.subspecies, rowData.spcode]);
-    }
+      Authority = VALUES(Authority)
+      FieldFamily = VALUES(FieldFamily)
+      Description = VALUES(Description);
+    `, [genusID,
+      rowData.spcode,
+      booleanToBit(true),
+      booleanToBit(false),
+      rowData.species,
+      rowData.IDLevel,
+      rowData.authority,
+      rowData.family,
+      null]);
   } catch (error: any) {
     console.error('Error processing species:', error.message);
     throw error;

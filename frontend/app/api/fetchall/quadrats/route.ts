@@ -1,10 +1,10 @@
 // FETCH ALL QUADRATS ROUTE HANDLERS
 import {NextResponse} from "next/server";
-import {QuadratsRDS} from "@/config/sqlmacros";
+import {QuadratRDS} from "@/config/sqlmacros";
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
-import {getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
+import {getSqlConnection, runQuery} from "@/components/processors/processormacros";
 
-export async function GET(): Promise<NextResponse<QuadratsRDS[]>> {
+export async function GET(): Promise<NextResponse<QuadratRDS[]>> {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
@@ -14,14 +14,13 @@ export async function GET(): Promise<NextResponse<QuadratsRDS[]>> {
     const query = `SELECT * FROM ${schema}.Quadrats`;
     const results = await runQuery(conn, query);
 
-    const quadratRows: QuadratsRDS[] = results.map((row: RowDataPacket, index: number) => ({
+    const quadratRows: QuadratRDS[] = results.map((row: RowDataPacket, index: number) => ({
       id: index + 1,
       quadratID: row.QuadratID,
       plotID: row.PlotID,
       quadratName: row.QuadratName,
       quadratX: row.QuadratX,
       quadratY: row.QuadratY,
-      quadratZ: row.QuadratZ,
       dimensionX: row.DimensionX,
       dimensionY: row.DimensionY,
       area: row.Area,

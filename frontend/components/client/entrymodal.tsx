@@ -21,7 +21,7 @@ import {
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
 import {redirect} from 'next/navigation';
-import {CensusRDS, PlotRDS, QuadratsRDS} from '@/config/sqlmacros';
+import {CensusRDS, PlotRDS, QuadratRDS} from '@/config/sqlmacros';
 import {getData, setData} from "@/config/db";
 import {Plot, Quadrat} from "@/config/macros";
 import {usePlotDispatch} from "@/app/contexts/userselectionprovider";
@@ -45,7 +45,7 @@ export default function EntryModal() {
 
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData = await getData('quadratsLoad');
-    let quadratsRDSLoad: QuadratsRDS[];
+    let quadratsRDSLoad: QuadratRDS[];
     setLoading(10);
     if (quadratsLoadData) {
       quadratsRDSLoad = quadratsLoadData;

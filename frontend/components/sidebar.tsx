@@ -1,6 +1,6 @@
 "use client";
 import * as React from 'react';
-import {useState} from 'react';
+import {Dispatch, SetStateAction, useState} from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -37,7 +37,6 @@ import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import {usePlotListContext} from "@/app/contexts/listselectionprovider";
-import {AppRouterInstance} from "next/dist/shared/lib/app-router-context.shared-runtime";
 import {TextField} from "@mui/material";
 import Add from '@mui/icons-material/Add';
 import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/coredataprovider";
@@ -71,7 +70,6 @@ function SimpleToggler({isOpen, renderToggle, children,}: Readonly<{
 interface MRTProps {
   currentPlot: Plot | null;
   pathname: string;
-  router: AppRouterInstance;
 }
 
 function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean, setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>) {
@@ -82,7 +80,6 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
       // selected={props.pathname === siteConfigProps.href || siteConfigProps.expanded.find(value => value.href === props.pathname) !== undefined}
       color={props.pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
-        // props.router.push(siteConfigProps.href);
         setMenuOpen(!menuOpen);
       }}>
       <Icon/>
@@ -123,8 +120,23 @@ export default function Sidebar() {
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
 
-  const [properties, setProperties] = useState(false);
+  const [propertiesToggle, setPropertiesToggle] = useState(false);
+  const [formsToggle, setFormsToggle] = useState(false);
   const [newCensusData, setNewCensusData] = useState<CensusRDS>(initialCensus);
+  type ToggleObject = {
+    toggle?: boolean;
+    setToggle?: Dispatch<SetStateAction<boolean>>;
+  };
+
+  // Define the array type
+  type ToggleArray = ToggleObject[];
+  const toggleArray: ToggleArray = [
+    {toggle: undefined, setToggle: undefined},
+    {toggle: undefined, setToggle: undefined},
+    {toggle: undefined, setToggle: undefined},
+    {toggle: propertiesToggle, setToggle: setPropertiesToggle},
+    {toggle: formsToggle, setToggle: setFormsToggle}
+  ]
 
   const handleFieldChange = (field: string) => (_event: any, newValue: any) => {
     setNewCensusData({...newCensusData, [field]: newValue});
@@ -230,7 +242,6 @@ export default function Sidebar() {
       );
     }
   });
-  // const disabledStyle: React.CSSProperties = isFetchingData ? {pointerEvents: 'none', opacity: 0.5} : {};
   /**
    * AUTHENTICATED SESSION HANDLING
    */
@@ -290,13 +301,14 @@ export default function Sidebar() {
               '--ListItem-radius': (theme) => theme.vars.radius.sm,
             }}
           >
-            {siteConfigNav.map((item) => {
+            {siteConfigNav.map((item, index: number) => {
               const Icon = item.icon;
+              const {toggle, setToggle} = toggleArray[index];
               if (item.expanded.length === 0) {
                 return (
                   <ListItem key={item.href}>
                     <ListItemButton selected={pathname === item.href}
-                                    disabled={!currentPlot?.key || !currentPlot?.num || !currentPlot?.id}
+                                    disabled={!currentPlot}
                                     color={pathname === item.href ? 'primary' : undefined}
                                     onClick={() => router.push(item.href)}>
                       <Icon/>
@@ -310,8 +322,8 @@ export default function Sidebar() {
                 return (
                   <ListItem key={item.href} nested>
                     <SimpleToggler
-                      renderToggle={MenuRenderToggle({currentPlot, pathname, router}, item, properties, setProperties)}
-                      isOpen={properties}
+                      renderToggle={MenuRenderToggle({currentPlot, pathname}, item, toggle!, setToggle!)}
+                      isOpen={toggle!}
                     >
                       <List sx={{gap: 0.5}} size={"sm"}>
                         {item.expanded.map((link) => {
@@ -319,7 +331,7 @@ export default function Sidebar() {
                           return (
                             <ListItem sx={{marginTop: 0.5}} key={link.href}>
                               <ListItemButton selected={pathname == (item.href + link.href)}
-                                              disabled={!currentPlot?.key || !currentPlot?.num || !currentPlot?.id}
+                                              disabled={!currentPlot}
                                               onClick={() => router.push((item.href + link.href))}>
                                 <SubIcon/>
                                 <ListItemContent>
@@ -340,16 +352,16 @@ export default function Sidebar() {
               <Link component={"button"} onClick={() => {
                 setOpenPlotSelectionModal(true);
               }}>
-                <Typography color={(!currentPlot?.key || !currentPlot?.id) ? "danger" : undefined}
+                <Typography color={!currentPlot?.key ? "danger" : "success"}
                             level="body-lg">
                   {currentPlot?.key ? `Plot: ${currentPlot.key}` : "No Plot"}
                   {currentPlot?.id ? ` -> ID: ${currentPlot.id}` : ''}
                 </Typography>
               </Link>
-              <Link disabled={!currentPlot?.key || !currentPlot?.num || !currentPlot?.id} component={"button"} onClick={() => {
+              <Link disabled={!currentPlot} component={"button"} onClick={() => {
                 setOpenCensusSelectionModal(true);
               }}>
-                <Typography color={(!currentCensus?.censusID) ? "danger" : undefined}
+                <Typography color={(!currentPlot?.key || !currentCensus?.censusID) ? "danger" : "success"}
                             level="body-lg">
                   {currentCensus?.censusID ? `Census: ${currentCensus.censusID}` : 'No Census'}
                 </Typography>
@@ -433,10 +445,10 @@ export default function Sidebar() {
                         onChange={(_event: React.SyntheticEvent | null, newValue: CensusRDS | null,) => setCensus(newValue)}
                       >
                         <Option value={null}>None</Option>
-                        {censusLoadContext.map((item) => (
+                        {censusLoadContext.slice().sort((a, b) => b.censusID - a.censusID).map((item) => (
                           <Option key={item.censusID} value={item}>Census {item.censusID},
-                            starting at {item.startDate?.toString() ?? 'Date not found'}, ending
-                            at {item.endDate?.toString() ?? 'Date not found'}</Option>
+                            starting at {new Date(item.startDate!).toDateString() ?? 'Date not found'}, ending
+                            at {new Date(item.endDate!).toDateString() ?? 'Date not found'}</Option>
                         ))}
                       </Select>
                     </Stack>

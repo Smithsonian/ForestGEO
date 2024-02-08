@@ -464,6 +464,20 @@ export const siteConfigNav: SiteConfigProps[] = [
       }
     ]
   },
+  {
+    label: "Manual Input Forms (CTFSWeb)",
+    href: "/forms",
+    tip: 'forms from ctfsweb',
+    icon: SettingsSuggestIcon,
+    expanded: [
+      {
+        label: 'Big Trees Form',
+        href: '/bigtrees',
+        tip: '',
+        icon: DescriptionIcon,
+      },
+    ]
+  },
 ]
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | null }) => Promise<void>;

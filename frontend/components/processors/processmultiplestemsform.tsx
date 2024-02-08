@@ -1,11 +1,12 @@
-import {FileRow} from "@/config/macros";
+import {booleanToBit, FileRow} from "@/config/macros";
+import {runQuery} from "@/components/processors/processormacros";
+import {PoolConnection} from "mysql2/promise";
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
   processCode,
   processStems
-} from "@/components/processors/processorhelpers";
-import {PoolConnection} from "mysql2/promise";
+} from "@/components/processors/processorhelperfunctions";
 
 export default async function processMultipleStemsForm(
   connection: PoolConnection,
@@ -18,6 +19,15 @@ export default async function processMultipleStemsForm(
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
   try {
+    /**
+     *       "quadrat": "Quadrats.QuadratName",
+     *       "tag": "Trees.TreeTag",
+     *       "stemtag": "Stems.StemTag",
+     *       "dbh": "CoreMeasurements.MeasuredDBH",
+     *       "codes": "Attributes.Code",
+     *       "comments": "CoreMeasurements.Description"
+     */
+    await connection.beginTransaction();
     // Foreign key checks and error handling for species, quadrat, and plot
     const speciesID = await getColumnValueByColumnName(
       connection,
@@ -73,61 +83,67 @@ export default async function processMultipleStemsForm(
     }
 
     // Process CoreMeasurements for dbh
-    // Note: The following assumes that you have a way to link these measurements to a specific Tree and Census
-    let measurementTypeID = await getColumnValueByColumnName(
-      connection,
-      'MeasurementTypes',
-      'MeasurementTypeID',
-      'MeasurementTypeDescription',
-      "dbh"
-    );
-    if (measurementTypeID === null) {
-      throw new Error(`MeasurementType with description "dbh" does not exist.`);
-    }
+    const isPrimaryStemQuery = `
+    SELECT IF(COUNT(*) > 0, MAX(IsPrimaryStem), b'1') AS IsPrimaryStem
+    FROM ${schema}.CoreMeasurements
+    WHERE TreeID = ? AND StemID = ? AND CensusID = ? AND PlotID = ? AND QuadratID = ?;
+    `;
 
-    let collectedMeasurements = [];
+    const stemResult = await runQuery(connection, isPrimaryStemQuery, [
+      treeID,
+      stemID,
+      censusID,
+      plotID,
+      quadratID,
+    ]);
+
+    const isPrimaryStem = stemResult.length > 0 ? stemResult[0].IsPrimaryStem : false;
 
     const measurementInsertQuery = `
-      INSERT INTO ${schema}.CoreMeasurements
-      (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, MeasurementTypeID, MeasurementDate, Measurement, IsRemeasurement, IsCurrent, UserDefinedFields, Description, MasterMeasurementID)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    INSERT INTO ${schema}.CoreMeasurements
+    (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsRemeasurement, IsCurrent, IsPrimaryStem, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
-    const [result] = await connection.execute(measurementInsertQuery, [
+    const dbhResult = await runQuery(connection, measurementInsertQuery, [
       censusID,
       plotID,
       quadratID,
       treeID,
       stemID,
       personnelID,
-      measurementTypeID, // DBH Measurement Type
+      booleanToBit(false), // is not remeasurement
+      booleanToBit(true),
+      isPrimaryStem,  // Using the value obtained from the previous query
+      booleanToBit(false), // isValidated is false by default
       rowData.date,
-      rowData.dbh.toString(),
-      null,
-      1,
+      rowData.dbh,
       null,
       null,
       null,
-    ]) as any[];
-    if (result.affectedRows <= 0) throw new Error(`No matching CoreMeasurement found for DBH.`);
+    ]);
 
-    const dbhCMID = result.insertId;
-    if (dbhCMID === null) {
-      throw new Error(`the DBH insertion's CoreMeasurementID is null.`);
+    if (dbhResult.affectedRows <= 0) {
+      throw new Error(`Insertion failed for CoreMeasurement.`);
     }
-    collectedMeasurements.push(dbhCMID);
+
+    const dbhCMID = dbhResult.insertId;
+    if (dbhCMID === null) {
+      throw new Error(`The DBH insertion's CoreMeasurementID is null.`);
+    }
 
     // Process Attributes and CMAttributes for codes
     const codesArray = rowData.codes.split(';');
-    await processCode(
-      connection,
-      codesArray,
-      collectedMeasurements,
-    );
+    await processCode(connection, codesArray, dbhCMID);
     // Commit transaction
     await connection.commit();
   } catch (error) {
     // Rollback transaction in case of error
     await connection.rollback();
     throw error;
+  } finally {
+    // Release the connection back to the pool
+    if (connection) {
+      connection.release();
+    }
   }
 }

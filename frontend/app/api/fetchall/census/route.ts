@@ -2,7 +2,7 @@
 import {NextResponse} from "next/server";
 import {CensusRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {getSqlConnection, runQuery} from "@/components/processors/processorhelpers";
+import {getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {HTTPResponses} from "@/config/macros";
 
 
