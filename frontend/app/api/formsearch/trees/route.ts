@@ -9,15 +9,15 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
   conn = await getConn();
   try {
     const query = partialTreeTag === '' ?
-      `SELECT DISTINCT TreeTag
+      `SELECT TreeTag
       FROM ${schema}.trees
       ORDER BY TreeTag
-      LIMIT 10` :
-      `SELECT DISTINCT TreeTag
+      LIMIT 5` :
+      `SELECT TreeTag
       FROM ${schema}.trees
       WHERE TreeTag LIKE ?
       ORDER BY TreeTag
-      LIMIT 10`;
+      LIMIT 5`;
     const queryParams = partialTreeTag === '' ? [] : [`%${partialTreeTag}%`];
     const results = await runQuery(conn, query, queryParams);
     return new NextResponse(JSON.stringify(results.map((row: RowDataPacket) => row.TreeTag)), {status: 200});

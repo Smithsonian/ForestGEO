@@ -8,17 +8,19 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
   let conn: PoolConnection | null;
   conn = await getConn();
   try {
-    const query = partialStemTag === '' ? `SELECT DISTINCT StemTag
+    const query = partialStemTag === '' ?
+      `SELECT StemTag
       FROM ${schema}.stems
       ORDER BY StemTag
-      LIMIT 10` : `SELECT DISTINCT StemTag
+      LIMIT 5` :
+      `SELECT StemTag
       FROM ${schema}.stems
       WHERE StemTag LIKE ?
       ORDER BY StemTag
-      LIMIT 10`;
+      LIMIT 5`;
     const queryParams = partialStemTag === '' ? [] : [`%${partialStemTag}%`];
     const results = await runQuery(conn, query, queryParams);
-    return new NextResponse(JSON.stringify(results.map((row: RowDataPacket) => row.StemTag)), {status: 200});
+    return new NextResponse(JSON.stringify(results.map((row: RowDataPacket) => row.StemTag ? row.StemTag : '')), {status: 200});
   } catch (error: any) {
     console.error('Error in GET Quadrats:', error.message || error);
     throw new Error('Failed to fetch quadrat data');

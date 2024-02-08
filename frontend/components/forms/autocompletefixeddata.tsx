@@ -31,6 +31,11 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
   };
 
   useEffect(() => {
+    // Pre-load options with empty input value
+    refreshData();
+  }, []); // This will run only once when the component mounts
+
+  useEffect(() => {
     if (timer) clearTimeout(timer);
     const newTimer = setTimeout(refreshData, 5000); // Refresh after 5 seconds of inactivity
     setTimer(newTimer);
@@ -44,7 +49,7 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
     if (inputValue) {
       refreshData();
     }
-  }, [inputValue, options]);
+  }, [inputValue]);
 
   return (
     <Autocomplete
@@ -54,6 +59,7 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
       inputValue={inputValue}
       onInputChange={(_event, newInputValue) => setInputValue(newInputValue)}
       options={options}
+      isOptionEqualToValue={(option, value) => value !== '' ? value === option : value === ''}
       renderInput={(params) => (
         <TextField
           {...params}

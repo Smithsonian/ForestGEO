@@ -9,15 +9,15 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
   conn = await getConn();
   try {
     const query = partialLastName === '' ?
-      `SELECT DISTINCT FirstName, LastName
+      `SELECT FirstName, LastName
       FROM ${schema}.personnel
       ORDER BY LastName
-      LIMIT 10` :
-      `SELECT DISTINCT FirstName, LastName
+      LIMIT 5` :
+      `SELECT FirstName, LastName
       FROM ${schema}.personnel
       WHERE LastName LIKE ?
       ORDER BY LastName
-      LIMIT 10`;
+      LIMIT 5`;
     const queryParams = partialLastName === '' ? [] : [`%${partialLastName}%`];
     const results = await runQuery(conn, query, queryParams);
 
