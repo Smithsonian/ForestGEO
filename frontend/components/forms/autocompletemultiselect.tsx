@@ -45,8 +45,7 @@ export const AutocompleteMultiSelect: React.FC<AutocompleteMultiSelectProps> = (
   return (
     <Autocomplete
       multiple
-      id="autocomplete-multi-select"
-      style={{width: 'fit-content'}}
+      className={"fullWidthAutoComplete"}
       open={open}
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}
@@ -60,6 +59,7 @@ export const AutocompleteMultiSelect: React.FC<AutocompleteMultiSelectProps> = (
       renderInput={(params) => (
         <TextField
           {...params}
+          fullWidth
           label="Select Codes"
           InputProps={{
             ...params.InputProps,

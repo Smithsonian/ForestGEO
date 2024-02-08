@@ -471,8 +471,8 @@ export const siteConfigNav: SiteConfigProps[] = [
     icon: SettingsSuggestIcon,
     expanded: [
       {
-        label: 'Big Trees Form',
-        href: '/bigtrees',
+        label: 'Census Form',
+        href: '/census',
         tip: '',
         icon: DescriptionIcon,
       },

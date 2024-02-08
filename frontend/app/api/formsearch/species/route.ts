@@ -8,14 +8,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
   let conn: PoolConnection | null;
   conn = await getConn();
   try {
-    const query = partialSpeciesCode === '' ? `SELECT DISTINCT SpeciesCode
+    const query = partialSpeciesCode === '' ? `SELECT SpeciesCode
       FROM ${schema}.species
       ORDER BY SpeciesCode
-      LIMIT 10` : `SELECT DISTINCT SpeciesCode
+      LIMIT 5` : `SELECT SpeciesCode
       FROM ${schema}.species
       WHERE SpeciesCode LIKE ?
       ORDER BY SpeciesCode
-      LIMIT 10`;
+      LIMIT 5`;
     const queryParams = partialSpeciesCode === '' ? [] : [`%${partialSpeciesCode}%`];
     const results = await runQuery(conn, query, queryParams);
     return new NextResponse(JSON.stringify(results.map((row: RowDataPacket) => row.SpeciesCode)), {status: 200});

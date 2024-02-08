@@ -8,14 +8,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
   let conn: PoolConnection | null;
   conn = await getConn();
   try {
-    const query = partialQuadratName === '' ? `SELECT DISTINCT QuadratName
+    const query = partialQuadratName === '' ?
+      `SELECT QuadratName
       FROM ${schema}.quadrats
       ORDER BY QuadratName
-      LIMIT 10` : `SELECT DISTINCT QuadratName
+      LIMIT 5` :
+      `SELECT QuadratName
       FROM ${schema}.quadrats
       WHERE QuadratName LIKE ?
       ORDER BY QuadratName
-      LIMIT 10`;
+      LIMIT 5`;
     const queryParams = partialQuadratName === '' ? [] : [`%${partialQuadratName}%`];
     const results = await runQuery(conn, query, queryParams);
     return new NextResponse(JSON.stringify(results.map((row: RowDataPacket) => row.QuadratName)), {status: 200});
