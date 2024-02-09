@@ -1,7 +1,7 @@
 // FETCH ALL CENSUS ROUTE HANDLERS
 import {NextResponse} from "next/server";
 import {CensusRDS} from "@/config/sqlmacros";
-import {PoolConnection} from "mysql2/promise";
+import {PoolConnection, RowDataPacket} from "mysql2/promise";
 import {getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {HTTPResponses} from "@/config/macros";
 
@@ -18,7 +18,7 @@ export async function GET(): Promise<NextResponse<CensusRDS[]>> {
     if (!results) throw new Error("Call failed");
 
     // Map the results to CensusRDS structure
-    const censusRows: CensusRDS[] = results.map((row, index) => ({
+    const censusRows: CensusRDS[] = results.map((row: any, index: any) => ({
       id: index + 1,
       censusID: row.CensusID,
       plotID: row.PlotID,

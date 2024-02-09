@@ -1,7 +1,8 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getSqlConnection, insertOrUpdate} from "@/components/processors/processormacros";
+import {getSqlConnection} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {HTTPResponses} from "@/config/macros";
+import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
 
 export async function POST(request: NextRequest) {
   const fileRowSet = await request.json();

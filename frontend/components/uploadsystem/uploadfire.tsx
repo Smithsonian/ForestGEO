@@ -3,6 +3,7 @@ import React, {useEffect, useState} from 'react';
 import {Box, Button, LinearProgress, LinearProgressProps, Typography} from '@mui/material';
 import {FileCollectionRowSet, ReviewStates, UploadFireProps} from '@/config/macros';
 import {FileWithPath} from "react-dropzone";
+import {Stack} from "@mui/joy";
 
 const UploadFire: React.FC<UploadFireProps> = ({
                                                  acceptedFiles, parsedData,
@@ -133,21 +134,25 @@ const UploadFire: React.FC<UploadFireProps> = ({
   return (
     <>
       {loading ? (
-        <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4}}>
-          <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-          <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
-                                   currentlyRunningMsg={currentlyRunning}/>
+        <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
+          <Stack direction={"column"}>
+            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
+            <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
+                                     currentlyRunningMsg={currentlyRunning}/>
+          </Stack>
         </Box>
       ) : (
-        <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4}}>
-          <Typography variant="h5" gutterBottom>Upload Complete</Typography>
-          {results.map((result) => (
-            <Typography key={result}>{result}</Typography>
-          ))}
-          <Typography>{uploadCompleteMessage}</Typography>
-          <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
-            Return to Upload Start
-          </Button>
+        <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
+          <Stack direction={"column"}>
+            <Typography variant="h5" gutterBottom>Upload Complete</Typography>
+            {results.map((result) => (
+              <Typography key={result}>{result}</Typography>
+            ))}
+            <Typography>{uploadCompleteMessage}</Typography>
+            <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
+              Return to Upload Start
+            </Button>
+          </Stack>
         </Box>
       )}
     </>

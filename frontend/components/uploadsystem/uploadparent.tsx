@@ -42,35 +42,6 @@ export function fileCollectionToString(fileCollection: FileCollectionRowSet): st
 
   return result;
 }
-
-export function fileRowSetToString(fileRowSet: FileRowSet): string {
-  let result = '';
-
-  for (const row in fileRowSet) {
-    result += `Row: ${row} { `;
-    const fileRow = fileRowSet[row];
-
-    for (const header in fileRow) {
-      const value = fileRow[header];
-      result += `${header}: ${value}, `;
-    }
-
-    // Remove the trailing ', ' characters if needed
-    if (result.endsWith(', ')) {
-      result = result.slice(0, -2);
-    }
-
-    result += ' }, ';
-  }
-
-  // Remove the trailing ', ' characters if needed
-  if (result.endsWith(', ')) {
-    result = result.slice(0, -2);
-  }
-
-  return result;
-}
-
 export default function UploadParent() {
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
@@ -250,8 +221,11 @@ export default function UploadParent() {
     for (const file of acceptedFiles) {
       try {
         const fileText = await file.text();
+        // Determine the delimiter based on the file extension or file content
+        const isCSV = file.name.endsWith('.csv'); // Simple check based on file extension
+        const delimiter = isCSV ? "," : "\t"; // Set delimiter to comma for CSV, tab for TSV
         parse(fileText, {
-          delimiter: ",",
+          delimiter: delimiter,
           header: true,
           skipEmptyLines: true,
           transformHeader: (h) => h.trim(),

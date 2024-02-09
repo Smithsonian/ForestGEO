@@ -1,5 +1,5 @@
 "use client";
-import React, {createContext, Dispatch, useContext, useEffect, useReducer} from "react";
+import React, {createContext, Dispatch, useContext, useEffect, useReducer, useState} from "react";
 import {createEnhancedDispatch, genericLoadContextReducer, LoadAction, Plot, Quadrat} from "@/config/macros";
 import {
   usePlotListContext,
@@ -11,6 +11,11 @@ import {getData} from "@/config/db";
 import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 
+export const USPLoadingContext = createContext({
+  plotLoading: false,
+  censusLoading: false,
+  quadratLoading: false,
+});
 export const PlotsContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<CensusRDS | null>(null);
 export const QuadratContext = createContext<Quadrat | null>(null);
@@ -30,24 +35,18 @@ function containsCensusID(censusArray: CensusRDS[], censusToCheck: CensusRDS): b
   return censusArray.some(census => census.censusID === censusToCheck.censusID);
 }
 
-export default function UserSelectionProvider({children}: { children: React.ReactNode }) {
-  let initPlot: Plot = {key: '', num: 0, id: 0};
-  let initCensus: CensusRDS = {
-    id: 0,
-    censusID: 0,
-    plotID: null,
-    plotCensusNumber: null,
-    startDate: null,
-    endDate: null,
-    description: null
-  };
-  let initQuadrat: Quadrat = {quadratID: 0, plotID: 0, quadratName: ''}
+export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
+  let initPlot: Plot | null = null;
+  let initCensus: CensusRDS | null = null;
+  let initQuadrat: Quadrat | null = null;
   const plotListContext = usePlotListContext();
   const censusLoadContext = useCensusLoadContext();
   const quadratListContext = useQuadratListContext();
-  const plotListDispatch = usePlotListDispatch();
-  const censusLoadDispatch = useCensusLoadDispatch();
-  const quadratListDispatch = useQuadratListDispatch();
+  const [loading, setLoading] = useState({
+    plotLoading: false,
+    censusLoading: false,
+    quadratLoading: false,
+  });
 
   const [plot, plotDispatch] = useReducer(
     (state: Plot | null, action: LoadAction<Plot>) => genericLoadContextReducer(state, action, plotListContext!, isValidPlot),
@@ -69,15 +68,7 @@ export default function UserSelectionProvider({children}: { children: React.Reac
 
   useEffect(() => {
     const fetchData = async () => {
-      const plotListData = await getData('plotList');
-      if (plotListDispatch) plotListDispatch({plotList: plotListData});
-
-      const censusLoadData = await getData('censusLoad');
-      if (censusLoadDispatch) censusLoadDispatch({censusLoad: censusLoadData});
-
-      const quadratListData = await getData('quadratList');
-      if (quadratListDispatch) quadratListDispatch({quadratList: quadratListData});
-
+      setLoading({ plotLoading: true, censusLoading: true, quadratLoading: true });
       const plotData = await getData('plot');
       plotDispatch({type: 'plot', payload: plotData});
 
@@ -86,29 +77,33 @@ export default function UserSelectionProvider({children}: { children: React.Reac
 
       const censusData = await getData('census');
       censusDispatch({type: "census", payload: censusData});
+      setLoading({ plotLoading: false, censusLoading: false, quadratLoading: false });
     };
-
     fetchData().catch(console.error);
   }, []);
 
   return (
-    <PlotsContext.Provider value={plot}>
-      <PlotsDispatchContext.Provider value={enhancedPlotDispatch}>
-        <CensusContext.Provider value={census}>
-          <CensusDispatchContext.Provider value={enhancedCensusDispatch}>
-            <QuadratContext.Provider value={quadrat}>
-              <QuadratDispatchContext.Provider value={enhancedQuadratDispatch}>
-                {children}
-              </QuadratDispatchContext.Provider>
-            </QuadratContext.Provider>
-          </CensusDispatchContext.Provider>
-        </CensusContext.Provider>
-      </PlotsDispatchContext.Provider>
-    </PlotsContext.Provider>
+    <USPLoadingContext.Provider value={loading}>
+      <PlotsContext.Provider value={plot}>
+        <PlotsDispatchContext.Provider value={enhancedPlotDispatch}>
+          <CensusContext.Provider value={census}>
+            <CensusDispatchContext.Provider value={enhancedCensusDispatch}>
+              <QuadratContext.Provider value={quadrat}>
+                <QuadratDispatchContext.Provider value={enhancedQuadratDispatch}>
+                  {children}
+                </QuadratDispatchContext.Provider>
+              </QuadratContext.Provider>
+            </CensusDispatchContext.Provider>
+          </CensusContext.Provider>
+        </PlotsDispatchContext.Provider>
+      </PlotsContext.Provider>
+    </USPLoadingContext.Provider>
   );
 }
 
-
+export function useUSPLoadingContext() {
+  return useContext(USPLoadingContext);
+}
 export function usePlotContext() {
   return useContext(PlotsContext);
 }

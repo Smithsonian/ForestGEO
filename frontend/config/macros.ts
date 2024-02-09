@@ -260,7 +260,8 @@ export enum ReviewStates {
   PARSE = "parse",
   REVIEW = "review",
   UPLOAD = "upload",
-  UPLOADED = "uploaded",
+  VALIDATE = "validate",
+  COMPLETE = "complete",
   ERRORS = "errors",
   ERRORS_CORRECTION = "errors_correction",
   FILE_MISMATCH_ERROR = "file_mismatch_error"

@@ -3,7 +3,7 @@ import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
 import {getSchema, getSqlConnection, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
-import mysql, {PoolConnection} from "mysql2/promise";
+import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
   let conn: PoolConnection | null = null;

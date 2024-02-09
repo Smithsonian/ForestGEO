@@ -8,7 +8,7 @@ import {
   parsePersonnelRequestBody,
   runQuery
 } from "@/components/processors/processormacros";
-import mysql, {PoolConnection} from "mysql2/promise";
+import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
   personnel: PersonnelRDS[],

@@ -1,28 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, runQuery, ValidationResponse} from "@/components/processors/processormacros";
-
-// Function to call and handle the stored procedure
-async function validateHOMUpperLowerBounds(plotID: number | null, censusID: number | null, minHOM: number, maxHOM: number) {
-  const conn = await getConn();
-  try {
-    await conn.beginTransaction();
-    const query = 'CALL ValidateHOMUpperAndLowerBounds(?, ?, ?, ?)';
-    const result = await runQuery(conn, query, [censusID, plotID, minHOM, maxHOM]); // Pass censusID and plotID as parameters
-    const validationResponse: ValidationResponse = {
-      expectedRows: result[0].ExpectedRows,
-      insertedRows: result[0].InsertedRows,
-      updatedRows: result[0].UpdatedRows,
-      message: result[0].Message
-    };
-    await conn.commit();
-    return validationResponse;
-  } catch (error) {
-    await conn.rollback();
-    throw error;
-  } finally {
-    if (conn) conn.release();
-  }
-}
+import {runValidationProcedure} from "@/components/processors/processorhelperfunctions";
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,7 +12,7 @@ export async function GET(request: NextRequest) {
     const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 
 
-    const validationResponse = await validateHOMUpperLowerBounds(plotID, censusID, minHOM, maxHOM);
+    const validationResponse = await runValidationProcedure('ValidateHOMUpperAndLowerBounds', plotID, censusID, minHOM, maxHOM);
     return new NextResponse(JSON.stringify(validationResponse), { status: 200 });
   } catch (error: any) {
     return new NextResponse(JSON.stringify({ error: error.message }), { status: 500 });

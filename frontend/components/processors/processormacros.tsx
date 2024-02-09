@@ -325,6 +325,5 @@ export function getSchema() {
 export type ValidationResponse = {
   expectedRows: number;
   insertedRows: number;
-  updatedRows: number;
   message: string;
 }
