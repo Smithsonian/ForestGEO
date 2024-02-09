@@ -1,0 +1,52 @@
+firstname	lastname	role
+John	Bithorn	Field Technician
+Samuel 	Matta	Field Technician
+Jess 	Zimmerman	LFDP Principal Investigator
+Seth 	Rifkin	LFDP Research Manager
+Christopher 	Nytch	LFDP Research Manager
+Jill	Thompson	LFDP Codirector
+Eda 	Meléndez-Colom	Data Manager
+Alejandro 	Miró	Field Technician
+Goerges	Felix	Field Technician
+Dianne 	 Viera	Field Technician
+Yazmín 	Rivera Rivera	Field Technician
+Thomas 	Bennett	Field Technician
+Christina		Field Technician
+Nereida	Ramirez	Field Technician
+Mark 	Baran	Tree Census Intern
+Mark 	Baum..	Tree Census Intern
+Christopher 	Johnson	Tree Census Intern
+Liza 		Tree Census Intern
+Rachael	Stewart	Tree Census Intern
+Edward 	Whitehead	Tree Census Intern
+Aaron 	Hogan	Tree Census Intern
+Daniel 	Christopher	Tree Census Intern
+Amanda	Powell	Tree Census Intern
+Jocelyn	Holt	Tree Census Intern
+Rachael	Poutasse	Tree Census Intern
+Kevin	Vega	Tree Census Intern
+Sheffin 	Joseph	Tree Census Intern
+Michael	Szuter	Tree Census Intern
+Thomas 	Bennett	Tree Census Intern
+Seth 	Rifkin	Tree Census Intern
+Susan 	Boehm	Tree Census Intern
+Jessica	Holland	Tree Census Intern
+Collin	Dougherty	Tree Census Intern
+Benjamin		Tree Census Intern
+Victor	Vega	Tree Census Intern
+Ana Maria	Sanchez Cuervo	Tree Census Intern
+Justin	Lemmons	Tree Census Intern
+Lucas	Southworth	Tree Census Intern
+Sarah	McLellan	Tree Census Intern
+Richard	Anderson	Tree Census Intern
+Michael	Malmberg	Tree Census Intern
+Raina	Dominguez	Tree Census Intern
+Maria	Moskalenko	Tree Census Intern
+Caroline 	Brady	Tree Census Intern
+Katie	Mann	Tree Census Intern
+Adianez		Tree Census Intern
+Jen		Tree Census Intern
+Zara 	Dowling	Tree Census Intern
+Brendon	Rohr	Tree Census Intern
+Nicholas		Tree Census Intern
+Maria 	Aponte	Field Technician

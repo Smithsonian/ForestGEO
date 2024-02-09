@@ -1,6 +1,6 @@
 "use client";
 import * as React from 'react';
-import {Dispatch, SetStateAction, useState} from 'react';
+import {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -15,7 +15,7 @@ import {useSession} from "next-auth/react";
 import {Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
-  useCensusDispatch,
+  useCensusDispatch, useUSPLoadingContext,
   usePlotContext,
   usePlotDispatch
 } from "@/app/contexts/userselectionprovider";
@@ -41,6 +41,9 @@ import {TextField} from "@mui/material";
 import Add from '@mui/icons-material/Add';
 import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
+import {getData} from "@/config/db";
+import SidebarSkeleton from "@/components/skeletons/sidebarskeleton";
+import CircularProgress from "@mui/joy/CircularProgress";
 
 
 function SimpleToggler({isOpen, renderToggle, children,}: Readonly<{
@@ -69,6 +72,7 @@ function SimpleToggler({isOpen, renderToggle, children,}: Readonly<{
 
 interface MRTProps {
   currentPlot: Plot | null;
+  currentCensus: CensusRDS | null;
   pathname: string;
 }
 
@@ -76,7 +80,7 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
   const Icon = siteConfigProps.icon;
   return (
     <ListItemButton
-      disabled={!props.currentPlot?.key || !props.currentPlot?.num || !props.currentPlot?.id}
+      disabled={props.currentPlot === null || props.currentCensus === null}
       // selected={props.pathname === siteConfigProps.href || siteConfigProps.expanded.find(value => value.href === props.pathname) !== undefined}
       color={props.pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
@@ -104,12 +108,30 @@ export default function Sidebar() {
     description: null,
   }
   let currentPlot = usePlotContext();
-  let plotDispatch = usePlotDispatch();
-  let plotListContext = usePlotListContext()!;
+  let plotDispatch = usePlotDispatch()!;
+  let plotListContext = usePlotListContext();
   let currentCensus = useCensusContext();
-  let censusDispatch = useCensusDispatch();
+  let censusDispatch = useCensusDispatch()!;
   let censusLoadContext = useCensusLoadContext()!;
   let censusLoadDispatch = useCensusLoadDispatch();
+
+  const [loading, setLoading] = useState<boolean>();
+
+  useEffect(() => {
+    const fetchCensusPlot = async () => {
+      setLoading(true);
+      console.log('fetchCensusPlot in sidebar called');
+      const storedCensus = await getData('census');
+      console.log(`sidebar fetchCensusPlot: stored census: ${storedCensus.censusID}`);
+      censusDispatch({census: storedCensus});
+      const storedPlot = await getData('plot');
+      console.log(`sidebar fetchCensusPlot: stored plot: ${storedPlot.key}`);
+      plotDispatch({plot: storedPlot});
+      setLoading(false);
+    }
+
+    fetchCensusPlot().catch(console.error);
+  }, []);
 
   const [plot, setPlot] = useState<Plot | null>(currentPlot);
   const [census, setCensus] = useState<CensusRDS | null>(currentCensus);
@@ -123,6 +145,8 @@ export default function Sidebar() {
   const [propertiesToggle, setPropertiesToggle] = useState(false);
   const [formsToggle, setFormsToggle] = useState(false);
   const [newCensusData, setNewCensusData] = useState<CensusRDS>(initialCensus);
+  const { plotLoading, censusLoading, quadratLoading } = useUSPLoadingContext();
+
   type ToggleObject = {
     toggle?: boolean;
     setToggle?: Dispatch<SetStateAction<boolean>>;
@@ -181,70 +205,18 @@ export default function Sidebar() {
       alert('Failed to add new census.');
     }
   };
-
-  /**
-   * UNAUTHENTICATED SESSION HANDLING:
-   */
-  useSession({
-    required: false,
-    onUnauthenticated() {
-      return (
-        <Stack direction={"row"} overflow={'hidden'} sx={{display: 'flex', width: 'fit-content'}}>
-          <Box
-            className="Sidebar"
-            sx={{
-              position: {
-                md: 'sticky',
-              },
-              height: '100dvh',
-              width: 'calc(var(--Sidebar-width) )',
-              top: 0,
-              p: 2,
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-              borderRight: '1px solid',
-              borderColor: 'divider',
-            }}
-            ref={containerRef}
-          >
-            <GlobalStyles
-              styles={(theme) => ({
-                ':root': {
-                  '--Sidebar-width': '300px',
-                  [theme.breakpoints.up('lg')]: {
-                    '--Sidebar-width': '320px',
-                  },
-                },
-              })}
-            />
-            <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
-              <Typography level="h1">ForestGEO</Typography>
-            </Box>
-            <Box
-              sx={{
-                minHeight: 0,
-                overflow: 'hidden auto',
-                flexGrow: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                [`& .${listItemButtonClasses.root}`]: {
-                  gap: 1.5,
-                },
-              }}
-            >
-            </Box>
-            <Divider/>
-            <LoginLogout/>
-          </Box>
-        </Stack>
-      );
-    }
-  });
   /**
    * AUTHENTICATED SESSION HANDLING
    */
+
+  if (plotLoading || censusLoading || quadratLoading || loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
     <Stack direction={"row"} sx={{display: 'flex', width: 'fit-content'}}>
       {/*BASE SIDEBAR*/}
@@ -322,7 +294,7 @@ export default function Sidebar() {
                 return (
                   <ListItem key={item.href} nested>
                     <SimpleToggler
-                      renderToggle={MenuRenderToggle({currentPlot, pathname}, item, toggle!, setToggle!)}
+                      renderToggle={MenuRenderToggle({currentPlot, currentCensus, pathname}, item, toggle!, setToggle!)}
                       isOpen={toggle!}
                     >
                       <List sx={{gap: 0.5}} size={"sm"}>
@@ -354,16 +326,16 @@ export default function Sidebar() {
               }}>
                 <Typography color={!currentPlot?.key ? "danger" : "success"}
                             level="body-lg">
-                  {currentPlot?.key ? `Plot: ${currentPlot.key}` : "No Plot"}
-                  {currentPlot?.id ? ` -> ID: ${currentPlot.id}` : ''}
+                  {currentPlot ? `Plot: ${currentPlot.key}` : "No Plot"}
+                  {currentPlot ? ` -> ID: ${currentPlot.id}` : ''}
                 </Typography>
               </Link>
               <Link disabled={!currentPlot} component={"button"} onClick={() => {
                 setOpenCensusSelectionModal(true);
               }}>
-                <Typography color={(!currentPlot?.key || !currentCensus?.censusID) ? "danger" : "success"}
+                <Typography color={(!currentPlot || !currentCensus) ? "danger" : "success"}
                             level="body-lg">
-                  {currentCensus?.censusID ? `Census: ${currentCensus.censusID}` : 'No Census'}
+                  {currentCensus ? `Census: ${currentCensus.censusID}` : 'No Census'}
                 </Typography>
               </Link>
             </Breadcrumbs>
@@ -390,8 +362,8 @@ export default function Sidebar() {
                         size={"sm"}
                         onChange={(_event: React.SyntheticEvent | null, newValue: Plot | null,) => setPlot(newValue)}
                       >
-                        <Option value={null}>None</Option>
-                        {plotListContext.map((item) => (
+                        <Option value={""}>None</Option>
+                        {plotListContext?.map((item) => (
                           <Option value={item} key={item.key}>{item.key}, Quadrats: {item.num},
                             ID: {item.id}</Option>
                         ))}
@@ -411,7 +383,6 @@ export default function Sidebar() {
                       if (plotDispatch) {
                         plotDispatch({plot: plot});
                       }
-                      setPlot(currentPlot);
                       setOpenPlotSelectionModal(false);
                     }}>
                       Submit Plot
@@ -444,7 +415,7 @@ export default function Sidebar() {
                         size={"sm"}
                         onChange={(_event: React.SyntheticEvent | null, newValue: CensusRDS | null,) => setCensus(newValue)}
                       >
-                        <Option value={null}>None</Option>
+                        <Option value={""}>None</Option>
                         {censusLoadContext.slice().sort((a, b) => b.censusID - a.censusID).map((item) => (
                           <Option key={item.censusID} value={item}>Census {item.censusID},
                             starting at {new Date(item.startDate!).toDateString() ?? 'Date not found'}, ending
@@ -466,7 +437,6 @@ export default function Sidebar() {
                       if (censusDispatch) {
                         censusDispatch({census: census});
                       }
-                      setCensus(currentCensus);
                       setOpenCensusSelectionModal(false);
                     }}>
                       Submit Census
@@ -490,7 +460,7 @@ export default function Sidebar() {
                     size="sm"
                     onChange={(event, newValue) => handleFieldChange('plotID')(event, newValue)}
                   >
-                    {plotListContext.map((item) => (
+                    {plotListContext?.map((item) => (
                       <Option value={item} key={item.key}>{item.key}, Quadrats: {item.num}, ID: {item.id}</Option>
                     ))}
                   </Select>

@@ -80,7 +80,8 @@ export function DropzoneLogic({onChange}: DropzoneProps) {
   const {getRootProps, getInputProps, isDragActive} = useDropzone({
     onDrop, accept: {
       'text/csv': ['.csv'],
-      'text/xlsx': ['.xlsx']
+      'text/xlsx': ['.xlsx'],
+      'text/text': ['.txt']
     }
   });
 

@@ -6,7 +6,7 @@ import {Box} from "@mui/joy";
 import {CoreDataProvider} from "./contexts/coredataprovider";
 import UserSelectionProvider from "@/app/contexts/userselectionprovider";
 
-export default function RootLayout({children,}: { children: React.ReactNode; }) {
+export default function RootLayout({children,}: Readonly<{ children: React.ReactNode; }>) {
   return (
     <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
     <head>

@@ -37,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const speciesRows: SpeciesRDS[] = paginatedResults.map((row: RowDataPacket, index: number) => ({
+    const speciesRows: SpeciesRDS[] = paginatedResults.map((row: any, index: number) => ({
       id: index + 1,
       speciesID: row.SpeciesID,
       genusID: row.GenusID,

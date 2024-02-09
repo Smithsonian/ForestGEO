@@ -10,7 +10,7 @@ export const PlotListDispatchContext = createContext<Dispatch<{ plotList: Plot[]
 export const QuadratListDispatchContext = createContext<Dispatch<{ quadratList: Quadrat[] | null }> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
-export function ListSelectionProvider({children}: { children: React.ReactNode }) {
+export function ListSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
   const [plotList, plotListDispatch] =
     useReducer<React.Reducer<Plot[] | null, LoadAction<Plot[]>>>(genericLoadReducer, []);
 

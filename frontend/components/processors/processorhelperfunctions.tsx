@@ -1,5 +1,5 @@
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
-import {fileMappings, runQuery} from "@/components/processors/processormacros";
+import {fileMappings, getConn, runQuery, ValidationResponse} from "@/components/processors/processormacros";
 import {RowDataStructure} from "@/config/macros";
 
 export async function getColumnValueByColumnName<T>(
@@ -256,4 +256,36 @@ export async function insertOrUpdate(
     throw error; // Re-throw the error after rollback
   }
   console.log('INSERT OR UPDATE: default query completed. Exiting...');
+}
+
+export async function runValidationProcedure(procedureName: string, plotID: number | null, censusID: number | null, min?: number, max?: number) {
+  const conn = await getConn();
+  let query, parameters;
+
+  if (min !== undefined && max !== undefined) {
+    // If minDBH and maxDBH are provided, call ValidateScreenMeasuredDiameterMinMax
+    query = `CALL ${procedureName}(?, ?, ?, ?)`;
+    parameters = [censusID, plotID, min, max];
+  } else {
+    // If minDBH and maxDBH are not provided, call ValidateDBHGrowthExceedsMax
+    query = `CALL ${procedureName}(?, ?)`;
+    parameters = [censusID, plotID];
+  }
+
+  try {
+    await conn.beginTransaction();
+    const result = await runQuery(conn, query, parameters);
+    const validationResponse: ValidationResponse = {
+      expectedRows: result[0].ExpectedRows,
+      insertedRows: result[0].InsertedRows,
+      message: result[0].Message
+    };
+    await conn.commit();
+    return validationResponse;
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    if (conn) conn.release();
+  }
 }

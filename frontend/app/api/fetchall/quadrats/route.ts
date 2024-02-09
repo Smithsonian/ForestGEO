@@ -14,7 +14,7 @@ export async function GET(): Promise<NextResponse<QuadratRDS[]>> {
     const query = `SELECT * FROM ${schema}.Quadrats`;
     const results = await runQuery(conn, query);
 
-    const quadratRows: QuadratRDS[] = results.map((row: RowDataPacket, index: number) => ({
+    const quadratRows: QuadratRDS[] = results.map((row: any, index: number) => ({
       id: index + 1,
       quadratID: row.QuadratID,
       plotID: row.PlotID,

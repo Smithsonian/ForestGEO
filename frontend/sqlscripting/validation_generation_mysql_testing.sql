@@ -155,11 +155,33 @@ BEGIN
 END;
 
 create
+    definer = azureroot@`%` procedure forestgeo_testing.UpdateValidationStatus()
+BEGIN
+    -- Temporarily disable autocommit to ensure atomic operations
+    SET autocommit = 0;
+
+    -- Begin a new transaction
+    START TRANSACTION;
+
+    -- Update only the rows in coremeasurements that are currently not validated (IsValidated = FALSE)
+    -- Set IsValidated = TRUE only if they do not have a corresponding row in cmverrors
+    UPDATE forestgeo_testing.coremeasurements cm
+        LEFT JOIN forestgeo_testing.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
+    SET cm.IsValidated = IF(cme.CoreMeasurementID IS NULL, TRUE, FALSE)
+    WHERE cm.IsValidated = FALSE;
+
+    -- Commit the transaction
+    COMMIT;
+
+    -- Re-enable autocommit
+    SET autocommit = 1;
+END;
+
+create
     definer = azureroot@`%` procedure forestgeo_testing.ValidateDBHGrowthExceedsMax(IN p_CensusID int, IN p_PlotID int)
 begin
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -221,15 +243,12 @@ begin
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 14);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 end;
 
@@ -238,7 +257,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -300,15 +318,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 13);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -317,7 +332,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -362,87 +376,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 12);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
-           successMessage AS Message;
-END;
-
-create
-    definer = azureroot@`%` procedure forestgeo_testing.ValidateFindDuplicateStemTreeTagCombinationsCurrentCensus(IN p_CensusID int, IN p_PlotID int)
-BEGIN
-    DECLARE vCoreMeasurementID INT;
-    DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
-    DECLARE expectedCount INT;
-    DECLARE successMessage VARCHAR(255);
-    DECLARE done INT DEFAULT FALSE;
-    DECLARE cur CURSOR FOR SELECT cm.CoreMeasurementID
-                           FROM forestgeo_testing.coremeasurements cm
-                                    JOIN forestgeo_testing.stems s ON cm.StemID = s.StemID
-                                    JOIN forestgeo_testing.trees t ON cm.TreeID = t.TreeID
-                                    JOIN (SELECT MAX(CensusID) AS LatestCensusID FROM forestgeo_testing.census) latest
-                                         ON cm.CensusID = latest.LatestCensusID
-                           WHERE s.StemTag IS NOT NULL
-                             AND s.StemTag <> ''
-                             AND t.TreeTag IS NOT NULL
-                             AND t.TreeTag <> ''
-                             AND cm.IsValidated IS FALSE
-                             AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
-                             AND (p_PlotID IS NULL OR cm.PlotID = p_PlotID)
-                           GROUP BY s.StemTag, t.TreeTag
-                           HAVING COUNT(*) > 1;
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
-
-    -- Set default values within the procedure if parameters are NULL
-    IF p_CensusID IS NULL THEN
-        SET p_CensusID = -1; -- Using -1 or another value that would not be a valid CensusID
-    END IF;
-    IF p_PlotID IS NULL THEN
-        SET p_PlotID = -1; -- Using -1 or another value that would not be a valid PlotID
-    END IF;
-
-    SELECT COUNT(*)
-    INTO expectedCount
-    FROM forestgeo_testing.coremeasurements cm
-             JOIN forestgeo_testing.stems s ON cm.StemID = s.StemID
-             JOIN forestgeo_testing.trees t ON cm.TreeID = t.TreeID
-             JOIN (SELECT MAX(CensusID) AS LatestCensusID FROM forestgeo_testing.census) latest
-                  ON cm.CensusID = latest.LatestCensusID
-    WHERE s.StemTag IS NOT NULL
-      AND s.StemTag <> ''
-      AND t.TreeTag IS NOT NULL
-      AND t.TreeTag <> ''
-      AND cm.IsValidated IS FALSE
-      AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
-      AND (p_PlotID IS NULL OR cm.PlotID = p_PlotID)
-    GROUP BY s.StemTag, t.TreeTag
-    HAVING COUNT(*) > 1;
-
-    OPEN cur;
-    loop1:
-    LOOP
-        FETCH cur INTO vCoreMeasurementID;
-        IF done THEN
-            LEAVE loop1;
-        END IF;
-        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 10);
-        SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
-    END LOOP;
-    CLOSE cur;
-
-    SET successMessage = 'Validation completed successfully.';
-    SELECT expectedCount  AS ExpectedRows,
-           insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -451,7 +390,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -502,15 +440,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 9);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -519,7 +454,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -566,15 +500,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 11);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -583,7 +514,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -628,15 +558,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 8);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -645,7 +572,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -690,13 +616,13 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 7);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
-    SELECT insertCount AS InsertedRows, updateCount AS UpdatedRows, successMessage AS Message;
+    SELECT expectedCount  AS ExpectedRows,
+           insertCount    AS InsertedRows,
+           successMessage AS Message;
 END;
 
 create
@@ -704,7 +630,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -756,15 +681,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 6);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -773,7 +695,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -816,15 +737,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 5);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -833,7 +751,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -876,15 +793,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 4);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -896,7 +810,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -933,15 +846,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 3);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -953,7 +863,6 @@ create
 BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
     DECLARE done INT DEFAULT FALSE;
@@ -991,15 +900,12 @@ BEGIN
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 2);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
     SELECT expectedCount  AS ExpectedRows,
            insertCount    AS InsertedRows,
-           updateCount    AS UpdatedRows,
            successMessage AS Message;
 END;
 
@@ -1009,7 +915,6 @@ BEGIN
     DECLARE vCoreMeasurementID INT;
     DECLARE done INT DEFAULT FALSE;
     DECLARE insertCount INT DEFAULT 0;
-    DECLARE updateCount INT DEFAULT 0;
     DECLARE expectedCount INT;
     DECLARE successMessage VARCHAR(255);
 
@@ -1018,8 +923,8 @@ BEGIN
         FROM forestgeo_testing.coremeasurements cm
                  JOIN forestgeo_testing.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
                  JOIN forestgeo_testing.attributes a ON cma.Code = a.Code
-        WHERE
-            ((cm.MeasuredDBH IS NOT NULL AND cm.MeasuredDBH > 0) OR (cm.MeasuredHOM IS NOT NULL AND cm.MeasuredHOM > 0))
+        WHERE ((cm.MeasuredDBH IS NOT NULL AND cm.MeasuredDBH > 0) OR
+               (cm.MeasuredHOM IS NOT NULL AND cm.MeasuredHOM > 0))
           AND a.Status IN ('dead', 'stem dead', 'missing', 'broken below', 'omitted')
           AND cm.IsValidated IS FALSE
           AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
@@ -1040,27 +945,25 @@ BEGIN
     FROM forestgeo_testing.coremeasurements cm
              JOIN forestgeo_testing.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
              JOIN forestgeo_testing.attributes a ON cma.Code = a.Code
-    WHERE
-        ((cm.MeasuredDBH IS NOT NULL AND cm.MeasuredDBH > 0) OR (cm.MeasuredHOM IS NOT NULL AND cm.MeasuredHOM > 0))
+    WHERE ((cm.MeasuredDBH IS NOT NULL AND cm.MeasuredDBH > 0) OR (cm.MeasuredHOM IS NOT NULL AND cm.MeasuredHOM > 0))
       AND a.Status IN ('dead', 'stem dead', 'missing', 'broken below', 'omitted')
       AND cm.IsValidated IS FALSE
       AND (p_CensusID IS NULL OR cm.CensusID = p_CensusID)
       AND (p_PlotID IS NULL OR cm.PlotID = p_PlotID);
 
     OPEN cur;
-    loop1: LOOP
+    loop1:
+    LOOP
         FETCH cur INTO vCoreMeasurementID;
         IF done THEN
             LEAVE loop1;
         END IF;
         INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID) VALUES (vCoreMeasurementID, 1);
         SET insertCount = insertCount + 1;
-        UPDATE forestgeo_testing.coremeasurements SET IsValidated = TRUE WHERE CoreMeasurementID = vCoreMeasurementID;
-        SET updateCount = updateCount + 1;
     END LOOP;
     CLOSE cur;
 
     SET successMessage = 'Validation completed successfully.';
-    SELECT expectedCount AS ExpectedRows, insertCount AS InsertedRows, updateCount AS UpdatedRows, successMessage AS Message;
+    SELECT expectedCount AS ExpectedRows, insertCount AS InsertedRows, successMessage AS Message;
 END;
 

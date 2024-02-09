@@ -7,6 +7,7 @@ import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
 import EntryModal from "@/components/client/entrymodal";
 import {clearAllIDBData} from "@/config/db";
+import UnauthenticatedSidebar from "@/components/unauthenticatedsidebar";
 
 const slides = [
   'background-1.jpg',
@@ -59,7 +60,7 @@ export default function LoginPage() {
               backgroundImage: `url(${slides[i]})`,
             }}/>
         ))}
-        <Sidebar/>
+        <UnauthenticatedSidebar />
       </Box>
     );
   } else {

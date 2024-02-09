@@ -12,7 +12,7 @@ export async function GET(): Promise<NextResponse<PlotRDS[]>> {
     const query = `SELECT * FROM ${schema}.Plots`;
     const results = await runQuery(conn, query);
 
-    const plotRows: PlotRDS[] = results.map((row: RowDataPacket, index: number) => ({
+    const plotRows: PlotRDS[] = results.map((row: any, index: number) => ({
       id: index + 1,
       plotID: row.PlotID,
       plotName: row.PlotName,
