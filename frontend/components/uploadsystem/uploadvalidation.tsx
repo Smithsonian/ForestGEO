@@ -2,18 +2,13 @@
 import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import {Box, Button, LinearProgress, Typography} from '@mui/material';
 import {ReviewStates, UploadFireProps} from "@/config/macros";
+import {ValidationResult} from "@/components/processors/processormacros";
 
 export interface UploadValidationProps extends UploadFireProps {
   validationResults: Record<string, ValidationResult>;
   setValidationResults: Dispatch<SetStateAction<Record<string, ValidationResult>>>;
 }
 
-interface ValidationResult {
-  error: boolean;
-  message: string;
-  insertedRows?: number;
-  expectedRows?: number;
-}
 
 const UploadValidation: React.FC<UploadValidationProps> = ({
                                                              setReviewState,

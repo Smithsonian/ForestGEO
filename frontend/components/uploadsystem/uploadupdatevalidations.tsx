@@ -1,23 +1,31 @@
 "use client";
 
-import React, {useEffect, useState} from "react";
-import {Box, Typography} from "@mui/material";
+import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
+import {Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography} from "@mui/material";
 import {UploadFireProps} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
+import {UploadValidationProps} from "@/components/uploadsystem/uploadvalidation";
+import {Checkbox} from "@mui/joy";
 
-export interface UploadUpdateValidationsProps extends UploadFireProps {
-
+export interface UploadUpdateValidationsProps extends UploadValidationProps {
+  validationPassedCMIDs: number[];
+  setValidationPassedCMIDs: Dispatch<SetStateAction<number[]>>;
+  validationPassedRowCount: number;
+  setValidationPassedRowCount: Dispatch<SetStateAction<number>>;
 }
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
-  const {currentPlot, currentCensus} = props;
-  const [updatedRowCount, setUpdatedRowCount] = useState(0);
+  const {currentPlot, currentCensus, validationPassedCMIDs,
+    setValidationPassedCMIDs, validationPassedRowCount,
+    setValidationPassedRowCount,
+    allRowToCMID} = props;
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
     const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
     const result = await response.json();
-    setUpdatedRowCount(result);
+    setValidationPassedCMIDs(result.updatedIDs);
+    setValidationPassedRowCount(result.rowsValidated);
     setIsUpdateValidationComplete(true);
   }
 
@@ -31,7 +39,38 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       {!isUpdateValidationComplete ? (
         <CircularProgress/>
       ) : (
-        <Typography>Updated rows: {updatedRowCount}</Typography>
+        <Box sx={{ width: '100%', p: 2 }}>
+          <Typography variant="h6">CoreMeasurement Validation Status</Typography>
+          <TableContainer component={Paper}>
+            <Table aria-label="validation status table">
+              <TableHead>
+                <TableRow>
+                  <TableCell>File Name</TableCell>
+                  <TableCell>CoreMeasurementID</TableCell>
+                  <TableCell>StemTag</TableCell>
+                  <TableCell>TreeTag</TableCell>
+                  <TableCell>Validated</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {allRowToCMID.map((obj, index) => (
+                  <TableRow key={index}>
+                    <TableCell>{obj.fileName}</TableCell>
+                    <TableCell>{obj.coreMeasurementID}</TableCell>
+                    <TableCell>{obj.stemTag}</TableCell>
+                    <TableCell>{obj.treeTag}</TableCell>
+                    <TableCell>
+                      <Checkbox
+                        checked={validationPassedCMIDs.includes(obj.coreMeasurementID)}
+                        disabled
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
       )}
     </Box>
   );

@@ -198,6 +198,8 @@ export interface UploadFireProps extends UploadReviewFilesProps {
   uploadCompleteMessage: string;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   handleReturnToStart: () => Promise<void>;
+  allRowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[];
+  allSetRowToCMID: Dispatch<SetStateAction<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>>;
 }
 
 export interface UploadErrorProps {

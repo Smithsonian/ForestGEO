@@ -45,6 +45,7 @@ export async function processSpecies(connection: PoolConnection, rowData: FileRo
       rowData.authority,
       rowData.family,
       null]);
+    return null;
   } catch (error: any) {
     console.error('Error processing species:', error.message);
     throw error;

@@ -51,10 +51,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let rowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[] = [];
   for (const rowId in fileRowSet) {
     const row = fileRowSet[rowId];
     try {
-      await insertOrUpdate(conn, formType, row, plot, census, user);
+      const coreMeasurementID = await insertOrUpdate(conn, formType, row, plot, census, user);
+      if (coreMeasurementID) { // if a number was returned, then a coremeasurement was added --> therefore, row contains tag & stemtag
+        rowToCMID.push({fileName: fileName, coreMeasurementID: coreMeasurementID, stemTag: row.stemtag, treeTag: row.tag});
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);
@@ -76,5 +80,5 @@ export async function POST(request: NextRequest) {
       }
     }
   }
-  return new NextResponse(JSON.stringify({message: "Insert to SQL successful"}), {status: 200});
+  return new NextResponse(JSON.stringify({message: "Insert to SQL successful", output: rowToCMID}), {status: 200});
 }

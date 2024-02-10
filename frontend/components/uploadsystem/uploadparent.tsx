@@ -17,32 +17,10 @@ import UploadParseFiles from "@/components/uploadsystem/uploadparsefiles";
 import UploadReviewFiles from "@/components/uploadsystem/uploadreviewfiles";
 import UploadFire from "@/components/uploadsystem/uploadfire";
 import UploadError from "@/components/uploadsystem/uploaderror";
-import ViewUploadedFiles from "../fileupload/viewuploadedfiles";
+import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
 import UploadValidation from "@/components/uploadsystem/uploadvalidation";
-
-export function fileCollectionToString(fileCollection: FileCollectionRowSet): string {
-  let result = '';
-
-  for (const filename in fileCollection) {
-    const fileRowSet = fileCollection[filename];
-
-    for (const row in fileRowSet) {
-      const fileRow = fileRowSet[row];
-
-      for (const header in fileRow) {
-        const value = fileRow[header];
-        result += `${filename},${row},${header},${value}|`;
-      }
-    }
-  }
-
-  // Remove the trailing '|' character if needed
-  if (result.length > 0) {
-    result = result.slice(0, -1);
-  }
-
-  return result;
-}
+import {ValidationResult} from "@/components/processors/processormacros";
+import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
 
 export default function UploadParent() {
   /**
@@ -73,6 +51,10 @@ export default function UploadParent() {
   const [isDataUnsaved, setIsDataUnsaved] = useState(false);
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
+  const [validationResults, setValidationResults] = useState<Record<string, ValidationResult>>({});
+  const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
+  const [validationPassedRowCount, setValidationPassedRowCount] = useState(0);
+  const [allRowToCMID, setAllRowToCMID] = useState<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>([]);
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
   const {data: session} = useSession();
@@ -398,6 +380,8 @@ export default function UploadParent() {
           handleReturnToStart={handleReturnToStart}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
+          allRowToCMID={allRowToCMID}
+          allSetRowToCMID={setAllRowToCMID}
         />;
       case ReviewStates.VALIDATE:
         return <UploadValidation
@@ -430,7 +414,51 @@ export default function UploadParent() {
           handleReturnToStart={handleReturnToStart}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
+          validationResults={validationResults}
+          setValidationResults={setValidationResults}
+          allRowToCMID={allRowToCMID}
+          allSetRowToCMID={setAllRowToCMID}
         />;
+      case ReviewStates.UPDATE:
+        return <UploadUpdateValidations
+          acceptedFiles={acceptedFiles}
+          setAcceptedFiles={setAcceptedFiles}
+          uploadForm={uploadForm}
+          errors={errors}
+          errorRows={errorRows}
+          parsedData={parsedData}
+          expectedHeaders={expectedHeaders}
+          currentFileHeaders={currentFileHeaders}
+          dataViewActive={dataViewActive}
+          areHeadersValid={areHeadersValid}
+          setErrors={setErrors}
+          setErrorRows={setErrorRows}
+          setReviewState={setReviewState}
+          confirmationDialogOpen={confirmationDialogOpen}
+          setParsedData={setParsedData}
+          handleConfirm={handleConfirm}
+          handleRemoveCurrentFile={handleRemoveCurrentFile}
+          handleCancel={handleCancel}
+          handleApproval={handleApproval}
+          handleChange={handleChange}
+          setIsDataUnsaved={setIsDataUnsaved}
+          currentPlot={currentPlot!}
+          currentCensus={currentCensus!}
+          user={session?.user?.name!}
+          uploadCompleteMessage={uploadCompleteMessage}
+          setUploadCompleteMessage={setUploadCompleteMessage}
+          handleReturnToStart={handleReturnToStart}
+          setUploadError={setUploadError}
+          setErrorComponent={setErrorComponent}
+          validationResults={validationResults}
+          setValidationResults={setValidationResults}
+          validationPassedCMIDs={validationPassedCMIDs}
+          setValidationPassedCMIDs={setValidationPassedCMIDs}
+          validationPassedRowCount={validationPassedRowCount}
+          setValidationPassedRowCount={setValidationPassedRowCount}
+          allRowToCMID={allRowToCMID}
+          allSetRowToCMID={setAllRowToCMID}
+        />
       default:
         return (
           <UploadError

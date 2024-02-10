@@ -9,11 +9,8 @@ import processBigTreesForm from "@/components/processors/processbigtreesform";
 import processMultipleStemsForm from "@/components/processors/processmultiplestemsform";
 import * as fs from "fs";
 import {NextRequest} from "next/server";
-
-
 export async function getConn() {
   let conn: PoolConnection | null = null; // Use PoolConnection type
-
   try {
     let i = 0;
     conn = await getSqlConnection(i);
@@ -26,21 +23,17 @@ export async function getConn() {
       throw new Error('unknown');
     }
   }
-
   if (!conn) {
     console.error("Container client or SQL connection is undefined.");
     throw new Error('conn empty');
   }
-
   return conn;
 }
-
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (connection: mysql.PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) => Promise<void>;
+  specialProcessing?: (connection: mysql.PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) => Promise<number | null>;
 };
-
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
   "fixeddata_codes": {
@@ -152,7 +145,6 @@ export const fileMappings: Record<string, FileMapping> = {
     specialProcessing: processBigTreesForm
   },
 };
-
 const sqlConfig: any = {
   user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
   password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
@@ -162,7 +154,6 @@ const sqlConfig: any = {
   ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
 }
 const pool = mysql.createPool(sqlConfig);
-
 // Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
@@ -180,7 +171,6 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
     }
   }
 }
-
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
   try {
     // Check if the query is for calling a stored procedure
@@ -205,12 +195,10 @@ export async function runQuery(connection: PoolConnection, query: string, params
     connection.release(); // Release the connection back to the pool
   }
 }
-
 // Helper function to get value or default
 function getValueOrDefault(value: any, defaultValue = null) {
   return value ?? defaultValue;
 }
-
 // Function to transform request body into data object
 function transformRequestBody(requestBody: any) {
   return {
@@ -232,21 +220,10 @@ function transformRequestBody(requestBody: any) {
     UserDefinedFields: getValueOrDefault(requestBody.userDefinedFields),
   };
 }
-
 export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return transformRequestBody(requestBody);
 }
-
-export async function parseAttributeRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    Code: requestBody.code,
-    Description: requestBody.description ?? null,
-    Status: requestBody.status ?? null,
-  };
-}
-
 export async function parseCensusRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return {
@@ -258,7 +235,6 @@ export async function parseCensusRequestBody(request: NextRequest) {
     Description: requestBody.description ?? null,
   }
 }
-
 export async function parsePersonnelRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return {
@@ -268,7 +244,6 @@ export async function parsePersonnelRequestBody(request: NextRequest) {
     Role: requestBody.role ?? null,
   };
 }
-
 export async function parseQuadratsRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return {
@@ -283,7 +258,6 @@ export async function parseQuadratsRequestBody(request: NextRequest) {
     QuadratShape: requestBody.quadratShape,
   };
 }
-
 export async function parseSpeciesRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return {
@@ -300,7 +274,6 @@ export async function parseSpeciesRequestBody(request: NextRequest) {
     ReferenceID: requestBody.referenceID ?? null,
   };
 }
-
 export async function parseSubSpeciesRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return {
@@ -314,25 +287,21 @@ export async function parseSubSpeciesRequestBody(request: NextRequest) {
     InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
   };
 }
-
 // New function to extract environment variables
 export function getSchema() {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
   return schema;
 }
-
 export type ValidationResponse = {
   expectedRows: number;
   insertedRows: number;
   message: string;
 }
-
 export type UpdateValidationResponse = {
   updatedIDs: number[];
   rowsValidated: number;
 }
-
 export interface CoreMeasurementsResult {
   CoreMeasurementID: number;
   CensusID: number;
@@ -351,7 +320,6 @@ export interface CoreMeasurementsResult {
   Description: string;
   UserDefinedFields: string;
 }
-
 export interface CensusResult {
   CensusID: number;
   PlotID: number;
@@ -360,7 +328,6 @@ export interface CensusResult {
   EndDate: any;
   Description: string;
 }
-
 export interface PlotsResult {
   PlotID: number;
   PlotName: string;
@@ -378,7 +345,6 @@ export interface PlotsResult {
   PlotShape: string;
   PlotDescription: string;
 }
-
 export interface QuadratsResult {
   QuadratID: number;
   PlotID: number;
@@ -390,14 +356,12 @@ export interface QuadratsResult {
   Area: number;
   QuadratShape: string;
 }
-
 export interface PersonnelResult {
   PersonnelID: number;
   FirstName: string;
   LastName: string;
   Role: string;
 }
-
 export interface SpeciesResult {
   SpeciesID: number;
   GenusID: number;
@@ -411,7 +375,6 @@ export interface SpeciesResult {
   Description: string;
   ReferenceID: number;
 }
-
 export interface SubSpeciesResult {
   SubSpeciesID: number;
   SpeciesID: number;
@@ -421,4 +384,10 @@ export interface SubSpeciesResult {
   SubSpeciesCode: string;
   Authority: string;
   InfraSpecificLevel: string;
+}
+export interface ValidationResult {
+  error: boolean;
+  message: string;
+  insertedRows?: number;
+  expectedRows?: number;
 }

@@ -126,7 +126,7 @@ export default async function processMultipleStemsForm(
       throw new Error(`Insertion failed for CoreMeasurement.`);
     }
 
-    const dbhCMID = dbhResult.insertId;
+    const dbhCMID: number = dbhResult.insertId;
     if (dbhCMID === null) {
       throw new Error(`The DBH insertion's CoreMeasurementID is null.`);
     }
@@ -136,6 +136,7 @@ export default async function processMultipleStemsForm(
     await processCode(connection, codesArray, dbhCMID);
     // Commit transaction
     await connection.commit();
+    return dbhCMID;
   } catch (error) {
     // Rollback transaction in case of error
     await connection.rollback();

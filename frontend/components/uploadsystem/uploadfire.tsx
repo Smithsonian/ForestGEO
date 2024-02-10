@@ -10,7 +10,8 @@ const UploadFire: React.FC<UploadFireProps> = ({
                                                  uploadForm, setIsDataUnsaved,
                                                  currentPlot, currentCensus, uploadCompleteMessage,
                                                  setUploadCompleteMessage, handleReturnToStart,
-                                                 user, setUploadError, setErrorComponent, setReviewState
+                                                 user, setUploadError, setErrorComponent,
+                                                 setReviewState, allSetRowToCMID
                                                }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -29,7 +30,8 @@ const UploadFire: React.FC<UploadFireProps> = ({
         });
       // Increment completedOperations when an operation is completed
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
-      return response.ok ? 'SQL load successful' : 'SQL load failed';
+      const result = await response.json();
+      allSetRowToCMID(result.output);
     } catch (error) {
       setUploadError(error);
       setErrorComponent('UploadFire');
@@ -149,9 +151,22 @@ const UploadFire: React.FC<UploadFireProps> = ({
               <Typography key={result}>{result}</Typography>
             ))}
             <Typography>{uploadCompleteMessage}</Typography>
-            <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
-              Return to Upload Start
-            </Button>
+            {(uploadForm === "fixeddata_census" ||
+              uploadForm === "ctfsweb_new_plants_form" ||
+              uploadForm === "ctfsweb_old_tree_form" ||
+              uploadForm === "ctfsweb_multiple_stems_form" ||
+              uploadForm === "ctfsweb_big_trees_form") ? (
+                <Box>
+                  <Typography>Your upload included measurements, which must be validated before proceeding</Typography>
+                  <Button onClick={() => setReviewState(ReviewStates.VALIDATE)} sx={{width: 'fit-content'}}>
+                    Continue to Validation
+                  </Button>
+                </Box>
+            ) : (
+              <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
+                Return to Upload Start
+              </Button>
+            )}
           </Stack>
         </Box>
       )}

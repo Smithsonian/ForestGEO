@@ -11,7 +11,7 @@ import {
   Pagination
 } from "@mui/material";
 import {Box, Checkbox, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
-import {DisplayParsedDataGridInline} from "@/components/fileupload/displayparseddatagrid";
+import {DisplayParsedDataGridInline} from "@/components/uploadsystemhelpers/displayparseddatagrid";
 import Divider from "@mui/joy/Divider";
 import React, {useState} from "react";
 import {
@@ -23,9 +23,9 @@ import {
   UploadReviewFilesProps
 } from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {DropzoneLogic} from "@/components/fileupload/dropzone";
+import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
 import {parse, ParseResult} from "papaparse";
-import {FileDisplay} from "@/components/fileupload/filelist";
+import {FileDisplay} from "@/components/uploadsystemhelpers/filelist";
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {

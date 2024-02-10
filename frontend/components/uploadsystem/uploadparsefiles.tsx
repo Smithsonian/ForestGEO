@@ -1,11 +1,11 @@
 "use client";
 import {Box, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
 import {TableHeadersByFormType, UploadParseFilesProps} from "@/config/macros";
-import SelectFormType from "@/components/fileupload/groupedformselection";
+import SelectFormType from "@/components/uploadsystemhelpers/groupedformselection";
 import {Button, Grid} from "@mui/material";
-import {DropzoneLogic} from "@/components/fileupload/dropzone";
+import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
 import Divider from "@mui/joy/Divider";
-import {FileDisplay} from "@/components/fileupload/filelist";
+import {FileDisplay} from "@/components/uploadsystemhelpers/filelist";
 import {LoadingButton} from "@mui/lab";
 import React from "react";
 
