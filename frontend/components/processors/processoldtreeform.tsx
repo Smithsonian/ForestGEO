@@ -117,7 +117,7 @@ export default async function processOldTreeForm(
       throw new Error(`Insertion failed for CoreMeasurement.`);
     }
 
-    const dbhCMID = dbhResult.insertId;
+    const dbhCMID: number = dbhResult.insertId;
     if (dbhCMID === null) {
       throw new Error(`The DBH insertion's CoreMeasurementID is null.`);
     }
@@ -126,6 +126,7 @@ export default async function processOldTreeForm(
     const codesArray = rowData.codes.split(';');
     await processCode(connection, codesArray, dbhCMID);
     await connection.commit();
+    return dbhCMID;
   } catch (error) {
     await connection.rollback();
     throw error;

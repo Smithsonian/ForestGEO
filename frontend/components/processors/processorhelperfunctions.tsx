@@ -214,7 +214,7 @@ export async function insertOrUpdate(
   plotKey: string,
   censusID: string,
   fullName: string
-) {
+): Promise<number | null> {
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
   const mapping = fileMappings[fileType];
@@ -225,11 +225,10 @@ export async function insertOrUpdate(
   if (mapping.specialProcessing) {
     console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
     try {
-      await mapping.specialProcessing(connection, rowData, plotKey, censusID, fullName);
+      return await mapping.specialProcessing(connection, rowData, plotKey, censusID, fullName);
     } catch (error) {
       throw error;
     }
-    return;
   }
   console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
   const columns = Object.keys(mapping.columnMappings);
@@ -256,6 +255,7 @@ export async function insertOrUpdate(
     throw error; // Re-throw the error after rollback
   }
   console.log('INSERT OR UPDATE: default query completed. Exiting...');
+  return null;
 }
 
 export async function runValidationProcedure(procedureName: string, plotID: number | null, censusID: number | null, min?: number, max?: number) {
