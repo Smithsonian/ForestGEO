@@ -6,9 +6,10 @@ import {
   getSchema,
   getSqlConnection,
   parseSubSpeciesRequestBody,
-  runQuery
+  runQuery,
+  SubSpeciesResult
 } from "@/components/processors/processormacros";
-import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
+import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
   subSpecies: SubSpeciesRDS[],
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const subSpeciesRows: SubSpeciesRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const subSpeciesRows: SubSpeciesRDS[] = paginatedResults.map((row: SubSpeciesResult, index: number) => ({
       id: index + 1,
       subSpeciesID: row.SubSpeciesID,
       speciesID: row.SpeciesID,

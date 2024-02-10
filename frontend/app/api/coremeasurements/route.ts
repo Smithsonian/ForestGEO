@@ -3,6 +3,8 @@ import {NextRequest, NextResponse} from "next/server";
 import {bitToBoolean, ErrorMessages} from "@/config/macros";
 import {CoreMeasurementsRDS} from "@/config/sqlmacros";
 import {
+  CoreMeasurementsResult,
+  getConn,
   getSchema,
   getSqlConnection,
   parseCoreMeasurementsRequestBody,
@@ -26,7 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
       throw new Error('Invalid page, pageSize, or plotID parameter');
     }
     // Initialize the connection attempt counter
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
     // Map the results to CoreMeasurementsRDS structure
-    let coreMeasurementRows: CoreMeasurementsRDS[] = paginatedResults.map((row, index) => ({
+    let coreMeasurementRows: CoreMeasurementsRDS[] = paginatedResults.map((row: CoreMeasurementsResult, index: number) => ({
       // ... mapping fields ...
       id: index + 1,
       coreMeasurementID: row.CoreMeasurementID,

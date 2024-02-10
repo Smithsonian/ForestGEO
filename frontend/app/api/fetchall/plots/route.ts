@@ -1,8 +1,8 @@
 // FETCH ALL PLOTS ROUTE HANDLERS
 import {NextResponse} from "next/server";
 import {PlotRDS} from "@/config/sqlmacros";
-import {getSchema, getSqlConnection, runQuery} from "@/components/processors/processormacros";
-import {PoolConnection, RowDataPacket} from "mysql2/promise";
+import {getSchema, getSqlConnection, PlotsResult, runQuery} from "@/components/processors/processormacros";
+import {PoolConnection} from "mysql2/promise";
 
 export async function GET(): Promise<NextResponse<PlotRDS[]>> {
   let conn: PoolConnection | null = null;
@@ -12,7 +12,7 @@ export async function GET(): Promise<NextResponse<PlotRDS[]>> {
     const query = `SELECT * FROM ${schema}.Plots`;
     const results = await runQuery(conn, query);
 
-    const plotRows: PlotRDS[] = results.map((row: any, index: number) => ({
+    const plotRows: PlotRDS[] = results.map((row: PlotsResult, index: number) => ({
       id: index + 1,
       plotID: row.PlotID,
       plotName: row.PlotName,

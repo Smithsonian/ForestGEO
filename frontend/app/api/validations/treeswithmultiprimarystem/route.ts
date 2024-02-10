@@ -9,8 +9,8 @@ export async function GET(request: NextRequest) {
     const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 
     const validationResponse = await runValidationProcedure('ValidateFindTreesWithMultiplePrimaryStems', plotID, censusID);
-    return new NextResponse(JSON.stringify(validationResponse), { status: 200 });
+    return new NextResponse(JSON.stringify(validationResponse), {status: 200});
   } catch (error: any) {
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: 500 });
+    return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
   }
 }

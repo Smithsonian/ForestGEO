@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {PoolConnection, RowDataPacket} from "mysql2/promise";
+import {PoolConnection} from "mysql2/promise";
 import {getConn, getSchema, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
       LIMIT 5`;
     const queryParams = partialSpeciesCode === '' ? [] : [`%${partialSpeciesCode}%`];
     const results = await runQuery(conn, query, queryParams);
-    return new NextResponse(JSON.stringify(results.map((row: RowDataPacket) => row.SpeciesCode)), {status: 200});
+    return new NextResponse(JSON.stringify(results.map((row: any) => row.SpeciesCode)), {status: 200});
   } catch (error: any) {
     console.error('Error in GET Quadrats:', error.message || error);
     throw new Error('Failed to fetch quadrat data');

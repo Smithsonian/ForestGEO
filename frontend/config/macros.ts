@@ -235,32 +235,12 @@ export enum HTTPResponses {
   EMPTY_FILE = 204, // Custom code, example
 }
 
-
-export interface UploadValidationProps {
-  /** true when the upload is done,
-   * false when it's not done.
-   * Also, false when upload hasn't started.
-   */
-  plot: Plot;
-  formType: string;
-  uploadDone: boolean;
-  /** true when the upload has started but not done. */
-  isUploading: boolean;
-  /** Keyed by filename, valued by a dict of errors for each row */
-  errorsData: FileErrors;
-  /** The files which have been set to be uploaded. */
-  acceptedFiles: FileWithPath[];
-  /** When an upload action is triggered. */
-  handleUpload: () => Promise<void>;
-  /** When the files are drag/dropped. */
-  handleAcceptedFiles: (acceptedFiles: FileWithPath[]) => void;
-}
-
 export enum ReviewStates {
   PARSE = "parse",
   REVIEW = "review",
   UPLOAD = "upload",
   VALIDATE = "validate",
+  UPDATE = "update_rows",
   COMPLETE = "complete",
   ERRORS = "errors",
   ERRORS_CORRECTION = "errors_correction",

@@ -18,6 +18,7 @@ import UploadReviewFiles from "@/components/uploadsystem/uploadreviewfiles";
 import UploadFire from "@/components/uploadsystem/uploadfire";
 import UploadError from "@/components/uploadsystem/uploaderror";
 import ViewUploadedFiles from "../fileupload/viewuploadedfiles";
+import UploadValidation from "@/components/uploadsystem/uploadvalidation";
 
 export function fileCollectionToString(fileCollection: FileCollectionRowSet): string {
   let result = '';
@@ -42,6 +43,7 @@ export function fileCollectionToString(fileCollection: FileCollectionRowSet): st
 
   return result;
 }
+
 export default function UploadParent() {
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
@@ -367,6 +369,38 @@ export default function UploadParent() {
         />;
       case ReviewStates.UPLOAD:
         return <UploadFire
+          acceptedFiles={acceptedFiles}
+          setAcceptedFiles={setAcceptedFiles}
+          uploadForm={uploadForm}
+          errors={errors}
+          errorRows={errorRows}
+          parsedData={parsedData}
+          expectedHeaders={expectedHeaders}
+          currentFileHeaders={currentFileHeaders}
+          dataViewActive={dataViewActive}
+          areHeadersValid={areHeadersValid}
+          setErrors={setErrors}
+          setErrorRows={setErrorRows}
+          setReviewState={setReviewState}
+          confirmationDialogOpen={confirmationDialogOpen}
+          setParsedData={setParsedData}
+          handleConfirm={handleConfirm}
+          handleRemoveCurrentFile={handleRemoveCurrentFile}
+          handleCancel={handleCancel}
+          handleApproval={handleApproval}
+          handleChange={handleChange}
+          setIsDataUnsaved={setIsDataUnsaved}
+          currentPlot={currentPlot!}
+          currentCensus={currentCensus!}
+          user={session?.user?.name!}
+          uploadCompleteMessage={uploadCompleteMessage}
+          setUploadCompleteMessage={setUploadCompleteMessage}
+          handleReturnToStart={handleReturnToStart}
+          setUploadError={setUploadError}
+          setErrorComponent={setErrorComponent}
+        />;
+      case ReviewStates.VALIDATE:
+        return <UploadValidation
           acceptedFiles={acceptedFiles}
           setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}

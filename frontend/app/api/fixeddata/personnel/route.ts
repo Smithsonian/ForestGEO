@@ -6,9 +6,10 @@ import {
   getSchema,
   getSqlConnection,
   parsePersonnelRequestBody,
+  PersonnelResult,
   runQuery
 } from "@/components/processors/processormacros";
-import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
+import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
   personnel: PersonnelRDS[],
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const personnelRows: PersonnelRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const personnelRows: PersonnelRDS[] = paginatedResults.map((row: PersonnelResult, index: number) => ({
       id: index + 1,
       personnelID: row.PersonnelID,
       firstName: row.FirstName,

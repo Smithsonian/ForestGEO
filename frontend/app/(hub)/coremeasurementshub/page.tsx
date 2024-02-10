@@ -6,6 +6,8 @@ import {CoreMeasurementsGridColumns} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
+import {Box} from "@mui/joy";
+import Typography from "@mui/joy/Typography";
 
 export default function CoreMeasurementsPage() {
   const initialRows: GridRowsProp = [
@@ -85,28 +87,39 @@ export default function CoreMeasurementsPage() {
     return <>You must select a plot to continue!</>;
   } else {
     return (
-      <DataGridCommons
-        gridType="coreMeasurements"
-        gridColumns={CoreMeasurementsGridColumns}
-        rows={rows}
-        setRows={setRows}
-        rowCount={rowCount}
-        setRowCount={setRowCount}
-        rowModesModel={rowModesModel}
-        setRowModesModel={setRowModesModel}
-        snackbar={snackbar}
-        setSnackbar={setSnackbar}
-        refresh={refresh}
-        setRefresh={setRefresh}
-        paginationModel={paginationModel}
-        setPaginationModel={setPaginationModel}
-        isNewRowAdded={isNewRowAdded}
-        setIsNewRowAdded={setIsNewRowAdded}
-        shouldAddRowAfterFetch={shouldAddRowAfterFetch}
-        setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-        currentPlot={currentPlot}
-        addNewRowToGrid={addNewRowToGrid}
-      />
+      <>
+        <Box sx={{display: 'flex', flexDirection: 'column'}}>
+          <Typography variant={"solid"} level={"title-md"} color={"warning"}>
+            Note: This is a locked view and will not allow modification.
+          </Typography>
+          <Typography variant={"solid"} level={"title-md"} color={"warning"}>
+            Please use this view as a way to confirm changes made to measurements.
+          </Typography>
+        </Box>
+        <DataGridCommons
+          locked={true}
+          gridType="coreMeasurements"
+          gridColumns={CoreMeasurementsGridColumns}
+          rows={rows}
+          setRows={setRows}
+          rowCount={rowCount}
+          setRowCount={setRowCount}
+          rowModesModel={rowModesModel}
+          setRowModesModel={setRowModesModel}
+          snackbar={snackbar}
+          setSnackbar={setSnackbar}
+          refresh={refresh}
+          setRefresh={setRefresh}
+          paginationModel={paginationModel}
+          setPaginationModel={setPaginationModel}
+          isNewRowAdded={isNewRowAdded}
+          setIsNewRowAdded={setIsNewRowAdded}
+          shouldAddRowAfterFetch={shouldAddRowAfterFetch}
+          setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
+          currentPlot={currentPlot}
+          addNewRowToGrid={addNewRowToGrid}
+        />
+      </>
     );
   }
 }
