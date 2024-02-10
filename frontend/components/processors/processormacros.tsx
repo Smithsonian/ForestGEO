@@ -327,3 +327,98 @@ export type ValidationResponse = {
   insertedRows: number;
   message: string;
 }
+
+export type UpdateValidationResponse = {
+  updatedIDs: number[];
+  rowsValidated: number;
+}
+
+export interface CoreMeasurementsResult {
+  CoreMeasurementID: number;
+  CensusID: number;
+  PlotID: number;
+  QuadratID: number;
+  TreeID: number;
+  StemID: number;
+  PersonnelID: number;
+  IsRemeasurement: any;
+  IsCurrent: any;
+  IsPrimaryStem: any;
+  IsValidated: any;
+  MeasurementDate: any;
+  MeasuredDBH: number;
+  MeasuredHOM: number;
+  Description: string;
+  UserDefinedFields: string;
+}
+
+export interface CensusResult {
+  CensusID: number;
+  PlotID: number;
+  PlotCensusNumber: number;
+  StartDate: any;
+  EndDate: any;
+  Description: string;
+}
+
+export interface PlotsResult {
+  PlotID: number;
+  PlotName: string;
+  LocationName: string;
+  CountryName: string;
+  DimensionX: number;
+  DimensionY: number;
+  Area: number;
+  GlobalX: number;
+  GlobalY: number;
+  GlobalZ: number;
+  PlotX: number;
+  PlotY: number;
+  PlotZ: number;
+  PlotShape: string;
+  PlotDescription: string;
+}
+
+export interface QuadratsResult {
+  QuadratID: number;
+  PlotID: number;
+  QuadratName: string;
+  QuadratX: number;
+  QuadratY: number;
+  DimensionX: number;
+  DimensionY: number;
+  Area: number;
+  QuadratShape: string;
+}
+
+export interface PersonnelResult {
+  PersonnelID: number;
+  FirstName: string;
+  LastName: string;
+  Role: string;
+}
+
+export interface SpeciesResult {
+  SpeciesID: number;
+  GenusID: number;
+  CurrentTaxonFlag: any;
+  ObsoleteTaxonFlag: any;
+  SpeciesName: string;
+  SpeciesCode: string;
+  IDLevel: string;
+  Authority: string;
+  FieldFamily: string;
+  Description: string;
+  ReferenceID: number;
+}
+
+export interface SubSpeciesResult {
+  SubSpeciesID: number;
+  SpeciesID: number;
+  CurrentTaxonFlag: any;
+  ObsoleteTaxonFlag: any;
+  SubSpeciesName: string;
+  SubSpeciesCode: string;
+  Authority: string;
+  InfraSpecificLevel: string;
+}

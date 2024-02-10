@@ -2,8 +2,14 @@
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
-import {getSchema, getSqlConnection, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
-import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
+import {
+  CensusResult,
+  getSchema,
+  getSqlConnection,
+  parseCensusRequestBody,
+  runQuery
+} from "@/components/processors/processormacros";
+import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
   let conn: PoolConnection | null = null;
@@ -48,7 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
     const totalRows = totalRowsResult[0].totalRows;
 
     // Map the results to CensusRDS structure
-    const censusRows: CensusRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const censusRows: CensusRDS[] = paginatedResults.map((row: CensusResult, index: number) => ({
       id: index + 1,
       censusID: row.CensusID,
       plotID: row.PlotID,

@@ -35,13 +35,15 @@ import {Plot} from "@/config/macros";
 
 
 export function EditToolbar(props: Readonly<EditToolbarProps>) {
-  const {handleAddNewRow, handleRefresh} = props;
+  const {handleAddNewRow, handleRefresh, locked = false} = props;
 
   return (
     <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
-        Add Row
-      </Button>
+      {!locked && (
+        <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
+          Add Row
+        </Button>
+      )}
       <Button color="primary" startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
@@ -70,6 +72,7 @@ export interface DataGridCommonProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   currentPlot: Plot | null;
   addNewRowToGrid: () => void;
+  locked?: boolean;
 }
 
 export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
@@ -77,12 +80,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     addNewRowToGrid, gridColumns, gridType, rows, setRows, rowCount, setRowCount, rowModesModel,
     setRowModesModel, snackbar, setSnackbar, refresh, setRefresh,
     paginationModel, setPaginationModel, isNewRowAdded, setIsNewRowAdded,
-    shouldAddRowAfterFetch, setShouldAddRowAfterFetch, currentPlot
+    shouldAddRowAfterFetch, setShouldAddRowAfterFetch, currentPlot, locked = false
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
 
   const handleAddNewRow = () => {
+    if (locked) return;
     console.log('handleAddNewRow triggered');
     const newRowCount = rowCount + 1;
     const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
@@ -240,11 +244,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   };
 
   const handleEditClick = (id: GridRowId) => () => {
+    if (locked) return;
     console.log('edit button');
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
 
   const handleSaveClick = (id: GridRowId) => async () => {
+    if (locked) return;
     console.log('save button');
     setRowModesModel((oldModel) => ({
       ...oldModel,
@@ -262,6 +268,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
+    if (locked) return;
     console.log('delete button');
     let gridID = getGridID(gridType);
     const deletionID = rows.find((row) => row.id == id)![gridID];
@@ -278,6 +285,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   };
 
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
+    if (locked) return;
     console.log('cancel button');
     // Prevent default action for the event if it exists
     event?.preventDefault();
@@ -309,6 +317,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       width: 100,
       cellClassName: 'actions',
       getActions: ({id}) => {
+        if (locked) return [];
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
 
         if (isInEditMode) {
@@ -389,6 +398,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                           }}
                           slotProps={{
                             toolbar: {
+                              locked: locked,
                               handleAddNewRow: handleAddNewRow,
                               handleRefresh: handleRefresh,
                             },

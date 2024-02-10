@@ -1,14 +1,9 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useEffect, useReducer, useState} from "react";
 import {createEnhancedDispatch, genericLoadContextReducer, LoadAction, Plot, Quadrat} from "@/config/macros";
-import {
-  usePlotListContext,
-  usePlotListDispatch,
-  useQuadratListContext,
-  useQuadratListDispatch
-} from "@/app/contexts/listselectionprovider";
+import {usePlotListContext, useQuadratListContext} from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
-import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/coredataprovider";
+import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 
 export const USPLoadingContext = createContext({
@@ -68,7 +63,7 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading({ plotLoading: true, censusLoading: true, quadratLoading: true });
+      setLoading({plotLoading: true, censusLoading: true, quadratLoading: true});
       const plotData = await getData('plot');
       plotDispatch({type: 'plot', payload: plotData});
 
@@ -77,7 +72,7 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
 
       const censusData = await getData('census');
       censusDispatch({type: "census", payload: censusData});
-      setLoading({ plotLoading: false, censusLoading: false, quadratLoading: false });
+      setLoading({plotLoading: false, censusLoading: false, quadratLoading: false});
     };
     fetchData().catch(console.error);
   }, []);
@@ -104,6 +99,7 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
 export function useUSPLoadingContext() {
   return useContext(USPLoadingContext);
 }
+
 export function usePlotContext() {
   return useContext(PlotsContext);
 }

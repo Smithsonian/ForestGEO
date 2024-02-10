@@ -11,13 +11,13 @@ import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
-import {useSession} from "next-auth/react";
 import {Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
-  useCensusDispatch, useUSPLoadingContext,
+  useCensusDispatch,
   usePlotContext,
-  usePlotDispatch
+  usePlotDispatch,
+  useUSPLoadingContext
 } from "@/app/contexts/userselectionprovider";
 import {usePathname, useRouter} from "next/navigation";
 import {
@@ -42,7 +42,6 @@ import Add from '@mui/icons-material/Add';
 import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 import {getData} from "@/config/db";
-import SidebarSkeleton from "@/components/skeletons/sidebarskeleton";
 import CircularProgress from "@mui/joy/CircularProgress";
 
 
@@ -122,11 +121,11 @@ export default function Sidebar() {
       setLoading(true);
       console.log('fetchCensusPlot in sidebar called');
       const storedCensus = await getData('census');
-      console.log(`sidebar fetchCensusPlot: stored census: ${storedCensus.censusID}`);
-      censusDispatch({census: storedCensus});
+      console.log(`sidebar fetchCensusPlot: stored census: ${storedCensus?.censusID}`);
+      if (storedCensus) censusDispatch({census: storedCensus});
       const storedPlot = await getData('plot');
-      console.log(`sidebar fetchCensusPlot: stored plot: ${storedPlot.key}`);
-      plotDispatch({plot: storedPlot});
+      console.log(`sidebar fetchCensusPlot: stored plot: ${storedPlot?.key}`);
+      if (storedPlot) plotDispatch({plot: storedPlot});
       setLoading(false);
     }
 
@@ -145,7 +144,7 @@ export default function Sidebar() {
   const [propertiesToggle, setPropertiesToggle] = useState(false);
   const [formsToggle, setFormsToggle] = useState(false);
   const [newCensusData, setNewCensusData] = useState<CensusRDS>(initialCensus);
-  const { plotLoading, censusLoading, quadratLoading } = useUSPLoadingContext();
+  const {plotLoading, censusLoading, quadratLoading} = useUSPLoadingContext();
 
   type ToggleObject = {
     toggle?: boolean;
@@ -212,7 +211,7 @@ export default function Sidebar() {
   if (plotLoading || censusLoading || quadratLoading || loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center">
-        <CircularProgress />
+        <CircularProgress/>
       </Box>
     );
   }

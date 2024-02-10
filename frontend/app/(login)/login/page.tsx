@@ -3,7 +3,6 @@ import React, {useEffect, useState} from "react";
 import {useSession} from "next-auth/react";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
-import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
 import EntryModal from "@/components/client/entrymodal";
 import {clearAllIDBData} from "@/config/db";
@@ -60,7 +59,7 @@ export default function LoginPage() {
               backgroundImage: `url(${slides[i]})`,
             }}/>
         ))}
-        <UnauthenticatedSidebar />
+        <UnauthenticatedSidebar/>
       </Box>
     );
   } else {

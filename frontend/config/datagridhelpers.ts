@@ -5,6 +5,7 @@ export type FetchQueryFunction = (gridType: string, page: number, pageSize: numb
 export type ProcessQueryFunction = (gridType: string, deletionID?: number) => string;
 
 export interface EditToolbarProps {
+  locked?: boolean;
   handleAddNewRow: () => void;
   handleRefresh: () => Promise<void>;
 }

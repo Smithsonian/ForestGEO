@@ -1,9 +1,15 @@
 // FIXED DATA SPECIES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {getSchema, getSqlConnection, parseSpeciesRequestBody, runQuery} from "@/components/processors/processormacros";
+import {
+  getSchema,
+  getSqlConnection,
+  parseSpeciesRequestBody,
+  runQuery,
+  SpeciesResult
+} from "@/components/processors/processormacros";
 import {bitToBoolean, ErrorMessages} from "@/config/macros";
 import {SpeciesRDS} from "@/config/sqlmacros";
-import mysql, {PoolConnection, RowDataPacket} from "mysql2/promise";
+import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ species: SpeciesRDS[], totalCount: number }>> {
   let conn: PoolConnection | null = null;
@@ -37,7 +43,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const speciesRows: SpeciesRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const speciesRows: SpeciesRDS[] = paginatedResults.map((row: SpeciesResult, index: number) => ({
       id: index + 1,
       speciesID: row.SpeciesID,
       genusID: row.GenusID,

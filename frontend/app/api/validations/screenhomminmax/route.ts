@@ -1,5 +1,4 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getConn, runQuery, ValidationResponse} from "@/components/processors/processormacros";
 import {runValidationProcedure} from "@/components/processors/processorhelperfunctions";
 
 export async function GET(request: NextRequest) {
@@ -13,8 +12,8 @@ export async function GET(request: NextRequest) {
 
 
     const validationResponse = await runValidationProcedure('ValidateHOMUpperAndLowerBounds', plotID, censusID, minHOM, maxHOM);
-    return new NextResponse(JSON.stringify(validationResponse), { status: 200 });
+    return new NextResponse(JSON.stringify(validationResponse), {status: 200});
   } catch (error: any) {
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: 500 });
+    return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
   }
 }
