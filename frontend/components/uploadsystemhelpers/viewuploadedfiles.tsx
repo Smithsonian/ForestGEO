@@ -1,5 +1,5 @@
 "use client";
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
 import {fileColumns, Plot, tableHeaderSettings, UploadedFileData} from "@/config/macros";
 import {BrowseError} from "@/app/error"
 import {
@@ -47,9 +47,11 @@ function LoadingFiles() {
 interface VUFProps {
   currentPlot: Plot | null;
   currentCensus: CensusRDS | null;
+  refreshFileList: boolean;
+  setRefreshFileList: Dispatch<SetStateAction<boolean>>;
 }
 
-export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly<VUFProps>) {
+export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFileList, setRefreshFileList}: Readonly<VUFProps>) {
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
@@ -73,7 +75,7 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly
       if (!response.ok) throw new Error('Error deleting file');
 
       // Refresh the file list after successful deletion
-      await getListOfFiles();
+      setRefreshFileList(true);
     } catch (error: any) {
       console.error('Delete error:', error);
       setError(error);
@@ -103,10 +105,15 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly
   }, [currentPlot, currentCensus]);
 
   useEffect(() => {
-    if (currentPlot) {
-      getListOfFiles().then();
+    if (refreshFileList && currentPlot && currentCensus) {
+      getListOfFiles().then(() => setRefreshFileList(false)); // Reset the refresh trigger after loading
     }
-  }, [getListOfFiles, currentPlot]);
+  }, [refreshFileList, currentPlot, currentCensus, getListOfFiles, setRefreshFileList]);
+
+  const refreshFiles = () => {
+    getListOfFiles().then();
+  };
+
 
   if (error) {
     console.log(error);
@@ -131,6 +138,7 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly
               <br/> <br/>
               Uploaded CSV Files
             </Typography>
+            <Button sx={{width: 'fit-content'}} onClick={refreshFiles}>Refresh Files</Button>
           </Box>
           <Divider className={"mt-6 mb-6"}/>
           <Box sx={{display: 'flex', flexDirection: "column"}}>
@@ -146,7 +154,7 @@ export default function ViewUploadedFiles({currentPlot, currentCensus}: Readonly
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.csv')).map((row) => {
+                  {sortedFileData.filter((row) => row.name.toLowerCase()).map((row) => {
                     let errs = row.errors == "false";
                     return (
                       <TableRow key={row.key}>

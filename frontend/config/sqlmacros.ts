@@ -182,9 +182,6 @@ export type CoreMeasurementsRDS = {
   treeID: number | null;
   stemID: number | null;
   personnelID: number | null;
-  isRemeasurement: boolean | null;
-  isCurrent: boolean | null;
-  isPrimaryStem: boolean | null;
   isValidated: boolean | null;
   measurementDate: Date | null;
   measuredDBH: number | null;
@@ -202,9 +199,6 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'isRemeasurement', headerName: 'IsRemeasurement', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'isCurrent', headerName: 'IsCurrent', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'isPrimaryStem', headerName: 'IsPrimaryStem', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'isValidated', headerName: 'IsValidated', headerClassName: 'header', flex: 1, align: 'left'},
   {
     field: 'measurementDate',
@@ -276,7 +270,7 @@ export type GenusRDS = {
 export const GenusGridColumns: GridColDef[] = [
   {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'genusName', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'authority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left',},
 ]
@@ -348,13 +342,11 @@ export const PlotGridColumns: GridColDef[] = [
   {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
-export type QuadratRDS = {
+export type QuadratsRDS = {
   id: number;
   quadratID: number;
   plotID: number | null;
   quadratName: string | null;
-  quadratX: number | null;
-  quadratY: number | null;
   dimensionX: number | null;
   dimensionY: number | null;
   area: number | null;
@@ -366,9 +358,6 @@ export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratY', headerName: 'QuadratY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left',},

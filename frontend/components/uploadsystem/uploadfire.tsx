@@ -11,7 +11,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
                                                  currentPlot, currentCensus, uploadCompleteMessage,
                                                  setUploadCompleteMessage, handleReturnToStart,
                                                  user, setUploadError, setErrorComponent,
-                                                 setReviewState, allSetRowToCMID
+                                                 setReviewState, setAllRowToCMID
                                                }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -31,7 +31,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
       // Increment completedOperations when an operation is completed
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       const result = await response.json();
-      allSetRowToCMID(result.output);
+      setAllRowToCMID((prevState) => [...prevState, result.output]);
     } catch (error) {
       setUploadError(error);
       setErrorComponent('UploadFire');

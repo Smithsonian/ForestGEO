@@ -1,24 +1,41 @@
 "use client";
 
 import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
-import {Box, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography} from "@mui/material";
-import {UploadFireProps} from "@/config/macros";
+import {
+  Box,
+  Button,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography
+} from "@mui/material";
+import {Plot, ReviewStates, UploadFireProps} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {UploadValidationProps} from "@/components/uploadsystem/uploadvalidation";
 import {Checkbox} from "@mui/joy";
+import {CensusRDS} from "@/config/sqlmacros";
 
-export interface UploadUpdateValidationsProps extends UploadValidationProps {
+export interface UploadUpdateValidationsProps {
   validationPassedCMIDs: number[];
   setValidationPassedCMIDs: Dispatch<SetStateAction<number[]>>;
   validationPassedRowCount: number;
   setValidationPassedRowCount: Dispatch<SetStateAction<number>>;
+  currentPlot: Plot;
+  currentCensus: CensusRDS;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  allRowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[];
+  handleReturnToStart: () => Promise<void>;
 }
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const {currentPlot, currentCensus, validationPassedCMIDs,
-    setValidationPassedCMIDs, validationPassedRowCount,
+    setValidationPassedCMIDs,
     setValidationPassedRowCount,
-    allRowToCMID} = props;
+    allRowToCMID, handleReturnToStart} = props;
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
@@ -70,6 +87,9 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
               </TableBody>
             </Table>
           </TableContainer>
+          <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
+            Return to Upload Start
+          </Button>
         </Box>
       )}
     </Box>

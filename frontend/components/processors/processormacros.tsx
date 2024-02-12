@@ -310,9 +310,6 @@ export interface CoreMeasurementsResult {
   TreeID: number;
   StemID: number;
   PersonnelID: number;
-  IsRemeasurement: any;
-  IsCurrent: any;
-  IsPrimaryStem: any;
   IsValidated: any;
   MeasurementDate: any;
   MeasuredDBH: number;
@@ -349,8 +346,6 @@ export interface QuadratsResult {
   QuadratID: number;
   PlotID: number;
   QuadratName: string;
-  QuadratX: number;
-  QuadratY: number;
   DimensionX: number;
   DimensionY: number;
   Area: number;

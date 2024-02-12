@@ -199,7 +199,7 @@ export interface UploadFireProps extends UploadReviewFilesProps {
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   handleReturnToStart: () => Promise<void>;
   allRowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[];
-  allSetRowToCMID: Dispatch<SetStateAction<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>>;
+  setAllRowToCMID: Dispatch<SetStateAction<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>>;
 }
 
 export interface UploadErrorProps {
@@ -242,6 +242,7 @@ export enum ReviewStates {
   REVIEW = "review",
   UPLOAD = "upload",
   VALIDATE = "validate",
+  VALIDATE_ERRORS_FOUND = "validate_errors_found",
   UPDATE = "update_rows",
   COMPLETE = "complete",
   ERRORS = "errors",
@@ -588,12 +589,36 @@ export async function uploadFileAsBuffer(containerClient: ContainerClient, file:
 
 export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
   const buffer = Buffer.from(await file.arrayBuffer());
-  console.log(buffer.toString());
-  console.log(`blob name: ${file.name}`);
-  let metadata = {
-    user: user,
+  console.log(`Uploading blob: ${file.name}`);
+
+  // Upload the file
+  await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {
+    metadata: { user },
+  });
+
+  // Check if the container is empty (other than the current file)
+  if (await isContainerEmpty(containerClient, file.name)) {
+    console.log(`Container is empty after upload. Deleting container: ${containerClient.containerName}`);
+    await deleteContainer(containerClient);
   }
-  // create connection & client facing new blob
-  // async command to upload buffer via client, waiting for response
-  return await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata})
+}
+
+async function isContainerEmpty(containerClient: ContainerClient, uploadedFileName: string) {
+  let isEmpty = true;
+  for await (const blob of containerClient.listBlobsFlat()) {
+    if (blob.name !== uploadedFileName) {
+      isEmpty = false;
+      break;
+    }
+  }
+  return isEmpty;
+}
+
+async function deleteContainer(containerClient: ContainerClient) {
+  try {
+    await containerClient.delete();
+    console.log(`Container deleted: ${containerClient.containerName}`);
+  } catch (error) {
+    console.error(`Error deleting container: ${error}`);
+  }
 }
