@@ -19,8 +19,9 @@ import UploadFire from "@/components/uploadsystem/uploadfire";
 import UploadError from "@/components/uploadsystem/uploaderror";
 import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
 import UploadValidation from "@/components/uploadsystem/uploadvalidation";
-import {ValidationResult} from "@/components/processors/processormacros";
+import {ValidationResponse} from "@/components/processors/processormacros";
 import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
+import UploadValidationErrorDisplay from "@/components/uploadsystem/uploadvalidationerrordisplay";
 
 export default function UploadParent() {
   /**
@@ -51,10 +52,11 @@ export default function UploadParent() {
   const [isDataUnsaved, setIsDataUnsaved] = useState(false);
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
-  const [validationResults, setValidationResults] = useState<Record<string, ValidationResult>>({});
+  const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
   const [validationPassedRowCount, setValidationPassedRowCount] = useState(0);
   const [allRowToCMID, setAllRowToCMID] = useState<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>([]);
+  const [refreshFileList, setRefreshFileList] = useState(false);
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
   const {data: session} = useSession();
@@ -72,6 +74,16 @@ export default function UploadParent() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isDataUnsaved]); // Run the effect when isDataUnsaved changes
+
+  const onFileUpload = () => {
+    // After file upload logic
+    setRefreshFileList(true); // Trigger refresh in ViewUploadedFiles
+  };
+
+  const onFileDelete = () => {
+    // After file delete logic
+    setRefreshFileList(true); // Trigger refresh in ViewUploadedFiles
+  };
 
   function areHeadersValid(actualHeaders: string[]): boolean {
     const expectedHeadersLower = expectedHeaders.map(header => header.toLowerCase());
@@ -93,6 +105,7 @@ export default function UploadParent() {
     setErrors({})
     setErrorRows({});
     setUploadForm('');
+    setReviewState(ReviewStates.PARSE);
   }
 
   async function resetError() {
@@ -381,84 +394,28 @@ export default function UploadParent() {
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
           allRowToCMID={allRowToCMID}
-          allSetRowToCMID={setAllRowToCMID}
+          setAllRowToCMID={setAllRowToCMID}
         />;
       case ReviewStates.VALIDATE:
         return <UploadValidation
-          acceptedFiles={acceptedFiles}
-          setAcceptedFiles={setAcceptedFiles}
-          uploadForm={uploadForm}
-          errors={errors}
-          errorRows={errorRows}
-          parsedData={parsedData}
-          expectedHeaders={expectedHeaders}
-          currentFileHeaders={currentFileHeaders}
-          dataViewActive={dataViewActive}
-          areHeadersValid={areHeadersValid}
-          setErrors={setErrors}
-          setErrorRows={setErrorRows}
           setReviewState={setReviewState}
-          confirmationDialogOpen={confirmationDialogOpen}
-          setParsedData={setParsedData}
-          handleConfirm={handleConfirm}
-          handleRemoveCurrentFile={handleRemoveCurrentFile}
-          handleCancel={handleCancel}
-          handleApproval={handleApproval}
-          handleChange={handleChange}
-          setIsDataUnsaved={setIsDataUnsaved}
           currentPlot={currentPlot!}
           currentCensus={currentCensus!}
-          user={session?.user?.name!}
-          uploadCompleteMessage={uploadCompleteMessage}
-          setUploadCompleteMessage={setUploadCompleteMessage}
-          handleReturnToStart={handleReturnToStart}
-          setUploadError={setUploadError}
-          setErrorComponent={setErrorComponent}
           validationResults={validationResults}
           setValidationResults={setValidationResults}
-          allRowToCMID={allRowToCMID}
-          allSetRowToCMID={setAllRowToCMID}
         />;
+      case ReviewStates.VALIDATE_ERRORS_FOUND:
+        return <UploadValidationErrorDisplay allRowToCMID={allRowToCMID} parsedData={parsedData} setReviewState={setReviewState} />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
-          acceptedFiles={acceptedFiles}
-          setAcceptedFiles={setAcceptedFiles}
-          uploadForm={uploadForm}
-          errors={errors}
-          errorRows={errorRows}
-          parsedData={parsedData}
-          expectedHeaders={expectedHeaders}
-          currentFileHeaders={currentFileHeaders}
-          dataViewActive={dataViewActive}
-          areHeadersValid={areHeadersValid}
-          setErrors={setErrors}
-          setErrorRows={setErrorRows}
           setReviewState={setReviewState}
-          confirmationDialogOpen={confirmationDialogOpen}
-          setParsedData={setParsedData}
-          handleConfirm={handleConfirm}
-          handleRemoveCurrentFile={handleRemoveCurrentFile}
-          handleCancel={handleCancel}
-          handleApproval={handleApproval}
-          handleChange={handleChange}
-          setIsDataUnsaved={setIsDataUnsaved}
           currentPlot={currentPlot!}
           currentCensus={currentCensus!}
-          user={session?.user?.name!}
-          uploadCompleteMessage={uploadCompleteMessage}
-          setUploadCompleteMessage={setUploadCompleteMessage}
-          handleReturnToStart={handleReturnToStart}
-          setUploadError={setUploadError}
-          setErrorComponent={setErrorComponent}
-          validationResults={validationResults}
-          setValidationResults={setValidationResults}
           validationPassedCMIDs={validationPassedCMIDs}
           setValidationPassedCMIDs={setValidationPassedCMIDs}
           validationPassedRowCount={validationPassedRowCount}
           setValidationPassedRowCount={setValidationPassedRowCount}
-          allRowToCMID={allRowToCMID}
-          allSetRowToCMID={setAllRowToCMID}
-        />
+         allRowToCMID={allRowToCMID} handleReturnToStart={handleReturnToStart}/>
       default:
         return (
           <UploadError
@@ -485,7 +442,7 @@ export default function UploadParent() {
             <Tab>Upload New Files</Tab>
           </TabList>
           <TabPanel value={0}>
-            <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus}/>
+            <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFileList={refreshFileList} setRefreshFileList={setRefreshFileList}/>
           </TabPanel>
           <TabPanel value={1}>
             {currentPlot ? renderStateContent() : <Typography>You must select a plot to continue!</Typography>}

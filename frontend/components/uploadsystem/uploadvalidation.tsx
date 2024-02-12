@@ -1,12 +1,17 @@
 "use client";
 import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import {Box, Button, LinearProgress, Typography} from '@mui/material';
-import {ReviewStates, UploadFireProps} from "@/config/macros";
-import {ValidationResult} from "@/components/processors/processormacros";
+import {Plot, ReviewStates, UploadFireProps} from "@/config/macros";
+import {ValidationResponse, ValidationResult} from "@/components/processors/processormacros";
+import {Stack} from "@mui/joy";
+import {CensusRDS} from "@/config/sqlmacros";
 
-export interface UploadValidationProps extends UploadFireProps {
-  validationResults: Record<string, ValidationResult>;
-  setValidationResults: Dispatch<SetStateAction<Record<string, ValidationResult>>>;
+export interface UploadValidationProps {
+  validationResults: Record<string, ValidationResponse>;
+  setValidationResults: Dispatch<SetStateAction<Record<string, ValidationResponse>>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  currentPlot: Plot;
+  currentCensus: CensusRDS;
 }
 
 
@@ -17,6 +22,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
                                                            }) => {
   const [validationProgress, setValidationProgress] = useState<number>(0);
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
+  const [errorsFound, setErrorsFound] = useState(false);
 
   const validationAPIs: string[] = [
     'dbhgrowthexceedsmax',
@@ -35,33 +41,42 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   ];
 
   const performValidations = async () => {
-    let results: Record<string, ValidationResult> = {};
+    let results: Record<string, ValidationResponse> = {};
     let totalCalls = validationAPIs.length;
     let processedCalls = 0;
 
     for (const api of validationAPIs) {
-      try {
-        const response = await fetch(`/api/validations/${api}?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
-        const result = await response.json();
-        if (!response.ok) {
-          results[api] = {error: true, message: 'Validation API call failed.'};
-        } else {
-          results[api] = {error: false, message: 'Validation completed successfully.', ...result};
-        }
-      } catch (error) {
-        results[api] = {error: true, message: 'Network or server error occurred.'};
-      } finally {
-        processedCalls++;
-        setValidationProgress((processedCalls / totalCalls) * 100);
+      const response = await fetch(`/api/validations/${api}?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(`unforeseen error in uploadvalidation -- attempting to run validation ${api}`);
+      } else {
+        results[api] = result;
       }
+      processedCalls++;
+      setValidationProgress((processedCalls / totalCalls) * 100);
     }
     setValidationResults(results);
-    setIsValidationComplete(true);
   };
 
   useEffect(() => {
     performValidations().catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (validationResults) {
+      for (const api in validationResults) {
+        const result = validationResults[api];
+        if (result.insertedRows !== result.expectedRows) {
+          setErrorsFound(true);
+          break;
+        }
+      }
+    }
+    setIsValidationComplete(true);
+    setValidationProgress(100);
+  }, [validationResults]);
+
   return (
     <Box sx={{width: '100%', p: 2}}>
       <Typography variant="h6">Validation Progress</Typography>
@@ -72,7 +87,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
           {Object.entries(validationResults).map(([api, result]) => (
             <Box key={api} sx={{mb: 2}}>
               <Typography>{api}:</Typography>
-              {result.error ? (
+              {result.expectedRows !== result.insertedRows ? (
                 <Typography color="error">- {result.message}</Typography>
               ) : (
                 <Typography>Processed Rows: {result.insertedRows}, Errors Detected: {result.expectedRows}</Typography>
@@ -83,7 +98,17 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       ) : (
         <Typography>Validating...</Typography>
       )}
-      <Button onClick={() => setReviewState(ReviewStates.COMPLETE)}>Complete Validation</Button>
+      { isValidationComplete && errorsFound ? (
+        <Stack direction={"column"}>
+          <Typography variant={"h5"}>Erroneous rows were found when running validations. <br /> Please proceed to the error display to review errors found</Typography>
+          <Button sx={{width: 'fit-content'}} onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>Proceed</Button>
+        </Stack>
+      ) : (
+        <Stack direction={"column"}>
+          <Typography variant={"h5"}>All validations passed with no errors.</Typography>
+          <Button sx={{width: 'fit-content'}} onClick={() => setReviewState(ReviewStates.UPDATE)}>Complete Upload</Button>
+        </Stack>
+      )}
     </Box>
   );
 };

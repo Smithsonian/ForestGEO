@@ -11,7 +11,7 @@ import Divider from "@mui/joy/Divider";
 import {Plot, Quadrat, siteConfig} from "@/config/macros";
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
 import {usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
-import {CensusRDS, PlotRDS, QuadratRDS} from "@/config/sqlmacros";
+import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 import {getData, setData} from "@/config/db";
 import {useCensusDispatch, usePlotDispatch} from "@/app/contexts/userselectionprovider";
 import HeaderSkeleton from "@/components/skeletons/headerskeleton";
@@ -89,7 +89,7 @@ export default function Endpoint({children,}: Readonly<{ children: React.ReactNo
     setLoadingMsg('Retrieving Quadrats...');
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData = await getData('quadratsLoad');
-    let quadratsRDSLoad: QuadratRDS[];
+    let quadratsRDSLoad: QuadratsRDS[];
     setLoading(10);
     if (quadratsLoadData && quadratsLoadData.length > 0) {
       quadratsRDSLoad = quadratsLoadData;

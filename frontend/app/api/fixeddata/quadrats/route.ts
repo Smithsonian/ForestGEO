@@ -8,11 +8,11 @@ import {
   runQuery
 } from "@/components/processors/processormacros";
 import {ErrorMessages} from "@/config/macros";
-import {QuadratRDS} from "@/config/sqlmacros";
+import {QuadratsRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
-  quadrats: QuadratRDS[],
+  quadrats: QuadratsRDS[],
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
@@ -55,13 +55,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const quadratRows: QuadratRDS[] = paginatedResults.map((row: QuadratsResult, index: number) => ({
+    const quadratRows: QuadratsRDS[] = paginatedResults.map((row: QuadratsResult, index: number) => ({
       id: index + 1,
       quadratID: row.QuadratID,
       plotID: row.PlotID,
       quadratName: row.QuadratName,
-      quadratX: row.QuadratX,
-      quadratY: row.QuadratY,
       dimensionX: row.DimensionX,
       dimensionY: row.DimensionY,
       area: row.Area,

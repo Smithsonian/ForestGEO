@@ -12,8 +12,8 @@
     "bdwin": "npm run build ; npm run dev",
     "clean": "rm -rf .next node_modules package-lock.json; npm install",
     "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest",
-    "storybook": "start-storybook -p 6006",
-    "build-storybook": "build-storybook"
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.17.0",
@@ -48,13 +48,32 @@
   },
   "devDependencies": {
     "@mui/joy": "^5.0.0-beta.24",
+    "@storybook/addon-essentials": "^7.6.14",
+    "@storybook/addon-interactions": "^7.6.14",
+    "@storybook/addon-links": "^7.6.14",
+    "@storybook/addon-onboarding": "^1.0.11",
+    "@storybook/blocks": "^7.6.14",
+    "@storybook/nextjs": "^7.6.14",
+    "@storybook/react": "^7.6.14",
+    "@storybook/test": "^7.6.14",
     "@testing-library/react": "^14.1.2",
+    "@types/file-saver": "^2.0.7",
     "@types/papaparse": "^5.3.13",
     "@types/react": "latest",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "abort-controller": "^3.0.0",
     "eslint": "8.54.0",
-    "eslint-config-next": "14.0.3",
+    "eslint-config-next": "^14.0.3",
+    "eslint-plugin-storybook": "^0.6.15",
+    "file-saver": "^2.0.5",
     "idb": "^8.0.0",
-    "mysql2": "^3.7.0"
+    "mysql2": "^3.7.0",
+    "storybook": "^7.6.14"
+  },
+  "eslintConfig": {
+    "extends": [
+      "plugin:storybook/recommended"
+    ]
   }
 }
