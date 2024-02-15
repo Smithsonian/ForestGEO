@@ -1,12 +1,6 @@
 // FIXED DATA QUADRATS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {
-  getSchema,
-  getSqlConnection,
-  parseQuadratsRequestBody,
-  QuadratsResult,
-  runQuery
-} from "@/components/processors/processormacros";
+import {getSchema, getSqlConnection, parseQuadratsRequestBody, runQuery} from "@/components/processors/processormacros";
 import {ErrorMessages} from "@/config/macros";
 import {QuadratsRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection} from "mysql2/promise";
@@ -55,10 +49,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const quadratRows: QuadratsRDS[] = paginatedResults.map((row: QuadratsResult, index: number) => ({
+    const quadratRows: QuadratsRDS[] = paginatedResults.map((row: any, index: number) => ({
       id: index + 1,
       quadratID: row.QuadratID,
       plotID: row.PlotID,
+      censusID: row.CensusID,
+      personnelID: row.PersonnelID,
       quadratName: row.QuadratName,
       dimensionX: row.DimensionX,
       dimensionY: row.DimensionY,

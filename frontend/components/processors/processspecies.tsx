@@ -1,8 +1,8 @@
-import {booleanToBit, FileRow} from "@/config/macros";
-import {PoolConnection} from 'mysql2/promise';
-import {runQuery} from "@/components/processors/processormacros";
+import {booleanToBit} from "@/config/macros";
+import {runQuery, SpecialProcessingProps} from "@/components/processors/processormacros";
 
-export async function processSpecies(connection: PoolConnection, rowData: FileRow, plotKey: string, censusID: string, fullName: string) {
+export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
+  const {connection, rowData} = props;
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
@@ -15,7 +15,7 @@ export async function processSpecies(connection: PoolConnection, rowData: FileRo
 
     /**
      *       "spcode": "Species.SpeciesCode",
-     *       "genus": "Genus.GenusName",
+     *       "genus": "Genus.Genus",
      *       "species": "Species.SpeciesName",
      *       "IDLevel": "Species.IDLevel",
      *       "family": "Species.Family",

@@ -6,7 +6,7 @@ import {FileWithPath} from "react-dropzone";
 import {Stack} from "@mui/joy";
 
 const UploadFire: React.FC<UploadFireProps> = ({
-                                                 acceptedFiles, parsedData,
+                                                 personnelRecording, acceptedFiles, parsedData,
                                                  uploadForm, setIsDataUnsaved,
                                                  currentPlot, currentCensus, uploadCompleteMessage,
                                                  setUploadCompleteMessage, handleReturnToStart,
@@ -19,11 +19,13 @@ const UploadFire: React.FC<UploadFireProps> = ({
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState("");
 
+  if (personnelRecording === '') handleReturnToStart().catch(console.error);
+
   const uploadToSql = async (fileData: FileCollectionRowSet, fileName: string) => {
     try {
       setCurrentlyRunning(`File ${fileName} uploading to SQL...`)
       const response = await fetch(
-        `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}`, {
+        `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.plotCensusNumber ? currentCensus.plotCensusNumber.toString().trim() : 0}&user=${personnelRecording}`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(fileData[fileName])
@@ -32,6 +34,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       const result = await response.json();
       setAllRowToCMID((prevState) => [...prevState, result.output]);
+      return response.ok ? 'SQL load successful' : 'SQL load failed';
     } catch (error) {
       setUploadError(error);
       setErrorComponent('UploadFire');
@@ -46,7 +49,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
       formData.append(file.name, file);
 
       const response = await fetch(
-        `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}`, {
+        `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.plotCensusNumber ? currentCensus.plotCensusNumber.toString().trim() : 0}&user=${user}`, {
           method: 'POST',
           body: formData
         });
@@ -66,7 +69,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
         <Box sx={{width: '100%', mr: 1}}>
           <LinearProgress variant="determinate" {...props} />
         </Box>
-        <Box sx={{minWidth: 35}}>
+        <Box sx={{minWidth: 35, display: 'flex', flex: 1, flexDirection: 'column'}}>
           <Typography variant="body2" color="text.secondary">{`${Math.round(
             props.value,
           )}% --> ${props.currentlyRunningMsg}`}</Typography>
@@ -145,7 +148,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
         </Box>
       ) : (
         <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
-          <Stack direction={"column"}>
+          <Stack direction={"column"} sx={{display: 'inherit'}}>
             <Typography variant="h5" gutterBottom>Upload Complete</Typography>
             {results.map((result) => (
               <Typography key={result}>{result}</Typography>
@@ -156,12 +159,12 @@ const UploadFire: React.FC<UploadFireProps> = ({
               uploadForm === "ctfsweb_old_tree_form" ||
               uploadForm === "ctfsweb_multiple_stems_form" ||
               uploadForm === "ctfsweb_big_trees_form") ? (
-                <Box>
-                  <Typography>Your upload included measurements, which must be validated before proceeding</Typography>
-                  <Button onClick={() => setReviewState(ReviewStates.VALIDATE)} sx={{width: 'fit-content'}}>
-                    Continue to Validation
-                  </Button>
-                </Box>
+              <Box>
+                <Typography>Your upload included measurements, which must be validated before proceeding</Typography>
+                <Button onClick={() => setReviewState(ReviewStates.VALIDATE)} sx={{width: 'fit-content'}}>
+                  Continue to Validation
+                </Button>
+              </Box>
             ) : (
               <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
                 Return to Upload Start

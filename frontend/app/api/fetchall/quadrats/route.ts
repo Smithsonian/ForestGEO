@@ -18,6 +18,8 @@ export async function GET(): Promise<NextResponse<QuadratsRDS[]>> {
       id: index + 1,
       quadratID: row.QuadratID,
       plotID: row.PlotID,
+      censusID: row.CensusID,
+      personnelID: row.PersonnelID,
       quadratName: row.QuadratName,
       dimensionX: row.DimensionX,
       dimensionY: row.DimensionY,

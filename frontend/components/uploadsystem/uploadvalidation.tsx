@@ -1,8 +1,8 @@
 "use client";
 import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import {Box, Button, LinearProgress, Typography} from '@mui/material';
-import {Plot, ReviewStates, UploadFireProps} from "@/config/macros";
-import {ValidationResponse, ValidationResult} from "@/components/processors/processormacros";
+import {Plot, ReviewStates} from "@/config/macros";
+import {ValidationResponse} from "@/components/processors/processormacros";
 import {Stack} from "@mui/joy";
 import {CensusRDS} from "@/config/sqlmacros";
 
@@ -46,7 +46,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     let processedCalls = 0;
 
     for (const api of validationAPIs) {
-      const response = await fetch(`/api/validations/${api}?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
+      const response = await fetch(`/api/validations/${api}?plotID=${currentPlot?.id}&censusID=${currentCensus?.plotCensusNumber}`);
       const result = await response.json();
       if (!response.ok) {
         throw new Error(`unforeseen error in uploadvalidation -- attempting to run validation ${api}`);
@@ -67,7 +67,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     if (validationResults) {
       for (const api in validationResults) {
         const result = validationResults[api];
-        if (result.insertedRows !== result.expectedRows) {
+        if (result.failedRows > 0) {
           setErrorsFound(true);
           break;
         }
@@ -87,10 +87,14 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
           {Object.entries(validationResults).map(([api, result]) => (
             <Box key={api} sx={{mb: 2}}>
               <Typography>{api}:</Typography>
-              {result.expectedRows !== result.insertedRows ? (
-                <Typography color="error">- {result.message}</Typography>
+              {result.failedRows > 0 ? (
+                <>
+                  <Typography color="error">- {result.message}</Typography>
+                  <Typography color="error">Failed Core Measurement
+                    IDs: {result.failedCoreMeasurementIDs?.join(', ') ?? 'None'}</Typography>
+                </>
               ) : (
-                <Typography>Processed Rows: {result.insertedRows}, Errors Detected: {result.expectedRows}</Typography>
+                <Typography>Processed Rows: {result.failedRows}, Errors Detected: {result.totalRows}</Typography>
               )}
             </Box>
           ))}
@@ -98,15 +102,18 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       ) : (
         <Typography>Validating...</Typography>
       )}
-      { isValidationComplete && errorsFound ? (
+      {isValidationComplete && errorsFound ? (
         <Stack direction={"column"}>
-          <Typography variant={"h5"}>Erroneous rows were found when running validations. <br /> Please proceed to the error display to review errors found</Typography>
-          <Button sx={{width: 'fit-content'}} onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>Proceed</Button>
+          <Typography variant={"h5"}>Erroneous rows were found when running validations. <br/> Please proceed to the
+            error display to review errors found</Typography>
+          <Button sx={{width: 'fit-content'}}
+                  onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>Proceed</Button>
         </Stack>
       ) : (
         <Stack direction={"column"}>
           <Typography variant={"h5"}>All validations passed with no errors.</Typography>
-          <Button sx={{width: 'fit-content'}} onClick={() => setReviewState(ReviewStates.UPDATE)}>Complete Upload</Button>
+          <Button sx={{width: 'fit-content'}} onClick={() => setReviewState(ReviewStates.UPDATE)}>Complete
+            Upload</Button>
         </Stack>
       )}
     </Box>

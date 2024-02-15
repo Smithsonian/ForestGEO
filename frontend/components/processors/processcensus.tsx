@@ -1,6 +1,5 @@
-import {PoolConnection} from 'mysql2/promise';
-import {booleanToBit, FileRow} from '@/config/macros';
-import {runQuery,} from '@/components/processors/processormacros';
+import {booleanToBit} from '@/config/macros';
+import {runQuery, SpecialProcessingProps,} from '@/components/processors/processormacros';
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
@@ -10,15 +9,11 @@ import {
   processTrees
 } from './processorhelperfunctions';
 
-export default async function processCensus(
-  connection: PoolConnection,
-  rowData: FileRow,
-  plotKey: string,
-  censusID: string,
-  fullName: string
-) {
+export default async function processCensus(props: Readonly<SpecialProcessingProps>) {
+  const {connection, rowData, plotID, censusID, fullName} = props;
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
+  if (!plotID || !censusID || !fullName) throw new Error("Missing plotID, censusID, or full name");
   try {
     /**
      *       "tag": "Trees.TreeTag",
@@ -52,15 +47,6 @@ export default async function processCensus(
     );
     if (!quadratID) throw new Error(`Quadrat with name ${rowData.quadrat} does not exist.`);
 
-    const plotID = await getColumnValueByColumnName(
-      connection,
-      'Plots',
-      'PlotID',
-      'PlotName',
-      plotKey
-    );
-    if (!plotID) throw new Error(`Plot with name ${plotKey} does not exist.`);
-
     let subSpeciesID = null;
     if (speciesID) {
       subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
@@ -82,26 +68,9 @@ export default async function processCensus(
       throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     }
 
-    // Process CoreMeasurements for dbh
-    const isPrimaryStemQuery = `
-    SELECT IF(COUNT(*) > 0, MAX(IsPrimaryStem), b'1') AS IsPrimaryStem
-    FROM ${schema}.CoreMeasurements
-    WHERE TreeID = ? AND StemID = ? AND CensusID = ? AND PlotID = ? AND QuadratID = ?;
-    `;
-
-    const stemResult = await runQuery(connection, isPrimaryStemQuery, [
-      treeID,
-      stemID,
-      censusID,
-      plotID,
-      quadratID,
-    ]);
-
-    const isPrimaryStem = stemResult.length > 0 ? stemResult[0].IsPrimaryStem : false;
-
     const measurementInsertQuery = `
     INSERT INTO ${schema}.CoreMeasurements
-    (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsRemeasurement, IsCurrent, IsPrimaryStem, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
+    (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
     const dbhResult = await runQuery(connection, measurementInsertQuery, [
@@ -111,9 +80,6 @@ export default async function processCensus(
       treeID,
       stemID,
       personnelID,
-      booleanToBit(false), // is not remeasurement
-      booleanToBit(true),
-      isPrimaryStem,  // Using the value obtained from the previous query
       booleanToBit(false), // isValidated is false by default
       rowData.date,
       rowData.dbh,
@@ -126,9 +92,9 @@ export default async function processCensus(
       throw new Error(`Insertion failed for CoreMeasurement.`);
     }
 
-    const dbhCMID: number = dbhResult.insertId;
-    if (dbhCMID === null) {
-      throw new Error(`The DBH insertion's CoreMeasurementID is null.`);
+    const dbhCMID = dbhResult.insertId;
+    if (dbhCMID === null || dbhCMID === 0) {
+      throw new Error(`The DBH insertion's CoreMeasurementID is null, or 0, indicating that insertion was not successful`);
     }
 
     // Process Attributes and CMAttributes for codes

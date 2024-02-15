@@ -346,6 +346,8 @@ export type QuadratsRDS = {
   id: number;
   quadratID: number;
   plotID: number | null;
+  censusID: number | null;
+  personnelID: number | null;
   quadratName: string | null;
   dimensionX: number | null;
   dimensionY: number | null;
@@ -357,6 +359,8 @@ export type QuadratsRDS = {
 export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1, align: 'left',},

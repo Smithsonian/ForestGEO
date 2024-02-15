@@ -1,109 +1,136 @@
+// FIXED DATA ATTRIBUTES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import sql from "mssql";
-import {ErrorMessages, sqlConfig} from "@/config/macros";
-import {AttributeRDS} from "@/config/sqlmacros";
+import {ErrorMessages, HTTPResponses} from "@/config/macros";
+import {AttributesRDS} from "@/config/sqlmacros";
+import mysql, {PoolConnection} from "mysql2/promise";
+import {
+  getSchema,
+  getSqlConnection,
+  parseAttributeRequestBody,
+  runQuery
+} from "@/components/processors/processormacros";
 
-async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
+export async function GET(request: NextRequest): Promise<NextResponse<{
+  attributes: AttributesRDS[],
+  totalCount: number
+}>> {
+  let conn: PoolConnection | null = null;
+  try {
+    const schema = getSchema();
+    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+    if (isNaN(page)) {
+      console.error('page parseInt conversion failed');
     }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
+    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+    if (isNaN(pageSize)) {
+      console.error('pageSize parseInt conversion failed');
+      // handle error or set default
+    }
+    // Initialize the connection attempt counter
+    let attempt = 0;
+    conn = await getSqlConnection(attempt);
 
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
-  }
-  return await conn.request().query(query);
-}
+    /// Calculate the starting row for the query based on the page number and page size
+    const startRow = page * pageSize;
+    // Query to get the paginated data
+    const paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Attributes
+      LIMIT ?, ?
+    `;
+    const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
 
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRows = totalRowsResult[0].totalRows;
 
-export async function GET(): Promise<NextResponse<AttributeRDS[]>> {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Attributes`);
-  if (!results) throw new Error("call failed");
-  await conn.close();
-  let attributeRows: AttributeRDS[] = []
-  Object.values(results.recordset).map((row, index) => {
-    attributeRows.push({
+    const attributeRows: AttributesRDS[] = paginatedResults.map((row: any, index: number) => ({
       id: index + 1,
-      code: row['Code'],
-      description: row['Description'],
-      status: row['Status']
-    })
-  })
-  return new NextResponse(
-    JSON.stringify(attributeRows),
-    {status: 200}
-  );
-}
+      code: row.Code,
+      description: row.Description,
+      status: row.Status,
+    }));
 
-export async function POST(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  const row: AttributeRDS = {
-    id: 0,
-    code: request.nextUrl.searchParams.get('code')!,
-    description: request.nextUrl.searchParams.get('desc')!,
-    status: request.nextUrl.searchParams.get('stat')!
+    return new NextResponse(
+      JSON.stringify({attributes: attributeRows, totalCount: totalRows}),
+      {status: 200}
+    );
+  } catch (error) {
+    console.error('Error in GET:', error);
+    throw error;
+  } finally {
+    if (conn) {
+      conn.release();
+    }
   }
-
-  let validateCode = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${row.code}'`);
-  if (!validateCode) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
-  if (validateCode.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-
-  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Attributes (Code, Description, Status) VALUES ('${row.code}', '${row.description}', '${row.status}')`);
-  if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Insert successful"}, {status: 200});
 }
 
-export async function DELETE(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  try {
+    const schema = getSchema();
+    const newRowData = await parseAttributeRequestBody(request, 'POST');
+    conn = await getSqlConnection(0);
 
-  const deleteCode = request.nextUrl.searchParams.get('code')!;
-  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Attributes WHERE [Code] = '${deleteCode}'`);
-  if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Update successful",}, {status: 200});
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Attributes`, newRowData]);
+    await runQuery(conn, insertQuery);
+
+    return new NextResponse(JSON.stringify({message: "Insert successful"}), {status: 200});
+  } catch (error: any) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      // Handle the specific error if the code already exists
+      return new NextResponse(JSON.stringify({message: ErrorMessages.UKAE}), {status: HTTPResponses.CONFLICT});
+    }
+    console.error('Error in POST:', error);
+    throw error;
+  } finally {
+    if (conn) conn.release();
+  }
 }
 
-export async function PATCH(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  try {
+    const schema = getSchema();
+    conn = await getSqlConnection(0);
 
-  const oldCode = request.nextUrl.searchParams.get('oldCode')!;
-  const row: AttributeRDS = {
-    id: 0,
-    code: request.nextUrl.searchParams.get('newCode')!,
-    description: request.nextUrl.searchParams.get('newDesc')!,
-    status: request.nextUrl.searchParams.get('newStat')!
-  };
+    const deleteCode = request.nextUrl.searchParams.get('code')!;
+    if (!deleteCode) {
+      return new NextResponse(JSON.stringify({message: "Code parameter is required"}), {status: 400});
+    }
 
-  // check to ensure new code is not already taken
-  if (row.code !== oldCode) { // if CODE is being updated, this check needs to happen
-    let newCodeCheck = await runQuery(conn, `SELECT * FROM forestgeo.Attributes WHERE [Code] = '${row.code}'`);
-    if (!newCodeCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
-    if (newCodeCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
+    const deleteQuery = `DELETE FROM ${schema}.Attributes WHERE Code = ?`;
+    await runQuery(conn, deleteQuery, [deleteCode]);
 
-    let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [Code] = '${row.code}', [Description] = '${row.description}', [Status] = '${row.status}' WHERE [Code] = '${oldCode}'`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
-  } else { // otherwise updating can focus solely on other columns
-    let results = await runQuery(conn, `UPDATE forestgeo.Attributes SET [Description] = '${row.description}', [Status] = '${row.status}' WHERE [Code] = '${oldCode}'`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
+    return new NextResponse(JSON.stringify({message: "Delete successful"}), {status: 200});
+  } catch (error) {
+    console.error('Error in DELETE operation:', error);
+    return new NextResponse(JSON.stringify({message: ErrorMessages.DCF}), {status: 400});
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  try {
+    const schema = getSchema();
+    const code = request.nextUrl.searchParams.get('code')!;
+    const updateData = await parseAttributeRequestBody(request, 'PATCH');
+    conn = await getSqlConnection(0);
+
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE Code = ?', [`${schema}.Attributes`, updateData, code]);
+    await runQuery(conn, updateQuery);
+
+    return new NextResponse(JSON.stringify({message: "Update successful"}), {status: 200});
+  } catch (error: any) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      // Handle the specific error if the new code conflicts
+      return new NextResponse(JSON.stringify({message: ErrorMessages.UKAE}), {status: 409});
+    }
+    console.error('Error in PATCH:', error);
+    throw error;
+  } finally {
+    if (conn) conn.release();
   }
 }

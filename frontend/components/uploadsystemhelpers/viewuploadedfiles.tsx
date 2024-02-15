@@ -24,23 +24,44 @@ import {CensusRDS} from "@/config/sqlmacros";
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
-function LoadingFiles() {
+interface LoadingFilesProps {
+  currentPlot: Plot | null;
+  currentCensus: CensusRDS | null;
+  refreshFiles: () => void;
+}
+
+function LoadingFiles(props: Readonly<LoadingFilesProps>) {
+  const {currentPlot, currentCensus, refreshFiles} = props;
+  useEffect(() => {
+    refreshFiles();
+  }, []); // on mount
+
   return (
-    <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
-      <CardHeader>
-        <div className="flex flex-col">
-          <h5 className="text-md">Loading Files...</h5>
-        </div>
-      </CardHeader>
-      <Divider className={"mt-6 mb-6"}/>
-      <CardContent>
-        <div className="flex flex-col">
-          <CircularProgress value={60} size={"lg"}>
-            Retrieving files...
-          </CircularProgress>
-        </div>
-      </CardContent>
-    </Card>
+    <Box sx={{display: 'flex', flexDirection: "column"}}>
+      <Typography level={"title-lg"}>
+        Accessing
+        Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+        <br/>
+        <Button sx={{width: 'fit-content'}} onClick={refreshFiles}>Refresh Files</Button>
+        <br/>
+        Uploaded CSV Files
+      </Typography>
+      <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
+        <CardHeader>
+          <div className="flex flex-col">
+            <h5 className="text-md">Loading Files...</h5>
+          </div>
+        </CardHeader>
+        <Divider className={"mt-6 mb-6"}/>
+        <CardContent>
+          <div className="flex flex-col">
+            <CircularProgress value={60} size={"lg"}>
+              Retrieving files...
+            </CircularProgress>
+          </div>
+        </CardContent>
+      </Card>
+    </Box>
   );
 }
 
@@ -51,7 +72,8 @@ interface VUFProps {
   setRefreshFileList: Dispatch<SetStateAction<boolean>>;
 }
 
-export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFileList, setRefreshFileList}: Readonly<VUFProps>) {
+export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
+  const {currentPlot, currentCensus, refreshFileList, setRefreshFileList} = props;
   const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
@@ -84,7 +106,7 @@ export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFi
 
   const getListOfFiles = useCallback(async () => {
     try {
-      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot?.key.trim() ?? 'none'}&census=${currentCensus?.censusID.toString().trim() ?? 'none'}`, {
+      let response = await fetch(`/api/downloadallfiles?plot=${currentPlot?.key.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, {
         method: 'GET',
       });
 
@@ -114,14 +136,14 @@ export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFi
     getListOfFiles().then();
   };
 
-
   if (error) {
     console.log(error);
     return BrowseError(error);
   } else if (!isLoaded || !fileRows) {
-    return <LoadingFiles/>
+    return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>
   } else {
-    let sortedFileData = fileRows.toSorted((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    let sortedFileData: UploadedFileData[] = fileRows;
+    if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     let i = 1;
     sortedFileData.forEach((row) => {
       row.key = i;
@@ -134,11 +156,12 @@ export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFi
           <Box sx={{display: 'flex', flexDirection: "column"}}>
             <Typography level={"title-lg"}>
               Accessing
-              Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.censusID.toString() ?? 'none'}
-              <br/> <br/>
+              Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+            </Typography>
+            <Button sx={{width: 'fit-content', marginBottom: 5}} onClick={refreshFiles}>Refresh Files</Button>
+            <Typography level={"title-lg"}>
               Uploaded CSV Files
             </Typography>
-            <Button sx={{width: 'fit-content'}} onClick={refreshFiles}>Refresh Files</Button>
           </Box>
           <Divider className={"mt-6 mb-6"}/>
           <Box sx={{display: 'flex', flexDirection: "column"}}>
@@ -168,18 +191,18 @@ export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFi
                         <TableCell sx={(errs) ? {
                           color: 'red',
                           fontWeight: 'bold'
-                        } : {}}>{new Date(row.version).toString()}</TableCell>
+                        } : {}}>{row.version}</TableCell>
                         <TableCell sx={(errs) ? {
                           color: 'red',
                           fontWeight: 'bold'
                         } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
                           <Button
-                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                             <DownloadIcon/>
                           </Button>
                           <Button
-                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                             <DeleteIcon/>
                           </Button>
                         </TableCell>
@@ -233,14 +256,14 @@ export default function ViewUploadedFiles({currentPlot, currentCensus, refreshFi
                         } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
                           <Button
-                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                             <DownloadIcon/>
                           </Button>
                           <Button>
                             <EditIcon/>
                           </Button>
                           <Button
-                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.censusID.toString().trim() ?? 'none'}`, row.name)}>
+                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                             <DeleteIcon/>
                           </Button>
                         </TableCell>

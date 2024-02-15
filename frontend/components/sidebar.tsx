@@ -11,7 +11,7 @@ import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
-import {Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {Census, Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -36,7 +36,7 @@ import CommitIcon from "@mui/icons-material/Commit";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import {usePlotListContext} from "@/app/contexts/listselectionprovider";
+import {useCensusListContext, usePlotListContext} from "@/app/contexts/listselectionprovider";
 import {TextField} from "@mui/material";
 import Add from '@mui/icons-material/Add';
 import {useCensusLoadContext, useCensusLoadDispatch} from "@/app/contexts/coredataprovider";
@@ -107,11 +107,12 @@ export default function Sidebar() {
     description: null,
   }
   let currentPlot = usePlotContext();
-  let plotDispatch = usePlotDispatch()!;
+  let plotDispatch = usePlotDispatch();
   let plotListContext = usePlotListContext();
   let currentCensus = useCensusContext();
-  let censusDispatch = useCensusDispatch()!;
-  let censusLoadContext = useCensusLoadContext()!;
+  let censusDispatch = useCensusDispatch();
+  let censusListContext = useCensusListContext();
+  let censusLoadContext = useCensusLoadContext();
   let censusLoadDispatch = useCensusLoadDispatch();
 
   const [loading, setLoading] = useState<boolean>();
@@ -122,10 +123,10 @@ export default function Sidebar() {
       console.log('fetchCensusPlot in sidebar called');
       const storedCensus = await getData('census');
       console.log(`sidebar fetchCensusPlot: stored census: ${storedCensus?.censusID}`);
-      if (storedCensus) censusDispatch({census: storedCensus});
+      if (storedCensus && censusDispatch) censusDispatch({census: storedCensus});
       const storedPlot = await getData('plot');
       console.log(`sidebar fetchCensusPlot: stored plot: ${storedPlot?.key}`);
-      if (storedPlot) plotDispatch({plot: storedPlot});
+      if (storedPlot && plotDispatch) plotDispatch({plot: storedPlot});
       setLoading(false);
     }
 
@@ -181,7 +182,7 @@ export default function Sidebar() {
       return;
     }
     const highestCensusID = Math.max(
-      ...censusLoadContext.map((censusRDS) => censusRDS.censusID),
+      ...censusLoadContext!.map((census) => census.censusID),
       0
     );
 
@@ -192,11 +193,18 @@ export default function Sidebar() {
       plotCensusNumber: plotCensusNumber,
       startDate: new Date(newCensusData.startDate),
       endDate: new Date(newCensusData.endDate),
-      description: newCensusData.description
+      description: newCensusData.description!
     };
 
     try {
-      const updatedCensusList: CensusRDS[] = [...censusLoadContext, newCensus];
+      const response = await fetch(`/api/fixeddata/census`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(newCensus),
+      });
+      const responseJSON = await response.json();
+      if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Insertion failed");
+      const updatedCensusList: CensusRDS[] = [...censusLoadContext!, newCensus];
       if (censusLoadDispatch) censusLoadDispatch({censusLoad: updatedCensusList});
       setOpenAddCensusSelectionModal(false);
     } catch (error) {
@@ -207,7 +215,6 @@ export default function Sidebar() {
   /**
    * AUTHENTICATED SESSION HANDLING
    */
-
   if (plotLoading || censusLoading || quadratLoading || loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center">
@@ -334,7 +341,7 @@ export default function Sidebar() {
               }}>
                 <Typography color={(!currentPlot || !currentCensus) ? "danger" : "success"}
                             level="body-lg">
-                  {currentCensus ? `Census: ${currentCensus.censusID}` : 'No Census'}
+                  {currentCensus ? `Census: ${currentCensus.plotCensusNumber}` : 'No Census'}
                 </Typography>
               </Link>
             </Breadcrumbs>
@@ -412,13 +419,23 @@ export default function Sidebar() {
                         required
                         autoFocus
                         size={"sm"}
-                        onChange={(_event: React.SyntheticEvent | null, newValue: CensusRDS | null,) => setCensus(newValue)}
+                        onChange={(_event: React.SyntheticEvent | null, newValue: Census | null,) => {
+                          // Filter to get only those census records matching the given plotCensusNumber
+                          const filteredCensus = censusLoadContext?.filter(census => census.plotCensusNumber === newValue?.plotCensusNumber);
+
+                          // Sort by startDate in descending order (most recent first)
+                          filteredCensus?.sort((a, b) => (b.startDate?.getTime() ?? 0) - (a.startDate?.getTime() ?? 0));
+
+                          // Update the context with the first element (most recent date) or null if no matching records
+                          const mostRecentCensusRDS = filteredCensus?.[0] ?? null;
+                          setCensus(mostRecentCensusRDS);
+                        }}
                       >
                         <Option value={""}>None</Option>
-                        {censusLoadContext.slice().sort((a, b) => b.censusID - a.censusID).map((item) => (
-                          <Option key={item.censusID} value={item}>Census {item.censusID},
-                            starting at {new Date(item.startDate!).toDateString() ?? 'Date not found'}, ending
-                            at {new Date(item.endDate!).toDateString() ?? 'Date not found'}</Option>
+                        {censusListContext?.slice().sort((a, b) => b.plotCensusNumber - a.plotCensusNumber).map((item) => (
+                          <Option key={item.plotCensusNumber} value={item}>Census {item.plotCensusNumber},
+                            starting at {new Date(item.startDate).toDateString() ?? 'Date not found'}, ending
+                            at {new Date(item.endDate).toDateString() ?? 'Date not found'}</Option>
                         ))}
                       </Select>
                     </Stack>
@@ -463,14 +480,6 @@ export default function Sidebar() {
                       <Option value={item} key={item.key}>{item.key}, Quadrats: {item.num}, ID: {item.id}</Option>
                     ))}
                   </Select>
-                  <TextField
-                    label="Plot Census Number"
-                    type="number"
-                    fullWidth
-                    margin="dense"
-                    value={newCensusData.plotCensusNumber}
-                    onChange={handleInputChange('plotCensusNumber')}
-                  />
                   <TextField
                     label="Start Date"
                     type="date"
