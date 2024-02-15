@@ -11,8 +11,8 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
-import {CensusRDS} from "@/config/sqlmacros";
 import {setData} from "@/config/db";
+import {CensusRDS} from "@/config/sqlmacros";
 
 // INTERFACES
 export interface Plot {
@@ -27,16 +27,12 @@ export interface Quadrat {
   quadratName: string;
 }
 
-export interface PlotAction {
-  plot: Plot | null;
-}
-
-export interface CensusRDSAction {
-  census: CensusRDS | null;
-}
-
-export interface QuadratsAction {
-  quadrat: Quadrat | null;
+export interface Census {
+  plotID: number;
+  plotCensusNumber: number;
+  startDate: Date;
+  endDate: Date;
+  description: string;
 }
 
 export interface UploadedFileData {
@@ -63,48 +59,30 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
 
 export const TableHeadersByFormType: Record<string, { label: string }[]> = {
   "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
-  // "fixeddata_role.csv": [{label: "role"}],
   "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
   "fixeddata_species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
   "fixeddata_quadrat": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
   "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
-  "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
-  "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
-  "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}, {label: "comments"}],
-  "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}, {label: "comments"}],
   "arcgis_xlsx": arcgisHeaders
 };
 
 export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
   "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
-  // "fixeddata_role.csv": [{label: "role"}],
   "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}],
   "fixeddata_species": [{label: "spcode"}],
   "fixeddata_quadrat": [{label: "quadrat"}],
   "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
-  "ctfsweb_new_plants_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "dbh"}, {label: "codes"}],
-  "ctfsweb_old_tree_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "olddbh"}, {label: "oldhom"}, {label: "dbh"}, {label: "codes"}],
-  "ctfsweb_multiple_stems_form": [{label: "quadrat"}, {label: "tag"}, {label: "stemtag"}, {label: "dbh"}, {label: "codes"}],
-  "ctfsweb_big_trees_form": [{label: "quadrat"}, {label: "subquadrat"}, {label: "tag"}, {label: "multistemtag"}, {label: "species"}, {label: "dbh"}, {label: "hom"}],
   "arcgis_xlsx": arcgisHeaders
 }
 export const DBInputForms: string[] = [
   "fixeddata_codes",
-  "fixeddata_role",
   "fixeddata_personnel",
   "fixeddata_species",
   "fixeddata_quadrat",
   "fixeddata_census"
 ];
-export const CTFSWebInputForms: string[] = [
-  "ctfsweb_new_plants_form",
-  "ctfsweb_old_tree_form",
-  "ctfsweb_multiple_stems_form",
-  "ctfsweb_big_trees_form",
-];
 export const FormGroups: Record<string, string[]> = {
   "Database Forms": DBInputForms,
-  "CTFSWeb Forms": CTFSWebInputForms,
   "ArcGIS Forms": ["arcgis_xlsx"]
 };
 
@@ -149,20 +127,42 @@ export type FileCollectionRowSet = {
   [filename: string]: FileRowSet; // {filename --> FileRowSet}
 };
 
+export type ValidationErrorID = number;
+
+export type ExtendedFileRow = {
+  rowData: FileRow;
+  errors: ValidationErrorID[];
+};
+
+export type ExtendedFileRowSet = {
+  [row: string]: ExtendedFileRow; // {row --> ExtendedFileRow}
+};
+
+export type ExtendedFileCollectionRowSet = {
+  [filename: string]: ExtendedFileRowSet; // {filename --> ExtendedFileRowSet}
+};
+
+export interface UploadStartProps {
+  uploadForm: string;
+  setUploadForm: Dispatch<SetStateAction<string>>;
+  personnelRecording: string;
+  setPersonnelRecording: Dispatch<SetStateAction<string>>;
+  setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+}
+
 export interface UploadParseFilesProps {
   uploadForm: string;
   parsing: boolean;
   acceptedFiles: FileWithPath[];
   isOverwriteConfirmDialogOpen: boolean;
-  setUploadForm: Dispatch<SetStateAction<string>>;
-  setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
-  setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setIsOverwriteConfirmDialogOpen: Dispatch<SetStateAction<boolean>>;
+  personnelRecording: string;
+  setPersonnelRecording: Dispatch<SetStateAction<string>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   handleInitialSubmit: () => Promise<void>;
   handleFileReplace: () => void;
   handleFileChange: (newFiles: FileWithPath[]) => void;
-  setUploadError: Dispatch<SetStateAction<any>>;
-  setErrorComponent: Dispatch<SetStateAction<string>>;
 }
 
 export interface UploadReviewFilesProps {
@@ -191,6 +191,7 @@ export interface UploadReviewFilesProps {
 }
 
 export interface UploadFireProps extends UploadReviewFilesProps {
+  personnelRecording: string;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
   currentPlot: Plot;
   currentCensus: CensusRDS;
@@ -198,8 +199,13 @@ export interface UploadFireProps extends UploadReviewFilesProps {
   uploadCompleteMessage: string;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   handleReturnToStart: () => Promise<void>;
-  allRowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[];
-  setAllRowToCMID: Dispatch<SetStateAction<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>>;
+  allRowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[];
+  setAllRowToCMID: Dispatch<SetStateAction<{
+    fileName: string;
+    coreMeasurementID: number;
+    stemTag: string;
+    treeTag: string;
+  }[]>>;
 }
 
 export interface UploadErrorProps {
@@ -238,6 +244,7 @@ export enum HTTPResponses {
 }
 
 export enum ReviewStates {
+  START = "start",
   PARSE = "parse",
   REVIEW = "review",
   UPLOAD = "upload",
@@ -315,44 +322,6 @@ export const fileColumns = [
   {key: 'version', label: 'Version'},
   {key: 'isCurrentVersion', label: 'Is Current Version?'},
 ]
-
-export const plots: Plot[] = [
-  {key: "Amacayacu", num: 16, id: 0},
-  {key: "BCI", num: 40, id: 0},
-  {key: "bukittimah", num: 22, id: 0},
-  {key: "Cocoli", num: 39, id: 0},
-  {key: "CRC", num: 1, id: 0},
-  {key: "CTFS-Panama", num: 11, id: 0},
-  {key: "Danum", num: 36, id: 0},
-  {key: "Harvard Forest", num: 9, id: 0},
-  {key: "Heishiding", num: 4, id: 0},
-  {key: "HKK", num: 19, id: 0},
-  {key: "ituri_all", num: 24, id: 0},
-  {key: "khaochong", num: 38, id: 0},
-  {key: "Korup", num: 10, id: 0},
-  {key: "korup3census", num: 32, id: 0},
-  {key: "Lambir", num: 35, id: 0},
-  {key: "Lilly_Dickey", num: 41, id: 0},
-  {key: "Luquillo", num: 25, id: 0},
-  {key: "Mpala", num: 3, id: 0},
-  {key: "osfdp", num: 37, id: 0},
-  {key: "pasoh", num: 15, id: 0},
-  {key: "Rabi", num: 17, id: 0},
-  {key: "Scotty Creek", num: 8, id: 0},
-  {key: "SERC", num: 7, id: 0},
-  {key: "Sinharaja", num: 26, id: 0},
-  {key: "Speulderbos", num: 29, id: 0},
-  {key: "Stable_bukittimah", num: 27, id: 0},
-  {key: "stable_pasoh", num: 28, id: 0},
-  {key: "Traunstein", num: 34, id: 0},
-  {key: "Tyson", num: 23, id: 0},
-  {key: "UMBC", num: 18, id: 0},
-  {key: "Utah", num: 30, id: 0},
-  {key: "Vandermeer", num: 14, id: 0},
-  {key: "wanang", num: 21, id: 0},
-  {key: "Yosemite", num: 33, id: 0},
-];
-
 export const allCensusCount = 9;
 export const allCensus = Array.from({length: allCensusCount}, (_, i) => i + 1);
 
@@ -572,53 +541,39 @@ export type RowDataStructure = { [key: string]: any }; // Generic type for row d
 
 /**
  * CONTAINER STORAGE FUNCTIONS
+ *
+ * need a type to store validation errors by row per file
+ * row per file can be stored as FileRowSet?
  */
 
-export async function uploadFileAsBuffer(containerClient: ContainerClient, file: File, user: string, errors: boolean) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  console.log(buffer.toString());
-  console.log(`blob name: ${file.name}`);
-  let metadata = {
-    user: user,
-    errors: `${errors}`
-  }
-  // create connection & client facing new blob
-  // async command to upload buffer via client, waiting for response
-  return await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata})
-}
+const MAX_RETRIES = 3; // Maximum number of retries
+const RETRY_DELAY_MS = 3000; // Delay between retries in milliseconds
 
 export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
   const buffer = Buffer.from(await file.arrayBuffer());
   console.log(`Uploading blob: ${file.name}`);
 
-  // Upload the file
-  await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {
-    metadata: { user },
-  });
+  // Retry mechanism for the upload
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {
+        metadata: {user},
+      });
 
-  // Check if the container is empty (other than the current file)
-  if (await isContainerEmpty(containerClient, file.name)) {
-    console.log(`Container is empty after upload. Deleting container: ${containerClient.containerName}`);
-    await deleteContainer(containerClient);
-  }
-}
-
-async function isContainerEmpty(containerClient: ContainerClient, uploadedFileName: string) {
-  let isEmpty = true;
-  for await (const blob of containerClient.listBlobsFlat()) {
-    if (blob.name !== uploadedFileName) {
-      isEmpty = false;
-      break;
+      // If upload is successful, return the response
+      if (uploadResponse) {
+        console.log(`Upload successful on attempt ${attempt}: ${file.name}`);
+        return uploadResponse;
+      }
+    } catch (error) {
+      if (attempt < MAX_RETRIES) {
+        console.log(`Upload attempt ${attempt} failed for ${file.name}, retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      } else {
+        // If all attempts fail, rethrow the error
+        console.error(`All upload attempts failed for ${file.name}`);
+        throw error;
+      }
     }
-  }
-  return isEmpty;
-}
-
-async function deleteContainer(containerClient: ContainerClient) {
-  try {
-    await containerClient.delete();
-    console.log(`Container deleted: ${containerClient.containerName}`);
-  } catch (error) {
-    console.error(`Error deleting container: ${error}`);
   }
 }

@@ -1,70 +1,60 @@
 create
     definer = azureroot@`%` procedure forestgeo_testing.CheckIfQuadratByNameExistsInPlot(IN quadratName text, IN plotID int)
 BEGIN
-    SELECT EXISTS (
-        SELECT 1
-        FROM forestgeo_testing.quadrats
-        WHERE QuadratName = quadratName AND PlotID = plotID
-    ) AS QuadratExists;
+    SELECT EXISTS (SELECT 1
+                   FROM forestgeo_testing.quadrats
+                   WHERE QuadratName = quadratName
+                     AND PlotID = plotID) AS QuadratExists;
 END;
 
 create
     definer = azureroot@`%` procedure forestgeo_testing.CheckIfTreeTagExists(IN inputTreeTag varchar(10))
 BEGIN
-    SELECT EXISTS (
-        SELECT 1
-        FROM forestgeo_testing.trees
-        WHERE TreeTag = inputTreeTag
-    ) AS TreeTagExists;
+    SELECT EXISTS (SELECT 1
+                   FROM forestgeo_testing.trees
+                   WHERE TreeTag = inputTreeTag) AS TreeTagExists;
 END;
 
 create
     definer = azureroot@`%` procedure forestgeo_testing.CountNumDeadMissingStems()
 BEGIN
-    SELECT
-        cm.CensusID,
-        a.Status,
-        COUNT(s.StemID) AS NumberOfStems
-    FROM
-        forestgeo_testing.coremeasurements cm
-            JOIN
-        forestgeo_testing.stems s ON cm.StemID = s.StemID
-            JOIN
-        forestgeo_testing.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
-            JOIN
-        forestgeo_testing.attributes a ON cma.Code = a.Code
-    WHERE
-        a.Status IN ('dead', 'stem dead', 'missing') AND cm.IsValidated IS TRUE
-    GROUP BY
-        cm.CensusID, a.Status;
+    SELECT cm.CensusID,
+           a.Status,
+           COUNT(s.StemID) AS NumberOfStems
+    FROM forestgeo_testing.coremeasurements cm
+             JOIN
+         forestgeo_testing.stems s ON cm.StemID = s.StemID
+             JOIN
+         forestgeo_testing.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
+             JOIN
+         forestgeo_testing.attributes a ON cma.Code = a.Code
+    WHERE a.Status IN ('dead', 'stem dead', 'missing')
+      AND cm.IsValidated IS TRUE
+    GROUP BY cm.CensusID, a.Status;
 END;
 
 create
     definer = azureroot@`%` procedure forestgeo_testing.CountNumRecordsByQuadrat()
 BEGIN
-    SELECT
-        q.PlotID,
-        cm.CensusID,
-        q.QuadratName,
-        COUNT(DISTINCT s.StemID) AS NumberOfStems,
-        SUM(CASE WHEN a.Status NOT IN ('dead', 'missing', 'stem dead') THEN 1 ELSE 0 END) AS NumberOfLivingStems,
-        COUNT(DISTINCT t.TreeID) AS NumberOfTrees
-    FROM
-        forestgeo_testing.quadrats q
-            JOIN
-        forestgeo_testing.stems s ON q.QuadratID = s.QuadratID
-            JOIN
-        forestgeo_testing.coremeasurements cm ON s.StemID = cm.StemID
-            JOIN
-        forestgeo_testing.trees t ON s.TreeID = t.TreeID
-            LEFT JOIN
-        forestgeo_testing.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
-            LEFT JOIN
-        forestgeo_testing.attributes a ON cma.Code = a.Code
-    WHERE
-        cm.IsValidated IS TRUE
-    GROUP BY
-        q.PlotID, cm.CensusID, q.QuadratName;
+    SELECT q.PlotID,
+           cm.CensusID,
+           q.QuadratName,
+           COUNT(DISTINCT s.StemID)                                                          AS NumberOfStems,
+           SUM(CASE WHEN a.Status NOT IN ('dead', 'missing', 'stem dead') THEN 1 ELSE 0 END) AS NumberOfLivingStems,
+           COUNT(DISTINCT t.TreeID)                                                          AS NumberOfTrees
+    FROM forestgeo_testing.quadrats q
+             JOIN
+         forestgeo_testing.stems s ON q.QuadratID = s.QuadratID
+             JOIN
+         forestgeo_testing.coremeasurements cm ON s.StemID = cm.StemID
+             JOIN
+         forestgeo_testing.trees t ON s.TreeID = t.TreeID
+             LEFT JOIN
+         forestgeo_testing.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
+             LEFT JOIN
+         forestgeo_testing.attributes a ON cma.Code = a.Code
+    WHERE cm.IsValidated IS TRUE
+    GROUP BY q.PlotID, cm.CensusID, q.QuadratName;
 END;
 
 create
@@ -104,7 +94,8 @@ BEGIN
     SET vMaxRows = 2756583;
 
     -- Reset auto-increment of CoreMeasurements to 1
-    ALTER TABLE forestgeo_testing.CoreMeasurements AUTO_INCREMENT = 1;
+    ALTER TABLE forestgeo_testing.CoreMeasurements
+        AUTO_INCREMENT = 1;
 
     -- Open the combined cursor
     OPEN combinedCursor;
@@ -134,8 +125,10 @@ BEGIN
 
         -- Insert a row for DBH measurement or remeasurement
         INSERT INTO forestgeo_testing.CoreMeasurements (CensusID, PlotID, QuadratID, TreeID, StemID, MeasuredDBH,
-                                                        MeasuredHOM, MeasurementDate, Description, IsRemeasurement, IsCurrent)
-        VALUES (vCensusID, vPlotID, vQuadratID, vTreeID, vStemID, CAST(vDBH AS DECIMAL(10, 2)), CAST(vHOM AS DECIMAL(10, 2)), vExactDate, vComments, vIsRemeasurement, FALSE);
+                                                        MeasuredHOM, MeasurementDate, Description, IsRemeasurement,
+                                                        IsCurrent)
+        VALUES (vCensusID, vPlotID, vQuadratID, vTreeID, vStemID, CAST(vDBH AS DECIMAL(10, 2)),
+                CAST(vHOM AS DECIMAL(10, 2)), vExactDate, vComments, vIsRemeasurement, FALSE);
 
         -- Increment the row count
         SET vRowCount = vRowCount + 1;
@@ -146,11 +139,9 @@ BEGIN
 
     -- Update the IsCurrent field for the most recent measurement of each stem
     UPDATE forestgeo_testing.CoreMeasurements cm
-        INNER JOIN (
-            SELECT MAX(CoreMeasurementID) AS LatestMeasurementID, StemID
-            FROM forestgeo_testing.CoreMeasurements
-            GROUP BY StemID
-        ) AS latest ON cm.CoreMeasurementID = latest.LatestMeasurementID
+        INNER JOIN (SELECT MAX(CoreMeasurementID) AS LatestMeasurementID, StemID
+                    FROM forestgeo_testing.CoreMeasurements
+                    GROUP BY StemID) AS latest ON cm.CoreMeasurementID = latest.LatestMeasurementID
     SET cm.IsCurrent = TRUE;
 END;
 

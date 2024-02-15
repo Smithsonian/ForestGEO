@@ -47,8 +47,8 @@ export async function POST(request: NextRequest) {
   let uploadResponse;
   try {
     uploadResponse = await uploadValidFileAsBuffer(containerClient, file, user);
-    console.log(`upload complete: ${uploadResponse.requestId}`);
-    if (uploadResponse._response.status <= 200 && uploadResponse._response.status >= 299) throw new Error("Failure: Response status not between 200 & 299");
+    console.log(`upload complete: ${uploadResponse?.requestId}`);
+    if (uploadResponse && uploadResponse._response.status <= 200 && uploadResponse._response.status >= 299) throw new Error("Failure: Response status not between 200 & 299");
   } catch (error) {
     if (error instanceof Error) {
       console.error("File processing error:", error.message);

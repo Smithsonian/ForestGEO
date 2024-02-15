@@ -68,6 +68,8 @@ export function getGridID(gridType: string) {
       return 'code';
     case 'census':
       return 'censusID';
+    case 'personnel':
+      return 'personnelID';
     case 'quadrats':
       return 'quadratID';
     case 'species':
@@ -106,8 +108,7 @@ export function computeMutation(gridType: string, newRow: GridRowModel, oldRow: 
       break;
     case 'quadrats':
       fields = [
-        'quadratID', 'plotID', 'quadratName', 'quadratX', 'quadratY', 'quadratZ',
-        'dimensionX', 'dimensionY', 'area', 'quadratShape'
+        'quadratID', 'plotID', 'quadratName', 'dimensionX', 'dimensionY', 'area', 'quadratShape'
       ]
       break;
     case 'species':

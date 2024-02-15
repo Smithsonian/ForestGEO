@@ -2,7 +2,7 @@ create table forestgeo_id.Attributes
 (
     Code        varchar(10) not null
         constraint Attributes_pk
-            primary key,
+        primary key,
     Description varchar(max
 ) ,
     Status      varchar(20)
@@ -52,8 +52,8 @@ create table forestgeo_id.Census
         primary key,
     PlotID      int
         constraint Census_Plots_PlotID_fk
-            references forestgeo_id.Plots
-            on update cascade,
+        references forestgeo_id.Plots
+        on update cascade,
     StartDate   date,
     EndDate     date,
     Description varchar(max
@@ -68,10 +68,10 @@ create table forestgeo_id.Quadrats
         primary key,
     PlotID      int
         constraint Quadrats_Plots_FK
-            references forestgeo_id.Plots,
+        references forestgeo_id.Plots,
     PersonnelID int
         constraint Quadrats_Personnel_fk
-            references forestgeo_id.Personnel,
+        references forestgeo_id.Personnel,
     QuadratName varchar(max
 ) ,
     QuadratX     float,
@@ -103,7 +103,7 @@ create table forestgeo_id.Family
     Family      varchar(32),
     ReferenceID int
         constraint Family_Reference_ReferenceID_fk
-            references forestgeo_id.Reference
+        references forestgeo_id.Reference
 )
     go
 
@@ -114,11 +114,11 @@ create table forestgeo_id.Genus
         primary key,
     FamilyID    int
         constraint Genus_Family_FamilyID_fk
-            references forestgeo_id.Family,
+        references forestgeo_id.Family,
     GenusName   varchar(32),
     ReferenceID int
         constraint Genus_Reference_ReferenceID_fk
-            references forestgeo_id.Reference,
+        references forestgeo_id.Reference,
     Authority   varchar(32)
 )
     go
@@ -130,7 +130,7 @@ create table forestgeo_id.Species
         primary key,
     GenusID           int
         constraint Species_Genus_GenusID_fk
-            references forestgeo_id.Genus,
+        references forestgeo_id.Genus,
     CurrentTaxonFlag  bit,
     ObsoleteTaxonFlag bit,
     SpeciesName       varchar(64),
@@ -149,10 +149,10 @@ create table forestgeo_id.CurrentObsolete
 (
     SpeciesID         int  not null
         constraint CurrentObsolete_Species_SpeciesID_fk
-            references forestgeo_id.Species,
+        references forestgeo_id.Species,
     ObsoleteSpeciesID int  not null
         constraint CurrentObsolete_Species_SpeciesID_fk2
-            references forestgeo_id.Species,
+        references forestgeo_id.Species,
     ChangeDate        date not null,
     ChangeCodeID      int,
     ChangeNote        varchar(max
@@ -169,7 +169,7 @@ create table forestgeo_id.SpeciesInventory
     CensusID           int,
     PlotID             int
         constraint SpeciesInventory_Plots_PlotID_fk
-            references forestgeo_id.Plots,
+        references forestgeo_id.Plots,
     SpeciesID          int,
     SubSpeciesID       int
 )
@@ -183,8 +183,8 @@ create table forestgeo_id.SubSpecies
     SubSpeciesCode    varchar(10),
     SpeciesID         int
         constraint SubSpecies_Species_SpeciesID_fk
-            references forestgeo_id.Species
-            on update cascade,
+        references forestgeo_id.Species
+        on update cascade,
     CurrentTaxonFlag  bit,
     ObsoleteTaxonFlag bit,
     SubSpeciesName    varchar(max
@@ -201,11 +201,11 @@ create table forestgeo_id.Trees
     TreeTag      varchar(10),
     SpeciesID    int
         constraint Trees_Species_SpeciesID_fk
-            references forestgeo_id.Species
-            on update cascade,
+        references forestgeo_id.Species
+        on update cascade,
     SubSpeciesID int
         constraint Trees_SubSpecies_SubSpeciesID_fk
-            references forestgeo_id.SubSpecies
+        references forestgeo_id.SubSpecies
 )
     go
 
@@ -216,12 +216,12 @@ create table forestgeo_id.Stems
         primary key,
     TreeID          int
         constraint FK_Stems_Trees
-            references forestgeo_id.Trees
-            on update cascade,
+        references forestgeo_id.Trees
+        on update cascade,
     QuadratID       int
         constraint FK_Stems_Quadrats
-            references forestgeo_id.Quadrats
-            on update cascade,
+        references forestgeo_id.Quadrats
+        on update cascade,
     StemNumber      int,
     StemTag         varchar(10),
     TreeTag         varchar(10),
@@ -240,28 +240,28 @@ create table forestgeo_id.CoreMeasurements
         primary key,
     CensusID          int
         constraint CoreMeasurements_Census_CensusID_fk
-            references forestgeo_id.Census
-            on update cascade,
+        references forestgeo_id.Census
+        on update cascade,
     PlotID            int
         constraint CoreMeasurements_Plots_PlotID_fk
-            references forestgeo_id.Plots,
+        references forestgeo_id.Plots,
     QuadratID         int
         constraint CoreMeasurements_Quadrats_QuadratID_fk
-            references forestgeo_id.Quadrats,
+        references forestgeo_id.Quadrats,
     TreeID            int
         constraint FK_CoreMeasurements_Trees
-            references forestgeo_id.Trees,
+        references forestgeo_id.Trees,
     StemID            int
         constraint FK_CoreMeasurements_Stems
-            references forestgeo_id.Stems,
+        references forestgeo_id.Stems,
     PersonnelID       int
         constraint CoreMeasurements_Personnel_PersonnelID_fk
-            references forestgeo_id.Personnel
-            on update cascade,
+        references forestgeo_id.Personnel
+        on update cascade,
     MeasurementTypeID int
         constraint CoreMeasurements_MeasurementTypes_MeasurementTypeID_fk
-            references forestgeo_id.MeasurementTypes
-            on update cascade,
+        references forestgeo_id.MeasurementTypes
+        on update cascade,
     MeasurementDate   date,
     Measurement       varchar(max
 ) ,
@@ -279,12 +279,12 @@ create table forestgeo_id.CMAttributes
         primary key,
     CoreMeasurementID int
         constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
-            references forestgeo_id.CoreMeasurements
-            on update cascade,
+        references forestgeo_id.CoreMeasurements
+        on update cascade,
     Code              varchar(10)
         constraint CMAttributes_Attributes_Code_fk
-            references forestgeo_id.Attributes
-            on update cascade
+        references forestgeo_id.Attributes
+        on update cascade
 )
     go
 
@@ -304,12 +304,12 @@ create table forestgeo_id.CMVErrors
         primary key,
     CoreMeasurementID int
         constraint CMVErrors_CoreMeasurements_CoreMeasurementID_fk
-            references forestgeo_id.CoreMeasurements
-            on update cascade,
+        references forestgeo_id.CoreMeasurements
+        on update cascade,
     ValidationErrorID int
         constraint CMVErrors_ValidationErrors_ValidationErrorID_fk
-            references forestgeo_id.ValidationErrors
-            on update cascade
+        references forestgeo_id.ValidationErrors
+        on update cascade
 )
     go
 

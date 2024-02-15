@@ -1,6 +1,11 @@
 import {PoolConnection, RowDataPacket} from "mysql2/promise";
-import {fileMappings, getConn, runQuery, ValidationResponse} from "@/components/processors/processormacros";
-import {RowDataStructure} from "@/config/macros";
+import {
+  fileMappings,
+  getConn,
+  InsertUpdateProcessingProps,
+  runQuery,
+  ValidationResponse
+} from "@/components/processors/processormacros";
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
@@ -110,7 +115,7 @@ export async function processTrees(
   treeTag: any,
   speciesID: any,
   subSpeciesID: number | null
-) {
+): Promise<number | null> {
   const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
@@ -141,7 +146,7 @@ export async function processStems(
   quadratID: any,
   stemQuadX: any,
   stemQuadY: any
-) {
+): Promise<number | null> {
   const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
 
@@ -196,7 +201,6 @@ export async function getPersonnelIDByName(
     if (rows.length > 0) {
       return rows[0].PersonnelID as number;
     }
-
     return null; // No matching personnel found
   } catch (error: any) {
     console.error('Error retrieving PersonnelID:', error.message);
@@ -207,26 +211,22 @@ export async function getPersonnelIDByName(
   }
 }
 
-export async function insertOrUpdate(
-  connection: PoolConnection, // Change the parameter type to PoolConnection
-  fileType: string,
-  rowData: RowDataStructure,
-  plotKey: string,
-  censusID: string,
-  fullName: string
-): Promise<number | null> {
+export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | null> {
+  const {formType, ...subProps} = props;
+  const {connection, rowData} = subProps;
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
-  const mapping = fileMappings[fileType];
+  const mapping = fileMappings[formType];
   if (!mapping) {
-    throw new Error(`Mapping not found for file type: ${fileType}`);
+    throw new Error(`Mapping not found for file type: ${formType}`);
   }
   console.log('INSERT OR UPDATE: schema & mapping found');
   if (mapping.specialProcessing) {
     console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
     try {
-      return await mapping.specialProcessing(connection, rowData, plotKey, censusID, fullName);
+      return await mapping.specialProcessing(subProps);
     } catch (error) {
+      console.error(error);
       throw error;
     }
   }
@@ -263,23 +263,30 @@ export async function runValidationProcedure(procedureName: string, plotID: numb
   let query, parameters;
 
   if (min !== undefined && max !== undefined) {
-    // If minDBH and maxDBH are provided, call ValidateScreenMeasuredDiameterMinMax
     query = `CALL ${procedureName}(?, ?, ?, ?)`;
     parameters = [censusID, plotID, min, max];
   } else {
-    // If minDBH and maxDBH are not provided, call ValidateDBHGrowthExceedsMax
     query = `CALL ${procedureName}(?, ?)`;
     parameters = [censusID, plotID];
   }
 
   try {
     await conn.beginTransaction();
-    const result = await runQuery(conn, query, parameters);
+    const resultSets = await runQuery(conn, query, parameters);
+
+    // The first result set contains the expectedRows, insertedRows, and message
+    const validationSummary = resultSets[0][0];
+
+    // The second result set contains the failedValidationIds (if present)
+    const failedValidationIds = resultSets.length > 1 ? resultSets[1].map((row: any) => row.CoreMeasurementID) : [];
+
     const validationResponse: ValidationResponse = {
-      expectedRows: result[0].ExpectedRows,
-      insertedRows: result[0].InsertedRows,
-      message: result[0].Message
+      totalRows: validationSummary.TotalRows,
+      failedRows: validationSummary.FailedRows,
+      message: validationSummary.Message,
+      ...(failedValidationIds.length > 0 && {failedCoreMeasurementIDs: failedValidationIds})
     };
+
     await conn.commit();
     return validationResponse;
   } catch (error) {

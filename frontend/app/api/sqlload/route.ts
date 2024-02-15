@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getSqlConnection} from "@/components/processors/processormacros";
+import {getSqlConnection, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {HTTPResponses} from "@/config/macros";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
@@ -7,17 +7,17 @@ import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
 export async function POST(request: NextRequest) {
   const fileRowSet = await request.json();
   const fileName = request.nextUrl.searchParams.get('fileName')!.trim();
-  const plot = request.nextUrl.searchParams.get("plot")!.trim();
-  const census = request.nextUrl.searchParams.get("census")!.trim();
-  const user = request.nextUrl.searchParams.get("user")!;
+  const plotID = parseInt(request.nextUrl.searchParams.get("plot")!.trim());
+  const censusID = parseInt(request.nextUrl.searchParams.get("census")!.trim());
+  const fullName = request.nextUrl.searchParams.get("user")!;
   const formType = request.nextUrl.searchParams.get("formType")!.trim();
 
-  let conn: PoolConnection | null = null; // Use PoolConnection type
+  let connection: PoolConnection | null = null; // Use PoolConnection type
 
   try {
     let i = 0;
-    conn = await getSqlConnection(i);
-    if (!conn) {
+    connection = await getSqlConnection(i);
+    if (!connection) {
       throw new Error("SQL connection failed");
     }
   } catch (error) {
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (!conn) {
+  if (!connection) {
     console.error("Container client or SQL connection is undefined.");
     return new NextResponse(
       JSON.stringify({
@@ -51,13 +51,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let rowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[] = [];
+  let rowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[] = [];
   for (const rowId in fileRowSet) {
     const row = fileRowSet[rowId];
     try {
-      const coreMeasurementID = await insertOrUpdate(conn, formType, row, plot, census, user);
+      let props: InsertUpdateProcessingProps = {connection, formType, rowData: row, plotID, censusID, fullName};
+      const coreMeasurementID = await insertOrUpdate(props);
       if (coreMeasurementID) { // if a number was returned, then a coremeasurement was added --> therefore, row contains tag & stemtag
-        rowToCMID.push({fileName: fileName, coreMeasurementID: coreMeasurementID, stemTag: row.stemtag, treeTag: row.tag});
+        rowToCMID.push({
+          fileName: fileName,
+          coreMeasurementID: coreMeasurementID,
+          stemTag: row.stemtag,
+          treeTag: row.tag
+        });
       }
     } catch (error) {
       if (error instanceof Error) {

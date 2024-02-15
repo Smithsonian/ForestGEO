@@ -13,9 +13,8 @@ import {
   TableRow,
   Typography
 } from "@mui/material";
-import {Plot, ReviewStates, UploadFireProps} from "@/config/macros";
+import {Plot, ReviewStates} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
-import {UploadValidationProps} from "@/components/uploadsystem/uploadvalidation";
 import {Checkbox} from "@mui/joy";
 import {CensusRDS} from "@/config/sqlmacros";
 
@@ -27,19 +26,21 @@ export interface UploadUpdateValidationsProps {
   currentPlot: Plot;
   currentCensus: CensusRDS;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  allRowToCMID: {fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[];
+  allRowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[];
   handleReturnToStart: () => Promise<void>;
 }
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
-  const {currentPlot, currentCensus, validationPassedCMIDs,
+  const {
+    currentPlot, currentCensus, validationPassedCMIDs,
     setValidationPassedCMIDs,
     setValidationPassedRowCount,
-    allRowToCMID, handleReturnToStart} = props;
+    allRowToCMID, handleReturnToStart
+  } = props;
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
-    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
+    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id}&censusID=${currentCensus?.plotCensusNumber}`);
     const result = await response.json();
     setValidationPassedCMIDs(result.updatedIDs);
     setValidationPassedRowCount(result.rowsValidated);
@@ -56,7 +57,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       {!isUpdateValidationComplete ? (
         <CircularProgress/>
       ) : (
-        <Box sx={{ width: '100%', p: 2 }}>
+        <Box sx={{width: '100%', p: 2}}>
           <Typography variant="h6">CoreMeasurement Validation Status</Typography>
           <TableContainer component={Paper}>
             <Table aria-label="validation status table">

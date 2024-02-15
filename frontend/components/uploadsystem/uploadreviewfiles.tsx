@@ -26,6 +26,7 @@ import {FileWithPath} from "react-dropzone";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
 import {parse, ParseResult} from "papaparse";
 import {FileDisplay} from "@/components/uploadsystemhelpers/filelist";
+import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
@@ -41,11 +42,6 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const [reuploadInProgress, setReuploadInProgress] = useState(false);
   const currentFileName = acceptedFiles[dataViewActive - 1]?.name;
   const hasErrors = errors[currentFileName] && Object.keys(errors[currentFileName]).length > 0;
-
-  const allHeadersPresent = expectedHeaders.every(header =>
-    currentFileHeaders.includes(header.trim().toLowerCase())
-  );
-
   const parseAndUpdateFile = async (file: FileWithPath) => {
     try {
       const fileText = await file.text();
@@ -181,127 +177,128 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
       alert('Please resolve all errors before proceeding.');
     }
   };
-
-  const handleBack = () => {
-    // Set the review state to PARSE to go back to the UploadParseFiles component
-    setReviewState(ReviewStates.PARSE);
-  };
-
   return (
-    <Grid container spacing={2}>
-      <Grid item xs={12}>
-        <Button variant="contained" onClick={handleBack} sx={{mb: 2}}>
-          Back
-        </Button>
-        <Box sx={{display: 'flex', flexDirection: 'column', mr: 10}}>
-          <Typography level={"title-md"} color={"primary"} sx={{marginBottom: 1}}>
-            Form: {uploadForm}
-          </Typography>
-          <Typography level={"title-sm"}>
-            File: {acceptedFiles[dataViewActive - 1].name}
-          </Typography>
-          {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && allHeadersPresent ? (
-            <DisplayParsedDataGridInline
-              parsedData={parsedData}
-              errors={errors}
-              setErrors={setErrors}
-              setParsedData={setParsedData}
-              errorRows={errorRows}
-              setErrorRows={setErrorRows}
-              formType={uploadForm}
-              fileName={acceptedFiles[dataViewActive - 1].name}
-            />
-          ) : (
-            <Typography level="body-lg" bgcolor="error">
-              The selected file is missing required headers. Please check the file and re-upload.
-            </Typography>
-          )}
-        </Box>
-        <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-        <Button
-          onClick={() => setIsReuploadDialogOpen(true)}
-          variant="contained"
-          color="primary"
-          disabled={!hasErrors}
-          sx={{marginTop: 2}}
-        >
-          Re-upload Corrected File
-        </Button>
-      </Grid>
-      <Grid item xs={4}/>
-      <Grid item xs={4}>
-        <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
-          <Button variant="contained" color="primary" onClick={handleRemoveCurrentFile} sx={{width: 'fit-content'}}>
-            Remove Current File
-          </Button>
-          <Box sx={{display: 'flex', flexDirection: 'row', mb: 2}}>
-            <Divider orientation={"vertical"} sx={{marginX: 2}}/>
-            {currentFileHeaders.length > 0 ? (
-              expectedHeaders.map((header) => (
-                <Box key={header} sx={{display: 'flex', flex: 1, alignItems: 'center'}}>
-                  <Checkbox
-                    size={"lg"}
-                    disabled
-                    checked={currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase())}
-                    label={header}
-                    color={"success"}
-                  />
-                  <Divider orientation={"vertical"} sx={{marginX: 2}}/>
-                </Box>
-              ))
-            ) : (
-              <Typography>No file selected or file has no headers.</Typography>
-            )}
-          </Box>
-          <FileDisplay acceptedFiles={acceptedFiles}/>
-          <Button
-            variant={"contained"}
-            disabled={!areHeadersValid(currentFileHeaders)}
-            onClick={handleApproveClick} // Updated here
-            sx={{width: 'fit-content'}}
-          >
-            Confirm Changes
-          </Button>
-        </Box>
-      </Grid>
-      <Grid item xs={4}/>
-      <Modal open={isReuploadDialogOpen} onClose={() => setIsReuploadDialogOpen(false)}>
-        <ModalDialog>
-          <DialogTitle>Re-upload Corrected File</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              Please upload the corrected version of the file: {currentFileName}
-            </DialogContentText>
-            <DropzoneLogic onChange={handleReUploadFileChange}/>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setIsReuploadDialogOpen(false)}>Close</Button>
-          </DialogActions>
-        </ModalDialog>
-      </Modal>
-      <Dialog
-        open={confirmationDialogOpen && canConfirmChanges}
-        onClose={handleCancel}
-        aria-labelledby="alert-dialog-title"
-        aria-describedby="alert-dialog-description"
-      >
-        <DialogTitle id="alert-dialog-title">
-          {"Do your files look correct?"}
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText id="alert-dialog-description">
-            Please press Confirm to upload your files to storage.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Stack direction={"row"}>
-            <Button onClick={handleCancel}>Cancel</Button>
-            <Button onClick={handleConfirm} autoFocus>
-              Confirm
+    <>
+      {reuploadInProgress ? (
+        <CircularProgress/>
+      ) : (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Button variant="contained" onClick={() => setReviewState(ReviewStates.PARSE)} sx={{mb: 2}}>
+              Back
             </Button>
-          </Stack>
-        </DialogActions>
-      </Dialog>
-    </Grid>
+            <Box sx={{display: 'flex', flexDirection: 'column', mr: 10}}>
+              {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && areHeadersValid(currentFileHeaders) ? (
+                <>
+                  <Typography level={"title-md"} color={"primary"} sx={{marginBottom: 1}}>
+                    Form: {uploadForm}
+                  </Typography><Typography level={"title-sm"}>
+                  File: {acceptedFiles[dataViewActive - 1].name}
+                </Typography><DisplayParsedDataGridInline
+                  parsedData={parsedData}
+                  errors={errors}
+                  setErrors={setErrors}
+                  setParsedData={setParsedData}
+                  errorRows={errorRows}
+                  setErrorRows={setErrorRows}
+                  formType={uploadForm}
+                  fileName={acceptedFiles[dataViewActive - 1].name}/>
+                </>
+              ) : (
+                <Typography level="body-lg" bgcolor="error">
+                  The selected file is missing required headers. Please check the file and re-upload.<br/>
+                  Your file&apos;s headers were: {currentFileHeaders.join(', ')}<br/>
+                  The expected headers were {expectedHeaders.join(', ')}
+                </Typography>
+              )}
+            </Box>
+            <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
+            <Button
+              onClick={() => setIsReuploadDialogOpen(true)}
+              variant="contained"
+              color="primary"
+              disabled={!hasErrors}
+              sx={{marginTop: 2}}
+            >
+              Re-upload Corrected File
+            </Button>
+          </Grid>
+          <Grid item xs={4}/>
+          <Grid item xs={4}>
+            <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+              <Button variant="contained" color="primary" onClick={handleRemoveCurrentFile} sx={{width: 'fit-content'}}>
+                Remove Current File
+              </Button>
+              <Box sx={{display: 'flex', flexDirection: 'row', mb: 2}}>
+                <Divider orientation={"vertical"} sx={{marginX: 2}}/>
+                {currentFileHeaders.length > 0 ? (
+                  expectedHeaders.map((header) => (
+                    <Box key={header} sx={{display: 'flex', flex: 1, alignItems: 'center'}}>
+                      <Checkbox
+                        size={"lg"}
+                        disabled
+                        checked={currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase())}
+                        label={header}
+                        color={"success"}
+                      />
+                      <Divider orientation={"vertical"} sx={{marginX: 2}}/>
+                    </Box>
+                  ))
+                ) : (
+                  <Typography>No file selected or file has no headers.</Typography>
+                )}
+              </Box>
+              <FileDisplay acceptedFiles={acceptedFiles}/>
+              <Button
+                variant={"contained"}
+                disabled={!areHeadersValid(currentFileHeaders)}
+                onClick={handleApproveClick} // Updated here
+                sx={{width: 'fit-content'}}
+              >
+                Confirm Changes
+              </Button>
+            </Box>
+          </Grid>
+          <Grid item xs={4}/>
+          <Modal open={isReuploadDialogOpen} onClose={() => setIsReuploadDialogOpen(false)}>
+            <ModalDialog>
+              <DialogTitle>Re-upload Corrected File</DialogTitle>
+              <DialogContent>
+                <DialogContentText>
+                  Please upload the corrected version of the file: {currentFileName}
+                </DialogContentText>
+                <DropzoneLogic onChange={handleReUploadFileChange}/>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setIsReuploadDialogOpen(false)}>Close</Button>
+              </DialogActions>
+            </ModalDialog>
+          </Modal>
+          <Dialog
+            open={confirmationDialogOpen && canConfirmChanges}
+            onClose={handleCancel}
+            aria-labelledby="alert-dialog-title"
+            aria-describedby="alert-dialog-description"
+          >
+            <DialogTitle id="alert-dialog-title">
+              {"Do your files look correct?"}
+            </DialogTitle>
+            <DialogContent>
+              <DialogContentText id="alert-dialog-description">
+                Please press Confirm to upload your files to storage.
+              </DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Stack direction={"row"}>
+                <Button onClick={handleCancel}>Cancel</Button>
+                <Button onClick={handleConfirm} autoFocus>
+                  Confirm
+                </Button>
+              </Stack>
+            </DialogActions>
+          </Dialog>
+        </Grid>
+      )}
+    </>
   );
 }

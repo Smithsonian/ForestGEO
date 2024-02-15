@@ -1,20 +1,15 @@
 "use client";
-import React, {createContext, Dispatch, useContext, useEffect, useReducer, useState} from "react";
+import React, {createContext, Dispatch, useContext, useEffect, useReducer} from "react";
 import {createEnhancedDispatch, genericLoadContextReducer, LoadAction, Plot, Quadrat} from "@/config/macros";
 import {usePlotListContext, useQuadratListContext} from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 
-export const USPLoadingContext = createContext({
-  plotLoading: false,
-  censusLoading: false,
-  quadratLoading: false,
-});
-export const PlotsContext = createContext<Plot | null>(null);
+export const PlotContext = createContext<Plot | null>(null);
 export const CensusContext = createContext<CensusRDS | null>(null);
 export const QuadratContext = createContext<Quadrat | null>(null);
-export const PlotsDispatchContext = createContext<Dispatch<{ plot: Plot | null }> | null>(null);
+export const PlotDispatchContext = createContext<Dispatch<{ plot: Plot | null }> | null>(null);
 export const CensusDispatchContext = createContext<Dispatch<{ census: CensusRDS | null }> | null>(null);
 export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: Quadrat | null }> | null>(null);
 
@@ -26,8 +21,8 @@ function isValidQuadrat(quadratListContext: Quadrat[], quadrat: Quadrat): boolea
   return quadratListContext.includes(quadrat);
 }
 
-function containsCensusID(censusArray: CensusRDS[], censusToCheck: CensusRDS): boolean {
-  return censusArray.some(census => census.censusID === censusToCheck.censusID);
+function isValidCensus(censusLoadContext: CensusRDS[], census: CensusRDS): boolean {
+  return censusLoadContext.includes(census);
 }
 
 export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
@@ -37,18 +32,13 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
   const plotListContext = usePlotListContext();
   const censusLoadContext = useCensusLoadContext();
   const quadratListContext = useQuadratListContext();
-  const [loading, setLoading] = useState({
-    plotLoading: false,
-    censusLoading: false,
-    quadratLoading: false,
-  });
 
   const [plot, plotDispatch] = useReducer(
     (state: Plot | null, action: LoadAction<Plot>) => genericLoadContextReducer(state, action, plotListContext!, isValidPlot),
     initPlot
   );
   const [census, censusDispatch] = useReducer(
-    (state: CensusRDS | null, action: LoadAction<CensusRDS>) => genericLoadContextReducer(state, action, censusLoadContext!, containsCensusID),
+    (state: CensusRDS | null, action: LoadAction<CensusRDS>) => genericLoadContextReducer(state, action, censusLoadContext!, isValidCensus),
     initCensus
   );
   const [quadrat, quadratDispatch] = useReducer(
@@ -63,49 +53,37 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading({plotLoading: true, censusLoading: true, quadratLoading: true});
       const plotData = await getData('plot');
-      plotDispatch({type: 'plot', payload: plotData});
+      if (plotData) plotDispatch({type: 'plot', payload: plotData});
 
       const quadratData = await getData('quadrat');
-      quadratDispatch({type: "quadrat", payload: quadratData});
+      if (quadratData) quadratDispatch({type: "quadrat", payload: quadratData});
 
       const censusData = await getData('census');
-      censusDispatch({type: "census", payload: censusData});
-      setLoading({plotLoading: false, censusLoading: false, quadratLoading: false});
+      if (censusData) censusDispatch({type: "census", payload: censusData});
     };
     fetchData().catch(console.error);
   }, []);
 
   return (
-    <USPLoadingContext.Provider value={loading}>
-      <PlotsContext.Provider value={plot}>
-        <PlotsDispatchContext.Provider value={enhancedPlotDispatch}>
-          <CensusContext.Provider value={census}>
-            <CensusDispatchContext.Provider value={enhancedCensusDispatch}>
-              <QuadratContext.Provider value={quadrat}>
-                <QuadratDispatchContext.Provider value={enhancedQuadratDispatch}>
-                  {children}
-                </QuadratDispatchContext.Provider>
-              </QuadratContext.Provider>
-            </CensusDispatchContext.Provider>
-          </CensusContext.Provider>
-        </PlotsDispatchContext.Provider>
-      </PlotsContext.Provider>
-    </USPLoadingContext.Provider>
+    <PlotContext.Provider value={plot}>
+      <PlotDispatchContext.Provider value={enhancedPlotDispatch}>
+        <CensusContext.Provider value={census}>
+          <CensusDispatchContext.Provider value={enhancedCensusDispatch}>
+            <QuadratContext.Provider value={quadrat}>
+              <QuadratDispatchContext.Provider value={enhancedQuadratDispatch}>
+                {children}
+              </QuadratDispatchContext.Provider>
+            </QuadratContext.Provider>
+          </CensusDispatchContext.Provider>
+        </CensusContext.Provider>
+      </PlotDispatchContext.Provider>
+    </PlotContext.Provider>
   );
 }
 
-export function useUSPLoadingContext() {
-  return useContext(USPLoadingContext);
-}
-
-export function usePlotContext() {
-  return useContext(PlotsContext);
-}
-
 export function usePlotDispatch() {
-  return useContext(PlotsDispatchContext);
+  return useContext(PlotDispatchContext);
 }
 
 export function useCensusContext() {

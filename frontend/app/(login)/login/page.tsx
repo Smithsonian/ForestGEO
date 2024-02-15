@@ -32,6 +32,7 @@ export default function LoginPage() {
     },
     exitBeforeEnter: true,
   })
+
   useEffect(() => {
     const resetIDBStorage = async () => {
       if (status === "unauthenticated" && !dataIsReset) {
@@ -45,8 +46,8 @@ export default function LoginPage() {
       }
     }
     resetIDBStorage().catch(console.error);
-    setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
-  }, [status, dataIsReset]);
+    setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
+  }, []);
 
   if (status === "unauthenticated") {
     return (

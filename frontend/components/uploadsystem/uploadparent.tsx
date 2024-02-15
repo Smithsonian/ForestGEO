@@ -22,6 +22,43 @@ import UploadValidation from "@/components/uploadsystem/uploadvalidation";
 import {ValidationResponse} from "@/components/processors/processormacros";
 import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
 import UploadValidationErrorDisplay from "@/components/uploadsystem/uploadvalidationerrordisplay";
+import {Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle} from "@mui/material";
+import UploadStart from "@/components/uploadsystem/uploadstart";
+
+interface ConfirmationDialogProps {
+  open: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({open, title, message, onConfirm, onCancel}) => {
+  return (
+    <Dialog
+      open={open}
+      onClose={onCancel}
+      aria-labelledby="confirmation-dialog-title"
+      aria-describedby="confirmation-dialog-description"
+    >
+      <DialogTitle id="confirmation-dialog-title">{title}</DialogTitle>
+      <DialogContent>
+        <DialogContentText id="confirmation-dialog-description">
+          {message}
+        </DialogContentText>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onCancel} color="primary">
+          Cancel
+        </Button>
+        <Button onClick={onConfirm} color="primary" autoFocus>
+          Confirm
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
 
 export default function UploadParent() {
   /**
@@ -29,6 +66,7 @@ export default function UploadParent() {
    */
     // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState("");
+  const [personnelRecording, setPersonnelRecording] = useState('');
   // in progress state --> data is being parsed
   const [parsing, setParsing] = useState(false);
   // core enum to handle state progression
@@ -55,11 +93,19 @@ export default function UploadParent() {
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
   const [validationPassedRowCount, setValidationPassedRowCount] = useState(0);
-  const [allRowToCMID, setAllRowToCMID] = useState<{fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string;}[]>([]);
+  const [allRowToCMID, setAllRowToCMID] = useState<{
+    fileName: string;
+    coreMeasurementID: number;
+    stemTag: string;
+    treeTag: string;
+  }[]>([]);
   const [refreshFileList, setRefreshFileList] = useState(false);
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const [showLeaveUploadDialog, setShowLeaveUploadDialog] = useState(false);
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
   const {data: session} = useSession();
+
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isDataUnsaved) {
@@ -75,37 +121,59 @@ export default function UploadParent() {
     };
   }, [isDataUnsaved]); // Run the effect when isDataUnsaved changes
 
-  const onFileUpload = () => {
-    // After file upload logic
-    setRefreshFileList(true); // Trigger refresh in ViewUploadedFiles
+  const handleTabChange = (_event: React.SyntheticEvent<Element, Event> | null, newValue: string | number | null) => {
+    if (newValue === null || typeof (newValue) !== 'number') return;
+
+    const confirmTabChange = () => {
+      setActiveTabIndex(newValue);
+      handleReturnToStart().catch(console.error);
+    };
+
+    if (newValue !== activeTabIndex) {
+      if (isUploadInProgress()) {
+        // Show confirmation dialog
+        setShowLeaveUploadDialog(true);
+        // Set up a callback for what to do after confirmation
+        // You might store `newValue` in a state and use it in the confirmation handler
+      } else {
+        confirmTabChange();
+      }
+    }
+  };
+  const isUploadInProgress = () => {
+    // Add logic to determine if the upload process is in progress
+    // For example, check if files are being parsed or if the review state is not at the start
+    return parsing || reviewState !== ReviewStates.PARSE;
   };
 
-  const onFileDelete = () => {
-    // After file delete logic
-    setRefreshFileList(true); // Trigger refresh in ViewUploadedFiles
+  const handleConfirmLeaveUpload = () => {
+    setShowLeaveUploadDialog(false);
+    handleReturnToStart().catch(console.error);
+    setActiveTabIndex(0); // Assuming the index 1 is for the 'ViewUploadedFiles' tab
+  };
+
+  const handleCancelLeaveUpload = () => {
+    setShowLeaveUploadDialog(false);
   };
 
   function areHeadersValid(actualHeaders: string[]): boolean {
     const expectedHeadersLower = expectedHeaders.map(header => header.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
 
-    const allExpectedHeadersPresent = expectedHeadersLower.every(expectedHeader =>
+    return expectedHeadersLower.every(expectedHeader =>
       actualHeadersLower.includes(expectedHeader));
-
-    const noAdditionalHeaders = actualHeadersLower.every(actualHeader =>
-      expectedHeadersLower.includes(actualHeader));
-
-    return allExpectedHeadersPresent && noAdditionalHeaders;
   }
 
   async function handleReturnToStart() {
     setDataViewActive(1);
+    setParsing(false);
     setAcceptedFiles([]);
     setParsedData({});
     setErrors({})
     setErrorRows({});
     setUploadForm('');
-    setReviewState(ReviewStates.PARSE);
+    setPersonnelRecording('');
+    setReviewState(ReviewStates.START);
   }
 
   async function resetError() {
@@ -225,7 +293,7 @@ export default function UploadParent() {
           delimiter: delimiter,
           header: true,
           skipEmptyLines: true,
-          transformHeader: (h) => h.trim(),
+          transformHeader: (h) => h.toLowerCase().trim(),
           complete: function (results: ParseResult<any>) {
             const expectedHeaders = TableHeadersByFormType[uploadForm];
             const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
@@ -322,21 +390,27 @@ export default function UploadParent() {
 
   const renderStateContent = () => {
     switch (reviewState) {
+      case ReviewStates.START:
+        return <UploadStart
+          uploadForm={uploadForm}
+          setUploadForm={setUploadForm}
+          personnelRecording={personnelRecording}
+          setPersonnelRecording={setPersonnelRecording}
+          setExpectedHeaders={setExpectedHeaders}
+          setReviewState={setReviewState}/>
       case ReviewStates.PARSE:
         return <UploadParseFiles
           parsing={parsing}
           uploadForm={uploadForm}
           acceptedFiles={acceptedFiles}
-          setExpectedHeaders={setExpectedHeaders}
-          setUploadForm={setUploadForm}
-          setAcceptedFiles={setAcceptedFiles}
           isOverwriteConfirmDialogOpen={isOverwriteConfirmDialogOpen}
           setIsOverwriteConfirmDialogOpen={setIsOverwriteConfirmDialogOpen}
+          personnelRecording={personnelRecording}
+          setPersonnelRecording={setPersonnelRecording}
           handleFileChange={handleFileChange}
           handleInitialSubmit={handleInitialSubmit}
           handleFileReplace={handleFileReplace}
-          setUploadError={setUploadError}
-          setErrorComponent={setErrorComponent}/>;
+          setReviewState={setReviewState}/>;
       case ReviewStates.REVIEW:
         return <UploadReviewFiles
           acceptedFiles={acceptedFiles}
@@ -364,6 +438,7 @@ export default function UploadParent() {
         />;
       case ReviewStates.UPLOAD:
         return <UploadFire
+          personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
           setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}
@@ -405,7 +480,8 @@ export default function UploadParent() {
           setValidationResults={setValidationResults}
         />;
       case ReviewStates.VALIDATE_ERRORS_FOUND:
-        return <UploadValidationErrorDisplay allRowToCMID={allRowToCMID} parsedData={parsedData} setReviewState={setReviewState} />;
+        return <UploadValidationErrorDisplay allRowToCMID={allRowToCMID} parsedData={parsedData}
+                                             setReviewState={setReviewState}/>;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
@@ -415,7 +491,7 @@ export default function UploadParent() {
           setValidationPassedCMIDs={setValidationPassedCMIDs}
           validationPassedRowCount={validationPassedRowCount}
           setValidationPassedRowCount={setValidationPassedRowCount}
-         allRowToCMID={allRowToCMID} handleReturnToStart={handleReturnToStart}/>
+          allRowToCMID={allRowToCMID} handleReturnToStart={handleReturnToStart}/>
       default:
         return (
           <UploadError
@@ -431,24 +507,41 @@ export default function UploadParent() {
     }
   }
   return (
-    <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
-      <Typography level={"title-lg"} color={"primary"}>
-        Drag and drop files into the box to upload them to storage
-      </Typography>
-      <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-        <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
-          <TabList sticky={"top"}>
-            <Tab>Browse Uploaded Files</Tab>
-            <Tab>Upload New Files</Tab>
-          </TabList>
-          <TabPanel value={0}>
-            <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFileList={refreshFileList} setRefreshFileList={setRefreshFileList}/>
-          </TabPanel>
-          <TabPanel value={1}>
-            {currentPlot ? renderStateContent() : <Typography>You must select a plot to continue!</Typography>}
-          </TabPanel>
-        </Tabs>
-      </Box>
-    </Box>
+    <>
+      {(currentCensus && currentPlot) && (
+        <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
+          <Typography level={"title-lg"} color={"primary"}>
+            Drag and drop files into the box to upload them to storage
+          </Typography>
+          <Box sx={{mt: 5, mr: 5, width: '95%'}}>
+            <Tabs value={activeTabIndex} onChange={handleTabChange} aria-label={"File Hub Options"} size={"lg"}
+                  sx={{display: 'flex', flex: 1}} className={""}>
+              <TabList sticky={"top"}>
+                <Tab>Browse Uploaded Files</Tab>
+                <Tab>Upload New Files</Tab>
+              </TabList>
+              <TabPanel value={0}>
+                <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus}
+                                   refreshFileList={refreshFileList}
+                                   setRefreshFileList={setRefreshFileList}/>
+              </TabPanel>
+              <TabPanel value={1}>
+                {currentPlot ? renderStateContent() : <Typography>You must select a plot to continue!</Typography>}
+              </TabPanel>
+            </Tabs>
+            {/* Confirmation Dialog for leaving the upload process */}
+            {showLeaveUploadDialog && (
+              <ConfirmationDialog
+                open={showLeaveUploadDialog}
+                onConfirm={handleConfirmLeaveUpload}
+                onCancel={handleCancelLeaveUpload}
+                title="Leave Upload"
+                message="Are you sure you want to leave the upload process? All progress will be lost."
+              />
+            )}
+          </Box>
+        </Box>
+      )}
+    </>
   );
 }
