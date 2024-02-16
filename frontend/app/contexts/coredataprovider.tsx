@@ -45,7 +45,7 @@ export const SubSpeciesLoadDispatchContext = createContext<Dispatch<{
 }> | null>(null);
 export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: PlotRDS[] | null }> | null>(null);
 
-export function CoreDataProvider({children}: { children: React.ReactNode }) {
+export function CoreDataProvider({children}: Readonly<{ children: React.ReactNode }>) {
 
   const [coreMeasurementLoad, coreMeasurementLoadDispatch] =
     useReducer<React.Reducer<CoreMeasurementsRDS[] | null, LoadAction<CoreMeasurementsRDS[]>>>(genericLoadReducer, []);

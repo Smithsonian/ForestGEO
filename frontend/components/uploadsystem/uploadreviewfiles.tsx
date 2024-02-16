@@ -42,11 +42,15 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const [reuploadInProgress, setReuploadInProgress] = useState(false);
   const currentFileName = acceptedFiles[dataViewActive - 1]?.name;
   const hasErrors = errors[currentFileName] && Object.keys(errors[currentFileName]).length > 0;
+  let requiredExpectedHeadersRaw = RequiredTableHeadersByFormType[uploadForm];
+  const requiredHeadersTrimmed = requiredExpectedHeadersRaw.map(item => item.label);
   const parseAndUpdateFile = async (file: FileWithPath) => {
     try {
       const fileText = await file.text();
+      const isCSV = file.name.endsWith('.csv'); // Simple check based on file extension
+      const delimiter = isCSV ? "," : "\t"; // Set delimiter to comma for CSV, tab for TSV
       parse<FileRow>(fileText, {
-        delimiter: ",",
+        delimiter: delimiter,
         header: true,
         skipEmptyLines: true,
         transformHeader: (h) => h.trim(),
@@ -194,15 +198,16 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     Form: {uploadForm}
                   </Typography><Typography level={"title-sm"}>
                   File: {acceptedFiles[dataViewActive - 1].name}
-                </Typography><DisplayParsedDataGridInline
-                  parsedData={parsedData}
-                  errors={errors}
-                  setErrors={setErrors}
-                  setParsedData={setParsedData}
-                  errorRows={errorRows}
-                  setErrorRows={setErrorRows}
-                  formType={uploadForm}
-                  fileName={acceptedFiles[dataViewActive - 1].name}/>
+                </Typography>
+                  <DisplayParsedDataGridInline
+                    parsedData={parsedData}
+                    errors={errors}
+                    setErrors={setErrors}
+                    setParsedData={setParsedData}
+                    errorRows={errorRows}
+                    setErrorRows={setErrorRows}
+                    formType={uploadForm}
+                    fileName={acceptedFiles[dataViewActive - 1].name}/>
                 </>
               ) : (
                 <Typography level="body-lg" bgcolor="error">
@@ -232,7 +237,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Box sx={{display: 'flex', flexDirection: 'row', mb: 2}}>
                 <Divider orientation={"vertical"} sx={{marginX: 2}}/>
                 {currentFileHeaders.length > 0 ? (
-                  expectedHeaders.map((header) => (
+                  requiredHeadersTrimmed.map((header) => (
                     <Box key={header} sx={{display: 'flex', flex: 1, alignItems: 'center'}}>
                       <Checkbox
                         size={"lg"}

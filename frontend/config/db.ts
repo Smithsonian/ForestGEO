@@ -15,30 +15,23 @@ async function getDb(): Promise<IDBPDatabase<MyDB>> {
   return openDB<MyDB>(dbName, 1, {
     upgrade(db) {
       if (!db.objectStoreNames.contains(storeName)) {
-        console.log(`${storeName} not found in IDB. Creating...`);
         db.createObjectStore(storeName);
-        console.log(`Store for ${storeName} created.`);
       }
     },
   });
 }
 
 export async function getData(key: string): Promise<any> {
-  console.log(`attempting to access data from store: ${key}`);
   const db = await getDb();
   return db.get(storeName, key);
 }
 
 export async function setData(key: string, val: any): Promise<void> {
-  console.log(`Attempting to store data ${val || 'undefined'} at storeName ${key}`);
-  if (!val) console.log('undefined data set, skipping');
-  else {
-    console.log('val not undefined');
+  if (val) {
     const db = await getDb();
     const tx = db.transaction(storeName, 'readwrite');
     await tx.objectStore(storeName).put(val, key);
     await tx.done;
-    console.log(`Data storage complete.`);
   }
 }
 
@@ -55,4 +48,13 @@ export async function clearAllIDBData() {
   await transaction.done;
   db.close();
   console.log(`IDB data cleared`);
+}
+
+export async function clearDataByKey(key: string): Promise<void> {
+  console.log(`Clearing data for key: ${key}`);
+  const db = await getDb();
+  const tx = db.transaction(storeName, 'readwrite');
+  await tx.objectStore(storeName).delete(key);
+  await tx.done;
+  console.log(`Data cleared for key: ${key}`);
 }

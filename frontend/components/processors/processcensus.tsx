@@ -9,7 +9,7 @@ import {
   processTrees
 } from './processorhelperfunctions';
 
-export default async function processCensus(props: Readonly<SpecialProcessingProps>) {
+export async function processCensus(props: Readonly<SpecialProcessingProps>) {
   const {connection, rowData, plotID, censusID, fullName} = props;
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
@@ -29,6 +29,7 @@ export default async function processCensus(props: Readonly<SpecialProcessingPro
      */
     await connection.beginTransaction();
     // Foreign key checks and error handling for species, quadrat, and plot
+    console.log('extracting species ID by code');
     const speciesID = await getColumnValueByColumnName(
       connection,
       'Species',
@@ -37,7 +38,9 @@ export default async function processCensus(props: Readonly<SpecialProcessingPro
       rowData.spcode
     );
     if (!speciesID) throw new Error(`Species with code ${rowData.spcode} does not exist.`);
+    console.log(`speciesID: ${speciesID}`);
 
+    console.log('extracting quadrat ID by quadrat name');
     const quadratID = await getColumnValueByColumnName(
       connection,
       'Quadrats',
@@ -46,32 +49,33 @@ export default async function processCensus(props: Readonly<SpecialProcessingPro
       rowData.quadrat
     );
     if (!quadratID) throw new Error(`Quadrat with name ${rowData.quadrat} does not exist.`);
+    console.log(`quadratID: ${quadratID}`);
 
+    console.log('attempting subspecies ID by speciesID')
     let subSpeciesID = null;
     if (speciesID) {
       subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
     }
+    if (!subSpeciesID) console.log('no subspeciesID found');
 
     // Insert or update Trees with SpeciesID and SubSpeciesID
-    const treeID = await processTrees(connection, rowData.treeTag, speciesID, subSpeciesID ?? null);
-
-    if (treeID === null) {
-      throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
-    }
+    const treeID = await processTrees(connection, rowData.tag, speciesID, subSpeciesID ?? null);
+    if (treeID === null) throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
+    console.log(`treeID: ${treeID}`);
 
     // Insert or update Stems
-    const stemID = await processStems(connection, rowData.stemTag, treeID, quadratID, rowData.lx, rowData.ly);
-    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemTag, treeID, quadratID, rowData.lx, rowData.ly]}`)
+    const stemID = await processStems(connection, rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly);
+    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly]}`)
+    console.log(`stemID: ${stemID}`);
 
     const personnelID = await getPersonnelIDByName(connection, fullName);
-    if (personnelID === null) {
-      throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
-    }
+    if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
+    console.log(`personnelID: ${personnelID}`);
 
     const measurementInsertQuery = `
     INSERT INTO ${schema}.CoreMeasurements
     (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
     const dbhResult = await runQuery(connection, measurementInsertQuery, [
       censusID,
@@ -81,9 +85,9 @@ export default async function processCensus(props: Readonly<SpecialProcessingPro
       stemID,
       personnelID,
       booleanToBit(false), // isValidated is false by default
-      rowData.date,
-      rowData.dbh,
-      rowData.hom,
+      rowData.date ?? null,
+      rowData.dbh ?? null,
+      rowData.hom ?? null,
       null,
       null,
     ]);
@@ -98,12 +102,11 @@ export default async function processCensus(props: Readonly<SpecialProcessingPro
     }
 
     // Process Attributes and CMAttributes for codes
-    const codesArray = rowData.codes.split(';');
+    const codesArray = rowData.codes.split(';').filter(code => code.trim());
     await processCode(connection, codesArray, dbhCMID);
 
     // Commit transaction
     await connection.commit();
-    return dbhCMID;
   } catch (error) {
     // Rollback transaction in case of error
     await connection.rollback();

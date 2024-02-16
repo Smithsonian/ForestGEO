@@ -15,17 +15,21 @@ import {setData} from "@/config/db";
 import {CensusRDS} from "@/config/sqlmacros";
 
 // INTERFACES
-export interface Plot {
+export interface PlotRaw {
   key: string;
   num: number;
   id: number;
 }
 
-export interface Quadrat {
+export type Plot = PlotRaw | null;
+
+export interface QuadratRaw {
   quadratID: number;
   plotID: number;
   quadratName: string;
 }
+
+export type Quadrat = QuadratRaw | null;
 
 export interface Census {
   plotID: number;
@@ -69,8 +73,8 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
 export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
   "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
   "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}],
-  "fixeddata_species": [{label: "spcode"}],
-  "fixeddata_quadrat": [{label: "quadrat"}],
+  "fixeddata_species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}],
+  "fixeddata_quadrat": [{label: "quadrat"}, {label: "dimx"}, {label: "dimy"}],
   "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
   "arcgis_xlsx": arcgisHeaders
 }

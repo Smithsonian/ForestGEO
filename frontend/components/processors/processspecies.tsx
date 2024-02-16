@@ -18,8 +18,8 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
      *       "genus": "Genus.Genus",
      *       "species": "Species.SpeciesName",
      *       "IDLevel": "Species.IDLevel",
-     *       "family": "Species.Family",
-     *       "authority": "Species.Authority"
+     *       "family": "Species.Family", --> OPTIONAL
+     *       "authority": "Species.Authority" --> OPTIONAL
      */
 
     // Insert or update Species
@@ -33,19 +33,18 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
       ObsoleteTaxonFlag = VALUES(ObsoleteTaxonFlag),
       SpeciesName = VALUES(SpeciesName),
       IDLevel = VALUES(IDLevel),
-      Authority = VALUES(Authority)
-      FieldFamily = VALUES(FieldFamily)
+      Authority = VALUES(Authority),
+      FieldFamily = VALUES(FieldFamily),
       Description = VALUES(Description);
     `, [genusID,
-      rowData.spcode,
+      rowData.spcode ?? null,
       booleanToBit(true),
       booleanToBit(false),
-      rowData.species,
-      rowData.IDLevel,
-      rowData.authority,
-      rowData.family,
+      rowData.species ?? null,
+      rowData.IDLevel ?? null,
+      rowData.authority ?? null,
+      rowData.family ?? null,
       null]);
-    return null;
   } catch (error: any) {
     console.error('Error processing species:', error.message);
     throw error;

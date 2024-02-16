@@ -43,7 +43,7 @@ export default function EntryModal() {
             </Button>
           </DialogActions>
         </ModalDialog>
-      </Modal> : redirect('/dashboard')}
+      </Modal> : (status === 'authenticated') && redirect('/dashboard')}
     </>
   );
 }

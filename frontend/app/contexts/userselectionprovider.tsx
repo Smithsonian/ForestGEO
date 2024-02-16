@@ -6,12 +6,12 @@ import {getData} from "@/config/db";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 
-export const PlotContext = createContext<Plot | null>(null);
-export const CensusContext = createContext<CensusRDS | null>(null);
-export const QuadratContext = createContext<Quadrat | null>(null);
-export const PlotDispatchContext = createContext<Dispatch<{ plot: Plot | null }> | null>(null);
-export const CensusDispatchContext = createContext<Dispatch<{ census: CensusRDS | null }> | null>(null);
-export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: Quadrat | null }> | null>(null);
+export const PlotContext = createContext<Plot>(null);
+export const CensusContext = createContext<CensusRDS>(null);
+export const QuadratContext = createContext<Quadrat>(null);
+export const PlotDispatchContext = createContext<Dispatch<{ plot: Plot }> | null>(null);
+export const CensusDispatchContext = createContext<Dispatch<{ census: CensusRDS }> | null>(null);
+export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: Quadrat }> | null>(null);
 
 function isValidPlot(plotListContext: Plot[], plot: Plot): boolean {
   return plotListContext.includes(plot);
@@ -26,24 +26,21 @@ function isValidCensus(censusLoadContext: CensusRDS[], census: CensusRDS): boole
 }
 
 export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
-  let initPlot: Plot | null = null;
-  let initCensus: CensusRDS | null = null;
-  let initQuadrat: Quadrat | null = null;
   const plotListContext = usePlotListContext();
   const censusLoadContext = useCensusLoadContext();
   const quadratListContext = useQuadratListContext();
 
   const [plot, plotDispatch] = useReducer(
-    (state: Plot | null, action: LoadAction<Plot>) => genericLoadContextReducer(state, action, plotListContext!, isValidPlot),
-    initPlot
+    (state: Plot, action: LoadAction<Plot>) => genericLoadContextReducer(state, action, plotListContext!, isValidPlot),
+    null
   );
   const [census, censusDispatch] = useReducer(
-    (state: CensusRDS | null, action: LoadAction<CensusRDS>) => genericLoadContextReducer(state, action, censusLoadContext!, isValidCensus),
-    initCensus
+    (state: CensusRDS, action: LoadAction<CensusRDS>) => genericLoadContextReducer(state, action, censusLoadContext!, isValidCensus),
+    null
   );
   const [quadrat, quadratDispatch] = useReducer(
-    (state: Quadrat | null, action: LoadAction<Quadrat>) => genericLoadContextReducer(state, action, quadratListContext!, isValidQuadrat),
-    initQuadrat
+    (state: Quadrat, action: LoadAction<Quadrat>) => genericLoadContextReducer(state, action, quadratListContext!, isValidQuadrat),
+    null
   );
 
   const enhancedPlotDispatch = createEnhancedDispatch(plotDispatch, 'plot');
@@ -80,6 +77,10 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
       </PlotDispatchContext.Provider>
     </PlotContext.Provider>
   );
+}
+
+export function usePlotContext() {
+  return useContext(PlotContext);
 }
 
 export function usePlotDispatch() {

@@ -1,11 +1,12 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getSqlConnection, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {HTTPResponses} from "@/config/macros";
+import {FileRowSet, HTTPResponses} from "@/config/macros";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
 
 export async function POST(request: NextRequest) {
-  const fileRowSet = await request.json();
+  const fileRowSet: FileRowSet = await request.json();
+  console.log(`file row set: ${Object.keys(fileRowSet)}`);
   const fileName = request.nextUrl.searchParams.get('fileName')!.trim();
   const plotID = parseInt(request.nextUrl.searchParams.get("plot")!.trim());
   const censusID = parseInt(request.nextUrl.searchParams.get("census")!.trim());
@@ -53,18 +54,22 @@ export async function POST(request: NextRequest) {
 
   let rowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[] = [];
   for (const rowId in fileRowSet) {
+    console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
     try {
       let props: InsertUpdateProcessingProps = {connection, formType, rowData: row, plotID, censusID, fullName};
-      const coreMeasurementID = await insertOrUpdate(props);
-      if (coreMeasurementID) { // if a number was returned, then a coremeasurement was added --> therefore, row contains tag & stemtag
-        rowToCMID.push({
-          fileName: fileName,
-          coreMeasurementID: coreMeasurementID,
-          stemTag: row.stemtag,
-          treeTag: row.tag
-        });
-      }
+      console.log('in sqlload route try statement');
+      await insertOrUpdate(props);
+      console.log('in sqlload route, insertorupdate run');
+      // const coreMeasurementID =
+      // if (coreMeasurementID) { // if a number was returned, then a coremeasurement was added --> therefore, row contains tag & stemtag
+      //   rowToCMID.push({
+      //     fileName: fileName,
+      //     coreMeasurementID: coreMeasurementID,
+      //     stemTag: row.stemtag,
+      //     treeTag: row.tag
+      //   });
+      // }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);

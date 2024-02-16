@@ -81,7 +81,7 @@ export const AttributeGridColumns: GridColDef[] = [
   },
 ];
 
-export type CensusRDS = {
+export type CensusRaw = {
   id: number;
   censusID: number;
   plotID: number | null;
@@ -90,6 +90,8 @@ export type CensusRDS = {
   endDate: Date | null;
   description: string | null;
 }
+
+export type CensusRDS = CensusRaw | null;
 
 export const CensusGridColumns: GridColDef[] = [
   {

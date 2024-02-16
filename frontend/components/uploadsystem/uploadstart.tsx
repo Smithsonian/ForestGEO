@@ -19,12 +19,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
       <Grid container spacing={2} sx={{marginRight: 2}}>
         <Grid item xs={6}>
-          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
-            <CircularProgress/>
-          </Box>
-        </Grid>
-
-        <Grid item xs={6}>
           {(!TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording === '') && (
             <Stack direction={"column"} sx={{width: 'fit-content'}}>
               <Typography sx={{mb: 2}}>
@@ -42,12 +36,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           )}
           {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording === '') && (
             <Stack direction={"column"} sx={{width: 'fit-content'}}>
-              <Button onClick={() => {
-                setUploadForm('');
-                setPersonnelRecording('');
-              }} sx={{width: 'fit-content'}}>
-                Return to Table Select
-              </Button>
               <Typography sx={{mb: 2}}>
                 You have selected {uploadForm}. Please ensure that your file has the following headers before
                 continuing: <br/>
@@ -69,12 +57,21 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
                 The person recording the data is {personnelRecording}. Please verify this before continuing.
               </Typography>
-              <Button onClick={() => setReviewState(ReviewStates.PARSE)}>
-                Continue to parsing menu?
-              </Button>
+              <Stack direction={"row"}>
+                <Button onClick={() => {
+                  setUploadForm('');
+                  setPersonnelRecording('');
+                }} sx={{width: 'fit-content'}}>
+                  Reset
+                </Button>
+                <Button onClick={() => setReviewState(ReviewStates.PARSE)} sx={{width: 'fit-content'}}>
+                  Continue
+                </Button>
+              </Stack>
             </Stack>
           )}
         </Grid>
+        <Grid item xs={6} />
       </Grid>
     </Box>
   );
