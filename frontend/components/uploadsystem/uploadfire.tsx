@@ -1,5 +1,5 @@
 "use client";
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Button, LinearProgress, LinearProgressProps, Typography} from '@mui/material';
 import {FileCollectionRowSet, ReviewStates, UploadFireProps} from '@/config/macros';
 import {FileWithPath} from "react-dropzone";
@@ -18,18 +18,19 @@ const UploadFire: React.FC<UploadFireProps> = ({
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState("");
+  const hasUploaded = useRef(false);
 
-  if (personnelRecording === '') handleReturnToStart().catch(console.error);
-
-  const uploadToSql = async (fileData: FileCollectionRowSet, fileName: string) => {
+  const uploadToSql = useCallback(async (fileData: FileCollectionRowSet, fileName: string) => {
     try {
       setCurrentlyRunning(`File ${fileName} uploading to SQL...`)
+      console.log(`uploadtosql with filename: ${fileName}`);
       const response = await fetch(
         `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.plotCensusNumber ? currentCensus.plotCensusNumber.toString().trim() : 0}&user=${personnelRecording}`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(fileData[fileName])
         });
+      console.log(`sqlload response status: ${response.status}`)
       // Increment completedOperations when an operation is completed
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       const result = await response.json();
@@ -40,9 +41,9 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setErrorComponent('UploadFire');
       setReviewState(ReviewStates.ERRORS);
     }
-  };
+  }, []);
 
-  const uploadToStorage = async (file: FileWithPath) => {
+  const uploadToStorage = useCallback(async (file: FileWithPath) => {
     try {
       setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`)
       const formData = new FormData();
@@ -61,7 +62,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setErrorComponent('UploadFire');
       setReviewState(ReviewStates.ERRORS);
     }
-  };
+  }, []);
 
   function LinearProgressWithLabel(props: LinearProgressProps & { value: number, currentlyRunningMsg: string }) {
     return (
@@ -122,7 +123,10 @@ const UploadFire: React.FC<UploadFireProps> = ({
       // Calculate the total number of operations
       calculateTotalOperations();
 
+      console.log(`uploadfire acceptedfiles length: ${acceptedFiles.length}`);
+
       for (const file of acceptedFiles) {
+        console.log(`file: ${file.name}`);
         const sqlResult = await uploadToSql(parsedData, file.name);
         const storageResult = await uploadToStorage(file);
         uploadResults.push(`File: ${file.name}, SQL: ${sqlResult}, Storage: ${storageResult}`);
@@ -133,8 +137,11 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setIsDataUnsaved(false);
     };
 
-    uploadFiles().catch(console.error);
-  }, [acceptedFiles, parsedData, uploadForm, setIsDataUnsaved]);
+    if (!hasUploaded.current) {
+      uploadFiles().catch(console.error);
+      hasUploaded.current = true;
+    }
+  }, []);
 
   return (
     <>

@@ -2,10 +2,10 @@ import mysql, {PoolConnection} from 'mysql2/promise';
 import {booleanToBit, FileRow} from "@/config/macros";
 
 import {processSpecies} from "@/components/processors/processspecies";
-import processCensus from "@/components/processors/processcensus";
 import * as fs from "fs";
 import {NextRequest} from "next/server";
-import processQuadrats from "@/components/processors/processquadrats";
+import {processQuadrats} from "@/components/processors/processquadrats";
+import {processCensus} from "@/components/processors/processcensus";
 
 export async function getConn() {
   let conn: PoolConnection | null = null; // Use PoolConnection type
@@ -43,7 +43,7 @@ export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | null>;
+  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
 };
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {

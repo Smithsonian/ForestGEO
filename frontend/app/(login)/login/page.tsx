@@ -5,7 +5,6 @@ import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
 import Box from "@mui/joy/Box";
 import EntryModal from "@/components/client/entrymodal";
-import {clearAllIDBData} from "@/config/db";
 import UnauthenticatedSidebar from "@/components/unauthenticatedsidebar";
 
 const slides = [
@@ -18,7 +17,6 @@ const slides = [
 export default function LoginPage() {
   const {data: _session, status} = useSession();
   const [index, setIndex] = useState(0);
-  const [dataIsReset, setDataIsReset] = useState(false);
   const transitions = useTransition(index, {
     key: index,
     from: {opacity: 0},
@@ -34,18 +32,6 @@ export default function LoginPage() {
   })
 
   useEffect(() => {
-    const resetIDBStorage = async () => {
-      if (status === "unauthenticated" && !dataIsReset) {
-        console.log("user not logged in, and data has not been reset");
-        await clearAllIDBData();
-        setDataIsReset(true);
-      } else if (status === "unauthenticated" && dataIsReset) {
-        console.log("user not logged in, data is reset");
-      } else {
-        console.log("user is logged in");
-      }
-    }
-    resetIDBStorage().catch(console.error);
     setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
   }, []);
 

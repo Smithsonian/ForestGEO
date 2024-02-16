@@ -157,10 +157,11 @@ export default function UploadParent() {
   };
 
   function areHeadersValid(actualHeaders: string[]): boolean {
-    const expectedHeadersLower = expectedHeaders.map(header => header.toLowerCase());
+    const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+    const requiredExpectedHeadersLower = requiredHeaders.map(header => header.label.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
 
-    return expectedHeadersLower.every(expectedHeader =>
+    return requiredExpectedHeadersLower.every(expectedHeader =>
       actualHeadersLower.includes(expectedHeader));
   }
 
@@ -389,6 +390,7 @@ export default function UploadParent() {
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
 
   const renderStateContent = () => {
+    if ((personnelRecording === '' || uploadForm === '') && reviewState !== ReviewStates.START) setReviewState(ReviewStates.START);
     switch (reviewState) {
       case ReviewStates.START:
         return <UploadStart
@@ -460,8 +462,8 @@ export default function UploadParent() {
           handleApproval={handleApproval}
           handleChange={handleChange}
           setIsDataUnsaved={setIsDataUnsaved}
-          currentPlot={currentPlot!}
-          currentCensus={currentCensus!}
+          currentPlot={currentPlot}
+          currentCensus={currentCensus}
           user={session?.user?.name!}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
@@ -474,8 +476,8 @@ export default function UploadParent() {
       case ReviewStates.VALIDATE:
         return <UploadValidation
           setReviewState={setReviewState}
-          currentPlot={currentPlot!}
-          currentCensus={currentCensus!}
+          currentPlot={currentPlot}
+          currentCensus={currentCensus}
           validationResults={validationResults}
           setValidationResults={setValidationResults}
         />;
@@ -485,8 +487,8 @@ export default function UploadParent() {
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
-          currentPlot={currentPlot!}
-          currentCensus={currentCensus!}
+          currentPlot={currentPlot}
+          currentCensus={currentCensus}
           validationPassedCMIDs={validationPassedCMIDs}
           setValidationPassedCMIDs={setValidationPassedCMIDs}
           validationPassedRowCount={validationPassedRowCount}
@@ -514,8 +516,7 @@ export default function UploadParent() {
             Drag and drop files into the box to upload them to storage
           </Typography>
           <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-            <Tabs value={activeTabIndex} onChange={handleTabChange} aria-label={"File Hub Options"} size={"lg"}
-                  sx={{display: 'flex', flex: 1}} className={""}>
+            <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
               <TabList sticky={"top"}>
                 <Tab>Browse Uploaded Files</Tab>
                 <Tab>Upload New Files</Tab>
@@ -529,16 +530,6 @@ export default function UploadParent() {
                 {currentPlot ? renderStateContent() : <Typography>You must select a plot to continue!</Typography>}
               </TabPanel>
             </Tabs>
-            {/* Confirmation Dialog for leaving the upload process */}
-            {showLeaveUploadDialog && (
-              <ConfirmationDialog
-                open={showLeaveUploadDialog}
-                onConfirm={handleConfirmLeaveUpload}
-                onCancel={handleCancelLeaveUpload}
-                title="Leave Upload"
-                message="Are you sure you want to leave the upload process? All progress will be lost."
-              />
-            )}
           </Box>
         </Box>
       )}

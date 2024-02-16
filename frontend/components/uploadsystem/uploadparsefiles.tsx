@@ -17,11 +17,11 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   return (
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
-      <Button variant="contained" onClick={() => setReviewState(ReviewStates.START)} sx={{mb: 2}}>
+      <Button variant="contained" onClick={() => setReviewState(ReviewStates.START)} sx={{mb: 2, width: 'fit-content'}}>
         Back
       </Button>
-      <Grid container spacing={2}>
-        <Grid item xs={6} sx={{marginRight: 2}}>
+      <Grid container>
+        <Grid item xs={6}>
           <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
             <DropzoneLogic onChange={handleFileChange}/>
             <Modal open={isOverwriteConfirmDialogOpen} onClose={() => setIsOverwriteConfirmDialogOpen(false)}>

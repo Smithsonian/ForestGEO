@@ -32,6 +32,8 @@ import {
   getGridID
 } from "@/config/datagridhelpers";
 import {Plot} from "@/config/macros";
+import {updateContextsFromIDB} from "@/components/client/clientmacros";
+import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 
 
 export function EditToolbar(props: Readonly<EditToolbarProps>) {
@@ -84,6 +86,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
+
+  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } = UpdateContextsFromIDB();
 
   const handleAddNewRow = () => {
     if (locked) return;
@@ -220,6 +224,15 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
           setIsNewRowAdded(false); // We are done adding a new row
           // Now we can refetch data for the current page without adding a new row
           setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
+          if (gridType === 'census' || gridType === 'quadrats') {
+            try {
+              await updateQuadratsContext();
+              await updateCensusContext();
+              await updatePlotsContext();
+            } catch (error: any) {
+              console.error(error);
+            }
+          }
           await fetchPaginatedData(paginationModel.page);
         }
 
