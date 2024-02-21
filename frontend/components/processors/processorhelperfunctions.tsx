@@ -6,6 +6,7 @@ import {
   runQuery,
   ValidationResponse
 } from "@/components/processors/processormacros";
+import {processCensus} from "@/components/processors/processcensus";
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
@@ -214,7 +215,7 @@ export async function getPersonnelIDByName(
   }
 }
 
-export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<void> {
+export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | null> {
   const {formType, ...subProps} = props;
   const {connection, rowData} = subProps;
   const schema = process.env.AZURE_SQL_SCHEMA;
@@ -224,35 +225,40 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   console.log('INSERT OR UPDATE: schema & mapping found');
-  if (mapping.specialProcessing) {
-    console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
-    await mapping.specialProcessing(subProps);
+  if (formType === 'fixeddata_census') {
+    return await processCensus(subProps);
   } else {
-    console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
-    const columns = Object.keys(mapping.columnMappings);
-    const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
-    const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
-    const values = columns.map(fileColumn => rowData[fileColumn]);
-    let query = `
+    if (mapping.specialProcessing) {
+      console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
+      await mapping.specialProcessing(subProps);
+    } else {
+      console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
+      const columns = Object.keys(mapping.columnMappings);
+      const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
+      const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
+      const values = columns.map(fileColumn => rowData[fileColumn]);
+      let query = `
     INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
     VALUES (${placeholders})
     ON DUPLICATE KEY UPDATE 
     ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
   `;
-    console.log(`INSERT OR UPDATE: query constructed: ${query}`);
+      console.log(`INSERT OR UPDATE: query constructed: ${query}`);
 
-    try {
-      // Execute the query using the provided connection
-      await connection.beginTransaction();
-      await connection.query(query, values);
-      await connection.commit();
-    } catch (error) {
-      // Rollback the transaction in case of an error
-      console.log(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
-      await connection.rollback();
-      throw error; // Re-throw the error after rollback
+      try {
+        // Execute the query using the provided connection
+        await connection.beginTransaction();
+        await connection.query(query, values);
+        await connection.commit();
+      } catch (error) {
+        // Rollback the transaction in case of an error
+        console.log(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
+        await connection.rollback();
+        throw error; // Re-throw the error after rollback
+      }
+      console.log('INSERT OR UPDATE: default query completed. Exiting...');
     }
-    console.log('INSERT OR UPDATE: default query completed. Exiting...');
+    return null;
   }
 }
 

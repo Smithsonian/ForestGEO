@@ -5,8 +5,8 @@ export async function GET(request: NextRequest) {
   try {
     const plotIDParam = request.nextUrl.searchParams.get('plotID');
     const censusIDParam = request.nextUrl.searchParams.get('censusID');
-    const minHOM = parseInt(request.nextUrl.searchParams.get('min')!);
-    const maxHOM = parseInt(request.nextUrl.searchParams.get('max')!);
+    const minHOM = parseFloat(request.nextUrl.searchParams.get('minValue')!);
+    const maxHOM = parseFloat(request.nextUrl.searchParams.get('maxValue')!);
     const plotID = plotIDParam ? parseInt(plotIDParam) : null;
     const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 

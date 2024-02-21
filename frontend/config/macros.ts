@@ -13,6 +13,7 @@ import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
 import {CensusRDS} from "@/config/sqlmacros";
+import {CMIDRow} from "@/components/uploadsystem/uploadparent";
 
 // INTERFACES
 export interface PlotRaw {
@@ -203,13 +204,8 @@ export interface UploadFireProps extends UploadReviewFilesProps {
   uploadCompleteMessage: string;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   handleReturnToStart: () => Promise<void>;
-  allRowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[];
-  setAllRowToCMID: Dispatch<SetStateAction<{
-    fileName: string;
-    coreMeasurementID: number;
-    stemTag: string;
-    treeTag: string;
-  }[]>>;
+  allRowToCMID: CMIDRow[];
+  setAllRowToCMID: Dispatch<SetStateAction<CMIDRow[]>>;
 }
 
 export interface UploadErrorProps {
@@ -580,4 +576,11 @@ export async function uploadValidFileAsBuffer(containerClient: ContainerClient, 
       }
     }
   }
+}
+
+// for validation error display ONLY
+export interface CMError {
+  CoreMeasurementID: number;
+  ValidationErrorID: number;
+  Description: string;
 }

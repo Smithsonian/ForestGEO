@@ -1,9 +1,15 @@
 "use client";
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Button, LinearProgress, LinearProgressProps, Typography} from '@mui/material';
-import {FileCollectionRowSet, ReviewStates, UploadFireProps} from '@/config/macros';
+import {FileCollectionRowSet, FileRow, ReviewStates, UploadFireProps} from '@/config/macros';
 import {FileWithPath} from "react-dropzone";
 import {Stack} from "@mui/joy";
+import {CMIDRow} from "@/components/uploadsystem/uploadparent";
+
+interface IdToRow {
+  coreMeasurementID: number;
+  fileRow: FileRow;
+}
 
 const UploadFire: React.FC<UploadFireProps> = ({
                                                  personnelRecording, acceptedFiles, parsedData,
@@ -11,7 +17,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
                                                  currentPlot, currentCensus, uploadCompleteMessage,
                                                  setUploadCompleteMessage, handleReturnToStart,
                                                  user, setUploadError, setErrorComponent,
-                                                 setReviewState, setAllRowToCMID
+                                                 setReviewState, allRowToCMID, setAllRowToCMID
                                                }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -22,26 +28,33 @@ const UploadFire: React.FC<UploadFireProps> = ({
 
   const uploadToSql = useCallback(async (fileData: FileCollectionRowSet, fileName: string) => {
     try {
-      setCurrentlyRunning(`File ${fileName} uploading to SQL...`)
-      console.log(`uploadtosql with filename: ${fileName}`);
+      setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
       const response = await fetch(
-        `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.plotCensusNumber ? currentCensus.plotCensusNumber.toString().trim() : 0}&user=${personnelRecording}`, {
+        `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${personnelRecording}`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(fileData[fileName])
         });
-      console.log(`sqlload response status: ${response.status}`)
-      // Increment completedOperations when an operation is completed
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       const result = await response.json();
-      setAllRowToCMID((prevState) => [...prevState, result.output]);
+      if (uploadForm === 'fixeddata_census' && result.idToRows) {
+        // Map over the idToRows array to create new objects for allRowToCMID
+        const newRowToCMID: CMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IdToRow) => ({
+          coreMeasurementID,
+          fileName,
+          row: fileRow
+        }));
+        setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
+        console.log(allRowToCMID);
+      }
       return response.ok ? 'SQL load successful' : 'SQL load failed';
     } catch (error) {
       setUploadError(error);
       setErrorComponent('UploadFire');
       setReviewState(ReviewStates.ERRORS);
     }
-  }, []);
+  }, [uploadForm, currentPlot?.id, currentCensus?.censusID, personnelRecording, setAllRowToCMID, setUploadError, setErrorComponent, setReviewState]);
+
 
   const uploadToStorage = useCallback(async (file: FileWithPath) => {
     try {
@@ -50,7 +63,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
       formData.append(file.name, file);
 
       const response = await fetch(
-        `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.plotCensusNumber ? currentCensus.plotCensusNumber.toString().trim() : 0}&user=${user}`, {
+        `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}`, {
           method: 'POST',
           body: formData
         });
@@ -62,9 +75,9 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setErrorComponent('UploadFire');
       setReviewState(ReviewStates.ERRORS);
     }
-  }, []);
+  }, [currentCensus?.censusID, currentPlot?.key, setErrorComponent, setReviewState, setUploadError, user]);
 
-  function LinearProgressWithLabel(props: LinearProgressProps & { value: number, currentlyRunningMsg: string }) {
+  function LinearProgressWithLabel(props: LinearProgressProps & { value: number, currentlyrunningmsg: string }) {
     return (
       <Box sx={{display: 'flex', alignItems: 'center'}}>
         <Box sx={{width: '100%', mr: 1}}>
@@ -73,7 +86,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
         <Box sx={{minWidth: 35, display: 'flex', flex: 1, flexDirection: 'column'}}>
           <Typography variant="body2" color="text.secondary">{`${Math.round(
             props.value,
-          )}% --> ${props.currentlyRunningMsg}`}</Typography>
+          )}% --> ${props.currentlyrunningmsg}`}</Typography>
         </Box>
       </Box>
     );
@@ -150,7 +163,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
           <Stack direction={"column"}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
             <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
-                                     currentlyRunningMsg={currentlyRunning}/>
+                                     currentlyrunningmsg={currentlyRunning}/>
           </Stack>
         </Box>
       ) : (

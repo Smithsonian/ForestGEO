@@ -9,7 +9,7 @@ import {
   processTrees
 } from './processorhelperfunctions';
 
-export async function processCensus(props: Readonly<SpecialProcessingProps>) {
+export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
   const {connection, rowData, plotID, censusID, fullName} = props;
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
@@ -51,11 +51,9 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>) {
     if (!quadratID) throw new Error(`Quadrat with name ${rowData.quadrat} does not exist.`);
     console.log(`quadratID: ${quadratID}`);
 
-    console.log('attempting subspecies ID by speciesID')
+    console.log('attempting subspecies ID by speciesID');
     let subSpeciesID = null;
-    if (speciesID) {
-      subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
-    }
+    if (speciesID) subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
     if (!subSpeciesID) console.log('no subspeciesID found');
 
     // Insert or update Trees with SpeciesID and SubSpeciesID
@@ -107,14 +105,10 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>) {
 
     // Commit transaction
     await connection.commit();
+    return dbhCMID ?? null;
   } catch (error) {
     // Rollback transaction in case of error
     await connection.rollback();
     throw error;
-  } finally {
-    // Release the connection back to the pool
-    if (connection) {
-      connection.release();
-    }
   }
 }

@@ -1,8 +1,9 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getSqlConnection, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {FileRowSet, HTTPResponses} from "@/config/macros";
+import {FileRow, FileRowSet, HTTPResponses} from "@/config/macros";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
+import {setData} from "@/config/db";
 
 export async function POST(request: NextRequest) {
   const fileRowSet: FileRowSet = await request.json();
@@ -52,24 +53,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let rowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[] = [];
+  let idToRows: {coreMeasurementID: number; fileRow: FileRow}[] = [];
   for (const rowId in fileRowSet) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
     try {
       let props: InsertUpdateProcessingProps = {connection, formType, rowData: row, plotID, censusID, fullName};
-      console.log('in sqlload route try statement');
-      await insertOrUpdate(props);
-      console.log('in sqlload route, insertorupdate run');
-      // const coreMeasurementID =
-      // if (coreMeasurementID) { // if a number was returned, then a coremeasurement was added --> therefore, row contains tag & stemtag
-      //   rowToCMID.push({
-      //     fileName: fileName,
-      //     coreMeasurementID: coreMeasurementID,
-      //     stemTag: row.stemtag,
-      //     treeTag: row.tag
-      //   });
-      // }
+      const coreMeasurementID = await insertOrUpdate(props);
+      if (formType === 'fixeddata_census' && coreMeasurementID) {
+        idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);
@@ -89,7 +82,9 @@ export async function POST(request: NextRequest) {
           {status: HTTPResponses.SERVICE_UNAVAILABLE}
         );
       }
+    } finally {
+      if (connection) connection.release();
     }
   }
-  return new NextResponse(JSON.stringify({message: "Insert to SQL successful", output: rowToCMID}), {status: 200});
+  return new NextResponse(JSON.stringify({message: "Insert to SQL successful", idToRows: idToRows}), {status: 200});
 }

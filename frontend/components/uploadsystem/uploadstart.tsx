@@ -42,11 +42,17 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
                 Who recorded this data?
               </Typography>
-              <AutocompleteFixedData
-                dataType="personnel"
-                value={personnelRecording}
-                onChange={setPersonnelRecording}
-              />
+              <Stack direction={"row"}>
+                <Button sx={{marginRight: 2, width: 'fit-content'}} onClick={() => setUploadForm('')}>
+                  Back
+                </Button>
+                <AutocompleteFixedData
+                  dataType="personnel"
+                  value={personnelRecording}
+                  onChange={setPersonnelRecording}
+                />
+              </Stack>
+
             </Stack>
           )}
           {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording !== '') && (
@@ -59,10 +65,9 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               </Typography>
               <Stack direction={"row"}>
                 <Button onClick={() => {
-                  setUploadForm('');
                   setPersonnelRecording('');
                 }} sx={{width: 'fit-content'}}>
-                  Reset
+                  Back
                 </Button>
                 <Button onClick={() => setReviewState(ReviewStates.PARSE)} sx={{width: 'fit-content'}}>
                   Continue
