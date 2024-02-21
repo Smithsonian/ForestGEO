@@ -60,6 +60,12 @@ const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({open, title, mes
 };
 
 
+export interface CMIDRow {
+  coreMeasurementID: number;
+  fileName: string;
+  row: FileRow;
+}
+
 export default function UploadParent() {
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
@@ -93,12 +99,7 @@ export default function UploadParent() {
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
   const [validationPassedRowCount, setValidationPassedRowCount] = useState(0);
-  const [allRowToCMID, setAllRowToCMID] = useState<{
-    fileName: string;
-    coreMeasurementID: number;
-    stemTag: string;
-    treeTag: string;
-  }[]>([]);
+  const [allRowToCMID, setAllRowToCMID] = useState<CMIDRow[]>([]);
   const [refreshFileList, setRefreshFileList] = useState(false);
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [showLeaveUploadDialog, setShowLeaveUploadDialog] = useState(false);
@@ -482,8 +483,9 @@ export default function UploadParent() {
           setValidationResults={setValidationResults}
         />;
       case ReviewStates.VALIDATE_ERRORS_FOUND:
-        return <UploadValidationErrorDisplay allRowToCMID={allRowToCMID} parsedData={parsedData}
-                                             setReviewState={setReviewState}/>;
+        return <UploadValidationErrorDisplay
+          allRowToCMID={allRowToCMID}
+          setReviewState={setReviewState}/>;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}

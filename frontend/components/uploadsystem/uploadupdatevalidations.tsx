@@ -17,6 +17,7 @@ import {Plot, ReviewStates} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {Checkbox} from "@mui/joy";
 import {CensusRDS} from "@/config/sqlmacros";
+import {CMIDRow} from "@/components/uploadsystem/uploadparent";
 
 export interface UploadUpdateValidationsProps {
   validationPassedCMIDs: number[];
@@ -26,7 +27,7 @@ export interface UploadUpdateValidationsProps {
   currentPlot: Plot;
   currentCensus: CensusRDS;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  allRowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[];
+  allRowToCMID: CMIDRow[];
   handleReturnToStart: () => Promise<void>;
 }
 
@@ -71,15 +72,15 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
                 </TableRow>
               </TableHead>
               <TableBody>
-                {allRowToCMID.map((obj, index) => (
-                  <TableRow key={index}>
-                    <TableCell>{obj.fileName}</TableCell>
-                    <TableCell>{obj.coreMeasurementID}</TableCell>
-                    <TableCell>{obj.stemTag}</TableCell>
-                    <TableCell>{obj.treeTag}</TableCell>
+                {allRowToCMID.map(({coreMeasurementID, fileName, row}: CMIDRow, index: number) => (
+                  <TableRow key={`${coreMeasurementID}-${index}`}>
+                    <TableCell>{fileName}</TableCell>
+                    <TableCell>{coreMeasurementID}</TableCell>
+                    <TableCell>{row.stemtag}</TableCell>
+                    <TableCell>{row.tag}</TableCell>
                     <TableCell>
                       <Checkbox
-                        checked={validationPassedCMIDs.includes(obj.coreMeasurementID)}
+                        checked={validationPassedCMIDs.includes(coreMeasurementID)}
                         disabled
                       />
                     </TableCell>

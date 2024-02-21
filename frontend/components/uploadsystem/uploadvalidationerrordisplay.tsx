@@ -14,25 +14,18 @@ import {
   TableRow,
   Typography
 } from '@mui/material';
-import {FileCollectionRowSet, ReviewStates} from '@/config/macros';
+import {CMError, FileCollectionRowSet, FileRow, ReviewStates} from '@/config/macros';
 import {saveAs} from 'file-saver';
 import {Stack} from "@mui/joy";
+import {CMIDRow} from "@/components/uploadsystem/uploadparent";
 
 interface UploadValidationErrorDisplayProps {
-  allRowToCMID: { fileName: string; coreMeasurementID: number; stemTag: string; treeTag: string; }[];
-  parsedData: FileCollectionRowSet;
+  allRowToCMID: CMIDRow[];
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-}
-
-interface CMError {
-  CoreMeasurementID: number;
-  ValidationErrorID: number;
-  Description: string;
 }
 
 const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> = ({
                                                                                      allRowToCMID,
-                                                                                     parsedData,
                                                                                      setReviewState
                                                                                    }) => {
   const [cmErrors, setCMErrors] = useState<CMError[]>([]);
@@ -55,21 +48,23 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
         setIsLoading(false);
       }
     };
-
     fetchData().catch(console.error);
   }, []);
 
-  const findRowData = (coreMeasurementID: number) => {
-    const cmidRow = allRowToCMID.find(row => row.coreMeasurementID === coreMeasurementID);
-    if (!cmidRow) return null;
-    // @ts-ignore
-    return parsedData[cmidRow.fileName]!.find((row: any) => row.tag === cmidRow.treeTag && row.stemtag === cmidRow.stemTag);
-  };
-
-  const renderRowData = (rowData: any) => {
-    return Object.entries(rowData).map(([key, value]) => (
-      <Typography key={key}>{`${key}: ${value}`}</Typography>
-    ));
+  const renderRowData = (rowData: FileRow) => {
+    return (
+      <Stack direction={"column"}>
+        <Typography key={"tag"}>
+          <b>Identification: </b>{`Tree Tag: ${rowData.tag}, \tStem Tag: ${rowData.stemtag}`}
+        </Typography>
+        <Typography key={"measurements"}>
+          <b>Measurement: </b>{`DBH: ${rowData.dbh} at \tHOM: ${rowData.hom}`}
+        </Typography>
+        <Typography key={"date"}>
+          <b>Measurement Date: </b>{`${rowData.date}`}
+        </Typography>
+      </Stack>
+    );
   };
 
   const saveDataToFile = () => {
@@ -112,7 +107,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
           </TableHead>
           <TableBody>
             {cmErrors.map((error) => {
-              const rowData = findRowData(error.CoreMeasurementID);
+              const rowData = allRowToCMID.find(item => item.coreMeasurementID === error.CoreMeasurementID)?.row;
               return (
                 <TableRow key={error.CoreMeasurementID}>
                   <TableCell>{error.CoreMeasurementID}</TableCell>
