@@ -2,6 +2,7 @@
 import * as React from "react";
 import {Box} from "@mui/joy";
 import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
+import Typography from "@mui/joy/Typography";
 
 export default function DashboardPage() {
   let currentPlot = usePlotContext();
@@ -10,13 +11,17 @@ export default function DashboardPage() {
   if (!currentPlot || !currentCensus) {
     return (
       <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
-        In order to calculate Post-Census Summary Statistics, you must select a Plot and a Census from the sidebar!
+        Please select a plot and census!
       </Box>
     );
   }
   return (
     <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
-
+      <Typography level={"title-lg"}>A brief overview of the application:</Typography>
+      <br />
+      <Typography level={"title-sm"}>If you observe the sidebar, there are 5 different options you can explore within this application.</Typography>
+      Here is a brief overview of each one, how to use them, and how they all work together.
+      Please note that this is a work in progress, so changes will be made regularly.
     </Box>
   );
 }
