@@ -20,8 +20,11 @@ export default function DashboardPage() {
       <Typography level={"title-lg"}>A brief overview of the application:</Typography>
       <br />
       <Typography level={"title-sm"}>If you observe the sidebar, there are 5 different options you can explore within this application.</Typography>
-      Here is a brief overview of each one, how to use them, and how they all work together.
-      Please note that this is a work in progress, so changes will be made regularly.
+      <Typography level={"title-sm"}>Here is a brief overview of each one, how to use them, and how they all work together.</Typography>
+      <Typography level={"title-sm"}>Please note that this is a work in progress, so changes will be made regularly.</Typography>
+      <br />
+      <br />
+      <Typography level={"body-sm"}></Typography>
     </Box>
   );
 }
