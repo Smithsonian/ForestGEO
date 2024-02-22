@@ -43,7 +43,7 @@ export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
+  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | null>;
 };
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {

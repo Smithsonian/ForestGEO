@@ -46,4 +46,5 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
   } finally {
     if (connection) connection.release();
   }
+  return null;
 }

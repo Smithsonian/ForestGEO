@@ -48,5 +48,8 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
   } catch (error: any) {
     console.error('Error processing species:', error.message);
     throw error;
+  } finally {
+    if (connection) connection.release();
   }
+  return null;
 }
