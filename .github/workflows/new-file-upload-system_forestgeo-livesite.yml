@@ -21,6 +21,22 @@ jobs:
         with:
           node-version: '18.x'
 
+      - name: create frontend env file
+        run: |
+          touch frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
+          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
+          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
+          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
+          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
+          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
+          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
+          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
+
       - name: npm install, build, and test
         run: |
           cd frontend/
@@ -29,7 +45,7 @@ jobs:
           npm run test --if-present
 
       - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
+        run: zip release.zip ./frontend/* -r
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v3
