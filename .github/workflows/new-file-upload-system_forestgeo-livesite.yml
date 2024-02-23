@@ -56,7 +56,7 @@ jobs:
         run: zip -r release.zip ./frontend/*
 
       - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: node-app
           path: release.zip
@@ -70,7 +70,7 @@ jobs:
 
     steps:
       - name: Download artifact from build job
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: node-app
 
@@ -84,4 +84,4 @@ jobs:
           app-name: 'forestgeo-livesite'
           slot-name: 'development'
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .
+          package: frontend/
