@@ -32,7 +32,6 @@ import {
   getGridID
 } from "@/config/datagridhelpers";
 import {Plot} from "@/config/macros";
-import {updateContextsFromIDB} from "@/components/client/clientmacros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 
 
