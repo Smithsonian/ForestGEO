@@ -75,5 +75,5 @@ jobs:
         with:
           app-name: 'forestgeo-livesite'
           slot-name: 'development'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_3F1447A77BE14A4B9A487ED94F0327E1 }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: .
