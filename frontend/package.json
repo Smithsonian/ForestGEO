@@ -43,8 +43,7 @@
     "sharp": "latest",
     "tailwind-variants": "latest",
     "tailwindcss": "latest",
-    "ts-node": "latest",
-    "typescript": "latest"
+    "ts-node": "latest"
   },
   "devDependencies": {
     "@mui/joy": "latest",
@@ -69,7 +68,8 @@
     "file-saver": "latest",
     "idb": "latest",
     "mysql2": "latest",
-    "storybook": "latest"
+    "storybook": "latest",
+    "typescript": "^5.3.3"
   },
   "eslintConfig": {
     "extends": [
