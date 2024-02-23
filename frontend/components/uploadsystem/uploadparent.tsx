@@ -479,8 +479,6 @@ export default function UploadParent() {
           setReviewState={setReviewState}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          validationResults={validationResults}
-          setValidationResults={setValidationResults}
         />;
       case ReviewStates.VALIDATE_ERRORS_FOUND:
         return <UploadValidationErrorDisplay
