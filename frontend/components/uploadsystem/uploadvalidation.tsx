@@ -198,7 +198,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handlePromptClose}>Submit</Button>
+          <Button sx={{width: 'fit-content'}} onClick={handlePromptClose}>Submit</Button>
         </DialogActions>
       </Dialog>
     );
@@ -239,12 +239,12 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
             </Box>
           ))}
           {errorsFound ? (
-            <Button variant="contained" color="error" sx={{mt: 2}}
+            <Button variant="contained" color="error" sx={{mt: 2, width: 'fit-content'}}
                     onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>
               Review Errors
             </Button>
           ) : (
-            <Button variant="contained" color="success" sx={{mt: 2}}
+            <Button variant="contained" color="success" sx={{mt: 2, width: 'fit-content'}}
                     onClick={() => setReviewState(ReviewStates.UPDATE)}>
               Complete Upload
             </Button>
