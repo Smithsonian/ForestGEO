@@ -11,9 +11,7 @@
     "bswin": "npm run build ; npm run start",
     "bdwin": "npm run build ; npm run dev",
     "clean": "rm -rf .next node_modules package-lock.json; npm install",
-    "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest",
-    "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest"
   },
   "dependencies": {
     "@azure/storage-blob": "latest",
@@ -34,9 +32,6 @@
     "next": "latest",
     "next-auth": "latest",
     "papaparse": "latest",
-    "pino": "latest",
-    "pino-colada": "latest",
-    "pino-http": "latest",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-dropzone": "latest",
@@ -47,15 +42,6 @@
   },
   "devDependencies": {
     "@mui/joy": "latest",
-    "@storybook/addon-essentials": "latest",
-    "@storybook/addon-interactions": "latest",
-    "@storybook/addon-links": "latest",
-    "@storybook/addon-onboarding": "latest",
-    "@storybook/blocks": "latest",
-    "@storybook/nextjs": "latest",
-    "@storybook/react": "latest",
-    "@storybook/test": "latest",
-    "@testing-library/react": "latest",
     "@types/file-saver": "latest",
     "@types/papaparse": "latest",
     "@types/react": "latest",
@@ -68,7 +54,6 @@
     "file-saver": "latest",
     "idb": "latest",
     "mysql2": "latest",
-    "storybook": "latest",
     "typescript": "^5.3.3"
   },
   "eslintConfig": {
