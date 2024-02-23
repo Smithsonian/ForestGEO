@@ -12,18 +12,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    environment:
-      name: 'development'
-    env:
-      AZURE_AD_CLIENT_SECRET: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
-      AZURE_AD_CLIENT_ID: ${{ secrets.AZURE_AD_CLIENT_ID }}
-      AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
-      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
-      AZURE_SQL_USER: ${{ secrets.AZURE_SQL_USER }}
-      AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
-      AZURE_SQL_SERVER: ${{ secrets.AZURE_SQL_SERVER }}
-      AZURE_SQL_DATABASE: ${{ secrets.AZURE_SQL_DATABASE }}
-
+    environment: development
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +20,22 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '18.x'
+
+      - name: create frontend env file
+        run: |
+          touch frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
+          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
+          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
+          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
+          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
+          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
+          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
+          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
 
 #      - name: Cache node modules
 #        uses: actions/cache@v2
@@ -62,15 +67,6 @@ jobs:
     environment:
       name: 'development'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    env:
-      AZURE_AD_CLIENT_SECRET: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
-      AZURE_AD_CLIENT_ID: ${{ secrets.AZURE_AD_CLIENT_ID }}
-      AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
-      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
-      AZURE_SQL_USER: ${{ secrets.AZURE_SQL_USER }}
-      AZURE_SQL_PASSWORD: ${{ secrets.AZURE_SQL_PASSWORD }}
-      AZURE_SQL_SERVER: ${{ secrets.AZURE_SQL_SERVER }}
-      AZURE_SQL_DATABASE: ${{ secrets.AZURE_SQL_DATABASE }}
 
     steps:
       - name: Download artifact from build job
