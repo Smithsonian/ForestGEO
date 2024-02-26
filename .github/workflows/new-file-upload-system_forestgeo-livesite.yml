@@ -7,17 +7,12 @@ on:
   push:
     branches:
       - new-file-upload-system
-    paths-ignore:
-      - "README.md"
-      - ".husky"
-      - "**/*.csv"
-      - .env*
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment: development
+
     steps:
       - uses: actions/checkout@v4
 
@@ -59,14 +54,14 @@ jobs:
           npm run build --if-present
           npm run test --if-present
 
-      - name: Zip artifact for deployment
-        run: zip next.zip ./* .next .env -qr
+      - name: Zip all files for upload between jobs
+        run: zip next.zip ./frontend/* ./frontend/next ./frontend/.env -qr
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
           app-name: 'forestgeo-livesite'
-          slot-name: 'production'
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .
+          slot-name: 'Production'
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_852346BD764D45D08854E6679137F844 }}
+          package: next.zip
