@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     environment: development
     steps:
@@ -61,12 +61,6 @@ jobs:
 
       - name: Zip artifact for deployment
         run: zip next.zip ./* .next .env -qr
-
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-app
-          path: release.zip
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
