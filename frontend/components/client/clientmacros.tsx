@@ -5,6 +5,9 @@ import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 import {Census, Plot, Quadrat} from "@/config/macros";
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
 import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {Box, Typography} from "@mui/material";
+import React from "react";
+import { LinearProgress, LinearProgressProps } from "@mui/joy";
 
 async function updateQuadratsIDB() {
   const quadratRDSResponse = await fetch(`/api/fetchall/quadrats`, {method: 'GET'});
@@ -99,4 +102,28 @@ export async function loadServerDataIntoIDB(dataType: string) {
     default:
       throw new Error('incorrect data type provided to loadServerDataIntoIDB, verify');
   }
+}
+
+export function LinearProgressWithLabel(props: LinearProgressProps & { value?: number, currentlyrunningmsg?: string }) {
+  return (
+    <Box sx={{display: 'flex', flex: 1, alignItems: 'center', flexDirection: 'column'}}>
+      <Box sx={{ mr: 1}}>
+        {props.value ? (
+          <LinearProgress size={"lg"} determinate {...props} />
+        ) : (
+          <LinearProgress size={"lg"} {...props} />
+        )}
+      </Box>
+      <Box sx={{minWidth: 35, display: 'flex', flex: 1, flexDirection: 'column'}}>
+        {props.value ? (
+          <Typography variant="body2" color="text.secondary">{`${Math.round(
+            props?.value,
+          )}% --> ${props?.currentlyrunningmsg}`}</Typography>
+        ) : (
+          <Typography variant="body2" color="text.secondary">{`${props?.currentlyrunningmsg}`}</Typography>
+        )}
+
+      </Box>
+    </Box>
+  );
 }

@@ -54,7 +54,7 @@ export const LoginLogout = () => {
           </Typography>
         </Box>
         <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut()}>
-          {status == "loading" ? <CircularProgress/> : <LogoutRoundedIcon/>}
+          {status == "loading" ? <CircularProgress size={"lg"}/> : <LogoutRoundedIcon/>}
         </IconButton>
       </Box>
     );
