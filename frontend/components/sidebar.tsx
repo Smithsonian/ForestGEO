@@ -167,8 +167,9 @@ export default function Sidebar() {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center">
-        <CircularProgress/>
+      <Box display="flex" justifyContent="center" alignItems="center" sx={{flexDirection: 'column'}}>
+        <CircularProgress size={"lg"} variant={"soft"} color={'primary'} />
+        <Typography color={"warning"} level={"title-md"}>Loading Sidebar...</Typography>
       </Box>
     );
   }
@@ -206,7 +207,7 @@ export default function Sidebar() {
           })}
         />
         <Box sx={{display: 'flex', gap: 1, alignItems: 'left'}}>
-          <Typography level="h1">ForestGEO: <Typography className={"text-teal-400"}>Panama</Typography></Typography>
+          <Typography level="h1">ForestGEO: <Typography className={"text-teal-400"}>C. & S. America</Typography></Typography>
         </Box>
         <Divider orientation={"horizontal"}/>
         <Box

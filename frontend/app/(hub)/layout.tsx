@@ -17,9 +17,10 @@ import {Census, Plot, Quadrat, siteConfig} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
-import {Box} from "@mui/joy";
+import {Box, Stack} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
-import {loadServerDataIntoIDB} from "@/components/client/clientmacros";
+import {LinearProgressWithLabel, loadServerDataIntoIDB} from "@/components/client/clientmacros";
+import Typography from "@mui/joy/Typography";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
@@ -74,10 +75,6 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const [loading, setLoading] = useState(0);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [coreDataLoading, setCoreDataLoading] = useState(true);
-  let currentCensus = useCensusContext();
-  let currentPlot = usePlotContext();
-  const plotDispatch = usePlotDispatch();
-  const censusDispatch = useCensusDispatch();
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
@@ -124,8 +121,9 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   let pathname = usePathname();
 
   const fetchAndDispatchCoreData = useCallback(async () => {
+    const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
     setCoreDataLoading(true);
-
+    setLoading(0);
     // IDB load stored separately: QUADRATS
     await loadServerDataIntoIDB('quadrats');
     setLoadingMsg('Retrieving Quadrats...');
@@ -139,12 +137,14 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     let quadratList: Quadrat[] = await getData('quadratList');
     setLoading(30);
     if (!quadratList || quadratList.length === 0) throw new Error('quadratsList data failed');
+    await delay(500);
+    setLoading(40);
     setLoadingMsg('Dispatching Quadrat List...');
-    setLoading(40)
     if (quadratListDispatch) quadratListDispatch({quadratList: quadratList});
 
     // IDB load stored separately: CENSUS
     await loadServerDataIntoIDB('census');
+    await delay(500);
     setLoading(50);
     setLoadingMsg('Retrieving Census...');
     let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
@@ -157,6 +157,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
 
     // IDB load stored separately: PLOTS
     await loadServerDataIntoIDB('plots');
+    await delay(500);
     setLoading(70);
     setLoadingMsg('Retrieving Plots...');
     // Check if plotsLoad data is available in localStorage
@@ -167,16 +168,17 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     // Check if plotList data is available in localStorage
     const plotListData = await getData('plotList');
     if (!plotListData || plotListData.length === 0) throw new Error('plotList data failed');
+    await delay(500);
     setLoading(90);
     setLoadingMsg('Dispatching Plot List...');
     if (plotsListDispatch) plotsListDispatch({plotList: plotListData});
-
+    setLoading(100);
     setCoreDataLoading(false);
   }, [censusListDispatch, censusLoadDispatch, plotsListDispatch, plotsLoadDispatch, quadratListDispatch, quadratsLoadDispatch]);
   return (
     <>
       {coreDataLoading ? (
-        <CircularProgress determinate value={loading} variant={"soft"} title={loadingMsg}/>
+        <LinearProgressWithLabel value={loading} currentlyrunningmsg={loadingMsg} />
       ) : (
         <>
           <Sidebar/>

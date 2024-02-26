@@ -5,6 +5,7 @@ import {FileCollectionRowSet, FileRow, ReviewStates, UploadFireProps} from '@/co
 import {FileWithPath} from "react-dropzone";
 import {Stack} from "@mui/joy";
 import {CMIDRow} from "@/components/uploadsystem/uploadparent";
+import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 
 interface IdToRow {
   coreMeasurementID: number;
@@ -77,21 +78,6 @@ const UploadFire: React.FC<UploadFireProps> = ({
     }
   }, [currentCensus?.censusID, currentPlot?.key, setErrorComponent, setReviewState, setUploadError, user]);
 
-  function LinearProgressWithLabel(props: LinearProgressProps & { value: number, currentlyrunningmsg: string }) {
-    return (
-      <Box sx={{display: 'flex', alignItems: 'center'}}>
-        <Box sx={{width: '100%', mr: 1}}>
-          <LinearProgress variant="determinate" {...props} />
-        </Box>
-        <Box sx={{minWidth: 35, display: 'flex', flex: 1, flexDirection: 'column'}}>
-          <Typography variant="body2" color="text.secondary">{`${Math.round(
-            props.value,
-          )}% --> ${props.currentlyrunningmsg}`}</Typography>
-        </Box>
-      </Box>
-    );
-  }
-
   useEffect(() => {
     switch (uploadForm) {
       case "fixeddata_codes.csv":
@@ -162,7 +148,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
         <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
           <Stack direction={"column"}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-            <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
+            <LinearProgressWithLabel determinate value={(completedOperations / totalOperations) * 100}
                                      currentlyrunningmsg={currentlyRunning}/>
           </Stack>
         </Box>
