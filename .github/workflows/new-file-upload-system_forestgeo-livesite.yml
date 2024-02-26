@@ -56,7 +56,7 @@ jobs:
           npm run test --if-present
 
       - name: Zip artifact for deployment
-        run: zip next.zip ./* .next .env -qr
+        run: zip next.zip ./frontend/* ./frontend/.next ./frontend/.env -qr
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
