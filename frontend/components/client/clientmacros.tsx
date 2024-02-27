@@ -10,6 +10,7 @@ import React from "react";
 
 async function updateQuadratsIDB() {
   const quadratRDSResponse = await fetch(`/api/fetchall/quadrats`, {method: 'GET'});
+  if (!quadratRDSResponse.ok) throw new Error('fetchall quadrats failure.');
   const jsonResponse = await quadratRDSResponse.json();
   await clearDataByKey('quadratsLoad');
   await clearDataByKey('quadratList');
@@ -25,6 +26,7 @@ async function updateQuadratsIDB() {
   await setData('quadratsLoad', quadratsRDSLoad);
   await setData('quadratList', quadratList);
   const plotRDSResponse = await fetch('/api/fetchall/plots', {method: 'GET'});
+  if (!plotRDSResponse.ok) throw new Error('fetchall plots failure');
   let plotRDSLoad = await plotRDSResponse.json();
   let plotList: Plot[] = [];
   plotList = plotRDSLoad.map((plotRDS: PlotRDS) => ({
@@ -38,6 +40,7 @@ async function updateQuadratsIDB() {
 
 async function updatePlotsIDB() {
   const plotRDSResponse = await fetch(`/api/fetchall/plots`, {method: 'GET'});
+  if (!plotRDSResponse.ok) throw new Error('fetchall plots failure');
   const jsonResponse = await plotRDSResponse.json();
   await clearDataByKey('plotsLoad');
   await clearDataByKey('plotList');
@@ -56,6 +59,7 @@ async function updatePlotsIDB() {
 
 async function updateCensusIDB() {
   const censusRDSResponse = await fetch(`/api/fetchall/census`, {method: 'GET'});
+  if (!censusRDSResponse.ok) throw new Error('fetchall census failure');
   const jsonResponse = await censusRDSResponse.json();
   await clearDataByKey('censusLoad');
   await clearDataByKey('censusList');
