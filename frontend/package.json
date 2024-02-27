@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build -p 8080",
     "start": "node .next/standalone/server.js -p 8080",
     "lint": "next lint",
     "bs": "next build; next start",
