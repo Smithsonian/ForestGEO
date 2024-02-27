@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node .next/standalone/server.js",
+    "start": "node .next/standalone/server.js -p 8080",
     "lint": "next lint",
     "bs": "next build; next start",
     "bswin": "npm run build ; npm run start",
