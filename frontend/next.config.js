@@ -6,6 +6,8 @@ const nextConfig = {
     },
   },
   output: 'standalone',
+  reactStrictMode: true,
+  distDir: "build",
 }
 
 module.exports = nextConfig
