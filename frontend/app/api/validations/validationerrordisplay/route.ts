@@ -1,8 +1,7 @@
 import {NextResponse} from "next/server";
-import {getConn, getSchema, PersonnelResult, runQuery} from "@/components/processors/processormacros";
+import {getConn, getSchema, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {CMError} from "@/config/macros";
-import {PersonnelRDS} from "@/config/sqlmacros";
 export async function GET() {
   let conn: PoolConnection | null = null;
 

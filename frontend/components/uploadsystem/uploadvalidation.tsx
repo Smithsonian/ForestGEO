@@ -36,8 +36,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const [currentPromptApi, setCurrentPromptApi] = useState<string>('');
   const [tempMinMax, setTempMinMax] = useState<{ min: number | string, max: number | string }>({min: '', max: ''});
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
-  const [currentValidationIndex, setCurrentValidationIndex] = useState(0);
-
+  const [useDefaultValues, setUseDefaultValues] = useState<boolean>(false);
+  const [defaultValuesDialogOpen, setDefaultValuesDialogOpen] = useState<boolean>(true);
 
   const validationAPIs: string[] = [
     'dbhgrowthexceedsmax',
@@ -53,6 +53,12 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     'stemtreediffspecies',
     'treestemsdiffquadrats',
   ];
+
+  const defaultMinMaxValues: Record<string, { min: number, max: number }> = {
+    'screendbhminmax': { min: 1, max: 500 },
+    'screenhomminmax': { min: 1, max: 1.5},
+    // ... [other default values]
+  };
 
   // Define the type for validation messages
   type ValidationMessages = {
@@ -78,9 +84,19 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   useEffect(() => {
     const initialProgress = validationAPIs.reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
     setValidationProgress(initialProgress);
-    // Start with the first prompt for DBH
-    promptForInput('screendbhminmax');
   }, []);
+
+  const handleDefaultValuesSelection = (useDefaults: boolean) => {
+    setUseDefaultValues(useDefaults);
+    setDefaultValuesDialogOpen(false);
+
+    if (useDefaults) {
+      setMinMaxValues(defaultMinMaxValues);
+      showNextPrompt(0, false).catch(console.error);
+    } else {
+      promptForInput('screendbhminmax');
+    }
+  };
 
   const promptForInput = (api: string) => {
     setCurrentPromptApi(api);
@@ -100,45 +116,34 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       promptForInput('screenhomminmax');
     } else if (currentPromptApi === 'screenhomminmax') {
       // Start validations after both prompts are done
-      showNextPrompt(0);
+      showNextPrompt(0, false).catch(console.error);
     }
   };
 
-  const showNextPrompt = (index: number) => {
+  const showNextPrompt = async (index: number, foundError: boolean = false) => {
     if (index >= validationAPIs.length) {
       setIsValidationComplete(true); // All validations are complete
-      checkForErrors();
+      setErrorsFound(foundError);
+      if (foundError) {
+        setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND);
+      }
       return;
     }
 
     const api = validationAPIs[index];
 
-    // Directly perform validations for screendbhminmax and screenhomminmax
-    if (api === 'screendbhminmax' || api === 'screenhomminmax') {
-      performValidation(api).then(result => {
-        setValidationResults(prevResults => ({ ...prevResults, [api]: result }));
-        setValidationProgress(prevProgress => ({ ...prevProgress, [api]: 100 }));
-        showNextPrompt(index + 1);
-      });
-    } else {
-      performValidation(api).then(result => {
-        setValidationResults(prevResults => ({ ...prevResults, [api]: result }));
-        setValidationProgress(prevProgress => ({ ...prevProgress, [api]: 100 }));
-        showNextPrompt(index + 1);
-      });
-    }
+    performValidation(api).then(({ response, hasError }) => {
+      setValidationResults(prevResults => ({...prevResults, [api]: response}));
+      setValidationProgress(prevProgress => ({ ...prevProgress, [api]: 100 }));
+      showNextPrompt(index + 1, foundError || hasError);
+    });
   };
 
-  const performValidation = async (api: string): Promise<ValidationResponse> => {
+  const performValidation = async (api: string): Promise<{ response: ValidationResponse, hasError: boolean }> => {
     let queryParams = `plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`;
     if (['screendbhminmax', 'screenhomminmax'].includes(api)) {
-      const values = minMaxValues[api];
-      if (values) {
-        queryParams += `&minValue=${values.min}&maxValue=${values.max}`;
-      } else {
-        console.error(`Validation values for ${api} are not set`);
-        return { failedRows: 0, message: `Validation values for ${api} are not set`, totalRows: 0 };
-      }
+      const values = minMaxValues[api] || defaultMinMaxValues[api]; // Use default if not set
+      queryParams += `&minValue=${values.min}&maxValue=${values.max}`;
     }
     try {
       const response = await fetch(`/api/validations/${api}?${queryParams}`);
@@ -146,20 +151,22 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
         throw new Error(`Error executing ${api}`);
       }
       const result = await response.json();
-      setValidationProgress(prevProgress => ({ ...prevProgress, [api]: 100 }));
-      return result;
+      const hasError = result.failedRows > 0;
+      return { response: result, hasError };
     } catch (error: any) {
       console.error(`Error performing validation for ${api}:`, error);
       setApiErrors(prev => [...prev, `Failed to execute ${api}: ${error.message}`]);
       setValidationProgress(prevProgress => ({ ...prevProgress, [api]: -1 }));
-      return { failedRows: 0, message: error.message, totalRows: 0 };
+      return { response: {failedRows: 0, message: error.message, totalRows: 0 }, hasError: false};
     }
   };
 
   const checkForErrors = () => {
     const foundErrors = Object.values(validationResults).some(result => result.failedRows > 0);
+    console.log(`found errors: ${foundErrors}`);
     setErrorsFound(foundErrors);
   };
+
   const renderProgressBars = () => {
     return validationAPIs.map(api => (
       <Box key={api} sx={{mb: 2}}>
@@ -204,9 +211,27 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     );
   };
 
+  const renderDefaultValuesDialog = () => {
+    return (
+      <Dialog open={defaultValuesDialogOpen} onClose={() => handleDefaultValuesSelection(false)}>
+        <DialogTitle>Validation Parameters</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Would you like to use default values for validation parameters or provide them manually?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => handleDefaultValuesSelection(true)}>Use Default Values</Button>
+          <Button onClick={() => handleDefaultValuesSelection(false)}>Manual Input</Button>
+        </DialogActions>
+      </Dialog>
+    );
+  };
+
   return (
     <Box sx={{width: '100%', p: 2, display: 'flex', flex: 1, flexDirection: 'column'}}>
-      {renderPromptModal() /* Render the modal dialog */}
+      {renderDefaultValuesDialog()}
+      {renderPromptModal()}
 
       {!isValidationComplete ? (
         <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
@@ -219,13 +244,13 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
           {apiErrors.length > 0 && (
             <Box sx={{mb: 2}}>
               <Typography color="error">Some validations could not be performed:</Typography>
-              {apiErrors.map((error, index) => (
-                <Typography key={index} color="error">- {error}</Typography>
+              {apiErrors.map((error) => (
+                <Typography key={error} color="error">- {error}</Typography>
               ))}
             </Box>
           )}
-          {Object.entries(validationResults).map(([api, result], index) => (
-            <Box key={index} sx={{mb: 2}}>
+          {Object.entries(validationResults).map(([api, result]) => (
+            <Box key={api} sx={{mb: 2}}>
               <Typography>{api}:</Typography>
               {result.failedRows > 0 ? (
                 <>
@@ -238,17 +263,17 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
               )}
             </Box>
           ))}
-          {errorsFound ? (
-            <Button variant="contained" color="error" sx={{mt: 2, width: 'fit-content'}}
-                    onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>
-              Review Errors
-            </Button>
-          ) : (
-            <Button variant="contained" color="success" sx={{mt: 2, width: 'fit-content'}}
-                    onClick={() => setReviewState(ReviewStates.UPDATE)}>
-              Complete Upload
-            </Button>
-          )}
+          {/*{errorsFound ? (*/}
+          {/*  <Button variant="contained" color="error" sx={{mt: 2, width: 'fit-content'}}*/}
+          {/*          onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>*/}
+          {/*    Review Errors*/}
+          {/*  </Button>*/}
+          {/*) : (*/}
+          {/*  <Button variant="contained" color="success" sx={{mt: 2, width: 'fit-content'}}*/}
+          {/*          onClick={() => setReviewState(ReviewStates.UPDATE)}>*/}
+          {/*    Complete Upload*/}
+          {/*  </Button>*/}
+          {/*)}*/}
         </Box>
       )}
     </Box>
