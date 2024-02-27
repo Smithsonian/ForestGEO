@@ -51,7 +51,7 @@ jobs:
       - name: remove backend and legacy dirs --> not needed for app execution
         run: |
           rm -rf backend/
-          rm -rf frontend/
+          rm -rf legacy/
 
       - name: move all files from frontend/ into base directory
         run: |
