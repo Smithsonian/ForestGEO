@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: '18.x'
 
-      - name: create frontend env file
+      - name: create env file (now moved to base directory)
         run: |
           touch .env
           echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
@@ -48,12 +48,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
 
-      - name: npm install, build, and test
+      - name: remove backend and legacy dirs --> not needed for app execution
         run: |
           rm -rf backend/
-          rm -rf legacy/
+          rm -rf frontend/
+
+      - name: move all files from frontend/ into base directory
+        run: |
           mv frontend/* .
-          ls -a
+          rm -rf frontend/
+          ls -altr
+
+      - name: npm install, build, and test
+        run: |
           npm install
           npm run build --if-present
           npm run test --if-present
