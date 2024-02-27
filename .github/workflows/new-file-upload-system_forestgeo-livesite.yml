@@ -24,7 +24,7 @@ jobs:
 
       - name: create frontend env file
         run: |
-          touch frontend/.env
+          touch .env
           echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
           echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
           echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
@@ -50,13 +50,16 @@ jobs:
 
       - name: npm install, build, and test
         run: |
-          cd frontend/
+          rm -rf backend/
+          rm -rf legacy/
+          mv frontend/* .
+          ls -a
           npm install
           npm run build --if-present
           npm run test --if-present
 
       - name: Zip artifact for deployment
-        run: zip next.zip ./frontend/* ./frontend/.next ./frontend/.env -qr
+        run: zip next.zip ./* .next .env -qr
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
