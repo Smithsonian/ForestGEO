@@ -60,6 +60,7 @@ jobs:
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
           mv ./frontend/public ./frontend/build/standalone
+          mv ./*.pem ./frontend/build/standalone/
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
