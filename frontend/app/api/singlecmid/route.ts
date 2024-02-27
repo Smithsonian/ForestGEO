@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     conn = await getConn();
     let query = `SELECT * FROM ${schema}.CoreMeasurements WHERE CoreMeasurementID = ? LIMIT 1`;
     const results = await runQuery(conn, query, [cmID]);
-    if (results.length > 1) throw new Error('Attempting to select a single ')
+    if (results.length > 1) throw new Error('Attempting to select a single entry from SQL returned > 1 results');
     let coreMeasurementRows: CoreMeasurementsRDS[] = results.map((row: CoreMeasurementsResult, index: number) => ({
       // ... mapping fields ...
       id: index + 1,
