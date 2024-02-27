@@ -483,7 +483,8 @@ export default function UploadParent() {
       case ReviewStates.VALIDATE_ERRORS_FOUND:
         return <UploadValidationErrorDisplay
           allRowToCMID={allRowToCMID}
-          setReviewState={setReviewState}/>;
+          setReviewState={setReviewState}
+          uploadForm={uploadForm}/>;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
