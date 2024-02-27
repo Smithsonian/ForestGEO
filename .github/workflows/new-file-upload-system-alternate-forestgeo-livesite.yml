@@ -1,7 +1,7 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Alternate Testing Workflow
+name: Live Site Deployment (testing)
 
 on:
   push:
@@ -22,23 +22,23 @@ jobs:
         with:
           node-version: '18.x'
 
-      - name: create env file (now moved to base directory)
+      - name: create env file (in frontend/ directory)
         run: |
-          touch .env
-          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> .env
-          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> .env
-          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> .env
-          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> .env
-          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> .env
-          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> .env
-          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> .env
-          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> .env
-          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> .env
-          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> .env
-          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> .env
-          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> .env
-          echo NODE_ENV=development >> .env
-          echo PORT=3000 >> .env
+          touch frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
+          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
+          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
+          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
+          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
+          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
+          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
+          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
+          echo NODE_ENV=development >> frontend/.env
+          echo PORT=3000 >> frontend/.env
 
       - name: Cache node modules
         uses: actions/cache@v2
@@ -48,24 +48,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
 
-      - name: remove backend and legacy dirs --> not needed for app execution
+      - name: move into frontend --> npm install, build, and test
         run: |
-          rm -rf backend/
-          rm -rf legacy/
-
-      - name: move all files from frontend/ into base directory
-        run: |
-          mv frontend/* .
-          rm -rf frontend/
-          ls -altr
-
-      - name: npm install, build, and test
-        run: |
+          cd frontend/
           npm install
-          npm run build --if-present
+          npm run build
           npm run test --if-present
-          mv ./build/static ./build/standalone/build
-          mv ./public ./build/standalone
+
+      - name: Move directories into build/standalone to reduce app load
+        run: |
+          mv ./frontend/build/static ./frontend/build/standalone/build
+          mv ./frontend/public ./frontend/build/standalone
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -74,4 +67,4 @@ jobs:
           app-name: 'forestgeo-livesite'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_852346BD764D45D08854E6679137F844 }}
-          package: ./build/standalone
+          package: ./frontend/build/standalone
