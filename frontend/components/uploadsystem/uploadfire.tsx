@@ -148,7 +148,7 @@ const UploadFire: React.FC<UploadFireProps> = ({
         <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
           <Stack direction={"column"}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-            <LinearProgressWithLabel determinate value={(completedOperations / totalOperations) * 100}
+            <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
                                      currentlyrunningmsg={currentlyRunning}/>
           </Stack>
         </Box>

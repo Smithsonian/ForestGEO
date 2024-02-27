@@ -207,7 +207,7 @@ export default function Sidebar() {
           })}
         />
         <Box sx={{display: 'flex', gap: 1, alignItems: 'left'}}>
-          <Typography level="h1">ForestGEO: <Typography className={"text-teal-400"}>C. & S. America</Typography></Typography>
+          <Typography level="h1">ForestGEO: <Typography className={"text-teal-400"}>Americas</Typography></Typography>
         </Box>
         <Divider orientation={"horizontal"}/>
         <Box
@@ -296,9 +296,10 @@ export default function Sidebar() {
               </Link>
             </Breadcrumbs>
             <Divider orientation={"horizontal"}/>
-            <Button variant={"soft"} sx={{width: 'fit-content'}} onClick={restorePlotCensus} color={"primary"} title={"Restore Plot and Census"}>
+            <Button variant={"soft"} sx={{width: 'fit-content', marginBottom: 1}} onClick={restorePlotCensus} color={"primary"} title={"Restore Plot and Census"}>
               Restore Plot and Census
             </Button>
+            <Divider orientation={"horizontal"} />
             <Modal open={openPlotSelectionModal} onClose={() => {
               setPlot(currentPlot);
               setOpenPlotSelectionModal(false);
@@ -413,7 +414,6 @@ export default function Sidebar() {
               </ModalDialog>
             </Modal>
           </List>
-          <Divider orientation={"horizontal"}/>
         </Box>
         <Divider/>
         <LoginLogout/>

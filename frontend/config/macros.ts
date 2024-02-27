@@ -140,7 +140,7 @@ export type ExtendedFileRow = {
 };
 
 export type ExtendedFileRowSet = {
-  [row: string]: ExtendedFileRow; // {row --> ExtendedFileRow}
+  [row: string]: ExtendedFileRow; // {row --> ExtendedFileRow}z
 };
 
 export type ExtendedFileCollectionRowSet = {

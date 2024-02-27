@@ -205,13 +205,18 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
       return (
         <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5}}>
           {cellError ? (
-            <><Typography sx={{
-              whiteSpace: 'normal',
-              lineHeight: 'normal'
-            }}>{params.value !== undefined ? params.value?.toString() : ''}</Typography><Typography
-              sx={{color: 'error.main', fontSize: '0.75rem', mt: 0.5, whiteSpace: 'normal', lineHeight: 'normal'}}>
-              {cellError}
-            </Typography></>
+            <>
+              <Typography sx={{
+                whiteSpace: 'normal',
+                lineHeight: 'normal'
+              }}>
+                {params.value !== undefined ? params.value?.toString() : ''}
+              </Typography>
+              <Typography
+                sx={{color: 'error.main', fontSize: '0.75rem', mt: 0.5, whiteSpace: 'normal', lineHeight: 'normal'}}>
+                {cellError}
+              </Typography>
+            </>
           ) : (
             <Typography sx={{
               whiteSpace: 'normal',
