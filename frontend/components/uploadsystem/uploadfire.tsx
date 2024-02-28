@@ -1,13 +1,13 @@
 "use client";
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Button, LinearProgress, LinearProgressProps, Typography} from '@mui/material';
-import {FileCollectionRowSet, FileRow, ReviewStates, UploadFireProps} from '@/config/macros';
+import {FileCollectionRowSet, FileRow, formatDate, ReviewStates, UploadFireProps} from '@/config/macros';
 import {FileWithPath} from "react-dropzone";
 import {Stack} from "@mui/joy";
-import {CMIDRow} from "@/components/uploadsystem/uploadparent";
+import {CMIDRow, DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 
-interface IdToRow {
+interface IDToRow {
   coreMeasurementID: number;
   fileRow: FileRow;
 }
@@ -17,8 +17,10 @@ const UploadFire: React.FC<UploadFireProps> = ({
                                                  uploadForm, setIsDataUnsaved,
                                                  currentPlot, currentCensus, uploadCompleteMessage,
                                                  setUploadCompleteMessage, handleReturnToStart,
-                                                 user, setUploadError, setErrorComponent,
-                                                 setReviewState, allRowToCMID, setAllRowToCMID
+                                                 user, setUploadError,
+                                                 setErrorComponent,
+                                                 setReviewState,
+                                                 allRowToCMID, setAllRowToCMID,
                                                }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -39,14 +41,49 @@ const UploadFire: React.FC<UploadFireProps> = ({
       setCompletedOperations((prevCompleted) => prevCompleted + 1);
       const result = await response.json();
       if (uploadForm === 'fixeddata_census' && result.idToRows) {
-        // Map over the idToRows array to create new objects for allRowToCMID
-        const newRowToCMID: CMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IdToRow) => ({
-          coreMeasurementID,
-          fileName,
-          row: fileRow
-        }));
-        setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
-        console.log(allRowToCMID);
+        // Fetch additional details for each coreMeasurementID
+        Promise.all(result.idToRows.map(({ coreMeasurementID }: IDToRow) =>
+          fetch(`/api/cmiddetails?cmid=${coreMeasurementID}`)
+            .then(response => response.json())
+        )).then(details => {
+          // Combine details with idToRows data
+          const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow, index: number) => {
+            const detailArray = details[index];
+            if (Array.isArray(detailArray) && detailArray.length > 0) {
+              const detail = detailArray[0]; // Extract the object from the array
+              if ('plotName' in detail &&
+                'quadratName' in detail &&
+                'plotCensusNumber' in detail &&
+                'censusStart' in detail &&
+                'censusEnd' in detail &&
+                'personnelName' in detail &&
+                'speciesName' in detail) {
+                return {
+                  coreMeasurementID,
+                  fileName,
+                  row: fileRow,
+                  plotName: detail.plotName,
+                  quadratName: detail.quadratName,
+                  plotCensusNumber: detail.plotCensusNumber,
+                  censusStart: formatDate(detail.censusStart),
+                  censusEnd: formatDate(detail.censusEnd),
+                  personnelName: detail.personnelName,
+                  speciesName: detail.speciesName
+                };
+              } else {
+                throw new Error('Detail object missing required properties');
+              }
+            } else {
+              throw new Error('Invalid detail array structure');
+            }
+          });
+          setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
+        }).catch(error => {
+          console.error('Error fetching CMID details:', error);
+          setUploadError(error);
+          setErrorComponent('UploadFire');
+          setReviewState(ReviewStates.ERRORS);
+        });
       }
       return response.ok ? 'SQL load successful' : 'SQL load failed';
     } catch (error) {
@@ -160,6 +197,20 @@ const UploadFire: React.FC<UploadFireProps> = ({
               <Typography key={result}>{result}</Typography>
             ))}
             <Typography>{uploadCompleteMessage}</Typography>
+            {/* Display allRowToCMID data */}
+            {allRowToCMID.map((row, index) => (
+              <Box key={index} sx={{ mt: 2, p: 2, border: '1px solid grey' }}>
+                <Typography>Core Measurement ID: {row.coreMeasurementID}</Typography>
+                <Typography>File Name: {row.fileName}</Typography>
+                <Typography>Plot Name: {row.plotName}</Typography>
+                <Typography>Quadrat Name: {row.quadratName}</Typography>
+                <Typography>Plot Census Number: {row.plotCensusNumber}</Typography>
+                <Typography>Census Start: {row.censusStart}</Typography>
+                <Typography>Census End: {row.censusEnd}</Typography>
+                <Typography>Personnel Name: {row.personnelName}</Typography>
+              </Box>
+            ))}
+            {/* End of allRowToCMID data display */}
             {(uploadForm === "fixeddata_census" ||
               uploadForm === "ctfsweb_new_plants_form" ||
               uploadForm === "ctfsweb_old_tree_form" ||
