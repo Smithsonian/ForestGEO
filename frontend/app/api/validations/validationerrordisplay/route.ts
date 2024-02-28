@@ -9,19 +9,25 @@ export async function GET() {
     const schema = getSchema();
     conn = await getConn();
     const query = `
-      SELECT cm.CoreMeasurementID As CoreMeasurementID, ve.ValidationErrorID as ValidationErrorID, ve.ValidationErrorDescription as Description
-      FROM ${schema}.cmverrors AS cve
-      JOIN ${schema}.coremeasurements AS cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
-      JOIN ${schema}.validationerrors AS ve ON cve.ValidationErrorID = ve.ValidationErrorID;
-    `;
-
+      SELECT 
+          cm.CoreMeasurementID AS CoreMeasurementID, 
+          GROUP_CONCAT(ve.ValidationErrorID) AS ValidationErrorIDs,
+          GROUP_CONCAT(ve.ValidationErrorDescription) AS Descriptions
+      FROM 
+          ${schema}.cmverrors AS cve
+      JOIN 
+          ${schema}.coremeasurements AS cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
+      JOIN 
+          ${schema}.validationerrors AS ve ON cve.ValidationErrorID = ve.ValidationErrorID
+      GROUP BY 
+          cm.CoreMeasurementID;`;
     // Utilize the runQuery helper function
     const rows = await runQuery(conn, query);
 
     const parsedRows: CMError[] = rows.map((row: any) => ({
       CoreMeasurementID: row.CoreMeasurementID,
-      ValidationErrorID: row.ValidationErrorID,
-      Description: row.Description,
+      ValidationErrorIDs: row.ValidationErrorIDs,
+      Descriptions: row.Descriptions,
     }));
     return new NextResponse(JSON.stringify(parsedRows), {status: 200, headers: {
         'Content-Type': 'application/json'

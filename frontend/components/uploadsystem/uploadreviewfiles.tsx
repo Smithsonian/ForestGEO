@@ -220,7 +220,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
             <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
             <Button
               onClick={() => setIsReuploadDialogOpen(true)}
-              variant="contained"
+              variant={"outlined"}
               color="primary"
               disabled={!hasErrors}
               sx={{marginTop: 2}}

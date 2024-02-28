@@ -13,7 +13,7 @@ import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
 import {CensusRDS} from "@/config/sqlmacros";
-import {CMIDRow} from "@/components/uploadsystem/uploadparent";
+import {CMIDRow, DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 
 // INTERFACES
 export interface PlotRaw {
@@ -204,8 +204,8 @@ export interface UploadFireProps extends UploadReviewFilesProps {
   uploadCompleteMessage: string;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   handleReturnToStart: () => Promise<void>;
-  allRowToCMID: CMIDRow[];
-  setAllRowToCMID: Dispatch<SetStateAction<CMIDRow[]>>;
+  allRowToCMID: DetailedCMIDRow[];
+  setAllRowToCMID: Dispatch<SetStateAction<DetailedCMIDRow[]>>;
 }
 
 export interface UploadErrorProps {
@@ -235,7 +235,6 @@ export enum HTTPResponses {
   BAD_GATEWAY = 502,
   SERVICE_UNAVAILABLE = 503,
   GATEWAY_TIMEOUT = 504,
-  // Add more as needed
   SQL_CONNECTION_FAILURE = 408, // Custom code, example
   STORAGE_CONNECTION_FAILURE = 507, // Custom code, example
   INVALID_REQUEST = 400, // Custom code, example
@@ -581,6 +580,15 @@ export async function uploadValidFileAsBuffer(containerClient: ContainerClient, 
 // for validation error display ONLY
 export interface CMError {
   CoreMeasurementID: number;
-  ValidationErrorID: number;
-  Description: string;
+  ValidationErrorIDs: number[];
+  Descriptions: string[];
+}
+
+export function formatDate(isoDateString: string): string {
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  };
+  return new Date(isoDateString).toLocaleDateString(undefined, options);
 }

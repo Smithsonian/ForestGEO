@@ -66,6 +66,16 @@ export interface CMIDRow {
   row: FileRow;
 }
 
+export interface DetailedCMIDRow extends CMIDRow {
+  plotName: string;
+  plotCensusNumber: number;
+  quadratName: string;
+  censusStart: any;
+  censusEnd: any;
+  personnelName: string;
+  speciesName: string;
+}
+
 export default function UploadParent() {
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
@@ -99,7 +109,7 @@ export default function UploadParent() {
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
   const [validationPassedRowCount, setValidationPassedRowCount] = useState(0);
-  const [allRowToCMID, setAllRowToCMID] = useState<CMIDRow[]>([]);
+  const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [refreshFileList, setRefreshFileList] = useState(false);
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [showLeaveUploadDialog, setShowLeaveUploadDialog] = useState(false);

@@ -1,9 +1,8 @@
 "use client";
 
-import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import {
   Box,
-  CircularProgress,
   Paper,
   Table,
   TableBody,
@@ -13,14 +12,19 @@ import {
   TableRow,
   Typography
 } from '@mui/material';
-import {CMError, ReviewStates, TableHeadersByFormType} from '@/config/macros';
-import {CMIDRow} from "@/components/uploadsystem/uploadparent";
-import {CoreMeasurementsRDS} from "@/config/sqlmacros";
+import {CMError, formatDate, ReviewStates} from '@/config/macros';
+import { DetailedCMIDRow } from "@/components/uploadsystem/uploadparent";
+import { CoreMeasurementsRDS } from "@/config/sqlmacros";
+import { CircularProgress } from '@mui/joy';
 
 interface UploadValidationErrorDisplayProps {
   uploadForm: string;
-  allRowToCMID: CMIDRow[];
+  allRowToCMID: DetailedCMIDRow[]; // Updated to use DetailedCMIDRow[]
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+}
+
+function isFileRowKey(key: string, cmidRow: DetailedCMIDRow): boolean {
+  return key in cmidRow.row;
 }
 
 const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> = ({
@@ -49,27 +53,58 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
       }
     };
 
-    const fetchRowData = async () => {
-      let outputRows: CoreMeasurementsRDS[] = [];
-    }
     fetchData().catch(console.error);
   }, []);
 
+  // Updated tableHeaders to include new fields
   const tableHeaders = [
-    {key: "tag", header: 'Tag'},
-    {key: "stemtag", header: 'Stem Tag'},
-    {key: "spcode", header: 'Species Code'},
-    {key: "quadrat", header: 'Quadrat'},
-    {key: "lx", header: 'X-position'},
-    {key: "ly", header: 'Y-position'},
-    {key: "dbh", header: 'Diameter at Breast Height'},
-    {key: "codes", header: 'Attribute Codes'},
-    {key: "hom", header: "Height of Measure"},
-    {key: "date", header: 'Date Measured'}
+    { key: "tag", header: 'Tree' },
+    { key: "stemtag", header: 'Stem' },
+    { key: 'speciesName', header: 'Species'}, // for detailedCMIDRow
+    { key: "plotName", header: 'Plot' }, // for detailedCMIDRow
+    { key: "plotCensusNumber", header: 'Plot Census' }, // for detailedCMIDRow
+    { key: "quadratName", header: 'Quadrat' }, // for detailedCMIDRow
+    { key: "censusStart", header: 'Census Start' }, // for detailedCMIDRow
+    { key: "date", header: 'Date' },
+    { key: "censusEnd", header: 'Census End' }, // for detailedCMIDRow
+    { key: "lx", header: 'X-coord' },
+    { key: "ly", header: 'Y-coord' },
+    { key: "personnelName", header: 'Personnel' },  // for detailedCMIDRow
+    { key: "dbh", header: 'Diameter at Breast Height' },
+    { key: "hom", header: "Height of Measure" },
+    { key: "codes", header: 'Attributes' },
   ];
 
+  const errorMapping: { [key: string]: string[] } = {
+    '1': ["codes"],
+    '2': ["dbh"],
+    '3': ["hom"],
+    '4': ["tag", "stemtag"],
+    '5': ["tag", "stemtag", "quadratName"],
+    '6': ["lx", "ly"],
+    '7': ["speciesName"],
+    '8': ["date"],
+    '9': ["tag", "stemtag", "plotCensusNumber"],
+    '10': ["tag", "stemtag", "plotCensusNumber"],
+    '11': ["quadratName"],
+    '12': ["speciesName"],
+    '13': ["dbh"],
+    '14': ["dbh"],
+    '15': ["tag"],
+    '16': ["quadratName"],
+  };
+
+  const getCellStyles = (cmError: CMError, key: string) => {
+    if (!cmError) return {};
+    const errorFields = errorMapping[cmError.ValidationErrorIDs.toString()] || [];
+    if (errorFields.includes(key)) {
+      return { backgroundColor: '#eaf436', color: 'black', fontWeight: 'bold' };  // Highlight erroneous cells
+    }
+    return {};
+  };
+
   if (isLoading) {
-    return <CircularProgress/>;
+    return <CircularProgress size={"lg"}/>;
   }
 
   if (error) {
@@ -77,36 +112,51 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
   }
 
   return (
-    <Box sx={{width: '100%'}}>
+    <Box sx={{ width: '100%' }}>
       <Typography variant="h6">Core Measurement Errors</Typography>
       <TableContainer component={Paper}>
-        <Table>
+        <Table sx={{ tableLayout: 'auto' }}>
           <TableHead>
             <TableRow>
               {tableHeaders.map(item => (
-                <TableCell sx={{width: 'fit-content'}} key={item.key}>{item.header}</TableCell>
+                <TableCell key={item.key}>{item.header}</TableCell>
               ))}
             </TableRow>
           </TableHead>
           <TableBody>
-            {allRowToCMID.map((cmidRow) => {
-              const error = cmErrors.find(e => e.CoreMeasurementID === cmidRow.coreMeasurementID);
-              const isErroneous = !!error;
+            {allRowToCMID.map((cmidRow, rowIndex) => {
+              const cmError = cmErrors.find(e => e.CoreMeasurementID === cmidRow.coreMeasurementID);
+              const isErroneous = !!cmError;
+
               return (
                 <>
-                  <TableRow key={cmidRow.coreMeasurementID}>
-                    {tableHeaders.map(item => (
-                      <TableCell key={item.key}>
-                        {cmidRow.row[item.key]}
-                      </TableCell>
-                    ))}
+                  <TableRow key={rowIndex}>
+                    {tableHeaders.map((item, cellIndex) => {
+                      let cellValue;
+                      if (isFileRowKey(item.key, cmidRow)) {
+                        cellValue = cmidRow.row[item.key];
+                      } else {
+                        cellValue = (cmidRow as any)[item.key];
+                      }
+                      return (
+                        <TableCell key={cellIndex} style={cmError ? getCellStyles(cmError, item.key) : undefined}>
+                          {item.key === 'date' ? formatDate(cellValue) : cellValue}
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
                   {isErroneous && (
-                    <TableRow key={`error`} style={{backgroundColor: 'lightcoral'}}>
-                      <TableCell colSpan={tableHeaders.length}>
-                        {error?.Description}
-                      </TableCell>
-                    </TableRow>
+                    <>
+                      {cmError?.Descriptions.map((description) => {
+                        return (
+                          <TableRow key={`error-${cmidRow.coreMeasurementID}`} sx={{ backgroundColor: 'crimson', color: 'white', fontWeight: 'bold' }}>
+                            <TableCell colSpan={tableHeaders.length}>
+                              {description}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </>
                   )}
                 </>
               );

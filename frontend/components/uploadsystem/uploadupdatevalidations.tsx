@@ -17,7 +17,7 @@ import {Plot, ReviewStates} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {Checkbox} from "@mui/joy";
 import {CensusRDS} from "@/config/sqlmacros";
-import {CMIDRow} from "@/components/uploadsystem/uploadparent";
+import {CMIDRow, DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 
 export interface UploadUpdateValidationsProps {
   validationPassedCMIDs: number[];
@@ -27,7 +27,7 @@ export interface UploadUpdateValidationsProps {
   currentPlot: Plot;
   currentCensus: CensusRDS;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  allRowToCMID: CMIDRow[];
+  allRowToCMID: DetailedCMIDRow[];
   handleReturnToStart: () => Promise<void>;
 }
 
