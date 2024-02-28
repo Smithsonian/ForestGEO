@@ -54,11 +54,10 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
         </CardHeader>
         <Divider className={"mt-6 mb-6"}/>
         <CardContent>
-          <div className="flex flex-col">
-            <CircularProgress value={60} size={"lg"}>
-              Retrieving files...
-            </CircularProgress>
-          </div>
+          <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
+            <CircularProgress size={"lg"} color={"danger"} variant={"soft"} />
+            <Typography variant={"soft"} color={"warning"}>Retrieving files...</Typography>
+          </Box>
         </CardContent>
       </Card>
     </Box>
