@@ -1,5 +1,5 @@
 "use client";
-import React, {useEffect, useState} from 'react';
+import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import {
   Box,
   Button,
@@ -12,16 +12,9 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import {Plot, ReviewStates} from "@/config/macros";
+import {Plot, ReviewStates, UploadValidationProps} from "@/config/macros";
 import {ValidationResponse} from "@/components/processors/processormacros";
 import {CensusRDS} from "@/config/sqlmacros";
-
-export interface UploadValidationProps {
-  setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
-  currentPlot: Plot;
-  currentCensus: CensusRDS;
-}
-
 const UploadValidation: React.FC<UploadValidationProps> = ({
                                                              setReviewState,
                                                              currentPlot, currentCensus

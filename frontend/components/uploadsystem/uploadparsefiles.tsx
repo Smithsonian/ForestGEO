@@ -17,9 +17,6 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   return (
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
-      <Button variant="contained" onClick={() => setReviewState(ReviewStates.START)} sx={{mb: 2, width: 'fit-content'}}>
-        Back
-      </Button>
       <Grid container>
         <Grid item xs={6}>
           <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
@@ -52,7 +49,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               You have selected {uploadForm}. Please ensure that your file has the following headers before
               continuing: <br/>
               {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
-              The person recording the data is {personnelRecording}. Please verify this before continuing.
+              The person recording the data is {personnelRecording}.
             </Typography>
             <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
               <FileDisplay acceptedFiles={acceptedFiles}/>

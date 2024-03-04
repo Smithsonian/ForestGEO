@@ -5,7 +5,7 @@ import {ReviewStates, TableHeadersByFormType, UploadStartProps} from "@/config/m
 import {Stack, Typography} from "@mui/joy";
 import SelectFormType from "@/components/uploadsystemhelpers/groupedformselection";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
-import React from "react";
+import React, {useEffect, useState} from "react";
 import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
@@ -15,9 +15,38 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     setExpectedHeaders, setReviewState
   } = props;
 
+  const [timer, setTimer] = useState<number>(5);
+  const [isTimerActive, setIsTimerActive] = useState<boolean>(false);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    if (isTimerActive && timer > 0) {
+      interval = setInterval(() => {
+        setTimer((prevTimer) => prevTimer - 1);
+      }, 1000);
+    } else if (timer === 0) {
+      setReviewState(ReviewStates.UPLOAD_FILES);
+      setIsTimerActive(false); // Stop the timer
+    }
+
+    return () => clearInterval(interval);
+  }, [isTimerActive, timer, setReviewState]);
+
+  useEffect(() => {
+    if (uploadForm && personnelRecording) {
+      setIsTimerActive(true);
+    }
+  }, [uploadForm, personnelRecording]);
+
   return (
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
       <Grid container spacing={2} sx={{marginRight: 2}}>
+        <Button onClick={() => {
+          setPersonnelRecording('');
+        }} sx={{ width: 'fit-content' }}>
+          Back
+        </Button>
         <Grid item xs={6}>
           {(!TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording === '') && (
             <Stack direction={"column"} sx={{width: 'fit-content'}}>
@@ -52,7 +81,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                   onChange={setPersonnelRecording}
                 />
               </Stack>
-
             </Stack>
           )}
           {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording !== '') && (
@@ -63,15 +91,10 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
                 The person recording the data is {personnelRecording}. Please verify this before continuing.
               </Typography>
-              <Stack direction={"row"}>
-                <Button onClick={() => {
-                  setPersonnelRecording('');
-                }} sx={{width: 'fit-content'}}>
-                  Back
-                </Button>
-                <Button onClick={() => setReviewState(ReviewStates.PARSE)} sx={{width: 'fit-content'}}>
-                  Continue
-                </Button>
+              <Stack direction={"column"}>
+                {isTimerActive && (
+                  <CircularProgress value={(timer / 5) * 100} />
+                )}
               </Stack>
             </Stack>
           )}

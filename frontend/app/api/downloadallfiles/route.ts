@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, response: NextResponse) {
   }
   const listOptions = {
     includeMetadata: true,
-    includeVersions: true,
+    includeVersions: false,
   };
   let i = 0;
   try {

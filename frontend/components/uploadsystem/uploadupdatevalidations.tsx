@@ -1,6 +1,4 @@
-"use client";
-
-import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
   Button,
@@ -13,44 +11,45 @@ import {
   TableRow,
   Typography
 } from "@mui/material";
-import {Plot, ReviewStates} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {Checkbox} from "@mui/joy";
-import {CensusRDS} from "@/config/sqlmacros";
-import {CMIDRow, DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
-
-export interface UploadUpdateValidationsProps {
-  validationPassedCMIDs: number[];
-  setValidationPassedCMIDs: Dispatch<SetStateAction<number[]>>;
-  validationPassedRowCount: number;
-  setValidationPassedRowCount: Dispatch<SetStateAction<number>>;
-  currentPlot: Plot;
-  currentCensus: CensusRDS;
-  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  allRowToCMID: DetailedCMIDRow[];
-  handleReturnToStart: () => Promise<void>;
-}
+import {ReviewStates, UploadUpdateValidationsProps} from "@/config/macros";
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const {
-    currentPlot, currentCensus, validationPassedCMIDs,
-    setValidationPassedCMIDs,
-    setValidationPassedRowCount,
+    currentPlot, currentCensus,
+    setReviewState,
     allRowToCMID, handleReturnToStart
   } = props;
+
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
+  const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
+  const [numValidations, setNumValidations] = useState(0);
+
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
-    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id}&censusID=${currentCensus?.plotCensusNumber}`);
+    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
+
+    if (!response.ok) {
+      console.error('Failed to update validations');
+      setIsUpdateValidationComplete(true);
+      return;
+    }
+
     const result = await response.json();
     setValidationPassedCMIDs(result.updatedIDs);
-    setValidationPassedRowCount(result.rowsValidated);
+    setNumValidations(result.rowsValidated)
     setIsUpdateValidationComplete(true);
-  }
+  };
 
   useEffect(() => {
     updateValidations().catch(console.error);
   }, []);
+
+  const handleCompleteUpload = () => {
+    // Transition to the COMPLETE review state
+    setReviewState(ReviewStates.UPLOAD_AZURE);
+  };
 
   return (
     <Box sx={{width: '100%', p: 2}}>
@@ -58,8 +57,10 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       {!isUpdateValidationComplete ? (
         <CircularProgress/>
       ) : (
-        <Box sx={{width: '100%', p: 2}}>
+        <Box sx={{width: '100%', p: 2, flexDirection: 'column', display: 'flex', flex: 1}}>
           <Typography variant="h6">CoreMeasurement Validation Status</Typography>
+          <br />
+          <Typography variant={"body1"}>Rows Updated: ${numValidations}</Typography>
           <TableContainer component={Paper}>
             <Table aria-label="validation status table">
               <TableHead>
@@ -72,7 +73,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
                 </TableRow>
               </TableHead>
               <TableBody>
-                {allRowToCMID.map(({coreMeasurementID, fileName, row}: CMIDRow, index: number) => (
+                {allRowToCMID.map(({coreMeasurementID, fileName, row}, index) => (
                   <TableRow key={`${coreMeasurementID}-${index}`}>
                     <TableCell>{fileName}</TableCell>
                     <TableCell>{coreMeasurementID}</TableCell>
@@ -89,12 +90,11 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
               </TableBody>
             </Table>
           </TableContainer>
-          <Button onClick={handleReturnToStart} sx={{width: 'fit-content'}}>
-            Return to Upload Start
+          <Button onClick={handleCompleteUpload} sx={{width: 'fit-content', mt: 2}}>
+            Continue to Azure Upload
           </Button>
         </Box>
       )}
     </Box>
   );
-
 }
