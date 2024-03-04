@@ -7,7 +7,11 @@ export async function POST(request: NextRequest) {
   const plot = request.nextUrl.searchParams.get("plot")!.trim();
   const census = request.nextUrl.searchParams.get("census")!.trim();
   const user = request.nextUrl.searchParams.get("user")!;
+  const formType = request.nextUrl.searchParams.get('formType')!;
   const file = formData.get(fileName) as File | null;
+  const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(<string>formData.get('fileRowErrors')) : [];
+
+  if (!file) return NextResponse.error();
   if (!file) return NextResponse.error();
   let containerClient: any = null;
   try {
@@ -46,7 +50,7 @@ export async function POST(request: NextRequest) {
 
   let uploadResponse;
   try {
-    uploadResponse = await uploadValidFileAsBuffer(containerClient, file, user);
+    uploadResponse = await uploadValidFileAsBuffer(containerClient, file, user, formType, fileRowErrors);
     console.log(`upload complete: ${uploadResponse?.requestId}`);
     if (uploadResponse && uploadResponse._response.status <= 200 && uploadResponse._response.status >= 299) throw new Error("Failure: Response status not between 200 & 299");
   } catch (error) {
