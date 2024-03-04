@@ -112,14 +112,6 @@ export interface FileErrors {
   [fileName: string]: { [currentRow: string]: string };
 }
 
-export interface ErrorRowsData {
-  [fileName: string]: RowDataStructure[];
-}
-
-export interface AllRowsData {
-  [fileName: string]: RowDataStructure[];
-}
-
 export type FileRow = {
   [header: string]: string; // {header --> value}
 };
@@ -134,26 +126,13 @@ export type FileCollectionRowSet = {
 
 export type ValidationErrorID = number;
 
-export type ExtendedFileRow = {
-  rowData: FileRow;
-  errors: ValidationErrorID[];
-};
-
-export type ExtendedFileRowSet = {
-  [row: string]: ExtendedFileRow; // {row --> ExtendedFileRow}z
-};
-
-export type ExtendedFileCollectionRowSet = {
-  [filename: string]: ExtendedFileRowSet; // {filename --> ExtendedFileRowSet}
-};
-
 export interface UploadStartProps {
   uploadForm: string;
   setUploadForm: Dispatch<SetStateAction<string>>;
-  personnelRecording: string;
-  setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  personnelRecording: string;
+  setPersonnelRecording: Dispatch<SetStateAction<string>>;
 }
 
 export interface UploadParseFilesProps {
@@ -193,6 +172,7 @@ export interface UploadReviewFilesProps {
   handleApproval: () => Promise<void>;
   handleCancel: () => Promise<void>;
   handleConfirm: () => Promise<void>;
+  parseAndUpdateFile: (file: FileWithPath) => Promise<void>;
 }
 
 export interface UploadFireProps extends UploadReviewFilesProps {
@@ -208,6 +188,47 @@ export interface UploadFireProps extends UploadReviewFilesProps {
   setAllRowToCMID: Dispatch<SetStateAction<DetailedCMIDRow[]>>;
 }
 
+export interface UploadFireAzureProps extends UploadFireProps {
+  cmErrors: CMError[];
+  setCMErrors: Dispatch<SetStateAction<CMError[]>>;
+}
+
+export interface UploadValidationProps {
+  setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
+  currentPlot: Plot;
+  currentCensus: CensusRDS;
+}
+
+export interface UploadValidationErrorDisplayProps {
+  uploadForm: string;
+  allRowToCMID: DetailedCMIDRow[]; // Updated to use DetailedCMIDRow[]
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  cmErrors: CMError[];
+  setCMErrors: Dispatch<SetStateAction<CMError[]>>;
+}
+
+export interface UploadUpdateValidationsProps {
+  validationPassedCMIDs: number[];
+  setValidationPassedCMIDs: Dispatch<SetStateAction<number[]>>;
+  validationPassedRowCount: number;
+  setValidationPassedRowCount: Dispatch<SetStateAction<number>>;
+  currentPlot: Plot;
+  currentCensus: CensusRDS;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  allRowToCMID: DetailedCMIDRow[];
+  handleReturnToStart: () => Promise<void>;
+}
+
+export interface UploadCompleteProps {
+  uploadForm: string;
+}
+
+export interface ProgressStepperProps {
+  progressTracker: ReviewProgress;
+  setProgressTracker: Dispatch<SetStateAction<ReviewProgress>>;
+  reviewState: ReviewStates;
+}
+
 export interface UploadErrorProps {
   error: any;
   component: string;
@@ -217,9 +238,6 @@ export interface UploadErrorProps {
   handleReturnToStart: () => Promise<void>;
   resetError: () => Promise<void>;
 }
-
-export type FetchQueryFunction = (gridType: string, page: number, pageSize: number, plotID?: number) => string;
-export type ProcessQueryFunction = (gridType: string, deletionID?: number) => string;
 
 export enum HTTPResponses {
   OK = 200,
@@ -244,16 +262,28 @@ export enum HTTPResponses {
 
 export enum ReviewStates {
   START = "start",
-  PARSE = "parse",
+  UPLOAD_FILES = "upload_files",
   REVIEW = "review",
-  UPLOAD = "upload",
+  UPLOAD_SQL = "upload_sql",
   VALIDATE = "validate",
   VALIDATE_ERRORS_FOUND = "validate_errors_found",
   UPDATE = "update_rows",
+  UPLOAD_AZURE = "upload_azure",
   COMPLETE = "complete",
   ERRORS = "errors",
-  ERRORS_CORRECTION = "errors_correction",
-  FILE_MISMATCH_ERROR = "file_mismatch_error"
+  FILE_MISMATCH_ERROR = "file_mismatch_error",
+}
+
+export enum ReviewProgress {
+  START = 1,
+  UPLOAD_FILES = 2,
+  REVIEW = 3,
+  UPLOAD_SQL = 4,
+  VALIDATE = 5,
+  VALIDATE_ERRORS_FOUND = 6,
+  UPDATE = 7,
+  UPLOAD_AZURE = 8,
+  COMPLETE = 9
 }
 
 export enum ErrorMessages {
@@ -318,14 +348,10 @@ export const fileColumns = [
   {key: 'name', label: 'File Name'},
   {key: 'user', label: 'Uploaded By'},
   {key: 'date', label: 'Date Entered'},
-  {key: 'version', label: 'Version'},
-  {key: 'isCurrentVersion', label: 'Is Current Version?'},
+  // {key: 'version', label: 'Version'},
+  // {key: 'isCurrentVersion', label: 'Is Current Version?'},
 ]
-export const allCensusCount = 9;
-export const allCensus = Array.from({length: allCensusCount}, (_, i) => i + 1);
 
-export const allQuadratCount = 10;
-export const allQuadrats = Array.from({length: allQuadratCount}, (_, i) => i + 1);
 export type SiteConfigProps = {
   label: string;
   href: string;
@@ -362,13 +388,6 @@ export const siteConfigNav: SiteConfigProps[] = [
     href: '/dashboard',
     tip: 'Home Page',
     icon: DashboardIcon,
-    expanded: [],
-  },
-  {
-    label: "File Upload Hub",
-    href: "/fileuploadhub",
-    tip: 'Upload data',
-    icon: FolderIcon,
     expanded: [],
   },
   {
@@ -431,6 +450,7 @@ export const siteConfigNav: SiteConfigProps[] = [
     ]
   },
 ]
+
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | null }) => Promise<void>;
 
@@ -536,8 +556,6 @@ export async function getContainerClient(containerName: string) {
   }
 }
 
-export type RowDataStructure = { [key: string]: any }; // Generic type for row data
-
 /**
  * CONTAINER STORAGE FUNCTIONS
  *
@@ -548,16 +566,27 @@ export type RowDataStructure = { [key: string]: any }; // Generic type for row d
 const MAX_RETRIES = 3; // Maximum number of retries
 const RETRY_DELAY_MS = 3000; // Delay between retries in milliseconds
 
-export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string) {
+export type FileRowErrors = {
+  stemtag: string;
+  tag: string;
+  validationErrorID: number;
+}
+
+export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string, formType: string, fileRowErrors: FileRowErrors[] = []) {
   const buffer = Buffer.from(await file.arrayBuffer());
   console.log(`Uploading blob: ${file.name}`);
+
+  // Prepare metadata
+  const metadata = {
+    user: user,
+    FormType: formType,
+    FileErrorState: JSON.stringify(fileRowErrors.length > 0 ? fileRowErrors : [])
+  };
 
   // Retry mechanism for the upload
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {
-        metadata: {user},
-      });
+      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, { metadata });
 
       // If upload is successful, return the response
       if (uploadResponse) {

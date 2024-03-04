@@ -182,6 +182,14 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     }
   }, [currentPlot, paginationModel.page]);
 
+  useEffect(() => {
+    if (refresh) {
+      handleRefresh().then(() => {
+        setRefresh(false); // Reset refresh state after fetching data
+      });
+    }
+  }, [refresh, setRefresh]);
+
   const processRowUpdate = React.useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
       console.log('processRowUpdate triggered');

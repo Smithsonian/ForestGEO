@@ -3,8 +3,13 @@ import * as React from "react";
 import {Box} from "@mui/joy";
 import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 import Typography from "@mui/joy/Typography";
+import {useSession} from "next-auth/react";
 
 export default function DashboardPage() {
+  const {data: session} = useSession();
+  console.log(`user email: ${session?.user?.email}`);
+  console.log(`user: ${session?.user?.name}`);
+  console.log(`user admin state: ${session?.user.isAdmin}`);
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
 

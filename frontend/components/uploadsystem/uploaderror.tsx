@@ -8,7 +8,7 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
   const handleParseError = async () => {
     await resetError();
     await handleReturnToStart();
-    setReviewState(ReviewStates.PARSE);
+    setReviewState(ReviewStates.UPLOAD_FILES);
   };
 
   const handleReviewError = async (errorFile: FileWithPath) => {
@@ -20,7 +20,7 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
     } else {
       await resetError();
       await handleReturnToStart();
-      setReviewState(ReviewStates.PARSE);
+      setReviewState(ReviewStates.UPLOAD_FILES);
     }
   };
 

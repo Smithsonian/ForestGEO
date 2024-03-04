@@ -40,6 +40,7 @@ import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {getData} from "@/config/db";
+import {useSession} from "next-auth/react";
 
 
 function SimpleToggler({isOpen, renderToggle, children,}: Readonly<{
@@ -94,6 +95,7 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
 }
 
 export default function Sidebar() {
+  const {data: session} = useSession();
   let currentPlot = usePlotContext();
   let plotDispatch = usePlotDispatch();
   let plotListContext = usePlotListContext();
@@ -207,6 +209,9 @@ export default function Sidebar() {
           })}
         />
         <Box sx={{display: 'flex', alignItems: 'left', flexDirection: 'column'}}>
+          {session?.user.isAdmin && (
+            <Typography level="h1">ADMIN VIEW:</Typography>
+          )}
           <Typography level="h1">ForestGEO: </Typography>
           <Typography sx={{fontSize: '1.75rem', fontWeight: 'bold', color: 'aquamarine'}}>C. & S. Americas</Typography>
         </Box>
@@ -297,10 +302,10 @@ export default function Sidebar() {
               </Link>
             </Breadcrumbs>
             <Divider orientation={"horizontal"}/>
-            <Button variant={"soft"} sx={{width: 'fit-content', marginBottom: 1}} onClick={restorePlotCensus} color={"primary"} title={"Restore Plot and Census"}>
-              Restore Plot and Census
-            </Button>
-            <Divider orientation={"horizontal"} />
+            {/*<Button variant={"soft"} sx={{width: 'fit-content', marginBottom: 1}} onClick={restorePlotCensus} color={"primary"} title={"Restore Plot and Census"}>*/}
+            {/*  Restore Plot and Census*/}
+            {/*</Button>*/}
+            {/*<Divider orientation={"horizontal"} />*/}
             <Modal open={openPlotSelectionModal} onClose={() => {
               setPlot(currentPlot);
               setOpenPlotSelectionModal(false);

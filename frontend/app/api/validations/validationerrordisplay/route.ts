@@ -26,8 +26,8 @@ export async function GET() {
 
     const parsedRows: CMError[] = rows.map((row: any) => ({
       CoreMeasurementID: row.CoreMeasurementID,
-      ValidationErrorIDs: row.ValidationErrorIDs,
-      Descriptions: row.Descriptions,
+      ValidationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
+      Descriptions: row.Descriptions.split(',')
     }));
     return new NextResponse(JSON.stringify(parsedRows), {status: 200, headers: {
         'Content-Type': 'application/json'

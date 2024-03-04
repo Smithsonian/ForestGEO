@@ -7,6 +7,7 @@ import {
   ValidationResponse
 } from "@/components/processors/processormacros";
 import {processCensus} from "@/components/processors/processcensus";
+import {bitToBoolean} from "@/config/macros";
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
@@ -299,5 +300,24 @@ export async function runValidationProcedure(procedureName: string, plotID: numb
     throw error;
   } finally {
     if (conn) conn.release();
+  }
+}
+
+export async function verifyLastName(lastName: string): Promise<{ verified: boolean, isAdmin: boolean }> {
+  const connection: PoolConnection | null = await getConn();
+  try {
+    // The query now selects the IsAdmin field as well
+    const query = `SELECT COUNT(*) AS count, IsAdmin FROM catalog.users WHERE LastName = ? GROUP BY IsAdmin`;
+    const results = await runQuery(connection, query, [lastName]);
+
+    const verified = results.length > 0 && results[0].count > 0;
+    // Use the bitToBoolean function to convert the IsAdmin field
+    const isAdmin = verified && bitToBoolean(results[0].IsAdmin);
+    return { verified, isAdmin };
+  } catch (error) {
+    console.error('Error verifying user email or last name in database:', error);
+    throw error;
+  } finally {
+    if (connection) connection.release();
   }
 }

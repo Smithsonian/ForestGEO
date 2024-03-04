@@ -17,10 +17,11 @@ import {Census, Plot, Quadrat, siteConfig} from "@/config/macros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
-import {Box, Stack} from "@mui/joy";
+import {Box, LinearProgress, LinearProgressProps, Stack, linearProgressClasses} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import {LinearProgressWithLabel, loadServerDataIntoIDB} from "@/components/client/clientmacros";
 import Typography from "@mui/joy/Typography";
+import {verifyLastName} from "@/components/processors/processorhelperfunctions";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
@@ -31,10 +32,6 @@ function renderSwitch(endpoint: string) {
     case '/coremeasurementshub':
       return (
         <h3 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h3>
-      );
-    case '/fileuploadhub':
-      return (
-        <h3 className={title({color: "pink"})} key={endpoint}>File Upload Hub</h3>
       );
     case '/properties/attributes':
       return (
@@ -68,9 +65,41 @@ function renderSwitch(endpoint: string) {
   }
 }
 
-export default function HubLayout({children,}: Readonly<{ children: React.ReactNode }>) {
-  const {data: _session, status} = useSession();
+export function GlobalLinearProgressWithLabel(props: LinearProgressProps & { value?: number, currentlyrunningmsg?: string }) {
+  return (
+    <Box sx={{ display: 'flex', width: '100vw', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>
+      <Box sx={{ width: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {props.value ? (
+          <LinearProgress
+            determinate
+            value={props.value}
+            sx={{
+              width: '100%', // Ensures the progress bar takes the full width of the container
+              [`&.${linearProgressClasses.determinate}`]: {
+                transition: 'width .3s ease',
+              },
+            }}
+          />
+        ) : (
+          <LinearProgress sx={{ width: '100%' }} />
+        )}
+        <Box sx={{ minWidth: 35, marginTop: 2 }}>
+          {props.value ? (
+            <Typography level="body-md" sx={{ color: 'text.secondary' }}>
+              {`${Math.round(props.value)}% --> ${props.currentlyrunningmsg}`}
+            </Typography>
+          ) : (
+            <Typography level="body-md" sx={{ color: 'text.secondary' }}>
+              {props.currentlyrunningmsg}
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
 
+export default function HubLayout({children,}: Readonly<{ children: React.ReactNode }>) {
   const router = useRouter();
   const [loading, setLoading] = useState(0);
   const [loadingMsg, setLoadingMsg] = useState('');
@@ -103,7 +132,6 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         console.error(error);
       }
     };
-    console.log(`endpoint: session state: ${status}`);
     const handlePageRefresh = () => {
       console.log('Page is refreshed. Run your function here.');
       fetchDataEffect().catch(console.error);
@@ -116,7 +144,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         window.removeEventListener('beforeunload', handlePageRefresh);
       };
     }
-  }, [router, status]);
+  }, [router]);
 
   let pathname = usePathname();
 
@@ -178,7 +206,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   return (
     <>
       {coreDataLoading ? (
-        <LinearProgressWithLabel value={loading} currentlyrunningmsg={loadingMsg} />
+        <GlobalLinearProgressWithLabel value={loading} currentlyrunningmsg={loadingMsg} />
       ) : (
         <>
           <Sidebar/>

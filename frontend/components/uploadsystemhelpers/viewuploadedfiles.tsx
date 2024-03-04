@@ -1,13 +1,14 @@
 "use client";
 import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
 import {fileColumns, Plot, tableHeaderSettings, UploadedFileData} from "@/config/macros";
-import {BrowseError} from "@/app/error"
 import {
+  Alert,
   Button,
   Card,
   CardContent,
   CardHeader,
   Paper,
+  Snackbar,
   Table,
   TableBody,
   TableCell,
@@ -55,7 +56,7 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
         <Divider className={"mt-6 mb-6"}/>
         <CardContent>
           <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
-            <CircularProgress size={"lg"} color={"danger"} variant={"soft"} />
+            <CircularProgress size={"lg"} color={"danger"} variant={"soft"}/>
             <Typography variant={"soft"} color={"warning"}>Retrieving files...</Typography>
           </Box>
         </CardContent>
@@ -73,9 +74,11 @@ interface VUFProps {
 
 export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const {currentPlot, currentCensus, refreshFileList, setRefreshFileList} = props;
-  const [error, setError] = useState<Error>();
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
+  const [openSnackbar, setOpenSnackbar] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
   const handleDownload = async (containerName: string, filename: string) => {
     try {
       const response = await fetch(`/api/downloadfile?container=${containerName}&filename=${encodeURIComponent(filename)}`);
@@ -83,8 +86,10 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
       const data = await response.json();
       window.location.href = data.url; // Navigates to the pre-signed URL
-    } catch (error) {
+    } catch (error: any) {
       console.error('Download error:', error);
+      setErrorMessage(error.message); // Set the error message
+      setOpenSnackbar(true); // Open the snackbar
     }
   };
 
@@ -99,7 +104,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       setRefreshFileList(true);
     } catch (error: any) {
       console.error('Delete error:', error);
-      setError(error);
+      setErrorMessage(error.message); // Set the error message
+      setOpenSnackbar(true); // Open the snackbar
     }
   };
 
@@ -112,7 +118,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       if (!response.ok) {
         let jsonOutput = await response.json();
         console.error('response.statusText', jsonOutput.statusText);
-        setError(new Error(`API response: ${jsonOutput.statusText}`));
+        setErrorMessage(`API response: ${jsonOutput.statusText}`);
       } else {
         console.log(response.status + ", " + response.statusText);
         let data = await response.json();
@@ -120,8 +126,9 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setIsLoaded(true);
       }
     } catch (error: any) {
-      setError(error)
       console.log(error.message);
+      setErrorMessage(error.message); // Set the error message
+      setOpenSnackbar(true); // Open the snackbar
     }
   }, [currentPlot, currentCensus]);
 
@@ -135,10 +142,28 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     getListOfFiles().then();
   };
 
-  if (error) {
-    console.log(error);
-    return BrowseError(error);
-  } else if (!isLoaded || !fileRows) {
+  const handleCloseSnackbar = () => {
+    setOpenSnackbar(false);
+  };
+
+  // useEffect to refresh file list on error and reset the error message
+  useEffect(() => {
+    if (errorMessage) {
+      // Refresh the file list
+      refreshFiles();
+
+      // Reset the error message after a short delay
+      // This delay ensures that the user has enough time to see the error message
+      const timer = setTimeout(() => {
+        setErrorMessage('');
+      }, 6000); // Adjust the delay as needed
+
+      // Clear the timer if the component unmounts
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
+
+  if (!isLoaded || !fileRows) {
     return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>
   } else {
     let sortedFileData: UploadedFileData[] = fileRows;
@@ -147,23 +172,26 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     sortedFileData.forEach((row) => {
       row.key = i;
       i++;
-    })
+    });
+    let sortedFileTextCSV = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.csv') ||
+      row.name.toLowerCase().endsWith('.txt'));
+    let sortedFileArcGIS = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.xlsx'));
     return (
       <>
         {/*CSV FILES*/}
         <Box sx={{display: 'flex', flex: 1, flexDirection: "column", mb: 10}}>
           <Box sx={{display: 'flex', flexDirection: "column"}}>
-            <Typography level={"title-lg"}>
+            <Typography level={"title-lg"} marginBottom={2}>
               Accessing
               Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
             </Typography>
-            <Button sx={{width: 'fit-content', marginBottom: 5}} onClick={refreshFiles}>Refresh Files</Button>
+            <Button variant={"contained"} sx={{width: 'fit-content', marginBottom: 2}} onClick={refreshFiles}>Refresh
+              Files</Button>
             <Typography level={"title-lg"}>
               Uploaded CSV Files
             </Typography>
           </Box>
-          <Divider className={"mt-6 mb-6"}/>
-          <Box sx={{display: 'flex', flexDirection: "column"}}>
+          <Box sx={{display: 'flex', flexDirection: "column", marginTop: 1}}>
             <TableContainer component={Paper}>
               <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
                 <TableHead>
@@ -176,7 +204,14 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileData.filter((row) => row.name.toLowerCase()).map((row) => {
+                  {sortedFileTextCSV.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={fileColumns.length + 2} align="center">
+                        No data available
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sortedFileTextCSV.map((row) => {
                     let errs = row.errors == "false";
                     return (
                       <TableRow key={row.key}>
@@ -187,14 +222,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           color: 'red',
                           fontWeight: 'bold'
                         } : {}}>{new Date(row.date).toString()}</TableCell>
-                        <TableCell sx={(errs) ? {
-                          color: 'red',
-                          fontWeight: 'bold'
-                        } : {}}>{row.version}</TableCell>
-                        <TableCell sx={(errs) ? {
-                          color: 'red',
-                          fontWeight: 'bold'
-                        } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
                         <TableCell align="center">
                           <Button
                             onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
@@ -207,7 +234,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                         </TableCell>
                       </TableRow>
                     );
-                  })}
+                    })
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -220,8 +248,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
               Uploaded ArcGIS Files
             </Typography>
           </Box>
-          <Divider className={"mt-6 mb-6"}/>
-          <Box sx={{display: 'flex', flexDirection: "column"}}>
+          <Box sx={{display: 'flex', flexDirection: "column", marginTop: 1}}>
             <TableContainer component={Paper}>
               <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
                 <TableHead>
@@ -234,44 +261,61 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.xlsx')).map((row) => {
-                    let errs = row.errors == "false";
-                    return (
-                      <TableRow key={row.key}>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                        <TableCell sx={(errs) ? {
-                          color: 'red',
-                          fontWeight: 'bold'
-                        } : {}}>{new Date(row.date).toString()}</TableCell>
-                        <TableCell sx={(errs) ? {
-                          color: 'red',
-                          fontWeight: 'bold'
-                        } : {}}>{new Date(row.version).toString()}</TableCell>
-                        <TableCell sx={(errs) ? {
-                          color: 'red',
-                          fontWeight: 'bold'
-                        } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
-                        <TableCell align="center">
-                          <Button
-                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                            <DownloadIcon/>
-                          </Button>
-                          <Button>
-                            <EditIcon/>
-                          </Button>
-                          <Button
-                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                            <DeleteIcon/>
-                          </Button>
+                  {sortedFileArcGIS.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={fileColumns.length + 2} align="center">
+                        No data available
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
+                  ) : (
+                    sortedFileArcGIS.map((row) => {
+                      let errs = row.errors == "false";
+                      return (
+                        <TableRow key={row.key}>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
+                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.date).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.version).toString()}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                          <TableCell align="center">
+                            <Button
+                              onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              <DownloadIcon/>
+                            </Button>
+                            <Button>
+                              <EditIcon/>
+                            </Button>
+                            <Button
+                              onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              <DeleteIcon/>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>
+            <Snackbar
+              open={openSnackbar}
+              autoHideDuration={6000}
+              onClose={handleCloseSnackbar}
+            >
+              <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
+                {errorMessage}
+              </Alert>
+            </Snackbar>
           </Box>
         </Box>
       </>

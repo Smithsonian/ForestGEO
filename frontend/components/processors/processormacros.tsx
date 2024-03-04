@@ -284,8 +284,8 @@ export type ValidationResponse = {
   failedCoreMeasurementIDs?: number[];
 }
 export type UpdateValidationResponse = {
-  updatedIDs: number[];
-  rowsValidated: number;
+  updatedIDs: any;
+  rowsValidated: any;
 }
 
 export interface CoreMeasurementsResult {

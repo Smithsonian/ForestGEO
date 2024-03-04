@@ -1,10 +1,12 @@
 "use client";
 import React, {useEffect, useState} from "react";
 import {
+  CMError,
   FileCollectionRowSet,
   FileRow,
   FileRowSet,
   RequiredTableHeadersByFormType,
+  ReviewProgress,
   ReviewStates,
   TableHeadersByFormType
 } from "@/config/macros";
@@ -12,10 +14,10 @@ import {FileWithPath} from "react-dropzone";
 import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";
 import {parse, ParseResult} from "papaparse";
-import {Box, Tab, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
+import {Box, Tab, tabClasses, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
 import UploadParseFiles from "@/components/uploadsystem/uploadparsefiles";
 import UploadReviewFiles from "@/components/uploadsystem/uploadreviewfiles";
-import UploadFire from "@/components/uploadsystem/uploadfire";
+import UploadFireSQL from "@/components/uploadsystem/uploadfiresql";
 import UploadError from "@/components/uploadsystem/uploaderror";
 import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
 import UploadValidation from "@/components/uploadsystem/uploadvalidation";
@@ -24,6 +26,11 @@ import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalid
 import UploadValidationErrorDisplay from "@/components/uploadsystem/uploadvalidationerrordisplay";
 import {Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle} from "@mui/material";
 import UploadStart from "@/components/uploadsystem/uploadstart";
+import ListItemDecorator from "@mui/joy/ListItemDecorator";
+import ViewListIcon from '@mui/icons-material/ViewList';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import UploadFireAzure from "@/components/uploadsystem/uploadfireazure";
+import UploadComplete from "@/components/uploadsystem/uploadcomplete";
 
 interface ConfirmationDialogProps {
   open: boolean;
@@ -67,16 +74,21 @@ export interface CMIDRow {
 }
 
 export interface DetailedCMIDRow extends CMIDRow {
-  plotName: string;
-  plotCensusNumber: number;
-  quadratName: string;
-  censusStart: any;
-  censusEnd: any;
-  personnelName: string;
-  speciesName: string;
+  plotName?: string;
+  plotCensusNumber?: number;
+  quadratName?: string;
+  censusStart?: any;
+  censusEnd?: any;
+  personnelName?: string;
+  speciesName?: string;
 }
 
-export default function UploadParent() {
+interface UploadParentProps {
+  onReset: () => void;
+}
+
+export default function UploadParent(props: UploadParentProps) {
+  const {onReset} = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
@@ -86,7 +98,7 @@ export default function UploadParent() {
   // in progress state --> data is being parsed
   const [parsing, setParsing] = useState(false);
   // core enum to handle state progression
-  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.PARSE);
+  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
   // dropped file storage
   const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
@@ -113,9 +125,15 @@ export default function UploadParent() {
   const [refreshFileList, setRefreshFileList] = useState(false);
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [showLeaveUploadDialog, setShowLeaveUploadDialog] = useState(false);
+  const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
+  const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
   const {data: session} = useSession();
+
+  const handleCancelUpload = (): void => {
+    handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
+  };
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -154,7 +172,7 @@ export default function UploadParent() {
   const isUploadInProgress = () => {
     // Add logic to determine if the upload process is in progress
     // For example, check if files are being parsed or if the review state is not at the start
-    return parsing || reviewState !== ReviewStates.PARSE;
+    return parsing || reviewState !== ReviewStates.UPLOAD_FILES;
   };
 
   const handleConfirmLeaveUpload = () => {
@@ -203,7 +221,7 @@ export default function UploadParent() {
 
   async function handleConfirm() {
     setConfirmationDialogOpen(false);
-    setReviewState(ReviewStates.UPLOAD);
+    setReviewState(ReviewStates.UPLOAD_SQL);
   }
 
   const handleChange = (_event: React.ChangeEvent<unknown>, value: number) => {
@@ -387,6 +405,93 @@ export default function UploadParent() {
     setParsing(false);
   }
 
+  const parseAndUpdateFile = async (file: FileWithPath) => {
+    try {
+      const fileText = await file.text();
+      const isCSV = file.name.endsWith('.csv'); // Simple check based on file extension
+      const delimiter = isCSV ? "," : "\t"; // Set delimiter to comma for CSV, tab for TSV
+      parse<FileRow>(fileText, {
+        delimiter: delimiter,
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim(),
+        complete: function (results: ParseResult<FileRow>) {
+          const expectedHeaders = TableHeadersByFormType[uploadForm];
+          const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+
+          if (!expectedHeaders || !requiredHeaders) {
+            console.error(`No headers defined for form type: ${uploadForm}`);
+            setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+            return;
+          }
+
+          const updatedFileRowSet: FileRowSet = {};
+          let fileErrors: FileRowSet = {};
+
+          results.data.forEach((row, index) => {
+            const rowId = `row-${index}`;
+            updatedFileRowSet[rowId] = row;
+
+            let rowErrors: FileRow = {};
+            let hasError = false;
+
+            requiredHeaders.forEach((header) => {
+              const value = row[header.label];
+              if (value === null || value === undefined || value === "" || value === "NULL") {
+                rowErrors[header.label] = "This field is required";
+                hasError = true;
+              }
+            });
+
+            let dbhValue = parseFloat(row["DBH"]);
+            if (!isNaN(dbhValue) && dbhValue < 1) {
+              rowErrors["DBH"] = "DBH must be a number greater than 1";
+              hasError = true;
+            }
+            dbhValue = parseFloat(row['dbh']);
+            if (!isNaN(dbhValue) && dbhValue < 1) {
+              rowErrors["dbh"] = "DBH must be a number greater than 1";
+              hasError = true;
+            }
+            // Additional validation logic (similar to the original code)
+            //...
+
+            if (hasError) {
+              fileErrors[rowId] = rowErrors;
+            }
+          });
+
+          // Update state with the new parsed data
+          setParsedData(prevParsedData => ({
+            ...prevParsedData,
+            [file.name]: updatedFileRowSet,
+          }));
+
+          // Update errorRows with the new parsed data (if any errors)
+          setErrorRows(prevErrorRows => ({
+            ...prevErrorRows,
+            [file.name]: updatedFileRowSet,
+          }));
+
+          // Update errors with the new parsed errors (if any)
+          setErrors(prevErrors => ({
+            ...prevErrors,
+            [file.name]: fileErrors
+          }));
+        },
+      });
+    } catch (error: any) {
+      const errorWithFile = {
+        message: error.message, // original error message
+        file: file.name, // include the name of the file that caused the error
+        originalError: error // include the original error object if needed
+      };
+      setUploadError(errorWithFile);
+      setErrorComponent('UploadReviewFiles');
+      setReviewState(ReviewStates.ERRORS);
+    }
+  };
+
   useEffect(() => {
     if (acceptedFiles.length > 0 && dataViewActive <= acceptedFiles.length) {
       const currentFile = acceptedFiles[dataViewActive - 1];
@@ -396,22 +501,53 @@ export default function UploadParent() {
         setCurrentFileHeaders([]);
       }
     }
-    if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.PARSE); // if the user removes all files, move back to file drop phase
+    if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
 
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
 
+  useEffect(() => {
+    console.log(`progressTracker: ${progressTracker}`);
+    console.log(`review state: ${reviewState}`);
+  }, [progressTracker, reviewState]);
+
   const renderStateContent = () => {
-    if ((personnelRecording === '' || uploadForm === '') && reviewState !== ReviewStates.START) setReviewState(ReviewStates.START);
+    if ((personnelRecording === '' || uploadForm === '') && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
+    /**
+     * Designated Review State Flow (listing it explicitly here for future reference)
+     *
+     * 1. START
+     * 2. PARSE
+     * 3. REVIEW
+     * 4. UPLOAD_SQL
+     * 5. VALIDATE
+     * 6. VALIDATE_ERRORS_FOUND
+     * 7. UPDATE
+     * 8. UPLOAD_AZURE
+     * 9. COMPLETE
+     *
+     * Flow for ALL non-census/measurement files:
+     * 1, 2, 3, 4, 8, 9
+     * Azure blob is marked explicitly with form type
+     *
+     * Flow for census/measurement files --> NO VALIDATION ERRORS FOUND:
+     * 1, 2, 3, 4, 5, 7, 8, 9
+     * Azure blob is marked explicitly as having no errors
+     *
+     * Flow for census/measurement files --> VALIDATION ERRORS FOUND:
+     * 1, 2, 3, 4, 5, 6, 8, 9
+     * Azure blob is marked explicitly with list of combination of CMIDs/VEIDs
+     */
     switch (reviewState) {
       case ReviewStates.START:
         return <UploadStart
           uploadForm={uploadForm}
           setUploadForm={setUploadForm}
+          setExpectedHeaders={setExpectedHeaders}
+          setReviewState={setReviewState}
           personnelRecording={personnelRecording}
           setPersonnelRecording={setPersonnelRecording}
-          setExpectedHeaders={setExpectedHeaders}
-          setReviewState={setReviewState}/>
-      case ReviewStates.PARSE:
+        />;
+      case ReviewStates.UPLOAD_FILES:
         return <UploadParseFiles
           parsing={parsing}
           uploadForm={uploadForm}
@@ -448,9 +584,10 @@ export default function UploadParent() {
           handleChange={handleChange}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
+          parseAndUpdateFile={parseAndUpdateFile}
         />;
-      case ReviewStates.UPLOAD:
-        return <UploadFire
+      case ReviewStates.UPLOAD_SQL:
+        return <UploadFireSQL
           personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
           setAcceptedFiles={setAcceptedFiles}
@@ -483,6 +620,7 @@ export default function UploadParent() {
           setErrorComponent={setErrorComponent}
           allRowToCMID={allRowToCMID}
           setAllRowToCMID={setAllRowToCMID}
+          parseAndUpdateFile={parseAndUpdateFile}
         />;
       case ReviewStates.VALIDATE:
         return <UploadValidation
@@ -494,7 +632,10 @@ export default function UploadParent() {
         return <UploadValidationErrorDisplay
           allRowToCMID={allRowToCMID}
           setReviewState={setReviewState}
-          uploadForm={uploadForm}/>;
+          uploadForm={uploadForm}
+          cmErrors={cmErrors}
+          setCMErrors={setCMErrors}
+        />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
@@ -504,7 +645,49 @@ export default function UploadParent() {
           setValidationPassedCMIDs={setValidationPassedCMIDs}
           validationPassedRowCount={validationPassedRowCount}
           setValidationPassedRowCount={setValidationPassedRowCount}
-          allRowToCMID={allRowToCMID} handleReturnToStart={handleReturnToStart}/>
+          allRowToCMID={allRowToCMID}
+          handleReturnToStart={handleReturnToStart}
+        />;
+      case ReviewStates.UPLOAD_AZURE:
+        return <UploadFireAzure
+          personnelRecording={personnelRecording}
+          acceptedFiles={acceptedFiles}
+          setAcceptedFiles={setAcceptedFiles}
+          uploadForm={uploadForm}
+          errors={errors}
+          errorRows={errorRows}
+          parsedData={parsedData}
+          expectedHeaders={expectedHeaders}
+          currentFileHeaders={currentFileHeaders}
+          dataViewActive={dataViewActive}
+          areHeadersValid={areHeadersValid}
+          setErrors={setErrors}
+          setErrorRows={setErrorRows}
+          setReviewState={setReviewState}
+          confirmationDialogOpen={confirmationDialogOpen}
+          setParsedData={setParsedData}
+          handleConfirm={handleConfirm}
+          handleRemoveCurrentFile={handleRemoveCurrentFile}
+          handleCancel={handleCancel}
+          handleApproval={handleApproval}
+          handleChange={handleChange}
+          setIsDataUnsaved={setIsDataUnsaved}
+          currentPlot={currentPlot}
+          currentCensus={currentCensus}
+          user={session?.user?.name!}
+          uploadCompleteMessage={uploadCompleteMessage}
+          setUploadCompleteMessage={setUploadCompleteMessage}
+          handleReturnToStart={handleReturnToStart}
+          setUploadError={setUploadError}
+          setErrorComponent={setErrorComponent}
+          allRowToCMID={allRowToCMID}
+          setAllRowToCMID={setAllRowToCMID}
+          parseAndUpdateFile={parseAndUpdateFile}
+          cmErrors={cmErrors}
+          setCMErrors={setCMErrors}
+        />
+      case ReviewStates.COMPLETE:
+        return <UploadComplete uploadForm={uploadForm}/>;
       default:
         return (
           <UploadError
@@ -522,15 +705,44 @@ export default function UploadParent() {
   return (
     <>
       {(currentCensus && currentPlot) && (
-        <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 5}}>
+        <Box sx={{display: 'flex', width: '100%', flexDirection: 'column', marginBottom: 2}}>
           <Typography level={"title-lg"} color={"primary"}>
             Drag and drop files into the box to upload them to storage
           </Typography>
           <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-            <Tabs sx={{display: 'flex', flex: 1}} aria-label={"File Hub Options"} size={"lg"} className={""}>
-              <TabList sticky={"top"}>
-                <Tab>Browse Uploaded Files</Tab>
-                <Tab>Upload New Files</Tab>
+            <Tabs sx={{display: 'flex', flex: 1}} variant={"outlined"} aria-label={"File Hub Options"} size={"lg"}
+                  className={""}>
+              <TabList sticky={"top"} variant="soft"
+                       sx={{
+                         [`& .${tabClasses.root}`]: {
+                           '&[aria-selected="true"]': {
+                             bgcolor: 'background.surface',
+                             borderColor: 'divider',
+                             '&::before': {
+                               content: '""',
+                               display: 'block',
+                               position: 'absolute',
+                               height: 2,
+                               bottom: -2,
+                               left: 0,
+                               right: 0,
+                               bgcolor: 'background.surface',
+                             },
+                           },
+                         },
+                       }}>
+                <Tab indicatorPlacement="top">
+                  <ListItemDecorator>
+                    <ViewListIcon/>
+                  </ListItemDecorator>
+                  Browse Uploaded Files
+                </Tab>
+                <Tab indicatorPlacement="top">
+                  <ListItemDecorator>
+                    <UploadFileIcon/>
+                  </ListItemDecorator>
+                  Upload New Files
+                </Tab>
               </TabList>
               <TabPanel value={0}>
                 <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus}
@@ -538,9 +750,10 @@ export default function UploadParent() {
                                    setRefreshFileList={setRefreshFileList}/>
               </TabPanel>
               <TabPanel value={1}>
-                {currentPlot ? renderStateContent() : <Typography>You must select a plot to continue!</Typography>}
+                {renderStateContent()}
               </TabPanel>
             </Tabs>
+            <Button onClick={handleCancelUpload} sx={{marginY: 2}}>Cancel Upload</Button>
           </Box>
         </Box>
       )}

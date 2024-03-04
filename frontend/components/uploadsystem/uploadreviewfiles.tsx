@@ -14,28 +14,37 @@ import {Box, Checkbox, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
 import {DisplayParsedDataGridInline} from "@/components/uploadsystemhelpers/displayparseddatagrid";
 import Divider from "@mui/joy/Divider";
 import React, {useState} from "react";
-import {
-  FileRow,
-  FileRowSet,
-  RequiredTableHeadersByFormType,
-  ReviewStates,
-  TableHeadersByFormType,
-  UploadReviewFilesProps
-} from "@/config/macros";
+import {RequiredTableHeadersByFormType, ReviewStates, UploadReviewFilesProps} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
-import {parse, ParseResult} from "papaparse";
 import {FileDisplay} from "@/components/uploadsystemhelpers/filelist";
 import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
-    uploadForm, acceptedFiles, setReviewState,
-    expectedHeaders, parsedData, setParsedData,
-    errorRows, setErrorRows, confirmationDialogOpen,
-    errors, setErrors, setAcceptedFiles,
-    dataViewActive, currentFileHeaders, setUploadError, setErrorComponent,
-    handleChange, areHeadersValid, handleRemoveCurrentFile, handleApproval, handleCancel, handleConfirm
+    uploadForm,
+    acceptedFiles,
+    setReviewState,
+    expectedHeaders,
+    parsedData,
+    setParsedData,
+    errorRows,
+    setErrorRows,
+    confirmationDialogOpen,
+    errors,
+    setErrors,
+    setAcceptedFiles,
+    dataViewActive,
+    currentFileHeaders,
+    setUploadError,
+    setErrorComponent,
+    handleChange,
+    areHeadersValid,
+    handleRemoveCurrentFile,
+    handleApproval,
+    handleCancel,
+    handleConfirm,
+    parseAndUpdateFile
   } = props;
 
   const [isReuploadDialogOpen, setIsReuploadDialogOpen] = useState(false);
@@ -44,92 +53,6 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const hasErrors = errors[currentFileName] && Object.keys(errors[currentFileName]).length > 0;
   let requiredExpectedHeadersRaw = RequiredTableHeadersByFormType[uploadForm];
   const requiredHeadersTrimmed = requiredExpectedHeadersRaw.map(item => item.label);
-  const parseAndUpdateFile = async (file: FileWithPath) => {
-    try {
-      const fileText = await file.text();
-      const isCSV = file.name.endsWith('.csv'); // Simple check based on file extension
-      const delimiter = isCSV ? "," : "\t"; // Set delimiter to comma for CSV, tab for TSV
-      parse<FileRow>(fileText, {
-        delimiter: delimiter,
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: (h) => h.trim(),
-        complete: function (results: ParseResult<FileRow>) {
-          const expectedHeaders = TableHeadersByFormType[uploadForm];
-          const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
-
-          if (!expectedHeaders || !requiredHeaders) {
-            console.error(`No headers defined for form type: ${uploadForm}`);
-            setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
-            return;
-          }
-
-          const updatedFileRowSet: FileRowSet = {};
-          let fileErrors: FileRowSet = {};
-
-          results.data.forEach((row, index) => {
-            const rowId = `row-${index}`;
-            updatedFileRowSet[rowId] = row;
-
-            let rowErrors: FileRow = {};
-            let hasError = false;
-
-            requiredHeaders.forEach((header) => {
-              const value = row[header.label];
-              if (value === null || value === undefined || value === "" || value === "NULL") {
-                rowErrors[header.label] = "This field is required";
-                hasError = true;
-              }
-            });
-
-            let dbhValue = parseFloat(row["DBH"]);
-            if (!isNaN(dbhValue) && dbhValue < 1) {
-              rowErrors["DBH"] = "DBH must be a number greater than 1";
-              hasError = true;
-            }
-            dbhValue = parseFloat(row['dbh']);
-            if (!isNaN(dbhValue) && dbhValue < 1) {
-              rowErrors["dbh"] = "DBH must be a number greater than 1";
-              hasError = true;
-            }
-            // Additional validation logic (similar to the original code)
-            //...
-
-            if (hasError) {
-              fileErrors[rowId] = rowErrors;
-            }
-          });
-
-          // Update state with the new parsed data
-          setParsedData(prevParsedData => ({
-            ...prevParsedData,
-            [file.name]: updatedFileRowSet,
-          }));
-
-          // Update errorRows with the new parsed data (if any errors)
-          setErrorRows(prevErrorRows => ({
-            ...prevErrorRows,
-            [file.name]: updatedFileRowSet,
-          }));
-
-          // Update errors with the new parsed errors (if any)
-          setErrors(prevErrors => ({
-            ...prevErrors,
-            [file.name]: fileErrors
-          }));
-        },
-      });
-    } catch (error: any) {
-      const errorWithFile = {
-        message: error.message, // original error message
-        file: file.name, // include the name of the file that caused the error
-        originalError: error // include the original error object if needed
-      };
-      setUploadError(errorWithFile);
-      setErrorComponent('UploadReviewFiles');
-      setReviewState(ReviewStates.ERRORS);
-    }
-  };
 
   const handleReUploadFileChange = async (newFiles: FileWithPath[]) => {
     setReuploadInProgress(true);
@@ -183,127 +106,137 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   };
   return (
     <>
-      {reuploadInProgress ? (
-        <CircularProgress/>
-      ) : (
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Button variant="contained" onClick={() => setReviewState(ReviewStates.PARSE)} sx={{mb: 2}}>
+      <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
+        {reuploadInProgress ? (
+          <CircularProgress/>
+        ) : (
+          <>
+            <Button variant="contained" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)}
+                    sx={{mb: 2, width: 'fit-content'}}>
               Back
             </Button>
-            <Box sx={{display: 'flex', flexDirection: 'column', mr: 10}}>
-              {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && areHeadersValid(currentFileHeaders) ? (
-                <>
-                  <Typography level={"title-md"} color={"primary"} sx={{marginBottom: 1}}>
-                    Form: {uploadForm}
-                  </Typography><Typography level={"title-sm"}>
-                  File: {acceptedFiles[dataViewActive - 1].name}
-                </Typography>
-                  <DisplayParsedDataGridInline
-                    parsedData={parsedData}
-                    errors={errors}
-                    setErrors={setErrors}
-                    setParsedData={setParsedData}
-                    errorRows={errorRows}
-                    setErrorRows={setErrorRows}
-                    formType={uploadForm}
-                    fileName={acceptedFiles[dataViewActive - 1].name}/>
-                </>
-              ) : (
-                <Typography level="body-lg" bgcolor="error">
-                  The selected file is missing required headers. Please check the file and re-upload.<br/>
-                  Your file&apos;s headers were: {currentFileHeaders.join(', ')}<br/>
-                  The expected headers were {expectedHeaders.join(', ')}
-                </Typography>
-              )}
-            </Box>
-            <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
-            <Button
-              onClick={() => setIsReuploadDialogOpen(true)}
-              variant={"outlined"}
-              color="primary"
-              disabled={!hasErrors}
-              sx={{marginTop: 2}}
-            >
-              Re-upload Corrected File
-            </Button>
-          </Grid>
-          <Grid item xs={4}/>
-          <Grid item xs={4}>
-            <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
-              <Button variant="contained" color="primary" onClick={handleRemoveCurrentFile} sx={{width: 'fit-content'}}>
-                Remove Current File
-              </Button>
-              <Box sx={{display: 'flex', flexDirection: 'row', mb: 2}}>
-                <Divider orientation={"vertical"} sx={{marginX: 2}}/>
-                {currentFileHeaders.length > 0 ? (
-                  requiredHeadersTrimmed.map((header) => (
-                    <Box key={header} sx={{display: 'flex', flex: 1, alignItems: 'center'}}>
-                      <Checkbox
-                        size={"lg"}
-                        disabled
-                        checked={currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase())}
-                        label={header}
-                        color={"success"}
-                      />
-                      <Divider orientation={"vertical"} sx={{marginX: 2}}/>
-                    </Box>
-                  ))
-                ) : (
-                  <Typography>No file selected or file has no headers.</Typography>
-                )}
-              </Box>
-              <FileDisplay acceptedFiles={acceptedFiles}/>
-              <Button
-                variant={"contained"}
-                disabled={!areHeadersValid(currentFileHeaders)}
-                onClick={handleApproveClick} // Updated here
-                sx={{width: 'fit-content'}}
-              >
-                Confirm Changes
-              </Button>
-            </Box>
-          </Grid>
-          <Grid item xs={4}/>
-          <Modal open={isReuploadDialogOpen} onClose={() => setIsReuploadDialogOpen(false)}>
-            <ModalDialog>
-              <DialogTitle>Re-upload Corrected File</DialogTitle>
-              <DialogContent>
-                <DialogContentText>
-                  Please upload the corrected version of the file: {currentFileName}
-                </DialogContentText>
-                <DropzoneLogic onChange={handleReUploadFileChange}/>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={() => setIsReuploadDialogOpen(false)}>Close</Button>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-          <Dialog
-            open={confirmationDialogOpen && canConfirmChanges}
-            onClose={handleCancel}
-            aria-labelledby="alert-dialog-title"
-            aria-describedby="alert-dialog-description"
-          >
-            <DialogTitle id="alert-dialog-title">
-              {"Do your files look correct?"}
-            </DialogTitle>
-            <DialogContent>
-              <DialogContentText id="alert-dialog-description">
-                Please press Confirm to upload your files to storage.
-              </DialogContentText>
-            </DialogContent>
-            <DialogActions>
-              <Stack direction={"row"}>
-                <Button onClick={handleCancel}>Cancel</Button>
-                <Button onClick={handleConfirm} autoFocus>
-                  Confirm
+            <Grid container spacing={2}>
+              <Grid item xs={4}/>
+              <Grid item xs={4}>
+                <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+                  <Button variant="contained" color="primary" onClick={handleRemoveCurrentFile}
+                          sx={{width: 'fit-content'}}>
+                    Remove Current File
+                  </Button>
+                  <Box sx={{display: 'flex', flexDirection: 'row', mb: 2}}>
+                    <Divider orientation={"vertical"} sx={{marginX: 2}}/>
+                    {currentFileHeaders.length > 0 ? (
+                      requiredHeadersTrimmed.map((header) => (
+                        <Box key={header} sx={{display: 'flex', flex: 1, alignItems: 'center'}}>
+                          <Checkbox
+                            size={"lg"}
+                            disabled
+                            checked={currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase())}
+                            label={header}
+                            color={"success"}/>
+                          <Divider orientation={"vertical"} sx={{marginX: 2}}/>
+                        </Box>
+                      ))
+                    ) : (
+                      <Typography>No file selected or file has no headers.</Typography>
+                    )}
+                  </Box>
+                  <FileDisplay acceptedFiles={acceptedFiles}/>
+                </Box>
+              </Grid>
+              <Grid item xs={4}/>
+              <Grid item xs={12}>
+                <Box sx={{display: 'flex', flexDirection: 'column', mr: 10}}>
+                  {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && areHeadersValid(currentFileHeaders) ? (
+                    <>
+                      <Typography level={"title-md"} color={"primary"} sx={{marginBottom: 1}}>
+                        Form: {uploadForm}
+                      </Typography><Typography level={"title-sm"}>
+                      File: {acceptedFiles[dataViewActive - 1].name}
+                    </Typography>
+                      <DisplayParsedDataGridInline
+                        parsedData={parsedData}
+                        errors={errors}
+                        setErrors={setErrors}
+                        setParsedData={setParsedData}
+                        errorRows={errorRows}
+                        setErrorRows={setErrorRows}
+                        formType={uploadForm}
+                        fileName={acceptedFiles[dataViewActive - 1].name}/>
+                    </>
+                  ) : (
+                    <Typography level="body-lg" bgcolor="error">
+                      The selected file is missing required headers. Please check the file and re-upload.<br/>
+                      Your file&apos;s headers were: {currentFileHeaders.join(', ')}<br/>
+                      The expected headers were {expectedHeaders.join(', ')}
+                    </Typography>
+                  )}
+                </Box>
+                <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={handleChange}/>
+                <Button
+                  onClick={() => setIsReuploadDialogOpen(true)}
+                  variant={"outlined"}
+                  color="primary"
+                  disabled={!hasErrors}
+                  sx={{marginTop: 2}}
+                >
+                  Re-upload Corrected File
                 </Button>
-              </Stack>
-            </DialogActions>
-          </Dialog>
-        </Grid>
-      )}
+              </Grid>
+              <Grid item xs={4}/>
+              <Grid item xs={4}>
+                <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+                  <Button
+                    variant={"contained"}
+                    disabled={!areHeadersValid(currentFileHeaders)}
+                    onClick={handleApproveClick} // Updated here
+                    sx={{width: 'fit-content'}}
+                  >
+                    Confirm Changes
+                  </Button>
+                </Box>
+              </Grid>
+              <Grid item xs={4}/>
+              <Modal open={isReuploadDialogOpen} onClose={() => setIsReuploadDialogOpen(false)}>
+                <ModalDialog>
+                  <DialogTitle>Re-upload Corrected File</DialogTitle>
+                  <DialogContent>
+                    <DialogContentText>
+                      Please upload the corrected version of the file: {currentFileName}
+                    </DialogContentText>
+                    <DropzoneLogic onChange={handleReUploadFileChange}/>
+                  </DialogContent>
+                  <DialogActions>
+                    <Button onClick={() => setIsReuploadDialogOpen(false)}>Close</Button>
+                  </DialogActions>
+                </ModalDialog>
+              </Modal>
+              <Dialog
+                open={confirmationDialogOpen && canConfirmChanges}
+                onClose={handleCancel}
+                aria-labelledby="alert-dialog-title"
+                aria-describedby="alert-dialog-description"
+              >
+                <DialogTitle id="alert-dialog-title">
+                  {"Do your files look correct?"}
+                </DialogTitle>
+                <DialogContent>
+                  <DialogContentText id="alert-dialog-description">
+                    Please press Confirm to upload your files to storage.
+                  </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                  <Stack direction={"row"}>
+                    <Button onClick={handleCancel}>Cancel</Button>
+                    <Button onClick={handleConfirm} autoFocus>
+                      Confirm
+                    </Button>
+                  </Stack>
+                </DialogActions>
+              </Dialog>
+            </Grid></>
+        )}
+      </Box>
     </>
   );
 }
