@@ -25,12 +25,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState("");
   const hasUploaded = useRef(false);
-  const [timer, setTimer] = useState<number>(5); // State for the countdown timer
-  const [showTimer, setShowTimer] = useState<boolean>(false); // State to control whether the timer is shown
-
-  const handleCompleteUpload = () => {
-    setReviewState(ReviewStates.COMPLETE); // Transition to the COMPLETE review state
-  };
+  const [countdown, setCountdown] = useState(5);
+  const [startCountdown, setStartCountdown] = useState(false);
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors
@@ -131,23 +127,27 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       uploadFiles().catch(console.error);
       hasUploaded.current = true;
     }
-
-    if (!loading && completedOperations === totalOperations) {
-      setShowTimer(true); // Show the timer once uploading is completed
-    }
   }, []);
 
+  // Effect for handling countdown and state transition
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
-    if (showTimer && timer > 0) {
-      // Set a countdown timer
-      timeout = setTimeout(() => setTimer(timer - 1), 1000);
-    } else if (timer === 0) {
-      handleCompleteUpload(); // Transition to COMPLETE when the timer reaches 0
-    }
-    return () => clearTimeout(timeout); // Cleanup the timeout on component unmount
-  }, [timer, showTimer]);
+    let timer: number; // Declare timer as a number
 
+    if (startCountdown && countdown > 0) {
+      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
+      // Use 'window.setTimeout' and type assertion to treat the return as a number
+    } else if (countdown === 0) {
+      setReviewState(ReviewStates.COMPLETE);
+    }
+
+    return () => clearTimeout(timer); // Clear timeout using the timer variable
+  }, [startCountdown, countdown, setReviewState]);
+
+  useEffect(() => {
+    if (!loading && completedOperations === totalOperations) {
+      setStartCountdown(true); // Start countdown after upload is complete
+    }
+  }, [loading, completedOperations, totalOperations]);
 
   return <>
     {loading ? (
@@ -166,15 +166,11 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             <Typography key={result}>{result}</Typography>
           ))}
           <Typography>{uploadCompleteMessage}</Typography>
-          {showTimer ? (
-            <Box>
+          {startCountdown && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <CircularProgress />
-              <Typography>Continuing in {timer} seconds...</Typography>
+              <Typography>{countdown} seconds remaining</Typography>
             </Box>
-          ) : (
-            <Button onClick={handleCompleteUpload} sx={{width: 'fit-content', mt: 2}}>
-              Complete Upload
-            </Button>
           )}
         </Stack>
       </Box>

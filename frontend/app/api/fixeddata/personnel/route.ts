@@ -115,8 +115,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({message: "Invalid PersonnelID"}, {status: 400});
     }
 
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Personnel WHERE PersonnelID = ?`;
     await runQuery(conn, deleteQuery, [deletePersonnelID]);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
 
     return NextResponse.json({message: "Delete successful"}, {status: 200});
   } catch (error) {

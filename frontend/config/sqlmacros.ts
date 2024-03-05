@@ -47,6 +47,86 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   },
 }));
 
+export type MeasurementsSummaryRDS = {
+  id: number;
+  coreMeasurementID: number;
+  plotID: number | null;
+  plotName: string | null;
+  plotCensusNumber: number | null;
+  censusStartDate: any;
+  censusEndDate: any;
+  quadratName: string | null;
+  treeTag: string | null;
+  stemTag: string | null;
+  stemQuadX: number | null;
+  stemQuadY: number | null;
+  stemQuadZ: number | null;
+  speciesName: string | null;
+  subSpeciesName: string | null;
+  genus: string | null;
+  family: string | null;
+  personnelName: string | null;
+  measurementDate: any;
+  measuredDBH: number | null;
+  measuredHOM: number | null;
+  description: string | null;
+  attributes: string | null;
+  validationErrors: string[] | null;
+}
+
+export const MeasurementsSummaryGridColumns: GridColDef[] = [
+  {field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotName', headerName: 'Plot Name', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'plotCensusNumber', headerName: 'Plot Census', headerClassName: 'header', flex: 1, align: 'left',},
+  {
+    field: 'censusStartDate',
+    headerName: 'Census Start',
+    type: "string",
+    headerClassName: 'header',
+    flex: 1,
+    valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value).toDateString();
+    }
+  },
+  {
+    field: 'censusEndDate',
+    headerName: 'Census End',
+    type: "string",
+    headerClassName: 'header',
+    flex: 1,
+    valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value).toDateString();
+    }
+  },
+  {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'treeTag', headerName: 'Tag', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemQuadX', headerName: 'Stem X', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemQuadY', headerName: 'Stem Y', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemQuadZ', headerName: 'Stem Z', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'subSpeciesName', headerName: 'SubSpecies', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left',},
+  {
+    field: 'measurementDate',
+    headerName: 'MeasurementDate',
+    type: "string",
+    headerClassName: 'header',
+    flex: 1,
+    valueGetter: (params) => {
+      if (!params.value) return null;
+      return new Date(params.value).toDateString();
+    }
+  },
+  {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left',},
+]
 
 export type AttributesRDS = {
   id: number;

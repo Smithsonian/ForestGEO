@@ -95,7 +95,9 @@ export async function DELETE(request: NextRequest) {
     const schema = getSchema();
     conn = await getSqlConnection(0);
     const deleteQuadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!);
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Quadrats WHERE [QuadratID] = ${deleteQuadratID}`);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
     if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
     return NextResponse.json({message: "Delete successful"}, {status: 200});
   } catch (error) {

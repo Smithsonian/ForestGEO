@@ -220,6 +220,7 @@ export interface UploadUpdateValidationsProps {
 }
 
 export interface UploadCompleteProps {
+  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   uploadForm: string;
 }
 

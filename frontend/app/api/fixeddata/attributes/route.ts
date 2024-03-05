@@ -99,8 +99,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       return new NextResponse(JSON.stringify({message: "Code parameter is required"}), {status: 400});
     }
 
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Attributes WHERE Code = ?`;
     await runQuery(conn, deleteQuery, [deleteCode]);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
 
     return new NextResponse(JSON.stringify({message: "Delete successful"}), {status: 200});
   } catch (error) {

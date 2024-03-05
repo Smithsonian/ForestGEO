@@ -284,8 +284,32 @@ export type ValidationResponse = {
   failedCoreMeasurementIDs?: number[];
 }
 export type UpdateValidationResponse = {
-  updatedIDs: any;
   rowsValidated: any;
+}
+
+export interface ForestGEOMeasurementsSummaryResult {
+  CoreMeasurementID: any;
+  PlotID: any;
+  PlotName: any;
+  PlotCensusNumber: any;
+  StartDate: any;
+  EndDate: any;
+  QuadratName: any;
+  TreeTag: any;
+  StemTag: any;
+  StemQuadX: any;
+  StemQuadY: any;
+  StemQuadZ: any;
+  SpeciesName: any;
+  SubSpeciesName: any;
+  Genus: any;
+  Family: any;
+  PersonnelName: any;
+  MeasurementDate: any;
+  MeasuredDBH: any;
+  MeasuredHOM: any;
+  Description: any;
+  Attributes: any;
 }
 
 export interface CoreMeasurementsResult {

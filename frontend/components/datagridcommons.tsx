@@ -2,18 +2,18 @@
 "use client";
 import React, {Dispatch, SetStateAction, useEffect, useMemo, useState} from 'react';
 import {
-  GridActionsCellItem,
+  GridActionsCellItem, GridCellParams,
   GridColDef,
   GridEventListener,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
   GridRowModes,
-  GridRowModesModel,
+  GridRowModesModel, GridRowParams,
   GridRowsProp,
   GridToolbarContainer,
 } from '@mui/x-data-grid';
-import {Alert, AlertProps, Button, Snackbar} from '@mui/material';
+import {Alert, AlertProps, Button, Checkbox, Snackbar} from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -31,9 +31,27 @@ import {
   EditToolbarProps,
   getGridID
 } from "@/config/datagridhelpers";
-import {Plot} from "@/config/macros";
+import {CMError, Plot} from "@/config/macros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 
+const errorMapping: { [key: string]: string[] } = {
+  '1': ["attributes"],
+  '2': ["measuredDBH"],
+  '3': ["measuredHOM"],
+  '4': ["treeTag", "stemTag"],
+  '5': ["treeTag", "stemTag", "quadratName"],
+  '6': ["stemQuadX", "stemQuadY"],
+  '7': ["speciesName"],
+  '8': ["measurementDate"],
+  '9': ["treeTag", "stemTag", "plotCensusNumber"],
+  '10': ["treeTag", "stemTag", "plotCensusNumber"],
+  '11': ["quadratName"],
+  '12': ["speciesName"],
+  '13': ["measuredDBH"],
+  '14': ["measuredDBH"],
+  '15': ["treeTag"],
+  '16': ["quadratName"],
+};
 
 export function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {handleAddNewRow, handleRefresh, locked = false} = props;
@@ -85,6 +103,14 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
+  // State to store validation errors
+  const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
+  const [showErrorRows, setShowErrorRows] = useState<boolean>(false);
+
+  // Toggle function for the checkbox
+  const handleShowErrorRowsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setShowErrorRows(event.target.checked);
+  };
 
   const { updateQuadratsContext, updateCensusContext, updatePlotsContext } = UpdateContextsFromIDB();
 
@@ -375,12 +401,138 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     };
   }
 
+  const fetchValidationErrors = async () => {
+    if (gridType !== 'measurementsSummary') return;
 
-  // Memoize columns to avoid unnecessary re-renders
-  const columns = useMemo(() => [
-    ...gridColumns,
-    getGridActionsColumn(),
-  ], [gridColumns, rowModesModel, handleSaveClick, handleCancelClick, handleEditClick, handleDeleteClick]);
+    try {
+      const response = await fetch('/api/validations/validationerrordisplay');
+      const errors: CMError[] = await response.json();
+
+      // Define the type of the accumulator as Record<number, CMError>
+      const errorMap = errors.reduce<Record<number, CMError>>((acc, error) => {
+        acc[error.CoreMeasurementID] = error;
+        return acc;
+      }, {});
+
+      setValidationErrors(errorMap);
+    } catch (error) {
+      console.error('Error fetching validation errors:', error);
+    }
+  };
+
+  // useEffect to fetch validation errors when component mounts or refreshes
+  useEffect(() => {
+    fetchValidationErrors().catch(console.error);
+  }, [refresh]);
+
+  const cellHasError = (colField: string, rowId: GridRowId) => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return false;
+    const errorFields = error.ValidationErrorIDs.flatMap(id => errorMapping[id.toString()] || []);
+    return errorFields.includes(colField);
+  };
+
+  const getCellErrorMessages = (colField: string, rowId: GridRowId) => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return '';
+
+    // Map the ValidationErrorIDs to their descriptions.
+    // Assuming that each ValidationErrorID corresponds to an entry in Descriptions array.
+    return error.ValidationErrorIDs
+      .filter(id => errorMapping[id.toString()]?.includes(colField))
+      .map(id => {
+        // Find the index of this id in ValidationErrorIDs array
+        const index = error.ValidationErrorIDs.indexOf(id);
+        // Return the corresponding description
+        return error.Descriptions[index];
+      })
+      .join('; ');
+  };
+
+
+  // Modify gridColumns to include validation errors
+  const modifiedColumns = gridColumns.map(column => ({
+    ...column,
+    renderCell: (params: GridCellParams) => {
+      const cellValue = params.value !== undefined ? params.value?.toString() : '';
+      const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
+      return (
+        <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5}}>
+          {cellError ? (
+            <>
+              <Typography sx={{
+                whiteSpace: 'normal',
+                lineHeight: 'normal'
+              }}>
+                {cellValue}
+              </Typography>
+              <Typography color={"danger"} variant={"solid"}
+                sx={{color: 'error.main', fontSize: '0.75rem', mt: 1, whiteSpace: 'normal', lineHeight: 'normal'}}>
+                {cellError}
+              </Typography>
+            </>
+          ) : (
+            <Typography sx={{
+              whiteSpace: 'normal',
+              lineHeight: 'normal'
+            }}>{cellValue}</Typography>
+          )}
+        </Box>
+      );
+    }
+  }));
+
+  // Use useMemo to construct columns array conditionally based on 'locked' prop
+  const columns = useMemo(() => {
+    const commonColumns = modifiedColumns; // Assuming modifiedColumns is already defined in your component
+    if (locked) {
+      return commonColumns; // Return only the common columns when grid is locked
+    }
+    return [...commonColumns, getGridActionsColumn()]; // Include actions column when grid is not locked
+  }, [modifiedColumns, locked]);
+
+  // Function to check if any column in a row has an error
+  const rowHasError = (rowId: GridRowId) => {
+    return gridColumns.some(column => cellHasError(column.field, rowId));
+  };
+
+  // Updated visibleRows computation
+  const visibleRows = useMemo(() => {
+    if (gridType === 'measurementsSummary') {
+      if (showErrorRows) {
+        console.log("Showing all rows, including those with errors.");
+        return rows;
+      } else {
+        console.log("Filtering out rows with errors.");
+        return rows.filter(row => !rowHasError(row.id));
+      }
+    }
+    console.log("No filtering applied for non-measurementsSummary grid.");
+    return rows;
+  }, [rows, showErrorRows, gridType, gridColumns]);
+
+  // Count the number of rows with errors
+  const errorRowCount = useMemo(() => {
+    if (gridType === 'measurementsSummary') {
+      return rows.filter(row => rowHasError(row.id)).length;
+    }
+    return 0;
+  }, [rows, gridType, gridColumns]);
+
+  // Display snackbar when rows with errors are detected
+  useEffect(() => {
+    if (gridType === 'measurementsSummary' && errorRowCount > 0) {
+      setSnackbar({
+        children: `${errorRowCount} row(s) with validation errors detected.`,
+        severity: 'warning'
+      });
+    }
+  }, [errorRowCount, gridType]);
+
+  // Modify gridRows to include a custom class for rows with errors
+  const getRowClassName = (params: GridRowParams) => {
+    return rowHasError(params.id) ? 'error-row' : '';
+  };
 
   if (!currentPlot) {
     return <>You must select a plot to continue!</>;
@@ -398,9 +550,18 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         }}
       >
         <Box sx={{width: '100%', flexDirection: 'column'}}>
+          {gridType === 'measurementsSummary' && (
+            <Box>
+              <Checkbox
+                checked={showErrorRows}
+                onChange={handleShowErrorRowsChange}
+              />
+              Show rows with errors ({errorRowCount})
+            </Box>
+          )}
           <Typography level={"title-lg"}>Note: The Grid is filtered by your selected Plot and Plot ID</Typography>
           <StyledDataGrid sx={{width: '100%'}}
-                          rows={rows}
+                          rows={visibleRows}
                           columns={columns}
                           editMode="row"
                           rowModesModel={rowModesModel}
@@ -423,6 +584,9 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                               handleRefresh: handleRefresh,
                             },
                           }}
+                          autoHeight
+                          getRowHeight={() => 'auto'}
+                          getRowClassName={getRowClassName}
           />
         </Box>
         {!!snackbar && (

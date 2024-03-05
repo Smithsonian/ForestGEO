@@ -73,7 +73,7 @@ interface MRTProps {
   pathname: string;
 }
 
-function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean, setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>) {
+function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean | undefined, setMenuOpen: ((value: (((prevState: boolean) => boolean) | boolean)) => void) | undefined) {
   const Icon = siteConfigProps.icon;
   return (
     <ListItemButton
@@ -81,14 +81,16 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
       // selected={props.pathname === siteConfigProps.href || siteConfigProps.expanded.find(value => value.href === props.pathname) !== undefined}
       color={props.pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
-        setMenuOpen(!menuOpen);
+        if (setMenuOpen) {
+          setMenuOpen(!menuOpen);
+        }
       }}>
       <Icon/>
       <ListItemContent>
         <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
       </ListItemContent>
       <KeyboardArrowDownIcon
-        sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
+        sx={{transform: !menuOpen ? 'rotate(180deg)' : 'none'}}
       />
     </ListItemButton>
   );
@@ -125,7 +127,6 @@ export default function Sidebar() {
   // Define the array type
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
-    {toggle: undefined, setToggle: undefined},
     {toggle: undefined, setToggle: undefined},
     {toggle: undefined, setToggle: undefined},
     {toggle: propertiesToggle, setToggle: setPropertiesToggle},
@@ -257,8 +258,8 @@ export default function Sidebar() {
                 return (
                   <ListItem key={item.href} nested>
                     <SimpleToggler
-                      renderToggle={MenuRenderToggle({currentPlot, currentCensus, pathname}, item, toggle!, setToggle!)}
-                      isOpen={toggle!}
+                      renderToggle={MenuRenderToggle({currentPlot, currentCensus, pathname}, item, toggle, setToggle)}
+                      isOpen={!!toggle}
                     >
                       <List sx={{gap: 0.5}} size={"sm"}>
                         {item.expanded.map((link) => {
