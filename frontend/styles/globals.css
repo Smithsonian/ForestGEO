@@ -19,3 +19,7 @@ body {
 .dataGridCell {
     overflow: visible !important;
 }
+
+.error-row {
+    background-color: rgba(255, 0, 0, 0.1);
+}

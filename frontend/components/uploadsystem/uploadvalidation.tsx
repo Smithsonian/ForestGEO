@@ -1,5 +1,5 @@
 "use client";
-import React, {Dispatch, SetStateAction, useEffect, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   Box,
   Button,
@@ -12,9 +12,10 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import {Plot, ReviewStates, UploadValidationProps} from "@/config/macros";
+import {ReviewStates, UploadValidationProps} from "@/config/macros";
 import {ValidationResponse} from "@/components/processors/processormacros";
-import {CensusRDS} from "@/config/sqlmacros";
+import CircularProgress from "@mui/joy/CircularProgress";
+
 const UploadValidation: React.FC<UploadValidationProps> = ({
                                                              setReviewState,
                                                              currentPlot, currentCensus
@@ -31,6 +32,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
   const [useDefaultValues, setUseDefaultValues] = useState<boolean>(false);
   const [defaultValuesDialogOpen, setDefaultValuesDialogOpen] = useState<boolean>(true);
+  // Add new state for countdown timer
+  const [countdown, setCountdown] = useState(5);
 
   const validationAPIs: string[] = [
     'dbhgrowthexceedsmax',
@@ -117,9 +120,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     if (index >= validationAPIs.length) {
       setIsValidationComplete(true); // All validations are complete
       setErrorsFound(foundError);
-      if (foundError) {
-        setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND);
-      }
       return;
     }
 
@@ -152,12 +152,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       setValidationProgress(prevProgress => ({ ...prevProgress, [api]: -1 }));
       return { response: {failedRows: 0, message: error.message, totalRows: 0 }, hasError: false};
     }
-  };
-
-  const checkForErrors = () => {
-    const foundErrors = Object.values(validationResults).some(result => result.failedRows > 0);
-    console.log(`found errors: ${foundErrors}`);
-    setErrorsFound(foundErrors);
   };
 
   const renderProgressBars = () => {
@@ -221,6 +215,20 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     );
   };
 
+  // Effect for handling countdown and state transition
+  useEffect(() => {
+    let timer: number; // Declare timer as a number
+
+    if (isValidationComplete && countdown > 0) {
+      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
+      // Use 'window.setTimeout' and type assertion to treat the return as a number
+    } else if (countdown === 0) {
+      setReviewState(ReviewStates.UPDATE);
+    }
+
+    return () => clearTimeout(timer); // Clear timeout using the timer variable
+  }, [countdown, isValidationComplete, setReviewState]);
+
   return (
     <Box sx={{width: '100%', p: 2, display: 'flex', flex: 1, flexDirection: 'column'}}>
       {renderDefaultValuesDialog()}
@@ -233,6 +241,10 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
         </Box>
       ) : (
         <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress />
+            <Typography>{countdown} seconds remaining</Typography>
+          </Box>
           <Typography variant="h6">Validation Results</Typography>
           {apiErrors.length > 0 && (
             <Box sx={{mb: 2}}>
@@ -256,17 +268,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
               )}
             </Box>
           ))}
-          {/*{errorsFound ? (*/}
-          {/*  <Button variant="contained" color="error" sx={{mt: 2, width: 'fit-content'}}*/}
-          {/*          onClick={() => setReviewState(ReviewStates.VALIDATE_ERRORS_FOUND)}>*/}
-          {/*    Review Errors*/}
-          {/*  </Button>*/}
-          {/*) : (*/}
-          {/*  <Button variant="contained" color="success" sx={{mt: 2, width: 'fit-content'}}*/}
-          {/*          onClick={() => setReviewState(ReviewStates.UPDATE)}>*/}
-          {/*    Complete Upload*/}
-          {/*  </Button>*/}
-          {/*)}*/}
         </Box>
       )}
     </Box>
