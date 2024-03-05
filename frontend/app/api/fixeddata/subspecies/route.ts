@@ -115,7 +115,9 @@ export async function DELETE(request: NextRequest) {
     if (!conn) throw new Error('SQL connection failed');
 
     const deleteSubSpeciesID = parseInt(request.nextUrl.searchParams.get('subSpeciesID')!);
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SubSpecies WHERE [SubSpeciesID] = ?`, [deleteSubSpeciesID]);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
     if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: HTTPResponses.INVALID_REQUEST});
 
     return NextResponse.json({message: "Delete successful"}, {status: HTTPResponses.OK});

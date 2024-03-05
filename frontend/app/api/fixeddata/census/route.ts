@@ -121,8 +121,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({message: "Invalid censusID parameter"}, {status: 400});
     }
 
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Census WHERE CensusID = ?`;
     await runQuery(conn, deleteQuery, [deleteID]);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
 
     return NextResponse.json({message: "Delete successful"}, {status: HTTPResponses.OK});
   } catch (error) {

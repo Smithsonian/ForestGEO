@@ -84,11 +84,12 @@ export interface DetailedCMIDRow extends CMIDRow {
 }
 
 interface UploadParentProps {
+  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   onReset: () => void;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const {onReset} = props;
+  const {setIsUploadModalOpen, onReset} = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
@@ -687,7 +688,7 @@ export default function UploadParent(props: UploadParentProps) {
           setCMErrors={setCMErrors}
         />
       case ReviewStates.COMPLETE:
-        return <UploadComplete uploadForm={uploadForm}/>;
+        return <UploadComplete setIsUploadModalOpen={setIsUploadModalOpen} uploadForm={uploadForm}/>;
       default:
         return (
           <UploadError

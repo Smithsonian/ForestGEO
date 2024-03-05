@@ -41,6 +41,10 @@ export const createFetchQuery: FetchQueryFunction = (gridType, page, pageSize, p
       baseQuery += `fixeddata/${gridType}?page=${page}&pageSize=${pageSize}`;
       baseQuery += plotID ? `&plotID=${plotID}` : ``;
       break;
+    case 'measurementsSummary':
+      baseQuery += `fixeddata/${gridType.toLowerCase()}?page=${page}&pageSize=${pageSize}`;
+      baseQuery += plotID ? `&plotID=${plotID}` : ``;
+      break;
     case 'attributes':
     case 'personnel':
     case 'species':

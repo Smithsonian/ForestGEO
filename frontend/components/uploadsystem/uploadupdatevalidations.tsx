@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, {useEffect, useRef, useState} from "react";
 import {
   Box,
   Button,
@@ -23,76 +23,58 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   } = props;
 
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
-  const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
   const [numValidations, setNumValidations] = useState(0);
+  const [countdown, setCountdown] = useState(5);
+  const hasUpdated = useRef(false);
 
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
-    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`);
-
-    if (!response.ok) {
-      console.error('Failed to update validations');
-      setIsUpdateValidationComplete(true);
-      return;
-    }
-
+    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id.toString()}&censusID=${currentCensus?.censusID.toString()}`);
     const result = await response.json();
-    setValidationPassedCMIDs(result.updatedIDs);
-    setNumValidations(result.rowsValidated)
+    setNumValidations(result.rowsValidated);
     setIsUpdateValidationComplete(true);
   };
 
   useEffect(() => {
-    updateValidations().catch(console.error);
+    if (!hasUpdated.current) {
+      updateValidations().catch(console.error);
+      hasUpdated.current = true;
+    }
   }, []);
 
-  const handleCompleteUpload = () => {
-    // Transition to the COMPLETE review state
-    setReviewState(ReviewStates.UPLOAD_AZURE);
-  };
+  // Effect for handling countdown and state transition
+  useEffect(() => {
+    let timer: number; // Declare timer as a number
+
+    if (isUpdateValidationComplete && countdown > 0) {
+      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
+      // Use 'window.setTimeout' and type assertion to treat the return as a number
+    } else if (countdown === 0) {
+      setReviewState(ReviewStates.UPLOAD_AZURE);
+    }
+
+    return () => clearTimeout(timer); // Clear timeout using the timer variable
+  }, [countdown, setReviewState, isUpdateValidationComplete]);
 
   return (
     <Box sx={{width: '100%', p: 2}}>
       <Typography variant="h6">Update Validation-Passed Rows</Typography>
       {!isUpdateValidationComplete ? (
-        <CircularProgress/>
+        <Box sx={{width: '100%', p: 2, flexDirection: 'column', display: 'flex', flex: 1}}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress />
+            <Typography>Updating Passed Rows</Typography>
+          </Box>
+        </Box>
       ) : (
         <Box sx={{width: '100%', p: 2, flexDirection: 'column', display: 'flex', flex: 1}}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CircularProgress />
+            <Typography>{countdown} seconds remaining</Typography>
+          </Box>
           <Typography variant="h6">CoreMeasurement Validation Status</Typography>
           <br />
-          <Typography variant={"body1"}>Rows Updated: ${numValidations}</Typography>
-          <TableContainer component={Paper}>
-            <Table aria-label="validation status table">
-              <TableHead>
-                <TableRow>
-                  <TableCell>File Name</TableCell>
-                  <TableCell>CoreMeasurementID</TableCell>
-                  <TableCell>StemTag</TableCell>
-                  <TableCell>TreeTag</TableCell>
-                  <TableCell>Validated</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {allRowToCMID.map(({coreMeasurementID, fileName, row}, index) => (
-                  <TableRow key={`${coreMeasurementID}-${index}`}>
-                    <TableCell>{fileName}</TableCell>
-                    <TableCell>{coreMeasurementID}</TableCell>
-                    <TableCell>{row.stemtag}</TableCell>
-                    <TableCell>{row.tag}</TableCell>
-                    <TableCell>
-                      <Checkbox
-                        checked={validationPassedCMIDs.includes(coreMeasurementID)}
-                        disabled
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-          <Button onClick={handleCompleteUpload} sx={{width: 'fit-content', mt: 2}}>
-            Continue to Azure Upload
-          </Button>
+          <Typography variant={"body1"}>Rows Updated: {numValidations}</Typography>
         </Box>
       )}
     </Box>
