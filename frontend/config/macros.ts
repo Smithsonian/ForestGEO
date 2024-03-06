@@ -44,9 +44,8 @@ export interface UploadedFileData {
   key: number;
   name: string;
   user: string;
-  errors: string;
-  version: string;
-  isCurrentVersion: boolean;
+  formType: string;
+  fileErrors: any;
   date: Date;
 }
 

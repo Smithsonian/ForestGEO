@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, response: NextResponse) {
           name: blob.name,
           user: blob.metadata?.user,
           formType: blob.metadata?.FormType,
-          fileErrors: blob.metadata?.FileErrorState,
+          fileErrors: JSON.parse(<string>blob.metadata?.FileErrorState),
           date: blob.properties.lastModified
         });
     }

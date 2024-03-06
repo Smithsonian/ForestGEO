@@ -223,6 +223,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           color: 'red',
                           fontWeight: 'bold'
                         } : {}}>{new Date(row.date).toString()}</TableCell>
+                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
                         <TableCell align="center">
                           <Button
                             onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
@@ -245,7 +246,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                     </TableRow>
                   ) : (
                     sortedFileArcGIS.map((row) => {
-                      let errs = row.errors == "false";
+                      let errs = "false";
                       return (
                         <TableRow key={row.key}>
                           <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
@@ -258,11 +259,11 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           <TableCell sx={(errs) ? {
                             color: 'red',
                             fontWeight: 'bold'
-                          } : {}}>{new Date(row.version).toString()}</TableCell>
+                          } : {}}>{row.formType}</TableCell>
                           <TableCell sx={(errs) ? {
                             color: 'red',
                             fontWeight: 'bold'
-                          } : {}}>{row.isCurrentVersion ? 'YES' : ''}</TableCell>
+                          } : {}}>{row.fileErrors}</TableCell>
                           <TableCell align="center">
                             <Button
                               onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
