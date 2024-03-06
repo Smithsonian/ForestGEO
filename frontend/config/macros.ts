@@ -536,7 +536,7 @@ export function genericLoadContextReducer<T>(
  * SQL function storage
  */
 export async function getContainerClient(containerName: string) {
-  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
   console.log('Connection String:', storageAccountConnectionString);
   console.log(`container name: ${containerName}`);
   if (!storageAccountConnectionString) {
