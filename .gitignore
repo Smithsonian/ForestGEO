@@ -40,3 +40,4 @@ next-env.d.ts
 .vscode/*
 /*.zip
 .github/workflows/new-file-upload-system_forestgeo-livesite.yml
+.fleet/*

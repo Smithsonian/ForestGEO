@@ -315,7 +315,23 @@ export async function verifyLastName(lastName: string): Promise<{ verified: bool
     const isAdmin = verified && bitToBoolean(results[0].IsAdmin);
     return { verified, isAdmin };
   } catch (error) {
-    console.error('Error verifying user email or last name in database:', error);
+    console.error('Error verifying last name in database: ', error);
+    throw error;
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+export async function verifyEmail(email: string): Promise<{emailVerified: boolean}> {
+  const connection: PoolConnection | null = await getConn();
+  try {
+    const query = `SELECT COUNT(*) as count from catalog.users WHERE Email = ? GROUP BY IsAdmin`;
+    const results = await runQuery(connection, query, [email]);
+
+    const emailVerified = results.length > 0 && results[0].count > 0;
+    return {emailVerified};
+  } catch(error: any) {
+    console.error('Error verifying email in database: ', error);
     throw error;
   } finally {
     if (connection) connection.release();

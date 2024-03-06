@@ -13,6 +13,10 @@ declare module 'next-auth' {
     }
   }
 
+  interface AzureADProfile extends Profile {
+    preferred_username?: string;
+  }
+
   /**
    * Extends the built-in user types to include the isAdmin property.
    */

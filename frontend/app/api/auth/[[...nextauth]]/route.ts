@@ -1,7 +1,7 @@
 // NEXTAUTH ROUTE HANDLERS
-import NextAuth from "next-auth";
+import NextAuth, { AzureADProfile } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
-import {verifyLastName} from "@/components/processors/processorhelperfunctions";
+import {verifyEmail, verifyLastName} from "@/components/processors/processorhelperfunctions";
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,
@@ -17,11 +17,24 @@ const handler = NextAuth({
     strategy: "jwt"
   },
   callbacks: {
-    async signIn({ user, account, profile, email, credentials }) {
-      if (user.name) {
+    async signIn({ user, account, profile, email: signInEmail, credentials }) {
+      console.log('User object:', user); // Debugging
+      console.log('Profile object:', profile); // Debugging
+      // Now using the extended AzureADProfile
+      const azureProfile = profile as AzureADProfile;
+      const userEmail = user.email || signInEmail || azureProfile.preferred_username;
+      if (typeof userEmail !== 'string') {
+        console.error('User email is not a string:', userEmail);
+        return false; // Email is not a valid string, abort sign-in
+      }
+      if (user.name && userEmail) {
         const lastName = user.name.split(' ').slice(-1).join(''); // Gets the last word from the name
         const { verified, isAdmin } = await verifyLastName(lastName);
         if (!verified) {
+          return false;
+        }
+        const {emailVerified} = await verifyEmail(userEmail);
+        if (!emailVerified) {
           return false;
         }
         user.isAdmin = isAdmin; // Add isAdmin property to the user object

@@ -3,12 +3,10 @@
 import {clearDataByKey, getData, setData} from "@/config/db";
 import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 import {Census, Plot, Quadrat} from "@/config/macros";
-import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
-import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
 import {Box, LinearProgress, LinearProgressProps, Typography} from "@mui/material";
 import React from "react";
 
-async function updateQuadratsIDB() {
+async function updateQuadratsIDB(userLastName: string, userEmail: string) {
   const quadratRDSResponse = await fetch(`/api/fetchall/quadrats`, {method: 'GET'});
   if (!quadratRDSResponse.ok) throw new Error('fetchall quadrats failure.');
   const jsonResponse = await quadratRDSResponse.json();
@@ -25,7 +23,7 @@ async function updateQuadratsIDB() {
   }));
   await setData('quadratsLoad', quadratsRDSLoad);
   await setData('quadratList', quadratList);
-  const plotRDSResponse = await fetch('/api/fetchall/plots', {method: 'GET'});
+  const plotRDSResponse = await fetch(`/api/fetchall/plots?lastname=${userLastName}&email=${userEmail}`, {method: 'GET'});
   if (!plotRDSResponse.ok) throw new Error('fetchall plots failure');
   let plotRDSLoad = await plotRDSResponse.json();
   let plotList: Plot[] = [];
@@ -38,8 +36,8 @@ async function updateQuadratsIDB() {
   await setData('plotList', plotList);
 }
 
-async function updatePlotsIDB() {
-  const plotRDSResponse = await fetch(`/api/fetchall/plots`, {method: 'GET'});
+async function updatePlotsIDB(userLastName: string, userEmail: string) {
+  const plotRDSResponse = await fetch(`/api/fetchall/plots?lastname=${userLastName}&email=${userEmail}`, {method: 'GET'});
   if (!plotRDSResponse.ok) throw new Error('fetchall plots failure');
   const jsonResponse = await plotRDSResponse.json();
   await clearDataByKey('plotsLoad');
@@ -91,13 +89,14 @@ async function updateCensusIDB() {
   await setData('censusList', censusList);
 }
 
-export async function loadServerDataIntoIDB(dataType: string) {
+export async function loadServerDataIntoIDB(dataType: string, userLastName: string, userEmail: string) {
+  if (!userLastName || !userEmail) throw new Error('session user informaiton was not provided');
   switch(dataType) {
     case 'quadrats':
-      await updateQuadratsIDB();
+      await updateQuadratsIDB(userLastName, userEmail);
       return;
     case 'plots':
-      await updatePlotsIDB();
+      await updatePlotsIDB(userLastName, userEmail);
       return;
     case 'census':
       await updateCensusIDB();
