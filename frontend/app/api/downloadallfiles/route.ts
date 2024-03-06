@@ -33,15 +33,15 @@ export async function GET(request: NextRequest, response: NextResponse) {
           date: blob.properties.lastModified
         });
     }
-  } catch (error) {
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: "List of files",
+        blobData: blobData,
+      }),
+      {status: 200}
+    );
+  } catch (error: any) {
     console.error('error in blob listing: ', error);
+    return NextResponse.json({message: error.message}, {status: 400});
   }
-
-  return new NextResponse(
-    JSON.stringify({
-      responseMessage: "List of files",
-      blobData: blobData,
-    }),
-    {status: 200}
-  );
 }
