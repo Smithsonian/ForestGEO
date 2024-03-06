@@ -26,10 +26,9 @@ export async function GET(request: NextRequest, response: NextResponse) {
         {
           key: ++i,
           name: blob.name,
-          user: blob.metadata!.user,
-          errors: blob.metadata!.errors,
-          version: blob.versionId!,
-          isCurrentVersion: blob.isCurrentVersion!,
+          user: blob.metadata?.user,
+          formType: blob.metadata?.FormType,
+          fileErrors: blob.metadata?.FileErrorState,
           date: blob.properties.lastModified
         });
     }

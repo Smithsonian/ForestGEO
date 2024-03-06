@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    serverMinification: false,
+  },
   logging: {
     fetches: {
       fullUrl: true,
