@@ -176,7 +176,7 @@ export default function CoreMeasurementsPage() {
             sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
           >
             <ModalClose onClick={handleCloseUploadModal}/>
-            <UploadParent onReset={handleCloseUploadModal}/>
+            <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal}/>
             {/* Additional modal content if needed */}
           </ModalDialog>
         </Modal>
