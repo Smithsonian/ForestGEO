@@ -348,6 +348,8 @@ export interface DropzoneProps {
 export const fileColumns = [
   {key: 'name', label: 'File Name'},
   {key: 'user', label: 'Uploaded By'},
+  {key: 'formType', label: 'Form Type'},
+  {key: 'fileErrors', label: 'Errors in File'},
   {key: 'date', label: 'Date Entered'},
   // {key: 'version', label: 'Version'},
   // {key: 'isCurrentVersion', label: 'Is Current Version?'},

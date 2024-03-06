@@ -212,7 +212,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                     </TableRow>
                   ) : (
                     sortedFileTextCSV.map((row) => {
-                    let errs = row.errors == "false";
+                    // let errs = row.errors == "false";
+                      let errs = false;
                     return (
                       <TableRow key={row.key}>
                         <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
@@ -236,37 +237,12 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                     );
                     })
                   )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        </Box>
-        {/*  ARCGIS FILES */}
-        <Box sx={{display: 'flex', flex: 1, flexDirection: "column"}}>
-          <Box sx={{display: 'flex', flexDirection: "column"}}>
-            <Typography level={"title-lg"}>
-              Uploaded ArcGIS Files
-            </Typography>
-          </Box>
-          <Box sx={{display: 'flex', flexDirection: "column", marginTop: 1}}>
-            <TableContainer component={Paper}>
-              <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={tableHeaderSettings}>File Count</TableCell>
-                    {fileColumns.map((item) => (
-                      <TableCell key={item.key} sx={tableHeaderSettings}>{item.label}</TableCell>
-                    ))}
-                    <TableCell sx={tableHeaderSettings}>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
                   {sortedFileArcGIS.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={fileColumns.length + 2} align="center">
                         No data available
-                        </TableCell>
-                      </TableRow>
+                      </TableCell>
+                    </TableRow>
                   ) : (
                     sortedFileArcGIS.map((row) => {
                       let errs = row.errors == "false";
@@ -307,15 +283,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                 </TableBody>
               </Table>
             </TableContainer>
-            <Snackbar
-              open={openSnackbar}
-              autoHideDuration={6000}
-              onClose={handleCloseSnackbar}
-            >
-              <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
-                {errorMessage}
-              </Alert>
-            </Snackbar>
           </Box>
         </Box>
       </>
