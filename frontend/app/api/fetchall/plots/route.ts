@@ -1,18 +1,44 @@
 // FETCH ALL PLOTS ROUTE HANDLERS
-import {NextResponse} from "next/server";
+import {NextRequest, NextResponse} from "next/server";
 import {PlotRDS} from "@/config/sqlmacros";
-import {getSchema, getSqlConnection, PlotsResult, runQuery} from "@/components/processors/processormacros";
+import {getCatalogSchema, getConn, getSchema, getSqlConnection, PlotsResult, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 
-export async function GET(): Promise<NextResponse<PlotRDS[]>> {
+export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>> {
   let conn: PoolConnection | null = null;
   try {
     const schema = getSchema();
-    conn = await getSqlConnection(0);
-    const query = `SELECT * FROM ${schema}.Plots`;
-    const results = await runQuery(conn, query);
+    const catalogSchema = getCatalogSchema();
+    conn = await getConn();
 
-    const plotRows: PlotRDS[] = results.map((row: PlotsResult, index: number) => ({
+    const lastName = request.nextUrl.searchParams.get('lastname');
+    const email = request.nextUrl.searchParams.get('email');
+
+    if (!lastName || !email) throw new Error('missing lastname or email');
+
+    const userQuery = `
+      SELECT UserID FROM ${catalogSchema}.users
+      WHERE LastName = ? AND Email = ?
+    `;
+    const userParams = [lastName, email];
+    const userResults = await runQuery(conn, userQuery, userParams);
+
+    if (userResults.length === 0) {
+      throw new Error('User not found');
+    }
+    const userID = userResults[0].UserID;
+
+    // Query to get plots
+    const plotQuery = `
+      SELECT p.*
+      FROM ${schema}.Plots AS p
+      LEFT JOIN ${catalogSchema}.UserPlotRelations AS upr ON p.PlotID = upr.PlotID
+      WHERE (upr.UserID = ? OR upr.AllPlots = 1) AND (upr.UserID IS NOT NULL)
+    `;
+    const plotParams = [userID];
+    const plotResults = await runQuery(conn, plotQuery, plotParams);
+
+    const plotRows: PlotRDS[] = plotResults.map((row: PlotsResult, index: number) => ({
       id: index + 1,
       plotID: row.PlotID,
       plotName: row.PlotName,

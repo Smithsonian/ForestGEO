@@ -110,6 +110,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const plotsListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
+  const {data: session} = useSession();
 
   useEffect(() => {
     const fetchDataEffect = async () => {
@@ -153,7 +154,11 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     setCoreDataLoading(true);
     setLoading(0);
     // IDB load stored separately: QUADRATS
-    await loadServerDataIntoIDB('quadrats');
+    let lastname = session?.user?.name;
+    let email = session?.user?.email;
+    if (!email) throw new Error("session user's email was undefined");
+    if (!lastname) throw new Error("session user's name was undefined");
+    await loadServerDataIntoIDB('quadrats', lastname.split(' ')[1], email);
     setLoadingMsg('Retrieving Quadrats...');
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData = await getData('quadratsLoad');
@@ -171,7 +176,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     if (quadratListDispatch) quadratListDispatch({quadratList: quadratList});
 
     // IDB load stored separately: CENSUS
-    await loadServerDataIntoIDB('census');
+    await loadServerDataIntoIDB('census', lastname.split(' ')[1], email);
     await delay(500);
     setLoading(50);
     setLoadingMsg('Retrieving Census...');
@@ -184,7 +189,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     if (censusListDispatch) censusListDispatch({censusList: censusListData});
 
     // IDB load stored separately: PLOTS
-    await loadServerDataIntoIDB('plots');
+    await loadServerDataIntoIDB('plots', lastname.split(' ')[1], email);
     await delay(500);
     setLoading(70);
     setLoadingMsg('Retrieving Plots...');

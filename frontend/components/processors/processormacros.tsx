@@ -277,6 +277,12 @@ export function getSchema() {
   return schema;
 }
 
+export function getCatalogSchema() {
+  const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
+  if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
+  return catalogSchema;
+}
+
 export type ValidationResponse = {
   totalRows: number;
   failedRows: number;
