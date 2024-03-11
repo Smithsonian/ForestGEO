@@ -16,18 +16,18 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  if (isNaN(page)) {
+    console.error('page parseInt conversion failed');
+  }
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  if (isNaN(pageSize)) {
+    console.error('pageSize parseInt conversion failed');
+    // handle error or set default
+  }
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0); // Utilize the retry mechanism effectively
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    if (isNaN(page)) {
-      console.error('page parseInt conversion failed');
-    }
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    if (isNaN(pageSize)) {
-      console.error('pageSize parseInt conversion failed');
-      // handle error or set default
-    }
     // Initialize the connection attempt counter
     let attempt = 0;
     conn = await getSqlConnection(attempt);
@@ -106,14 +106,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const deletePersonnelID = parseInt(request.nextUrl.searchParams.get('personnelID')!);
+  if (isNaN(deletePersonnelID)) {
+    return NextResponse.json({message: "Invalid PersonnelID"}, {status: 400});
+  }
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
-
-    const deletePersonnelID = parseInt(request.nextUrl.searchParams.get('personnelID')!);
-    if (isNaN(deletePersonnelID)) {
-      return NextResponse.json({message: "Invalid PersonnelID"}, {status: 400});
-    }
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Personnel WHERE PersonnelID = ?`;

@@ -188,7 +188,11 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
                       {cmError.Descriptions.map((description) => {
                         return (
                           <TableRow key={`error-${cmidRow.coreMeasurementID}`}
-                                    sx={{backgroundColor: 'crimson', color: 'white', fontWeight: 'bold'}}>
+                                    sx={{
+                                      backgroundColor: 'crimson',
+                                      color: 'white',
+                                      fontWeight: 'bold'
+                                    }}>
                             <TableCell colSpan={tableHeaders.length}>
                               {description}
                             </TableCell>
@@ -207,7 +211,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
         variant="outlined"
         color="primary"
         onClick={handleProceedToUpdate}
-        sx={{ mt: 2, width: 'fit-content' }}
+        sx={{mt: 2, width: 'fit-content'}}
       >
         Proceed to Update
       </Button>

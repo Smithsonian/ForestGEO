@@ -1,10 +1,9 @@
-// FETCH ALL PLOTS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {PlotRDS} from "@/config/sqlmacros";
-import {getCatalogSchema, getConn, getSchema, PlotsResult, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
+import {getCatalogSchema, getConn, getSchema, runQuery} from "@/components/processors/processormacros";
+import {generateHash} from "@/config/crypto-actions";
 
-export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>> {
+export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
   const lastName = request.nextUrl.searchParams.get('lastname');
   const email = request.nextUrl.searchParams.get('email');
@@ -12,7 +11,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
     const schema = getSchema();
     const catalogSchema = getCatalogSchema();
     conn = await getConn();
-
     if (!lastName || !email) throw new Error('missing lastname or email');
 
     const userQuery = `
@@ -37,26 +35,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
     const plotParams = [userID];
     const plotResults = await runQuery(conn, plotQuery, plotParams);
 
-    const plotRows: PlotRDS[] = plotResults.map((row: PlotsResult, index: number) => ({
-      id: index + 1,
-      plotID: row.PlotID,
-      plotName: row.PlotName,
-      locationName: row.LocationName,
-      countryName: row.CountryName,
-      dimensionX: row.DimensionX,
-      dimensionY: row.DimensionY,
-      area: row.Area,
-      globalX: row.GlobalX,
-      globalY: row.GlobalY,
-      globalZ: row.GlobalZ,
-      plotX: row.PlotX,
-      plotY: row.PlotY,
-      plotZ: row.PlotZ,
-      plotShape: row.PlotShape,
-      plotDescription: row.PlotDescription,
-    }));
-
-    return new NextResponse(JSON.stringify(plotRows), {status: 200});
+    return new NextResponse(JSON.stringify(generateHash(plotResults)), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
     throw new Error('Failed to fetch plot data');

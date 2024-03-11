@@ -1,6 +1,6 @@
 "use client";
 
-import React, {createContext, Dispatch, useContext, useEffect, useReducer} from "react";
+import React, {createContext, useContext, useEffect, useReducer} from "react";
 import {
   AttributesRDS,
   CensusRDS,
@@ -12,7 +12,7 @@ import {
   SubSpeciesRDS
 } from "@/config/sqlmacros";
 import {getData} from "@/config/db";
-import {createEnhancedDispatch, genericLoadReducer, LoadAction} from "@/config/macros";
+import {createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction} from "@/config/macros";
 
 export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | null>(null);
 export const AttributeLoadContext = createContext<AttributesRDS[] | null>(null);
@@ -22,28 +22,14 @@ export const QuadratsLoadContext = createContext<QuadratsRDS[] | null>(null);
 export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
 export const SubSpeciesLoadContext = createContext<SubSpeciesRDS[] | null>(null);
 export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
-export const CoreMeasurementLoadDispatchContext = createContext<Dispatch<{
-  coreMeasurementLoad: CoreMeasurementsRDS[] | null
-}> | null>(null);
-export const AttributeLoadDispatchContext = createContext<Dispatch<{
-  attributeLoad: AttributesRDS[] | null
-}> | null>(null);
-export const CensusLoadDispatchContext = createContext<Dispatch<{
-  censusLoad: CensusRDS[] | null
-}> | null>(null);
-export const PersonnelLoadDispatchContext = createContext<Dispatch<{
-  personnelLoad: PersonnelRDS[] | null
-}> | null>(null);
-export const QuadratsLoadDispatchContext = createContext<Dispatch<{
-  quadratsLoad: QuadratsRDS[] | null
-}> | null>(null);
-export const SpeciesLoadDispatchContext = createContext<Dispatch<{
-  speciesLoad: SpeciesRDS[] | null
-}> | null>(null);
-export const SubSpeciesLoadDispatchContext = createContext<Dispatch<{
-  subSpeciesLoad: SubSpeciesRDS[] | null
-}> | null>(null);
-export const PlotsLoadDispatchContext = createContext<Dispatch<{ plotsLoad: PlotRDS[] | null }> | null>(null);
+export const CoreMeasurementLoadDispatchContext = createContext<EnhancedDispatch<CoreMeasurementsRDS[]> | null>(null);
+export const AttributeLoadDispatchContext = createContext<EnhancedDispatch<AttributesRDS[]> | null>(null);
+export const CensusLoadDispatchContext = createContext<EnhancedDispatch<CensusRDS[]> | null>(null);
+export const PersonnelLoadDispatchContext = createContext<EnhancedDispatch<PersonnelRDS[]> | null>(null);
+export const QuadratsLoadDispatchContext = createContext<EnhancedDispatch<QuadratsRDS[]> | null>(null);
+export const SpeciesLoadDispatchContext = createContext<EnhancedDispatch<SpeciesRDS[]> | null>(null);
+export const SubSpeciesLoadDispatchContext = createContext<EnhancedDispatch<SubSpeciesRDS[]> | null>(null);
+export const PlotsLoadDispatchContext = createContext<EnhancedDispatch<PlotRDS[]> | null>(null);
 
 export function CoreDataProvider({children}: Readonly<{ children: React.ReactNode }>) {
 

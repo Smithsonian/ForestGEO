@@ -1,7 +1,7 @@
 import {NextResponse} from "next/server";
-import {AttributesRDS, PersonnelRDS, SpeciesRDS} from "@/config/sqlmacros";
+import {SpeciesRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {getSqlConnection, PersonnelResult, runQuery, SpeciesResult} from "@/components/processors/processormacros";
+import {getSqlConnection, runQuery, SpeciesResult} from "@/components/processors/processormacros";
 import {bitToBoolean} from "@/config/macros";
 
 export async function GET(): Promise<NextResponse<SpeciesRDS[]>> {

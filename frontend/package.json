@@ -10,7 +10,7 @@
     "bs": "next build; next start",
     "bswin": "npm run build ; npm run start",
     "bdwin": "npm run build ; npm run dev",
-    "clean": "rm -rf .next node_modules package-lock.json; npm install",
+    "clean": "rm -rf .next node_modules package-lock.json build; npm install",
     "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest"
   },
   "dependencies": {
@@ -27,6 +27,8 @@
     "@mui/x-data-grid-generator": "latest",
     "@react-spring/web": "latest",
     "autoprefixer": "latest",
+    "crypto-browserify": "^3.12.0",
+    "crypto-js": "^4.2.0",
     "date-fns": "latest",
     "dotenv": "latest",
     "next": "latest",
@@ -42,6 +44,7 @@
   },
   "devDependencies": {
     "@mui/joy": "latest",
+    "@types/crypto-js": "^4.2.2",
     "@types/file-saver": "latest",
     "@types/papaparse": "latest",
     "@types/react": "latest",
@@ -60,5 +63,9 @@
     "extends": [
       "plugin:storybook/recommended"
     ]
+  },
+  "browser": {
+    "crypto": false,
+    "stream": false
   }
 }

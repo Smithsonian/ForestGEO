@@ -1,33 +1,32 @@
-"use client"
+"use client";
 
-import React, {createContext, Dispatch, useContext, useReducer} from "react";
+import React, {createContext, useContext, useState} from "react";
 
-export const LoadingContext = createContext(false);
-export const LoadingDispatchContext = createContext<Dispatch<{ loading: boolean }> | null>(null);
+const LoadingContext = createContext<{
+  isLoading: boolean;
+  loadingMessage: string;
+  setLoading: (isLoading: boolean, loadingMessage?: string) => void;
+}>({
+  isLoading: false,
+  loadingMessage: '',
+  setLoading: () => {}
+});
 
-export default function LoadingProvider({children}: Readonly<{ children: React.ReactNode }>) {
-  const [loading, loadingDispatch] = useReducer(
-    loadingReducer,
-    false
-  );
+export function LoadingProvider({children}: Readonly<{ children: React.ReactNode }>) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+
+  const setLoading = (isLoading: boolean, message = '') => {
+    setIsLoading(isLoading);
+    setLoadingMessage(message);
+  };
 
   return (
-    <LoadingContext.Provider value={loading}>
-      <LoadingDispatchContext.Provider value={loadingDispatch}>
-        {children}
-      </LoadingDispatchContext.Provider>
+    <LoadingContext.Provider value={{ isLoading, loadingMessage, setLoading }}>
+      {children}
     </LoadingContext.Provider>
   );
 }
 
-function loadingReducer(_currentState: any, action: { loading: boolean }) {
-  return action.loading;
-}
-
-export function useLoadingContext() {
-  return useContext(LoadingContext);
-}
-
-export function useLoadingDispatch() {
-  return useContext(LoadingDispatchContext);
-}
+// Custom hook to use the loading context
+export const useLoading = () => useContext(LoadingContext);

@@ -1,6 +1,14 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useEffect, useReducer} from "react";
-import {createEnhancedDispatch, genericLoadContextReducer, LoadAction, Plot, Quadrat} from "@/config/macros";
+import {
+  createEnhancedDispatch,
+  EnhancedDispatch,
+  genericLoadContextReducer,
+  LoadAction,
+  Plot,
+  PlotRaw,
+  Quadrat
+} from "@/config/macros";
 import {usePlotListContext, useQuadratListContext} from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
@@ -9,37 +17,28 @@ import {CensusRDS} from "@/config/sqlmacros";
 export const PlotContext = createContext<Plot>(null);
 export const CensusContext = createContext<CensusRDS>(null);
 export const QuadratContext = createContext<Quadrat>(null);
-export const PlotDispatchContext = createContext<Dispatch<{ plot: Plot }> | null>(null);
-export const CensusDispatchContext = createContext<Dispatch<{ census: CensusRDS }> | null>(null);
-export const QuadratDispatchContext = createContext<Dispatch<{ quadrat: Quadrat }> | null>(null);
-
-function isValidPlot(plotListContext: Plot[], plot: Plot): boolean {
-  return plotListContext.includes(plot);
-}
-
-function isValidQuadrat(quadratListContext: Quadrat[], quadrat: Quadrat): boolean {
-  return quadratListContext.includes(quadrat);
-}
-
-function isValidCensus(censusLoadContext: CensusRDS[], census: CensusRDS): boolean {
-  return censusLoadContext.includes(census);
-}
+export const PlotDispatchContext = createContext<EnhancedDispatch<Plot> | null>(null);
+export const CensusDispatchContext = createContext<EnhancedDispatch<CensusRDS> | null>(null);
+export const QuadratDispatchContext = createContext<EnhancedDispatch<Quadrat> | null>(null);
 
 export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
   const plotListContext = usePlotListContext();
   const censusLoadContext = useCensusLoadContext();
   const quadratListContext = useQuadratListContext();
+  if (!plotListContext) throw new Error('plot list context is not populated');
+  if (!censusLoadContext) throw new Error('census load context is not populated');
+  if (!quadratListContext) throw new Error('quadratList context is not populated');
 
   const [plot, plotDispatch] = useReducer(
-    (state: Plot, action: LoadAction<Plot>) => genericLoadContextReducer(state, action, plotListContext!, isValidPlot),
+    (state: Plot, action: LoadAction<Plot>) => genericLoadContextReducer(state, action, plotListContext),
     null
   );
   const [census, censusDispatch] = useReducer(
-    (state: CensusRDS, action: LoadAction<CensusRDS>) => genericLoadContextReducer(state, action, censusLoadContext!, isValidCensus),
+    (state: CensusRDS, action: LoadAction<CensusRDS>) => genericLoadContextReducer(state, action, censusLoadContext),
     null
   );
   const [quadrat, quadratDispatch] = useReducer(
-    (state: Quadrat, action: LoadAction<Quadrat>) => genericLoadContextReducer(state, action, quadratListContext!, isValidQuadrat),
+    (state: Quadrat, action: LoadAction<Quadrat>) => genericLoadContextReducer(state, action, quadratListContext),
     null
   );
 
@@ -60,6 +59,10 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
       if (censusData) censusDispatch({type: "census", payload: censusData});
     };
     fetchData().catch(console.error);
+    // Set up polling
+    // const interval = setInterval(fetchData, 10000); // Poll every 10 seconds
+    //
+    // return () => clearInterval(interval);
   }, []);
 
   return (

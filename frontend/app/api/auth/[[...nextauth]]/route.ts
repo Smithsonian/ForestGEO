@@ -1,5 +1,5 @@
 // NEXTAUTH ROUTE HANDLERS
-import NextAuth, { AzureADProfile } from "next-auth";
+import NextAuth, {AzureADProfile} from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import {verifyEmail, verifyLastName} from "@/components/processors/processorhelperfunctions";
 
@@ -17,9 +17,10 @@ const handler = NextAuth({
     strategy: "jwt"
   },
   callbacks: {
-    async signIn({ user, account, profile, email: signInEmail, credentials }) {
+    async signIn({user, account, profile, email: signInEmail, credentials}) {
       console.log('User object:', user); // Debugging
       console.log('Profile object:', profile); // Debugging
+      console.log('Account object: ', account); // Debugging
       // Now using the extended AzureADProfile
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
@@ -29,7 +30,7 @@ const handler = NextAuth({
       }
       if (user.name && userEmail) {
         const lastName = user.name.split(' ').slice(-1).join(''); // Gets the last word from the name
-        const { verified, isAdmin } = await verifyLastName(lastName);
+        const {verified, isAdmin} = await verifyLastName(lastName);
         if (!verified) {
           return false;
         }
@@ -38,18 +39,19 @@ const handler = NextAuth({
           return false;
         }
         user.isAdmin = isAdmin; // Add isAdmin property to the user object
+        user.email = userEmail;
       }
       return true;
     },
 
-    async jwt({ token, user }) {
+    async jwt({token, user}) {
       if (user?.isAdmin !== undefined) {
         token.isAdmin = user.isAdmin; // Persist admin status in the JWT token
       }
       return token;
     },
 
-    async session({ session, token }) {
+    async session({session, token}) {
       if (typeof token.isAdmin === 'boolean') {
         session.user.isAdmin = token.isAdmin; // Include admin status in the session
       } else {

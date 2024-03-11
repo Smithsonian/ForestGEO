@@ -17,7 +17,7 @@ import React, {useState} from "react";
 import {RequiredTableHeadersByFormType, ReviewStates, UploadReviewFilesProps} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
-import {FileDisplay} from "@/components/uploadsystemhelpers/filelist";
+import {FileList} from "@/components/uploadsystemhelpers/filelist";
 import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
@@ -35,16 +35,17 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     setErrors,
     setAcceptedFiles,
     dataViewActive,
+    setDataViewActive,
     currentFileHeaders,
     setUploadError,
     setErrorComponent,
     handleChange,
     areHeadersValid,
-    handleRemoveCurrentFile,
     handleApproval,
     handleCancel,
     handleConfirm,
-    parseAndUpdateFile
+    handleRemoveFile,
+    handleReplaceFile
   } = props;
 
   const [isReuploadDialogOpen, setIsReuploadDialogOpen] = useState(false);
@@ -63,16 +64,9 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
       return;
     }
 
-    // Replace the file, re-parse and validate
-    setAcceptedFiles(prevFiles => {
-      const updatedFiles = [...prevFiles];
-      updatedFiles[dataViewActive - 1] = newFile;
-      return updatedFiles;
-    });
-    // Similar to the parse logic in UploadParent, re-parse the file
-    // You need to define a function similar to parseFileText in UploadParent
-    // for parsing and updating parsedData, errorRows, and errors
-    await parseAndUpdateFile(newFile);
+    // Use handleReplaceFile to replace, re-parse, and update headers
+    await handleReplaceFile(dataViewActive - 1, newFile);
+
     setReuploadInProgress(false);
     setIsReuploadDialogOpen(false);
   };
@@ -119,7 +113,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Grid item xs={4}/>
               <Grid item xs={4}>
                 <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
-                  <Button variant="contained" color="primary" onClick={handleRemoveCurrentFile}
+                  <Button variant="contained" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)}
                           sx={{width: 'fit-content'}}>
                     Remove Current File
                   </Button>
@@ -141,7 +135,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                       <Typography>No file selected or file has no headers.</Typography>
                     )}
                   </Box>
-                  <FileDisplay acceptedFiles={acceptedFiles}/>
+                  <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
                 </Box>
               </Grid>
               <Grid item xs={4}/>
@@ -166,7 +160,8 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     </>
                   ) : (
                     <Typography level="body-lg" bgcolor="error">
-                      The selected file is missing required headers. Please check the file and re-upload.<br/>
+                      The selected file is missing required headers. Please check the file and
+                      re-upload.<br/>
                       Your file&apos;s headers were: {currentFileHeaders.join(', ')}<br/>
                       The expected headers were {expectedHeaders.join(', ')}
                     </Typography>

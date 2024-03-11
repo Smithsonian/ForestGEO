@@ -13,17 +13,17 @@ import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ species: SpeciesRDS[], totalCount: number }>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  if (isNaN(page)) {
+    console.error('page parseInt conversion failed');
+  }
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  if (isNaN(pageSize)) {
+    console.error('pageSize parseInt conversion failed');
+    // handle error or set default
+  }
   try {
     const schema = getSchema();
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    if (isNaN(page)) {
-      console.error('page parseInt conversion failed');
-    }
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    if (isNaN(pageSize)) {
-      console.error('pageSize parseInt conversion failed');
-      // handle error or set default
-    }
     // Initialize the connection attempt counter
     let attempt = 0;
     conn = await getSqlConnection(attempt);
@@ -86,10 +86,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const deleteSpeciesID = parseInt(request.nextUrl.searchParams.get('speciesID')!);
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
-    const deleteSpeciesID = parseInt(request.nextUrl.searchParams.get('speciesID')!);
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Species WHERE [SpeciesID] = ${deleteSpeciesID}`);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);

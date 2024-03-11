@@ -2,14 +2,16 @@
 "use client";
 import React, {Dispatch, SetStateAction, useEffect, useMemo, useState} from 'react';
 import {
-  GridActionsCellItem, GridCellParams,
+  GridActionsCellItem,
+  GridCellParams,
   GridColDef,
   GridEventListener,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
   GridRowModes,
-  GridRowModesModel, GridRowParams,
+  GridRowModesModel,
+  GridRowParams,
   GridRowsProp,
   GridToolbarContainer,
 } from '@mui/x-data-grid';
@@ -33,6 +35,7 @@ import {
 } from "@/config/datagridhelpers";
 import {CMError, Plot} from "@/config/macros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
+import {useSession} from "next-auth/react";
 
 const errorMapping: { [key: string]: string[] } = {
   '1': ["attributes"],
@@ -106,13 +109,22 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   // State to store validation errors
   const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(false);
+  const {data: session} = useSession();
+  let lastname = session?.user?.name;
+  let email = session?.user?.email;
+  if (!lastname || !email) {
+    throw new Error("Session user's name or email is undefined");
+  }
+  // Split lastname to get the actual last name
+  lastname = lastname.split(' ')[1];
+
+  const {updateQuadratsContext, updateCensusContext, updatePlotsContext} = UpdateContextsFromIDB({lastName: lastname, email: email});
 
   // Toggle function for the checkbox
   const handleShowErrorRowsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setShowErrorRows(event.target.checked);
   };
 
-  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } = UpdateContextsFromIDB();
 
   const handleAddNewRow = () => {
     if (locked) return;
@@ -467,7 +479,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                 {cellValue}
               </Typography>
               <Typography color={"danger"} variant={"solid"}
-                sx={{color: 'error.main', fontSize: '0.75rem', mt: 1, whiteSpace: 'normal', lineHeight: 'normal'}}>
+                          sx={{
+                            color: 'error.main',
+                            fontSize: '0.75rem',
+                            mt: 1,
+                            whiteSpace: 'normal',
+                            lineHeight: 'normal'
+                          }}>
                 {cellError}
               </Typography>
             </>
@@ -559,7 +577,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
               Show rows with errors ({errorRowCount})
             </Box>
           )}
-          <Typography level={"title-lg"}>Note: The Grid is filtered by your selected Plot and Plot ID</Typography>
+          <Typography level={"title-lg"}>Note: The Grid is filtered by your selected Plot and Plot
+            ID</Typography>
           <StyledDataGrid sx={{width: '100%'}}
                           rows={visibleRows}
                           columns={columns}

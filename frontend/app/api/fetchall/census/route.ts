@@ -28,7 +28,6 @@ export async function GET(): Promise<NextResponse<CensusRDS[]>> {
       description: row.Description,
       // ... other fields as needed
     }));
-
     return new NextResponse(JSON.stringify(censusRows), {status: HTTPResponses.OK});
   } catch (error) {
     console.error('Error in GET:', error);

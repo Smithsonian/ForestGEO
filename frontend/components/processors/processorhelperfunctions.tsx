@@ -1,7 +1,8 @@
 import {PoolConnection} from "mysql2/promise";
 import {
   fileMappings,
-  getConn, getSchema,
+  getConn,
+  getSchema,
   InsertUpdateProcessingProps,
   runQuery,
   ValidationResponse
@@ -313,7 +314,7 @@ export async function verifyLastName(lastName: string): Promise<{ verified: bool
     const verified = results.length > 0 && results[0].count > 0;
     // Use the bitToBoolean function to convert the IsAdmin field
     const isAdmin = verified && bitToBoolean(results[0].IsAdmin);
-    return { verified, isAdmin };
+    return {verified, isAdmin};
   } catch (error) {
     console.error('Error verifying last name in database: ', error);
     throw error;
@@ -322,7 +323,7 @@ export async function verifyLastName(lastName: string): Promise<{ verified: bool
   }
 }
 
-export async function verifyEmail(email: string): Promise<{emailVerified: boolean}> {
+export async function verifyEmail(email: string): Promise<{ emailVerified: boolean }> {
   const connection: PoolConnection | null = await getConn();
   try {
     const query = `SELECT COUNT(*) as count from catalog.users WHERE Email = ? GROUP BY IsAdmin`;
@@ -330,7 +331,7 @@ export async function verifyEmail(email: string): Promise<{emailVerified: boolea
 
     const emailVerified = results.length > 0 && results[0].count > 0;
     return {emailVerified};
-  } catch(error: any) {
+  } catch (error: any) {
     console.error('Error verifying email in database: ', error);
     throw error;
   } finally {

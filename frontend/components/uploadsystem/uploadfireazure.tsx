@@ -4,7 +4,7 @@ import React, {useCallback, useEffect, useRef, useState} from "react";
 import {ReviewStates, UploadFireAzureProps} from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
 import {Box, Typography} from "@mui/material";
-import {Button, Stack} from "@mui/joy";
+import {Stack} from "@mui/joy";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 
@@ -154,7 +154,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
         <Stack direction={"column"}>
           <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-          <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
+          <LinearProgressWithLabel variant={"determinate"}
+                                   value={(completedOperations / totalOperations) * 100}
                                    currentlyrunningmsg={currentlyRunning}/>
         </Stack>
       </Box>
@@ -167,8 +168,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           ))}
           <Typography>{uploadCompleteMessage}</Typography>
           {startCountdown && (
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <CircularProgress />
+            <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+              <CircularProgress/>
               <Typography>{countdown} seconds remaining</Typography>
             </Box>
           )}

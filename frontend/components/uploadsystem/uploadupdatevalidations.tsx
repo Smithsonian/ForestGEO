@@ -1,18 +1,6 @@
 import React, {useEffect, useRef, useState} from "react";
-import {
-  Box,
-  Button,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Typography
-} from "@mui/material";
+import {Box, Typography} from "@mui/material";
 import CircularProgress from "@mui/joy/CircularProgress";
-import {Checkbox} from "@mui/joy";
 import {ReviewStates, UploadUpdateValidationsProps} from "@/config/macros";
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
@@ -61,19 +49,19 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       <Typography variant="h6">Update Validation-Passed Rows</Typography>
       {!isUpdateValidationComplete ? (
         <Box sx={{width: '100%', p: 2, flexDirection: 'column', display: 'flex', flex: 1}}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress />
+          <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+            <CircularProgress/>
             <Typography>Updating Passed Rows</Typography>
           </Box>
         </Box>
       ) : (
         <Box sx={{width: '100%', p: 2, flexDirection: 'column', display: 'flex', flex: 1}}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress />
+          <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+            <CircularProgress/>
             <Typography>{countdown} seconds remaining</Typography>
           </Box>
           <Typography variant="h6">CoreMeasurement Validation Status</Typography>
-          <br />
+          <br/>
           <Typography variant={"body1"}>Rows Updated: {numValidations}</Typography>
         </Box>
       )}

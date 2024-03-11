@@ -2,26 +2,17 @@
 import React, {useCallback, useEffect, useState} from "react";
 import {subtitle, title} from "@/config/primitives";
 import {useSession} from "next-auth/react";
-import {usePathname, useRouter} from "next/navigation";
-import {
-  useCensusContext,
-  useCensusDispatch,
-  usePlotContext,
-  usePlotDispatch
-} from "@/app/contexts/userselectionprovider";
+import {usePathname} from "next/navigation";
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
 import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
-import {getData, setData} from "@/config/db";
-import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
-import {Census, Plot, Quadrat, siteConfig} from "@/config/macros";
-import CircularProgress from "@mui/joy/CircularProgress";
+import {getData} from "@/config/db";
+import {siteConfig} from "@/config/macros";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
-import {Box, LinearProgress, LinearProgressProps, Stack, linearProgressClasses} from "@mui/joy";
+import {Box} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
-import {LinearProgressWithLabel, loadServerDataIntoIDB} from "@/components/client/clientmacros";
-import Typography from "@mui/joy/Typography";
-import {verifyLastName} from "@/components/processors/processorhelperfunctions";
+import {loadServerDataIntoIDB} from "@/components/client/clientmacros";
+import {useLoading} from "@/app/contexts/loadingprovider";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
@@ -65,45 +56,8 @@ function renderSwitch(endpoint: string) {
   }
 }
 
-export function GlobalLinearProgressWithLabel(props: LinearProgressProps & { value?: number, currentlyrunningmsg?: string }) {
-  return (
-    <Box sx={{ display: 'flex', width: '100vw', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>
-      <Box sx={{ width: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        {props.value ? (
-          <LinearProgress
-            determinate
-            value={props.value}
-            sx={{
-              width: '100%', // Ensures the progress bar takes the full width of the container
-              [`&.${linearProgressClasses.determinate}`]: {
-                transition: 'width .3s ease',
-              },
-            }}
-          />
-        ) : (
-          <LinearProgress sx={{ width: '100%' }} />
-        )}
-        <Box sx={{ minWidth: 35, marginTop: 2 }}>
-          {props.value ? (
-            <Typography level="body-md" sx={{ color: 'text.secondary' }}>
-              {`${Math.round(props.value)}% --> ${props.currentlyrunningmsg}`}
-            </Typography>
-          ) : (
-            <Typography level="body-md" sx={{ color: 'text.secondary' }}>
-              {props.currentlyrunningmsg}
-            </Typography>
-          )}
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-
 export default function HubLayout({children,}: Readonly<{ children: React.ReactNode }>) {
-  const router = useRouter();
-  const [loading, setLoading] = useState(0);
-  const [loadingMsg, setLoadingMsg] = useState('');
-  const [coreDataLoading, setCoreDataLoading] = useState(true);
+  const { setLoading } = useLoading();
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
@@ -112,166 +66,122 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const censusListDispatch = useCensusListDispatch();
   const {data: session} = useSession();
 
-  useEffect(() => {
-    const fetchDataEffect = async () => {
-      try {
-        await fetchAndDispatchCoreData();
-        setLoading(100);
-      } catch (error) {
-        console.error(error);
-      }
-    };
-    fetchDataEffect().catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    const fetchDataEffect = async () => {
-      try {
-        await fetchAndDispatchCoreData();
-        setLoading(100);
-      } catch (error) {
-        console.error(error);
-      }
-    };
-    const handlePageRefresh = () => {
-      console.log('Page is refreshed. Run your function here.');
-      fetchDataEffect().catch(console.error);
-    };
-    // Check if the router is available and window is defined
-    if (router && typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', handlePageRefresh);
-
-      return () => {
-        window.removeEventListener('beforeunload', handlePageRefresh);
-      };
-    }
-  }, [router]);
+  const [coreDataLoaded, setCoreDataLoaded] = useState(false);
 
   let pathname = usePathname();
 
   const fetchAndDispatchCoreData = useCallback(async () => {
+    // Removed direct use of Dispatch functions for core data, as it's handled within clientmacros now.
     const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
-    setCoreDataLoading(true);
-    setLoading(0);
-    // IDB load stored separately: QUADRATS
+    setLoading(true, 'Loading Core Data...');
+
     let lastname = session?.user?.name;
     let email = session?.user?.email;
-    if (!email) throw new Error("session user's email was undefined");
-    if (!lastname) throw new Error("session user's name was undefined");
-    await loadServerDataIntoIDB('quadrats', lastname.split(' ')[1], email);
-    setLoadingMsg('Retrieving Quadrats...');
-    // Check if quadratsLoad is available in IndexedDB
-    const quadratsLoadData = await getData('quadratsLoad');
-    setLoading(10);
-    if (!quadratsLoadData || quadratsLoadData.length === 0) throw new Error('quadratsLoad data failed');
-    setLoading(20);
-    if (quadratsLoadDispatch) quadratsLoadDispatch({quadratsLoad: quadratsLoadData});
-    // Check if quadratList data is available in IndexedDB
-    let quadratList: Quadrat[] = await getData('quadratList');
-    setLoading(30);
-    if (!quadratList || quadratList.length === 0) throw new Error('quadratsList data failed');
-    await delay(500);
-    setLoading(40);
-    setLoadingMsg('Dispatching Quadrat List...');
-    if (quadratListDispatch) quadratListDispatch({quadratList: quadratList});
+    if (!lastname || !email) {
+      console.error("Session user's name or email is undefined");
+      return;
+    }
 
-    // IDB load stored separately: CENSUS
-    await loadServerDataIntoIDB('census', lastname.split(' ')[1], email);
-    await delay(500);
-    setLoading(50);
-    setLoadingMsg('Retrieving Census...');
-    let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
-    if (!censusRDSLoad || censusRDSLoad.length === 0) throw new Error('censusLoad data failed');
-    setLoading(60);
-    if (censusLoadDispatch) censusLoadDispatch({censusLoad: censusRDSLoad});
-    const censusListData = await getData('censusList');
-    if (!censusListData || censusListData.length === 0) throw new Error('censusList data failed');
-    if (censusListDispatch) censusListDispatch({censusList: censusListData});
+    // Split lastname to get the actual last name
+    lastname = lastname.split(' ')[1];
 
-    // IDB load stored separately: PLOTS
-    await loadServerDataIntoIDB('plots', lastname.split(' ')[1], email);
-    await delay(500);
-    setLoading(70);
-    setLoadingMsg('Retrieving Plots...');
-    // Check if plotsLoad data is available in localStorage
-    const plotsLoadData = await getData('plotsLoad');
-    if (!plotsLoadData || plotsLoadData.length === 0) throw new Error('plotsLoad data failed');
-    setLoading(80);
-    if (plotsLoadDispatch) plotsLoadDispatch({plotsLoad: plotsLoadData});
-    // Check if plotList data is available in localStorage
-    const plotListData = await getData('plotList');
-    if (!plotListData || plotListData.length === 0) throw new Error('plotList data failed');
-    await delay(500);
-    setLoading(90);
-    setLoadingMsg('Dispatching Plot List...');
-    if (plotsListDispatch) plotsListDispatch({plotList: plotListData});
-    setLoading(100);
-    setCoreDataLoading(false);
-  }, [censusListDispatch, censusLoadDispatch, plotsListDispatch, plotsLoadDispatch, quadratListDispatch, quadratsLoadDispatch]);
+    // Load data from server into IndexedDB
+    try {
+      setLoading(true, 'Loading Quadrats...');
+      await loadServerDataIntoIDB('quadrats', lastname, email);
+      const quadratsData = await getData('quadratsLoad');
+      const quadratsList = await getData('quadratList');
+      quadratsLoadDispatch ? await quadratsLoadDispatch({quadratsLoad: quadratsData}) : undefined;
+      quadratListDispatch ? await quadratListDispatch({quadratList: quadratsList}) : undefined;
+      await delay(500);
+      setLoading(true, 'Loading Census...');
+      await loadServerDataIntoIDB('census', lastname, email);
+      const censusData = await getData('censusLoad');
+      const censusList = await getData('censusList');
+      censusLoadDispatch ? await censusLoadDispatch({censusLoad: censusData}) : undefined;
+      censusListDispatch ? await censusListDispatch({censusList: censusList}) : undefined;
+
+      await delay(500);
+      setLoading(true, 'Loading Plots...');
+      await loadServerDataIntoIDB('plots', lastname, email);
+      const plotsData = await getData('plotsLoad');
+      const plotList = await getData('plotList');
+      plotsLoadDispatch ? await plotsLoadDispatch({plotsLoad: plotsData}) : undefined;
+      plotsListDispatch ? await plotsListDispatch({plotList: plotList}) : undefined;
+    } catch (error) {
+      console.error('Error loading server data:', error);
+    }
+
+    await delay(500); // Artificial delay for user experience
+    setLoading(false);
+  }, [session]);
+
+  useEffect(() => {
+    // Fetch and dispatch core data
+    // Once done, set coreDataLoaded to true
+    fetchAndDispatchCoreData()
+      .then(() => setCoreDataLoaded(true))
+      .catch(console.error);
+  }, [fetchAndDispatchCoreData]);
+
   return (
     <>
-      {coreDataLoading ? (
-        <GlobalLinearProgressWithLabel value={loading} currentlyrunningmsg={loadingMsg} />
-      ) : (
-        <>
-          <Sidebar/>
-          <Header/>
-          <Box
-            component="main"
-            className="MainContent"
-            sx={{
-              marginTop: 'var(--Header-height)',
-              display: 'flex',
-              flexDirection: 'column',
-              minWidth: 0,
-              gap: 1,
-              flexGrow: 1,
-              flexShrink: 1,
-              overflow: 'hidden',
-            }}
-          >
-            <Box sx={{
-              display: 'flex',
-              alignItems: 'left',
-              paddingTop: '25px',
-              paddingLeft: '5px',
-              paddingBottom: '25px',
-              flexDirection: 'column',
-            }}>
-              {renderSwitch(pathname)}
-            </Box>
-            <Divider orientation={"horizontal"} sx={{my: '5px'}}/>
-            <Box
-              sx={{
-                display: 'flex',
-                flexGrow: 1,
-                flexShrink: 1,
-                alignItems: 'flex-start',
-                flexDirection: 'column',
-                paddingLeft: 2
-              }}>
-              {children}
-            </Box>
-            <Divider orientation={"horizontal"}/>
-            <Box mt={3}
-                 sx={{
-                   display: 'flex',
-                   alignItems: 'center',
-                   alignSelf: 'center',
-                   flexDirection: 'row',
-                   marginBottom: '15px'
-                 }}>
-              <Box>
-                <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
-              </Box>
-              <Divider orientation={"vertical"} sx={{marginRight: 2}}/>
-              <Box>
-                <p className={subtitle({color: "cyan"})}>{siteConfig.description}</p>
-              </Box>
-            </Box>
+      <Sidebar coreDataLoaded={coreDataLoaded} />
+      <Header/>
+      <Box
+        component="main"
+        className="MainContent"
+        sx={{
+          marginTop: 'var(--Header-height)',
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          gap: 1,
+          flexGrow: 1,
+          flexShrink: 1,
+          overflow: 'hidden',
+        }}
+      >
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'left',
+          paddingTop: '25px',
+          paddingLeft: '5px',
+          paddingBottom: '25px',
+          flexDirection: 'column',
+        }}>
+          {renderSwitch(pathname)}
+        </Box>
+        <Divider orientation={"horizontal"} sx={{my: '5px'}}/>
+        <Box
+          sx={{
+            display: 'flex',
+            flexGrow: 1,
+            flexShrink: 1,
+            alignItems: 'flex-start',
+            flexDirection: 'column',
+            paddingLeft: 2
+          }}>
+          {children}
+        </Box>
+        <Divider orientation={"horizontal"}/>
+        <Box mt={3}
+             sx={{
+               display: 'flex',
+               alignItems: 'center',
+               alignSelf: 'center',
+               flexDirection: 'row',
+               marginBottom: '15px'
+             }}>
+          <Box>
+            <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
           </Box>
-        </>
-      )}
+          <Divider orientation={"vertical"} sx={{marginRight: 2}}/>
+          <Box>
+            <p className={subtitle({color: "cyan"})}>{siteConfig.description}</p>
+          </Box>
+        </Box>
+      </Box>
     </>
   );
 }

@@ -78,7 +78,8 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.START}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.START ? "solid" : "outlined"} color="primary">
+        <StepIndicator variant={progressTracker === ReviewProgress.START ? "solid" : "outlined"}
+                       color="primary">
           {progressTracker === ReviewProgress.START ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>
       }
@@ -101,8 +102,10 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.UPLOAD_FILES}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.UPLOAD_FILES ? "solid" : "outlined"} color="primary">
-          {progressTracker === ReviewProgress.UPLOAD_FILES ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
+        <StepIndicator variant={progressTracker === ReviewProgress.UPLOAD_FILES ? "solid" : "outlined"}
+                       color="primary">
+          {progressTracker === ReviewProgress.UPLOAD_FILES ? <CheckRoundedIcon/> :
+            <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>
       }
     >
@@ -124,7 +127,8 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.REVIEW}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.REVIEW ? "solid" : "outlined"} color="primary">
+        <StepIndicator variant={progressTracker === ReviewProgress.REVIEW ? "solid" : "outlined"}
+                       color="primary">
           {progressTracker === ReviewProgress.REVIEW ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>
       }
@@ -147,9 +151,11 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.UPLOAD_SQL}
       orientation="vertical"
       indicator={
-      <StepIndicator variant={progressTracker === ReviewProgress.UPLOAD_SQL ? "solid" : "outlined"} color="neutral">
-        {progressTracker === ReviewProgress.UPLOAD_SQL ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
-      </StepIndicator>}
+        <StepIndicator variant={progressTracker === ReviewProgress.UPLOAD_SQL ? "solid" : "outlined"}
+                       color="neutral">
+          {progressTracker === ReviewProgress.UPLOAD_SQL ? <CheckRoundedIcon/> :
+            <KeyboardArrowDownRoundedIcon/>}
+        </StepIndicator>}
     >
       <Typography
         level="h4"
@@ -169,8 +175,10 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.VALIDATE}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.VALIDATE ? "solid" : "outlined"} color="neutral">
-          {progressTracker === ReviewProgress.VALIDATE ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
+        <StepIndicator variant={progressTracker === ReviewProgress.VALIDATE ? "solid" : "outlined"}
+                       color="neutral">
+          {progressTracker === ReviewProgress.VALIDATE ? <CheckRoundedIcon/> :
+            <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>}
     >
       <Typography
@@ -191,8 +199,10 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.VALIDATE_ERRORS_FOUND}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.VALIDATE_ERRORS_FOUND ? "solid" : "outlined"} color="neutral">
-          {progressTracker === ReviewProgress.VALIDATE_ERRORS_FOUND ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
+        <StepIndicator variant={progressTracker === ReviewProgress.VALIDATE_ERRORS_FOUND ? "solid" : "outlined"}
+                       color="neutral">
+          {progressTracker === ReviewProgress.VALIDATE_ERRORS_FOUND ? <CheckRoundedIcon/> :
+            <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>}
     >
       <Typography
@@ -213,7 +223,8 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.UPDATE}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.UPDATE ? "solid" : "outlined"} color="neutral">
+        <StepIndicator variant={progressTracker === ReviewProgress.UPDATE ? "solid" : "outlined"}
+                       color="neutral">
           {progressTracker === ReviewProgress.UPDATE ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>}
     >
@@ -235,8 +246,10 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.UPLOAD_AZURE}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.UPLOAD_AZURE ? "solid" : "outlined"} color="neutral">
-          {progressTracker === ReviewProgress.UPLOAD_AZURE ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
+        <StepIndicator variant={progressTracker === ReviewProgress.UPLOAD_AZURE ? "solid" : "outlined"}
+                       color="neutral">
+          {progressTracker === ReviewProgress.UPLOAD_AZURE ? <CheckRoundedIcon/> :
+            <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>}
     >
       <Typography
@@ -257,8 +270,10 @@ export default function ProgressStepper(props: Readonly<ProgressStepperProps>) {
       disabled={progressTracker < ReviewProgress.COMPLETE}
       orientation="vertical"
       indicator={
-        <StepIndicator variant={progressTracker === ReviewProgress.COMPLETE ? "solid" : "outlined"} color="neutral">
-          {progressTracker === ReviewProgress.COMPLETE ? <CheckRoundedIcon/> : <KeyboardArrowDownRoundedIcon/>}
+        <StepIndicator variant={progressTracker === ReviewProgress.COMPLETE ? "solid" : "outlined"}
+                       color="neutral">
+          {progressTracker === ReviewProgress.COMPLETE ? <CheckRoundedIcon/> :
+            <KeyboardArrowDownRoundedIcon/>}
         </StepIndicator>}
     >
       <Typography

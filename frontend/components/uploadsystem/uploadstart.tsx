@@ -44,7 +44,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
       <Grid container spacing={2} sx={{marginRight: 2}}>
         <Button onClick={() => {
           setPersonnelRecording('');
-        }} sx={{ width: 'fit-content' }}>
+        }} sx={{width: 'fit-content'}}>
           Back
         </Button>
         <Grid item xs={6}>
@@ -66,9 +66,11 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording === '') && (
             <Stack direction={"column"} sx={{width: 'fit-content'}}>
               <Typography sx={{mb: 2}}>
-                You have selected {uploadForm}. Please ensure that your file has the following headers before
+                You have selected {uploadForm}. Please ensure that your file has the following headers
+                before
                 continuing: <br/>
-                {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
+                {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
+                <br/>
                 Who recorded this data?
               </Typography>
               <Stack direction={"row"}>
@@ -86,20 +88,23 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording !== '') && (
             <Stack direction={"column"} sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
               <Typography sx={{mb: 2}}>
-                You have selected {uploadForm}. Please ensure that your file has the following headers before
+                You have selected {uploadForm}. Please ensure that your file has the following headers
+                before
                 continuing: <br/>
-                {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
-                The person recording the data is {personnelRecording}. Please verify this before continuing.
+                {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
+                <br/>
+                The person recording the data is {personnelRecording}. Please verify this before
+                continuing.
               </Typography>
               <Stack direction={"column"}>
                 {isTimerActive && (
-                  <CircularProgress value={(timer / 5) * 100} />
+                  <CircularProgress value={(timer / 5) * 100}/>
                 )}
               </Stack>
             </Stack>
           )}
         </Grid>
-        <Grid item xs={6} />
+        <Grid item xs={6}/>
       </Grid>
     </Box>
   );

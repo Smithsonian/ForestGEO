@@ -15,12 +15,12 @@ interface ValidationErrorResult {
 
 export async function GET(request: NextRequest): Promise<NextResponse<MeasurementsSummaryRDS[]>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!);
+
   try {
     const schema = getSchema();
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!);
-
     if (isNaN(page) || isNaN(pageSize)) {
       throw new Error('Invalid page or pageSize parameter');
     }
