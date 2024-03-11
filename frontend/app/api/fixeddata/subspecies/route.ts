@@ -16,17 +16,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  if (isNaN(page)) {
+    console.error('page parseInt conversion failed');
+  }
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  if (isNaN(pageSize)) {
+    console.error('pageSize parseInt conversion failed');
+    // handle error or set default
+  }
   try {
     const schema = getSchema();
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    if (isNaN(page)) {
-      console.error('page parseInt conversion failed');
-    }
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    if (isNaN(pageSize)) {
-      console.error('pageSize parseInt conversion failed');
-      // handle error or set default
-    }
     // Initialize the connection attempt counter
     let attempt = 0;
     conn = await getSqlConnection(attempt);
@@ -109,12 +109,11 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const deleteSubSpeciesID = parseInt(request.nextUrl.searchParams.get('subSpeciesID')!);
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
     if (!conn) throw new Error('SQL connection failed');
-
-    const deleteSubSpeciesID = parseInt(request.nextUrl.searchParams.get('subSpeciesID')!);
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SubSpecies WHERE [SubSpeciesID] = ?`, [deleteSubSpeciesID]);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);

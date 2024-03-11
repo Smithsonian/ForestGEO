@@ -1,14 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getConn, getSchema, runQuery, UpdateValidationResponse } from "@/components/processors/processormacros";
+import {NextRequest, NextResponse} from "next/server";
+import {getConn, getSchema, runQuery, UpdateValidationResponse} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest) {
   const conn = await getConn();
   const schema = getSchema();
+  const plotIDParam = request.nextUrl.searchParams.get('plotID');
+  const censusIDParam = request.nextUrl.searchParams.get('censusID');
 
   try {
-    const plotIDParam = request.nextUrl.searchParams.get('plotID');
-    const censusIDParam = request.nextUrl.searchParams.get('censusID');
-
     await conn.beginTransaction();
 
     // Update query to toggle IsValidated status
@@ -36,7 +35,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     await conn.rollback();
     console.error('Error in update operation:', error.message);
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: 500 });
+    return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
   } finally {
     if (conn) conn.release();
   }

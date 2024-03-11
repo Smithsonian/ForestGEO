@@ -1,15 +1,24 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useEffect, useReducer} from 'react';
-import {Census, createEnhancedDispatch, genericLoadReducer, LoadAction, Plot, Quadrat} from "@/config/macros";
+import {
+  Census,
+  createEnhancedDispatch,
+  EnhancedDispatch,
+  genericLoadReducer,
+  LoadAction,
+  Plot,
+  Quadrat
+} from "@/config/macros";
 import {getData} from "@/config/db";
+import {CoreMeasurementsRDS} from "@/config/sqlmacros";
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const QuadratListContext = createContext<Quadrat[] | null>(null);
 export const CensusListContext = createContext<Census[] | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
-export const PlotListDispatchContext = createContext<Dispatch<{ plotList: Plot[] | null }> | null>(null);
-export const QuadratListDispatchContext = createContext<Dispatch<{ quadratList: Quadrat[] | null }> | null>(null);
-export const CensusListDispatchContext = createContext<Dispatch<{ censusList: Census[] | null }> | null>(null);
+export const PlotListDispatchContext = createContext<EnhancedDispatch<Plot[]> | null>(null);
+export const QuadratListDispatchContext = createContext<EnhancedDispatch<Quadrat[]> | null>(null);
+export const CensusListDispatchContext = createContext<EnhancedDispatch<Census[]> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
 export function ListSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
@@ -34,16 +43,22 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
 
   useEffect(() => {
     const fetchData = async () => {
-      const plotListData = await getData('plotList');
-      if (plotListData) plotListDispatch({type: 'plotList', payload: plotListData});
+      const plotListData: Plot[] | undefined = await getData('plotList');
+      if (plotListData) await enhancedPlotListDispatch({plotList: plotListData});
 
-      const quadratListData = await getData('quadratList');
-      if (quadratListData) quadratListDispatch({type: "quadratList", payload: quadratListData});
+      const quadratListData: Quadrat[] | undefined = await getData('quadratList');
+      if (quadratListData) await enhancedQuadratListDispatch({quadratList: quadratListData});
 
-      const censusListData = await getData('censusList');
-      if (censusListData) censusListDispatch({type: 'censusList', payload: censusListData});
+      const censusListData: Census[] | undefined = await getData('censusList');
+      if (censusListData) await enhancedCensusListDispatch({censusList: censusListData});
     };
+
     fetchData().catch(console.error);
+
+    // // Set up polling
+    // const interval = setInterval(fetchData, 10000); // Poll every 10 seconds
+    //
+    // return () => clearInterval(interval);
   }, []);
 
 

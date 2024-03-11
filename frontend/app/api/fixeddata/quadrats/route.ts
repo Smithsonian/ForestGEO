@@ -10,12 +10,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
+
   try {
     const schema = getSchema();
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
-
     if (isNaN(page) || isNaN(pageSize)) {
       throw new Error('Invalid page, pageSize, or plotID parameter');
     }
@@ -91,10 +91,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const deleteQuadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!);
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
-    const deleteQuadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!);
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Quadrats WHERE [QuadratID] = ${deleteQuadratID}`);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);

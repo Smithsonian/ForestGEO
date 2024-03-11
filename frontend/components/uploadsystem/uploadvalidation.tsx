@@ -51,8 +51,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   ];
 
   const defaultMinMaxValues: Record<string, { min: number, max: number }> = {
-    'screendbhminmax': { min: 1, max: 500 },
-    'screenhomminmax': { min: 1, max: 1.5},
+    'screendbhminmax': {min: 1, max: 500},
+    'screenhomminmax': {min: 1, max: 1.5},
     // ... [other default values]
   };
 
@@ -78,7 +78,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   };
 
   useEffect(() => {
-    const initialProgress = validationAPIs.reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
+    const initialProgress = validationAPIs.reduce((acc, api) => ({...acc, [api]: 0}), {});
     setValidationProgress(initialProgress);
   }, []);
 
@@ -97,14 +97,14 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const promptForInput = (api: string) => {
     setCurrentPromptApi(api);
     setPromptOpen(true);
-    setTempMinMax({ min: '', max: '' }); // Reset input fields
+    setTempMinMax({min: '', max: ''}); // Reset input fields
   };
 
   const handlePromptClose = () => {
-    const newMinMax = { min: Number(tempMinMax.min), max: Number(tempMinMax.max) };
+    const newMinMax = {min: Number(tempMinMax.min), max: Number(tempMinMax.max)};
 
     // Update minMaxValues for the current prompt
-    setMinMaxValues(prev => ({ ...prev, [currentPromptApi]: newMinMax }));
+    setMinMaxValues(prev => ({...prev, [currentPromptApi]: newMinMax}));
     setPromptOpen(false);
 
     if (currentPromptApi === 'screendbhminmax') {
@@ -125,9 +125,9 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
 
     const api = validationAPIs[index];
 
-    performValidation(api).then(({ response, hasError }) => {
+    performValidation(api).then(({response, hasError}) => {
       setValidationResults(prevResults => ({...prevResults, [api]: response}));
-      setValidationProgress(prevProgress => ({ ...prevProgress, [api]: 100 }));
+      setValidationProgress(prevProgress => ({...prevProgress, [api]: 100}));
       showNextPrompt(index + 1, foundError || hasError);
     });
   };
@@ -145,12 +145,12 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       }
       const result = await response.json();
       const hasError = result.failedRows > 0;
-      return { response: result, hasError };
+      return {response: result, hasError};
     } catch (error: any) {
       console.error(`Error performing validation for ${api}:`, error);
       setApiErrors(prev => [...prev, `Failed to execute ${api}: ${error.message}`]);
-      setValidationProgress(prevProgress => ({ ...prevProgress, [api]: -1 }));
-      return { response: {failedRows: 0, message: error.message, totalRows: 0 }, hasError: false};
+      setValidationProgress(prevProgress => ({...prevProgress, [api]: -1}));
+      return {response: {failedRows: 0, message: error.message, totalRows: 0}, hasError: false};
     }
   };
 
@@ -158,7 +158,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     return validationAPIs.map(api => (
       <Box key={api} sx={{mb: 2}}>
         <Typography variant="subtitle1">{validationMessages[api] || api}</Typography>
-        <LinearProgress variant="determinate" value={validationProgress[api]} />
+        <LinearProgress variant="determinate" value={validationProgress[api]}/>
       </Box>
     ));
   };
@@ -241,8 +241,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
         </Box>
       ) : (
         <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress />
+          <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+            <CircularProgress/>
             <Typography>{countdown} seconds remaining</Typography>
           </Box>
           <Typography variant="h6">Validation Results</Typography>
@@ -264,7 +264,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
                     IDs: {result.failedCoreMeasurementIDs?.join(', ') ?? 'None'}</Typography>
                 </>
               ) : (
-                <Typography>Processed Rows: {result.totalRows}, Errors Detected: {result.failedRows}</Typography>
+                <Typography>Processed Rows: {result.totalRows}, Errors
+                  Detected: {result.failedRows}</Typography>
               )}
             </Box>
           ))}

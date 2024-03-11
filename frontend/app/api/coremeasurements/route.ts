@@ -18,11 +18,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
   try {
     const schema = getSchema();
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
 
     if (isNaN(page) || isNaN(pageSize)) {
       throw new Error('Invalid page, pageSize, or plotID parameter');
@@ -130,11 +130,10 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const deleteCode = request.nextUrl.searchParams.get('coreMeasurementID')!;
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
-
-    const deleteCode = request.nextUrl.searchParams.get('coreMeasurementID')!;
     if (!deleteCode) {
       return new NextResponse(JSON.stringify({message: "coremeasurementID is required"}), {status: 400});
     }

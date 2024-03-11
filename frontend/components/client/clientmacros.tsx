@@ -1,99 +1,108 @@
 "use client";
 
-import {clearDataByKey, getData, setData} from "@/config/db";
+import {getData, setData} from "@/config/db";
 import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 import {Census, Plot, Quadrat} from "@/config/macros";
 import {Box, LinearProgress, LinearProgressProps, Typography} from "@mui/material";
 import React from "react";
 
-async function updateQuadratsIDB(userLastName: string, userEmail: string) {
-  const quadratRDSResponse = await fetch(`/api/fetchall/quadrats`, {method: 'GET'});
-  if (!quadratRDSResponse.ok) throw new Error('fetchall quadrats failure.');
-  const jsonResponse = await quadratRDSResponse.json();
-  await clearDataByKey('quadratsLoad');
-  await clearDataByKey('quadratList');
-  await clearDataByKey('plotsLoad');
-  await clearDataByKey('plotList');
-  let quadratsRDSLoad: QuadratsRDS[] = jsonResponse;
-  let quadratList: Quadrat[] = [];
-  quadratList = quadratsRDSLoad.map((quadratRDS) => ({
-    quadratID: quadratRDS.quadratID ? quadratRDS.quadratID : 0,
-    plotID: quadratRDS.plotID ? quadratRDS.plotID : 0,
-    quadratName: quadratRDS.quadratName ? quadratRDS.quadratName : '',
+async function createAndUpdateQuadratList(quadratsRDSLoad: QuadratsRDS[]) {
+  let quadratList: Quadrat[] = quadratsRDSLoad.map(quadratRDS => ({
+    quadratID: quadratRDS.quadratID || 0,
+    plotID: quadratRDS.plotID || 0,
+    quadratName: quadratRDS.quadratName || '',
   }));
-  await setData('quadratsLoad', quadratsRDSLoad);
   await setData('quadratList', quadratList);
-  const plotRDSResponse = await fetch(`/api/fetchall/plots?lastname=${userLastName}&email=${userEmail}`, {method: 'GET'});
-  if (!plotRDSResponse.ok) throw new Error('fetchall plots failure');
-  let plotRDSLoad = await plotRDSResponse.json();
-  let plotList: Plot[] = [];
-  plotList = plotRDSLoad.map((plotRDS: PlotRDS) => ({
-    key: plotRDS.plotName ? plotRDS.plotName : '',
-    num: quadratsRDSLoad.filter((quadrat) => quadrat.plotID === plotRDS.plotID).length,
-    id: plotRDS.plotID ? plotRDS.plotID : 0,
+}
+
+// Helper function to create and update Plot list
+async function createAndUpdatePlotList(plotRDSLoad: PlotRDS[], quadratsRDSLoad: QuadratsRDS[]) {
+  let plotList: Plot[] = plotRDSLoad.map(plotRDS => ({
+    key: plotRDS.plotName || '',
+    num: quadratsRDSLoad.filter(quadrat => quadrat.plotID === plotRDS.plotID).length,
+    id: plotRDS.plotID || 0,
   }));
-  await setData('plotsLoad', plotRDSLoad);
   await setData('plotList', plotList);
 }
 
-async function updatePlotsIDB(userLastName: string, userEmail: string) {
-  const plotRDSResponse = await fetch(`/api/fetchall/plots?lastname=${userLastName}&email=${userEmail}`, {method: 'GET'});
-  if (!plotRDSResponse.ok) throw new Error('fetchall plots failure');
-  const jsonResponse = await plotRDSResponse.json();
-  await clearDataByKey('plotsLoad');
-  await clearDataByKey('plotList');
-  let plotRDSLoad: PlotRDS[] = jsonResponse;
-  let quadratsRDSLoad = await getData('quadratsLoad');
-  if (!quadratsRDSLoad) throw new Error('quadratsLoad IDB instance undefined');
-  let plotList: Plot[] = [];
-  plotList = plotRDSLoad.map((plotRDS: PlotRDS) => ({
-    key: plotRDS.plotName ? plotRDS.plotName : '',
-    num: quadratsRDSLoad.filter((quadrat: QuadratsRDS) => quadrat.plotID === plotRDS.plotID).length,
-    id: plotRDS.plotID ? plotRDS.plotID : 0,
-  }));
-  await setData('plotsLoad', plotRDSLoad);
-  await setData('plotList', plotList);
-}
-
-async function updateCensusIDB() {
-  const censusRDSResponse = await fetch(`/api/fetchall/census`, {method: 'GET'});
-  if (!censusRDSResponse.ok) throw new Error('fetchall census failure');
-  const jsonResponse = await censusRDSResponse.json();
-  await clearDataByKey('censusLoad');
-  await clearDataByKey('censusList');
-  let censusRDSLoad: CensusRDS[] = jsonResponse;
-  let censusList: Census[];
-  const uniqueCensusMap = new Map<number, Census>();
-  censusRDSLoad.forEach((censusRDS) => {
-    const plotCensusNumber = censusRDS?.plotCensusNumber ? censusRDS.plotCensusNumber : 0;
-    if (!uniqueCensusMap.has(plotCensusNumber)) {
-      // First occurrence of this plotCensusNumber
+// Helper function to create and update Census list
+async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]) {
+  let uniqueCensusMap = new Map();
+  censusRDSLoad.forEach(censusRDS => {
+    const plotCensusNumber = censusRDS?.plotCensusNumber || 0;
+    let existingCensus = uniqueCensusMap.get(plotCensusNumber);
+    if (!existingCensus) {
       uniqueCensusMap.set(plotCensusNumber, {
-        plotID: censusRDS?.plotID ? censusRDS.plotID : 0,
+        plotID: censusRDS?.plotID || 0,
         plotCensusNumber,
-        startDate: new Date(censusRDS?.startDate!),
-        endDate: new Date(censusRDS?.endDate!),
-        description: censusRDS?.description ? censusRDS.description : ''
+        startDate: new Date(censusRDS?.startDate || 0),
+        endDate: new Date(censusRDS?.endDate || 0),
+        description: censusRDS?.description || ''
       });
     } else {
-      // Update existing entry with earliest startDate and latest endDate
-      const existingCensus = uniqueCensusMap.get(plotCensusNumber);
-      if (existingCensus) {
-        existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate!).getTime()));
-        existingCensus.endDate = new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS?.endDate!).getTime()));
-      }
+      existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate || 0).getTime()));
+      existingCensus.endDate = new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS?.endDate || 0).getTime()));
     }
   });
-  censusList = Array.from(uniqueCensusMap.values());
-  await setData('censusLoad', censusRDSLoad);
+  let censusList: Census[] = Array.from(uniqueCensusMap.values());
   await setData('censusList', censusList);
 }
 
+async function fetchHash(endpoint: string) {
+  const response = await fetch(endpoint, { method: 'GET' });
+  if (!response.ok) throw new Error(`Failed to fetch hash from ${endpoint}`);
+  return await response.json();
+}
+
+async function fetchData(endpoint: string) {
+  const response = await fetch(endpoint, { method: 'GET' });
+  if (!response.ok) throw new Error(`Failed to fetch data from ${endpoint}`);
+  return await response.json();
+}
+
+async function checkHashAndUpdateData(hashEndpoint: string, dataEndpoint: string, localHashKey: string, dataKey: string) {
+  const serverHash = await fetchHash(hashEndpoint);
+  const localHash = await getData(localHashKey);
+
+  if (serverHash !== localHash) {
+    const data = await fetchData(dataEndpoint);
+    await setData(localHashKey, serverHash);
+    await setData(dataKey, data);
+    return data;
+  }
+
+  return await getData(dataKey);
+}
+
+async function updateQuadratsIDB() {
+  const hashEndpoint = `/api/hash/quadrats`;
+  const dataEndpoint = `/api/fetchall/quadrats`;
+
+  const quadratsRDSLoad: QuadratsRDS[] = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'quadratsHash', 'quadratsLoad');
+  await createAndUpdateQuadratList(quadratsRDSLoad);
+}
+
+async function updatePlotsIDB(lastName: string, email: string) {
+  const hashEndpoint = `/api/hash/plots?lastname=${lastName}&email=${email}`;
+  const dataEndpoint = `/api/fetchall/plots?lastname=${lastName}&email=${email}`;
+  const plotRDSLoad = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'plotsHash', 'plotsLoad');
+  let quadratsRDSLoad: QuadratsRDS[] = await getData('quadratsLoad');
+  if (!quadratsRDSLoad) {throw new Error('quadratsLoad IDB retrieval failed');}
+  await createAndUpdatePlotList(plotRDSLoad, quadratsRDSLoad);
+}
+
+async function updateCensusIDB() {
+  const hashEndpoint = `/api/hash/census`;
+  const dataEndpoint = `/api/fetchall/census`;
+  let censusRDSLoad = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'censusHash', 'censusLoad');
+  await createAndUpdateCensusList(censusRDSLoad);
+}
+
 export async function loadServerDataIntoIDB(dataType: string, userLastName: string, userEmail: string) {
-  if (!userLastName || !userEmail) throw new Error('session user informaiton was not provided');
+  if (!userLastName || !userEmail) throw new Error('session user information was not provided');
   switch(dataType) {
     case 'quadrats':
-      await updateQuadratsIDB(userLastName, userEmail);
+      await updateQuadratsIDB();
       return;
     case 'plots':
       await updatePlotsIDB(userLastName, userEmail);
