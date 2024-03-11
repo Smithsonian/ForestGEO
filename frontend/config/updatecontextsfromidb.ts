@@ -1,12 +1,17 @@
 // useUpdateContextsFromIDB.ts
-import { useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch } from "@/app/contexts/coredataprovider";
-import { useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from "@/app/contexts/listselectionprovider";
-import { getData } from "@/config/db";
+import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
+import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {getData} from "@/config/db";
 import {loadServerDataIntoIDB} from "@/components/client/clientmacros";
 import {Census, Plot, Quadrat} from "@/config/macros";
 import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 
-const UpdateContextsFromIDB = () => {
+interface UpdateContextsIDBProps {
+  lastName: string;
+  email: string;
+}
+
+const UpdateContextsFromIDB = ({lastName, email}: UpdateContextsIDBProps) => {
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
@@ -16,7 +21,7 @@ const UpdateContextsFromIDB = () => {
 
   const updateQuadratsContext = async () => {
     // IDB load stored separately: QUADRATS
-    await loadServerDataIntoIDB('quadrats');
+    await loadServerDataIntoIDB('quadrats', lastName, email);
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData: QuadratsRDS[] = await getData('quadratsLoad');
     if (!quadratsLoadData || quadratsLoadData.length === 0) throw new Error('quadratsLoad data failed');
@@ -29,7 +34,7 @@ const UpdateContextsFromIDB = () => {
 
   const updateCensusContext = async () => {
     // IDB load stored separately: CENSUS
-    await loadServerDataIntoIDB('census');
+    await loadServerDataIntoIDB('census', lastName, email);
     let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
     if (!censusRDSLoad || censusRDSLoad.length === 0) throw new Error('censusLoad data failed');
     if (censusLoadDispatch) censusLoadDispatch({censusLoad: censusRDSLoad});
@@ -40,7 +45,7 @@ const UpdateContextsFromIDB = () => {
 
   const updatePlotsContext = async () => {
     // IDB load stored separately: PLOTS
-    await loadServerDataIntoIDB('plots');
+    await loadServerDataIntoIDB('plots', lastName, email);
     // Check if plotsLoad data is available in localStorage
     const plotsLoadData: PlotRDS[] = await getData('plotsLoad');
     if (!plotsLoadData || plotsLoadData.length === 0) throw new Error('plotsLoad data failed');
@@ -51,7 +56,7 @@ const UpdateContextsFromIDB = () => {
     if (plotsListDispatch) plotsListDispatch({plotList: plotListData});
   }
 
-  return { updateQuadratsContext, updateCensusContext, updatePlotsContext };
+  return {updateQuadratsContext, updateCensusContext, updatePlotsContext};
 };
 
 export default UpdateContextsFromIDB;

@@ -1,39 +1,58 @@
 "use client";
 import {Box, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
-import {ReviewStates, TableHeadersByFormType, UploadParseFilesProps} from "@/config/macros";
+import {TableHeadersByFormType, UploadParseFilesProps} from "@/config/macros";
 import {Button, Grid} from "@mui/material";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
-import {FileDisplay} from "@/components/uploadsystemhelpers/filelist";
+import {FileList} from "@/components/uploadsystemhelpers/filelist";
 import {LoadingButton} from "@mui/lab";
-import React from "react";
+import React, {useState} from "react";
+import {FileWithPath} from "react-dropzone";
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
   const {
     uploadForm, personnelRecording, acceptedFiles,
-    parsing, setReviewState,
-    isOverwriteConfirmDialogOpen, setIsOverwriteConfirmDialogOpen,
-    handleInitialSubmit, handleFileReplace, handleFileChange
+    dataViewActive, setDataViewActive,
+    parseFile,
+    handleInitialSubmit, handleAddFile, handleReplaceFile, handleRemoveFile,
   } = props;
+
+  const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
+
+  const handleFileChange = async (newFiles: FileWithPath[]) => {
+    for (const file of newFiles) {
+      const existingFile = acceptedFiles.find(f => f.name === file.name);
+      if (existingFile) {
+        setFileToReplace(file);
+      } else {
+        await parseFile(file); // parse the file
+        handleAddFile(file);
+      }
+    }
+  };
 
   return (
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
       <Grid container>
         <Grid item xs={6}>
-          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', mb: 10, mr: 10 }}>
             <DropzoneLogic onChange={handleFileChange}/>
-            <Modal open={isOverwriteConfirmDialogOpen} onClose={() => setIsOverwriteConfirmDialogOpen(false)}>
+            <Modal open={Boolean(fileToReplace)}
+                   onClose={() => setFileToReplace(null)}>
               <ModalDialog>
                 <DialogTitle>Confirm File Replace</DialogTitle>
                 <DialogContent>
                   A file with the same name already exists. Do you want to replace it?
                 </DialogContent>
                 <DialogActions>
-                  <Button onClick={() => setIsOverwriteConfirmDialogOpen(false)}>Cancel</Button>
+                  <Button onClick={() => setFileToReplace(null)}>Cancel</Button>
                   <Button
-                    onClick={() => {
-                      // Replace the existing file with the new one
-                      handleFileReplace();
-                      setIsOverwriteConfirmDialogOpen(false);
+                    onClick={async () => {
+                      if (fileToReplace) {
+                        const index = acceptedFiles.findIndex(f => f.name === fileToReplace.name);
+                        handleReplaceFile(index, fileToReplace);
+                        await props.parseFile(fileToReplace); // Parse the replaced file
+                      }
+                      setFileToReplace(null);
                     }}
                   >
                     Replace
@@ -46,15 +65,27 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         <Grid item xs={6}>
           <Stack direction={"column"} sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
             <Typography sx={{mb: 2}}>
-              You have selected {uploadForm}. Please ensure that your file has the following headers before
+              You have selected {uploadForm}. Please ensure that your file has the following headers
+              before
               continuing: <br/>
-              {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')} <br/>
+              {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
+              <br/>
               The person recording the data is {personnelRecording}.
             </Typography>
             <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
-              <FileDisplay acceptedFiles={acceptedFiles}/>
+              <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
+              {acceptedFiles.length > 0 &&
+                <Button
+                  variant="outlined"
+                  onClick={() => handleRemoveFile(dataViewActive - 1)}
+                  sx={{ mt: 2 }}
+                >
+                  Delete Selected File
+                </Button>
+              }
             </Box>
-            <LoadingButton disabled={acceptedFiles.length <= 0} loading={parsing} onClick={handleInitialSubmit}>
+            <LoadingButton disabled={acceptedFiles.length <= 0}
+                           onClick={handleInitialSubmit}>
               Review Files
             </LoadingButton>
           </Stack>

@@ -1,8 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
-import {CoreMeasurementsResult, getConn, getSchema, runQuery} from "@/components/processors/processormacros";
+import {getConn, getSchema, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {CoreMeasurementsRDS} from "@/config/sqlmacros";
-import {bitToBoolean} from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   const schema = getSchema();
@@ -40,17 +38,17 @@ export async function GET(request: NextRequest) {
     const results = await runQuery(conn, query, [cmID]);
     return new NextResponse(
       JSON.stringify(
-      results.map((row: any) => ({
-        coreMeasurementID: row.CoreMeasurementID,
-        plotName: row.PlotName,
-        quadratName: row.QuadratName,
-        plotCensusNumber: row.PlotCensusNumber,
-        censusStart: row.StartDate,
-        censusEnd: row.EndDate,
-        personnelName: row.FirstName + ' ' + row.LastName,
-        speciesName: row.SpeciesName
-      }))
-    ), {status: 200});
+        results.map((row: any) => ({
+          coreMeasurementID: row.CoreMeasurementID,
+          plotName: row.PlotName,
+          quadratName: row.QuadratName,
+          plotCensusNumber: row.PlotCensusNumber,
+          censusStart: row.StartDate,
+          censusEnd: row.EndDate,
+          personnelName: row.FirstName + ' ' + row.LastName,
+          speciesName: row.SpeciesName
+        }))
+      ), {status: 200});
   } catch (error: any) {
     throw new Error('SQL query failed: ' + error.message);
   } finally {

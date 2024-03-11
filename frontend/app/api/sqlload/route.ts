@@ -3,7 +3,6 @@ import {getSqlConnection, InsertUpdateProcessingProps} from "@/components/proces
 import {PoolConnection} from "mysql2/promise";
 import {FileRow, FileRowSet, HTTPResponses} from "@/config/macros";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
-import {setData} from "@/config/db";
 
 export async function POST(request: NextRequest) {
   const fileRowSet: FileRowSet = await request.json();
@@ -53,7 +52,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let idToRows: {coreMeasurementID: number; fileRow: FileRow}[] = [];
+  let idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
   for (const rowId in fileRowSet) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];

@@ -2,13 +2,11 @@
 import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
 import {fileColumns, Plot, tableHeaderSettings, UploadedFileData} from "@/config/macros";
 import {
-  Alert,
   Button,
   Card,
   CardContent,
   CardHeader,
   Paper,
-  Snackbar,
   Table,
   TableBody,
   TableCell,
@@ -167,7 +165,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>
   } else {
     let sortedFileData: UploadedFileData[] = fileRows;
-    if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date ? b.date : '').getTime() - new Date(a.date ? a.date : '').getTime());
     let i = 1;
     sortedFileData.forEach((row) => {
       row.key = i;
@@ -185,7 +183,8 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
               Accessing
               Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
             </Typography>
-            <Button variant={"contained"} sx={{width: 'fit-content', marginBottom: 2}} onClick={refreshFiles}>Refresh
+            <Button variant={"contained"} sx={{width: 'fit-content', marginBottom: 2}}
+                    onClick={refreshFiles}>Refresh
               Files</Button>
             <Typography level={"title-lg"}>
               Uploaded CSV Files
@@ -212,30 +211,46 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                     </TableRow>
                   ) : (
                     sortedFileTextCSV.map((row) => {
-                    // let errs = row.errors == "false";
+                      // let errs = row.errors == "false";
                       let errs = false;
-                    return (
-                      <TableRow key={row.key}>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                        <TableCell sx={(errs) ? {
-                          color: 'red',
-                          fontWeight: 'bold'
-                        } : {}}>{new Date(row.date).toString()}</TableCell>
-                        <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
-                        <TableCell align="center">
-                          <Button
-                            onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                            <DownloadIcon/>
-                          </Button>
-                          <Button
-                            onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                            <DeleteIcon/>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
+                      return (
+                        <TableRow key={row.key}>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.key}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.name}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.user}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.formType}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.fileErrors}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.date ? row.date : '').toString()}</TableCell>
+                          <TableCell align="center">
+                            <Button
+                              onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              <DownloadIcon/>
+                            </Button>
+                            <Button
+                              onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              <DeleteIcon/>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
                     })
                   )}
                   {sortedFileArcGIS.length === 0 ? (
@@ -249,13 +264,22 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                       let errs = "false";
                       return (
                         <TableRow key={row.key}>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.key}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.name}</TableCell>
-                          <TableCell sx={(errs) ? {color: 'red', fontWeight: 'bold'} : {}}>{row.user}</TableCell>
                           <TableCell sx={(errs) ? {
                             color: 'red',
                             fontWeight: 'bold'
-                          } : {}}>{new Date(row.date).toString()}</TableCell>
+                          } : {}}>{row.key}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.name}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{row.user}</TableCell>
+                          <TableCell sx={(errs) ? {
+                            color: 'red',
+                            fontWeight: 'bold'
+                          } : {}}>{new Date(row.date ? row.date : '').toString()}</TableCell>
                           <TableCell sx={(errs) ? {
                             color: 'red',
                             fontWeight: 'bold'

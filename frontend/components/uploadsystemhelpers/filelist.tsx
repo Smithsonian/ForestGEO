@@ -11,10 +11,10 @@ import {Box, Stack} from "@mui/joy";
 /**
  * A simple list of files with their sizes.
  */
-export function FileDisplay({acceptedFiles}: Readonly<FileListProps>) {
-  const [currentPage, setCurrentPage] = React.useState(1);
+export function FileList(props: Readonly<FileListProps>) {
+  const {acceptedFiles, dataViewActive, setDataViewActive} = props;
   const handleChange = (event: React.ChangeEvent<unknown>, value: number) => {
-    setCurrentPage(value);
+    setDataViewActive(value); // Directly update the dataViewActive in the parent component
   };
   return (
     <Card sx={{display: 'flex', flex: 1, width: '100%'}}>
@@ -27,20 +27,26 @@ export function FileDisplay({acceptedFiles}: Readonly<FileListProps>) {
             <Box sx={{display: 'inherit'}}>
               File Name: <br/>
               <Chip
-                color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].path) ? acceptedFiles[currentPage - 1].path! : ''}</Chip>
+                color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[dataViewActive - 1].path) ? acceptedFiles[dataViewActive - 1].path! : ''}</Chip>
             </Box>
             <Divider className={"my-2"}/>
             <Box sx={{display: 'inherit'}}>
               File Size: <br/>
               <Chip
-                color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[currentPage - 1].size) ? acceptedFiles[currentPage - 1].size : ''} bytes</Chip>
+                color={"primary"}>{(acceptedFiles?.length > 0 && acceptedFiles[dataViewActive - 1].size) ? acceptedFiles[dataViewActive - 1].size : ''} bytes</Chip>
             </Box>
           </Stack>
         </Box>
       </CardContent>
       <Box className={"flex justify-center"}>
-        {acceptedFiles.length > 1 && <Pagination count={acceptedFiles.length} color={"secondary"} page={currentPage}
-                                                 onChange={handleChange}/>}
+        {acceptedFiles.length > 1 &&
+          <Pagination
+            count={acceptedFiles.length}
+            color={"secondary"}
+            page={dataViewActive}
+            onChange={handleChange}
+          />
+        }
       </Box>
     </Card>
   );

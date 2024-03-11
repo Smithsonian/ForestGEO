@@ -1,0 +1,23 @@
+import {NextRequest, NextResponse} from "next/server";
+import {PoolConnection} from "mysql2/promise";
+import {getConn, getSchema, getSqlConnection, runQuery} from "@/components/processors/processormacros";
+import {generateHash} from "@/config/crypto-actions";
+
+export async function GET(request: NextRequest) {
+  const schema = getSchema();
+
+  let conn: PoolConnection | null = null;
+  try {
+    conn = await getConn();// Utilize the retry mechanism effectively
+
+    const results = await runQuery(conn, `SELECT * FROM ${schema}.Census`);
+    if (!results) throw new Error("Call failed");
+
+    return new NextResponse(JSON.stringify(generateHash(results)), {status: 200});
+  } catch (error) {
+    console.error('Error in GET:', error);
+    throw new Error('Failed to fetch census data'); // Providing a more user-friendly error message
+  } finally {
+    if (conn) conn.release(); // Release the connection
+  }
+}

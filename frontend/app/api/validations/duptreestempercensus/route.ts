@@ -3,12 +3,12 @@ import {runValidationProcedure} from "@/components/processors/processorhelperfun
 
 
 export async function GET(request: NextRequest) {
-  try {
-    const plotIDParam = request.nextUrl.searchParams.get('plotID');
-    const censusIDParam = request.nextUrl.searchParams.get('censusID');
-    const plotID = plotIDParam ? parseInt(plotIDParam) : null;
-    const censusID = censusIDParam ? parseInt(censusIDParam) : null;
+  const plotIDParam = request.nextUrl.searchParams.get('plotID');
+  const censusIDParam = request.nextUrl.searchParams.get('censusID');
+  const plotID = plotIDParam ? parseInt(plotIDParam) : null;
+  const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 
+  try {
     const validationResponse = await runValidationProcedure('ValidateFindDuplicateStemTreeTagCombinationsPerCensus', plotID, censusID);
     return new NextResponse(JSON.stringify(validationResponse), {status: 200});
   } catch (error: any) {

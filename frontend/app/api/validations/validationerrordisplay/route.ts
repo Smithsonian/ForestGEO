@@ -2,6 +2,7 @@ import {NextResponse} from "next/server";
 import {getConn, getSchema, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {CMError} from "@/config/macros";
+
 export async function GET() {
   let conn: PoolConnection | null = null;
 
@@ -29,9 +30,11 @@ export async function GET() {
       ValidationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
       Descriptions: row.Descriptions.split(',')
     }));
-    return new NextResponse(JSON.stringify(parsedRows), {status: 200, headers: {
+    return new NextResponse(JSON.stringify(parsedRows), {
+      status: 200, headers: {
         'Content-Type': 'application/json'
-      }});
+      }
+    });
   } catch (error: any) {
     return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
   } finally {

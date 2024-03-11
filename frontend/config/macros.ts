@@ -2,7 +2,6 @@ import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
 import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css'
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import FolderIcon from '@mui/icons-material/Folder';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
@@ -13,7 +12,8 @@ import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
 import {CensusRDS} from "@/config/sqlmacros";
-import {CMIDRow, DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
+import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
+import {createHash} from "node:crypto";
 
 // INTERFACES
 export interface PlotRaw {
@@ -105,6 +105,8 @@ export interface FileSize {
 
 export interface FileListProps {
   acceptedFiles: FileSize[];
+  dataViewActive: number;
+  setDataViewActive: Dispatch<SetStateAction<number>>;
 }
 
 export interface FileErrors {
@@ -136,16 +138,19 @@ export interface UploadStartProps {
 
 export interface UploadParseFilesProps {
   uploadForm: string;
-  parsing: boolean;
   acceptedFiles: FileWithPath[];
   isOverwriteConfirmDialogOpen: boolean;
   setIsOverwriteConfirmDialogOpen: Dispatch<SetStateAction<boolean>>;
   personnelRecording: string;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
+  dataViewActive: number;
+  setDataViewActive: Dispatch<SetStateAction<number>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  parseFile: (file: FileWithPath) => Promise<void>;
   handleInitialSubmit: () => Promise<void>;
-  handleFileReplace: () => void;
-  handleFileChange: (newFiles: FileWithPath[]) => void;
+  handleAddFile: (newFile: FileWithPath) => void;
+  handleRemoveFile: (fileIndex: number) => void;
+  handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => void;
 }
 
 export interface UploadReviewFilesProps {
@@ -157,6 +162,7 @@ export interface UploadReviewFilesProps {
   errorRows: FileCollectionRowSet;
   confirmationDialogOpen: boolean;
   dataViewActive: number;
+  setDataViewActive: Dispatch<SetStateAction<number>>;
   currentFileHeaders: string[];
   setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
@@ -167,11 +173,13 @@ export interface UploadReviewFilesProps {
   setErrorComponent: Dispatch<SetStateAction<string>>;
   handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
   areHeadersValid: (actualHeaders: string[]) => boolean;
-  handleRemoveCurrentFile: () => void;
   handleApproval: () => Promise<void>;
   handleCancel: () => Promise<void>;
   handleConfirm: () => Promise<void>;
-  parseAndUpdateFile: (file: FileWithPath) => Promise<void>;
+  parseFile: (file: FileWithPath) => Promise<void>;
+  handleAddFile: (newFile: FileWithPath) => void;
+  handleRemoveFile: (fileIndex: number) => void;
+  handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => Promise<void>;
 }
 
 export interface UploadFireProps extends UploadReviewFilesProps {
@@ -509,8 +517,11 @@ export function genericLoadContextReducer<T>(
   listContext: T[],
   validationFunction?: (list: T[], item: T) => boolean
 ): T | null {
+  console.log('action type: ', action.type);
+  console.log('action payload: ', action.payload);
   // Check if the action type is one of the specified types
   const isRecognizedActionType = ['plot', 'census', 'quadrat'].includes(action.type);
+  console.log('was action recognized? ', isRecognizedActionType);
   if (!isRecognizedActionType) {
     return currentState;
   }
@@ -588,7 +599,7 @@ export async function uploadValidFileAsBuffer(containerClient: ContainerClient, 
   // Retry mechanism for the upload
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, { metadata });
+      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata});
 
       // If upload is successful, return the response
       if (uploadResponse) {

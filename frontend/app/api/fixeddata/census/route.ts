@@ -13,13 +13,13 @@ import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
   let conn: PoolConnection | null = null;
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
+
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0); // Utilize the retry mechanism effectively
-    const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
-    const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
-    const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
-
     if (isNaN(page) || isNaN(pageSize)) {
       throw new Error('Invalid page, pageSize, or plotID parameter');
     }
@@ -65,7 +65,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
       // ... other fields as needed
     }));
 
-    return new NextResponse(JSON.stringify({census: censusRows, totalCount: totalRows}), {status: HTTPResponses.OK});
+    return new NextResponse(JSON.stringify({
+      census: censusRows,
+      totalCount: totalRows
+    }), {status: HTTPResponses.OK});
   } catch (error) {
     console.error('Error in GET:', error);
     throw new Error('Failed to fetch census data'); // Providing a more user-friendly error message
@@ -112,14 +115,13 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const deleteID = parseInt(request.nextUrl.searchParams.get('censusID')!);
+  if (isNaN(deleteID)) {
+    return NextResponse.json({message: "Invalid censusID parameter"}, {status: 400});
+  }
   try {
     const schema = getSchema();
     conn = await getSqlConnection(0);
-
-    const deleteID = parseInt(request.nextUrl.searchParams.get('censusID')!);
-    if (isNaN(deleteID)) {
-      return NextResponse.json({message: "Invalid censusID parameter"}, {status: 400});
-    }
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Census WHERE CensusID = ?`;

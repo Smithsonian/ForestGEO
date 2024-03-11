@@ -1,10 +1,9 @@
 "use client";
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Box, Button, LinearProgress, LinearProgressProps, Typography} from '@mui/material';
+import {Box, Button, Typography} from '@mui/material';
 import {FileCollectionRowSet, FileRow, formatDate, ReviewStates, UploadFireProps} from '@/config/macros';
-import {FileWithPath} from "react-dropzone";
 import {Stack} from "@mui/joy";
-import {CMIDRow, DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
+import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 
@@ -14,15 +13,15 @@ interface IDToRow {
 }
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
-                                                 personnelRecording, acceptedFiles, parsedData,
-                                                 uploadForm, setIsDataUnsaved,
-                                                 currentPlot, currentCensus, uploadCompleteMessage,
-                                                 setUploadCompleteMessage, handleReturnToStart,
-                                                 user, setUploadError,
-                                                 setErrorComponent,
-                                                 setReviewState,
-                                                 allRowToCMID, setAllRowToCMID,
-                                               }) => {
+                                                    personnelRecording, acceptedFiles, parsedData,
+                                                    uploadForm, setIsDataUnsaved,
+                                                    currentPlot, currentCensus, uploadCompleteMessage,
+                                                    setUploadCompleteMessage, handleReturnToStart,
+                                                    user, setUploadError,
+                                                    setErrorComponent,
+                                                    setReviewState,
+                                                    allRowToCMID, setAllRowToCMID,
+                                                  }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
@@ -47,12 +46,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       if (result.idToRows) {
         if (uploadForm === 'fixeddata_census') {
           // Fetch additional details for each coreMeasurementID
-          Promise.all(result.idToRows.map(({ coreMeasurementID }: IDToRow) =>
+          Promise.all(result.idToRows.map(({coreMeasurementID}: IDToRow) =>
             fetch(`/api/details/cmid?cmid=${coreMeasurementID}`)
               .then(response => response.json())
           )).then(details => {
             // Combine details with idToRows data
-            const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow, index: number) => {
+            const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({
+                                                                           coreMeasurementID,
+                                                                           fileRow
+                                                                         }: IDToRow, index: number) => {
               const detailArray = details[index];
               if (Array.isArray(detailArray) && detailArray.length > 0) {
                 const detail = detailArray[0]; // Extract the object from the array
@@ -91,7 +93,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           });
         } else {
           // Handle other form types without additional details
-          const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow) => ({
+          const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({
+                                                                         coreMeasurementID,
+                                                                         fileRow
+                                                                       }: IDToRow) => ({
             coreMeasurementID,
             fileName,
             row: fileRow
@@ -204,7 +209,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
           <Stack direction={"column"}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-            <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100}
+            <LinearProgressWithLabel variant={"determinate"}
+                                     value={(completedOperations / totalOperations) * 100}
                                      currentlyrunningmsg={currentlyRunning}/>
           </Stack>
         </Box>
@@ -214,8 +220,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             <Typography variant="h5" gutterBottom>Upload Complete</Typography>
             {/* Circular Progress and countdown display */}
             {startCountdown && (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <CircularProgress />
+              <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                <CircularProgress/>
                 <Typography>{countdown} seconds remaining</Typography>
               </Box>
             )}
@@ -231,7 +237,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               <Box>
                 {/* Display allRowToCMID data */}
                 {allRowToCMID.map((row, index) => (
-                  <Box key={index} sx={{ mt: 2, p: 2, border: '1px solid grey' }}>
+                  <Box key={index} sx={{mt: 2, p: 2, border: '1px solid grey'}}>
                     <Typography>Core Measurement ID: {row.coreMeasurementID}</Typography>
                     <Typography>File Name: {row.fileName}</Typography>
                     <Typography>Plot Name: {row.plotName}</Typography>
@@ -243,8 +249,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   </Box>
                 ))}
                 {/* End of allRowToCMID data display */}
-                <Typography>Your upload included measurements, which must be validated before proceeding</Typography>
-                <Button onClick={() => setReviewState(ReviewStates.VALIDATE)} sx={{width: 'fit-content'}}>
+                <Typography>Your upload included measurements, which must be validated before
+                  proceeding</Typography>
+                <Button onClick={() => setReviewState(ReviewStates.VALIDATE)}
+                        sx={{width: 'fit-content'}}>
                   Continue to Validation
                 </Button>
               </Box>
