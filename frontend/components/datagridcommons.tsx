@@ -113,7 +113,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   let lastname = session?.user?.name;
   let email = session?.user?.email;
   if (!lastname || !email) {
-    throw new Error("Session user's name or email is undefined");
+    lastname = '';
+    email = '';
   }
   // Split lastname to get the actual last name
   lastname = lastname.split(' ')[1];
