@@ -49,13 +49,13 @@ async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]) {
 }
 
 async function fetchHash(endpoint: string) {
-  const response = await fetch(endpoint, { method: 'GET' });
+  const response = await fetch(endpoint, {method: 'GET'});
   if (!response.ok) throw new Error(`Failed to fetch hash from ${endpoint}`);
   return await response.json();
 }
 
 async function fetchData(endpoint: string) {
-  const response = await fetch(endpoint, { method: 'GET' });
+  const response = await fetch(endpoint, {method: 'GET'});
   if (!response.ok) throw new Error(`Failed to fetch data from ${endpoint}`);
   return await response.json();
 }
@@ -87,7 +87,9 @@ async function updatePlotsIDB(lastName: string, email: string) {
   const dataEndpoint = `/api/fetchall/plots?lastname=${lastName}&email=${email}`;
   const plotRDSLoad = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'plotsHash', 'plotsLoad');
   let quadratsRDSLoad: QuadratsRDS[] = await getData('quadratsLoad');
-  if (!quadratsRDSLoad) {throw new Error('quadratsLoad IDB retrieval failed');}
+  if (!quadratsRDSLoad) {
+    throw new Error('quadratsLoad IDB retrieval failed');
+  }
   await createAndUpdatePlotList(plotRDSLoad, quadratsRDSLoad);
 }
 
@@ -100,7 +102,7 @@ async function updateCensusIDB() {
 
 export async function loadServerDataIntoIDB(dataType: string, userLastName: string, userEmail: string) {
   if (!userLastName || !userEmail) throw new Error('session user information was not provided');
-  switch(dataType) {
+  switch (dataType) {
     case 'quadrats':
       await updateQuadratsIDB();
       return;

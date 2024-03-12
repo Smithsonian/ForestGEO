@@ -1,12 +1,11 @@
 "use client";
-import React, {createContext, Dispatch, useContext, useEffect, useReducer} from "react";
+import React, {createContext, useContext, useEffect, useReducer} from "react";
 import {
   createEnhancedDispatch,
   EnhancedDispatch,
   genericLoadContextReducer,
   LoadAction,
   Plot,
-  PlotRaw,
   Quadrat
 } from "@/config/macros";
 import {usePlotListContext, useQuadratListContext} from "@/app/contexts/listselectionprovider";

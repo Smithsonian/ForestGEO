@@ -10,8 +10,6 @@ export async function POST(request: NextRequest) {
   const formType = request.nextUrl.searchParams.get('formType')!;
   const file = formData.get(fileName) as File | null;
   const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(<string>formData.get('fileRowErrors')) : [];
-
-  if (!file) return NextResponse.error();
   if (!file) return NextResponse.error();
   let containerClient: any = null;
   try {

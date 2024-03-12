@@ -34,6 +34,7 @@ export interface SpecialProcessingProps {
   plotID?: number;
   censusID?: number;
   fullName?: string;
+  unitOfMeasurement?: string;
 }
 
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {

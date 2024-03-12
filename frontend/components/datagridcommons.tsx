@@ -118,7 +118,10 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   // Split lastname to get the actual last name
   lastname = lastname.split(' ')[1];
 
-  const {updateQuadratsContext, updateCensusContext, updatePlotsContext} = UpdateContextsFromIDB({lastName: lastname, email: email});
+  const {updateQuadratsContext, updateCensusContext, updatePlotsContext} = UpdateContextsFromIDB({
+    lastName: lastname,
+    email: email
+  });
 
   // Toggle function for the checkbox
   const handleShowErrorRowsChange = (event: React.ChangeEvent<HTMLInputElement>) => {

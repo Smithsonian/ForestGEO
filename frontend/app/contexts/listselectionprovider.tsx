@@ -10,7 +10,6 @@ import {
   Quadrat
 } from "@/config/macros";
 import {getData} from "@/config/db";
-import {CoreMeasurementsRDS} from "@/config/sqlmacros";
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const QuadratListContext = createContext<Quadrat[] | null>(null);

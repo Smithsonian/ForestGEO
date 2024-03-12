@@ -12,6 +12,7 @@ export async function POST(request: NextRequest) {
   const censusID = parseInt(request.nextUrl.searchParams.get("census")!.trim());
   const fullName = request.nextUrl.searchParams.get("user")!;
   const formType = request.nextUrl.searchParams.get("formType")!.trim();
+  const unitOfMeasurement = request.nextUrl.searchParams.get('uom')?.trim();
 
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
     try {
-      let props: InsertUpdateProcessingProps = {connection, formType, rowData: row, plotID, censusID, fullName};
+      let props: InsertUpdateProcessingProps = {connection, formType, rowData: row, plotID, censusID, fullName, unitOfMeasurement};
       const coreMeasurementID = await insertOrUpdate(props);
       if (formType === 'fixeddata_census' && coreMeasurementID) {
         idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});

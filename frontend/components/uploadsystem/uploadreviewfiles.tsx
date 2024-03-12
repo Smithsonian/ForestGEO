@@ -22,30 +22,11 @@ import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
-    uploadForm,
-    acceptedFiles,
-    setReviewState,
-    expectedHeaders,
-    parsedData,
-    setParsedData,
-    errorRows,
-    setErrorRows,
-    confirmationDialogOpen,
-    errors,
-    setErrors,
-    setAcceptedFiles,
-    dataViewActive,
-    setDataViewActive,
-    currentFileHeaders,
-    setUploadError,
-    setErrorComponent,
-    handleChange,
-    areHeadersValid,
-    handleApproval,
-    handleCancel,
-    handleConfirm,
-    handleRemoveFile,
-    handleReplaceFile
+    uploadForm, acceptedFiles, setReviewState, expectedHeaders,
+    parsedData, setParsedData, errorRows, setErrorRows,
+    confirmationDialogOpen, errors, setErrors, dataViewActive, setDataViewActive,
+    currentFileHeaders, setUploadError, setErrorComponent, handleChange, areHeadersValid,
+    handleApproval, handleCancel, handleConfirm, handleRemoveFile, handleReplaceFile
   } = props;
 
   const [isReuploadDialogOpen, setIsReuploadDialogOpen] = useState(false);
@@ -64,7 +45,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
       return;
     }
 
-    // Use handleReplaceFile to replace, re-parse, and update headers
+    // Use handleReplaceFile to replace and re-parse the file
     await handleReplaceFile(dataViewActive - 1, newFile);
 
     setReuploadInProgress(false);
@@ -76,7 +57,6 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     return !errors[fileName] || Object.keys(errors[fileName]).length === 0;
   });
 
-
   const areAllErrorsResolved = (fileName: string): boolean => {
     // Check if there are no errors left for the current file
     return (!errors[fileName] || Object.keys(errors[fileName]).length === 0) ||
@@ -84,7 +64,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   };
 
   const handleApproveClick = async () => {
-    if (areAllErrorsResolved(acceptedFiles[dataViewActive - 1]?.name)) {
+    if (areAllErrorsResolved(currentFileName)) {
       try {
         await handleApproval();
       } catch (error) {
@@ -135,7 +115,8 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                       <Typography>No file selected or file has no headers.</Typography>
                     )}
                   </Box>
-                  <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
+                  <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive}
+                            setDataViewActive={setDataViewActive}/>
                 </Box>
               </Grid>
               <Grid item xs={4}/>

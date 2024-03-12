@@ -36,7 +36,6 @@ export async function setData(key: string, val: any): Promise<void> {
 }
 
 export async function clearAllIDBData() {
-  console.log(`Clearing all IDB data`);
   const db = await getDb();
   const storeNames = Array.from(db.objectStoreNames);
 
@@ -47,14 +46,11 @@ export async function clearAllIDBData() {
 
   await transaction.done;
   db.close();
-  console.log(`IDB data cleared`);
 }
 
 export async function clearDataByKey(key: string): Promise<void> {
-  console.log(`Clearing data for key: ${key}`);
   const db = await getDb();
   const tx = db.transaction(storeName, 'readwrite');
   await tx.objectStore(storeName).delete(key);
   await tx.done;
-  console.log(`Data cleared for key: ${key}`);
 }

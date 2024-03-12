@@ -10,14 +10,9 @@ import CircularProgress from "@mui/joy/CircularProgress";
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
                                                            acceptedFiles, uploadForm, setIsDataUnsaved,
-                                                           currentPlot, currentCensus, uploadCompleteMessage,
-                                                           setUploadCompleteMessage, handleReturnToStart,
-                                                           user, setUploadError,
-                                                           setErrorComponent,
-                                                           setReviewState,
-                                                           allRowToCMID,
-                                                           cmErrors,
-                                                           setCMErrors
+                                                           currentPlot, currentCensus, user, setUploadError,
+                                                           setErrorComponent, setReviewState,
+                                                           allRowToCMID, cmErrors,
                                                          }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -44,13 +39,12 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const uploadToStorage = useCallback(async (file: FileWithPath) => {
     try {
       setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`);
-      const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
-
-      const formData = new FormData();
+      let formData = new FormData();
       formData.append(file.name, file);
-      formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
-
-
+      if (uploadForm === 'fixeddata_census') {
+        const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
+        formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
+      }
       const response = await fetch(
         `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`, {
           method: 'POST',
@@ -67,31 +61,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   }, [currentCensus?.censusID, currentPlot?.key, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]);
 
   useEffect(() => {
-    switch (uploadForm) {
-      case "fixeddata_codes.csv":
-        setUploadCompleteMessage("Please visit the Attributes view in the Properties menu to review your changes!");
-        break;
-      case "fixeddata_role.csv":
-      case "fixeddata_personnel.csv":
-        setUploadCompleteMessage("Please visit the Personnel view in the Properties menu to review your changes!");
-        break;
-      case "fixeddata_species.csv":
-        setUploadCompleteMessage("Please visit the Species view in the Properties menu to review your changes!");
-        break;
-      case "fixeddata_quadrat.csv":
-        setUploadCompleteMessage("Please visit the Quadrats view in the Properties menu to review your changes!");
-        break;
-      case "fixeddata_census.csv":
-      case "ctfsweb_new_plants_form":
-      case "ctfsweb_old_tree_form":
-      case "ctfsweb_multiple_stems_form":
-      case "ctfsweb_big_trees_form":
-        setUploadCompleteMessage("Please visit the CoreMeasurements view to review your changes!");
-        break;
-      default:
-        setUploadCompleteMessage("");
-        break;
-    }
     const calculateTotalOperations = () => {
       let totalOps = 0;
 
@@ -109,8 +78,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
       // Calculate the total number of operations
       calculateTotalOperations();
-
-      console.log(`uploadfire acceptedfiles length: ${acceptedFiles.length}`);
 
       for (const file of acceptedFiles) {
         console.log(`file: ${file.name}`);
@@ -166,9 +133,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           {results.map((result) => (
             <Typography key={result}>{result}</Typography>
           ))}
-          <Typography>{uploadCompleteMessage}</Typography>
+          <Typography>Azure upload complete! Finalizing changes...</Typography>
           {startCountdown && (
-            <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+            <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5}}>
               <CircularProgress/>
               <Typography>{countdown} seconds remaining</Typography>
             </Box>

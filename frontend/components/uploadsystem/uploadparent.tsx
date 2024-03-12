@@ -21,16 +21,16 @@ import UploadFireSQL from "@/components/uploadsystem/uploadfiresql";
 import UploadError from "@/components/uploadsystem/uploaderror";
 import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
 import UploadValidation from "@/components/uploadsystem/uploadvalidation";
-import {ValidationResponse} from "@/components/processors/processormacros";
 import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
 import UploadValidationErrorDisplay from "@/components/uploadsystem/uploadvalidationerrordisplay";
-import {Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle} from "@mui/material";
+import {Button} from "@mui/material";
 import UploadStart from "@/components/uploadsystem/uploadstart";
 import ListItemDecorator from "@mui/joy/ListItemDecorator";
 import ViewListIcon from '@mui/icons-material/ViewList';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import UploadFireAzure from "@/components/uploadsystem/uploadfireazure";
 import UploadComplete from "@/components/uploadsystem/uploadcomplete";
+
 export interface CMIDRow {
   coreMeasurementID: number;
   fileName: string;
@@ -60,6 +60,7 @@ export default function UploadParent(props: UploadParentProps) {
     // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState("");
   const [personnelRecording, setPersonnelRecording] = useState('');
+  const [unitOfMeasurement, setUnitOfMeasurement] = useState('');
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
   // dropped file storage
@@ -76,12 +77,9 @@ export default function UploadParent(props: UploadParentProps) {
   const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   const [uploadCompleteMessage, setUploadCompleteMessage] = useState("");
   const [allFileHeaders, setAllFileHeaders] = useState<{ [key: string]: string[] }>({});
-  const [isOverwriteConfirmDialogOpen, setIsOverwriteConfirmDialogOpen] = useState(false);
   const [isDataUnsaved, setIsDataUnsaved] = useState(false);
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
-  const [validationPassedCMIDs, setValidationPassedCMIDs] = useState<number[]>([]);
-  const [validationPassedRowCount, setValidationPassedRowCount] = useState(0);
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [refreshFileList, setRefreshFileList] = useState(false);
   const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
@@ -162,7 +160,7 @@ export default function UploadParent(props: UploadParentProps) {
 
     // Remove the headers of the deleted file
     setAllFileHeaders(prevHeaders => {
-      const updatedHeaders = { ...prevHeaders };
+      const updatedHeaders = {...prevHeaders};
       delete updatedHeaders[fileToRemove.name];
       return updatedHeaders;
     });
@@ -180,7 +178,7 @@ export default function UploadParent(props: UploadParentProps) {
 
     // Update headers after replacement
     setAllFileHeaders(prevHeaders => {
-      const updatedHeaders = { ...prevHeaders };
+      const updatedHeaders = {...prevHeaders};
       delete updatedHeaders[fileToReplace.name];
       return updatedHeaders;
     });
@@ -296,23 +294,21 @@ export default function UploadParent(props: UploadParentProps) {
           setReviewState={setReviewState}
           personnelRecording={personnelRecording}
           setPersonnelRecording={setPersonnelRecording}
+          unitOfMeasurement={unitOfMeasurement}
+          setUnitOfMeasurement={setUnitOfMeasurement}
         />;
       case ReviewStates.UPLOAD_FILES:
         return <UploadParseFiles
           uploadForm={uploadForm}
           acceptedFiles={acceptedFiles}
-          isOverwriteConfirmDialogOpen={isOverwriteConfirmDialogOpen}
-          setIsOverwriteConfirmDialogOpen={setIsOverwriteConfirmDialogOpen}
           personnelRecording={personnelRecording}
-          setPersonnelRecording={setPersonnelRecording}
           dataViewActive={dataViewActive}
           setDataViewActive={setDataViewActive}
           parseFile={parseFile}
           handleInitialSubmit={handleInitialSubmit}
           handleAddFile={handleAddFile}
           handleRemoveFile={handleRemoveFile}
-          handleReplaceFile={handleReplaceFile}
-          setReviewState={setReviewState}/>;
+          handleReplaceFile={handleReplaceFile}/>;
       case ReviewStates.REVIEW:
         return <UploadReviewFiles
           acceptedFiles={acceptedFiles}
@@ -331,7 +327,6 @@ export default function UploadParent(props: UploadParentProps) {
           setReviewState={setReviewState}
           confirmationDialogOpen={confirmationDialogOpen}
           setParsedData={setParsedData}
-          parseFile={parseFile}
           handleConfirm={handleConfirmationConfirm}
           handleCancel={handleConfirmationCancel}
           handleApproval={handleConfirmationApproval}
@@ -340,46 +335,23 @@ export default function UploadParent(props: UploadParentProps) {
           setErrorComponent={setErrorComponent}
           handleReplaceFile={handleReplaceFile}
           handleRemoveFile={handleRemoveFile}
-          handleAddFile={handleAddFile}
         />;
       case ReviewStates.UPLOAD_SQL:
         return <UploadFireSQL
           personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
-          setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}
-          errors={errors}
-          errorRows={errorRows}
+          unitOfMeasurement={unitOfMeasurement}
           parsedData={parsedData}
-          expectedHeaders={expectedHeaders}
-          currentFileHeaders={currentFileHeaders}
-          dataViewActive={dataViewActive}
-          setDataViewActive={setDataViewActive}
-          areHeadersValid={areHeadersValid}
-          setErrors={setErrors}
-          setErrorRows={setErrorRows}
           setReviewState={setReviewState}
-          confirmationDialogOpen={confirmationDialogOpen}
-          setParsedData={setParsedData}
-          handleConfirm={handleConfirmationConfirm}
-          handleCancel={handleConfirmationCancel}
-          handleApproval={handleConfirmationApproval}
-          handleChange={handleChange}
           setIsDataUnsaved={setIsDataUnsaved}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          user={session?.user?.name!}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
-          handleReturnToStart={handleReturnToStart}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
-          allRowToCMID={allRowToCMID}
           setAllRowToCMID={setAllRowToCMID}
-          handleAddFile={handleAddFile}
-          handleRemoveFile={handleRemoveFile}
-          handleReplaceFile={handleReplaceFile}
-          parseFile={parseFile}
         />;
       case ReviewStates.VALIDATE:
         return <UploadValidation
@@ -387,67 +359,30 @@ export default function UploadParent(props: UploadParentProps) {
           currentPlot={currentPlot}
           currentCensus={currentCensus}
         />;
-      case ReviewStates.VALIDATE_ERRORS_FOUND:
-        return <UploadValidationErrorDisplay
-          allRowToCMID={allRowToCMID}
-          setReviewState={setReviewState}
-          uploadForm={uploadForm}
-          cmErrors={cmErrors}
-          setCMErrors={setCMErrors}
-        />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          validationPassedCMIDs={validationPassedCMIDs}
-          setValidationPassedCMIDs={setValidationPassedCMIDs}
-          validationPassedRowCount={validationPassedRowCount}
-          setValidationPassedRowCount={setValidationPassedRowCount}
-          allRowToCMID={allRowToCMID}
-          handleReturnToStart={handleReturnToStart}
         />;
       case ReviewStates.UPLOAD_AZURE:
         return <UploadFireAzure
           personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
-          setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}
-          errors={errors}
-          errorRows={errorRows}
+          unitOfMeasurement={unitOfMeasurement}
           parsedData={parsedData}
-          expectedHeaders={expectedHeaders}
-          currentFileHeaders={currentFileHeaders}
-          dataViewActive={dataViewActive}
-          setDataViewActive={setDataViewActive}
-          areHeadersValid={areHeadersValid}
-          setErrors={setErrors}
-          setErrorRows={setErrorRows}
           setReviewState={setReviewState}
-          confirmationDialogOpen={confirmationDialogOpen}
-          setParsedData={setParsedData}
-          handleConfirm={handleConfirmationConfirm}
-          handleCancel={handleConfirmationCancel}
-          handleApproval={handleConfirmationApproval}
-          handleChange={handleChange}
           setIsDataUnsaved={setIsDataUnsaved}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          user={session?.user?.name!}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
-          handleReturnToStart={handleReturnToStart}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
-          allRowToCMID={allRowToCMID}
           setAllRowToCMID={setAllRowToCMID}
-          parseFile={parseFile}
-          handleReplaceFile={handleReplaceFile}
-          handleRemoveFile={handleRemoveFile}
-          handleAddFile={handleAddFile}
           cmErrors={cmErrors}
-          setCMErrors={setCMErrors}
-        />
+          user={session?.user?.name!}/>
       case ReviewStates.COMPLETE:
         return <UploadComplete setIsUploadModalOpen={setIsUploadModalOpen} uploadForm={uploadForm}/>;
       default:
@@ -513,7 +448,10 @@ export default function UploadParent(props: UploadParentProps) {
                                    setRefreshFileList={setRefreshFileList}/>
               </TabPanel>
               <TabPanel value={1}>
-                {renderStateContent()}
+                <Box sx={{display: 'flex', width: '100%', flex: 1}}>
+
+                  {renderStateContent()}
+                </Box>
               </TabPanel>
             </Tabs>
             <Button onClick={handleCancelUpload} sx={{marginY: 2}}>Cancel Upload</Button>

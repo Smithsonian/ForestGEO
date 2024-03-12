@@ -1,9 +1,9 @@
-import { getToken } from "next-auth/jwt";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import {getToken} from "next-auth/jwt";
+import type {NextRequest} from "next/server";
+import {NextResponse} from "next/server";
 
 export async function middleware(request: NextRequest) {
-  const session = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  const session = await getToken({req: request, secret: process.env.NEXTAUTH_SECRET});
   const url = request.nextUrl.clone();
 
   if (url.pathname.startsWith('/dashboard') ||
