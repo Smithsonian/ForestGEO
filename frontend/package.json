@@ -46,6 +46,7 @@
     "@mui/joy": "latest",
     "@types/crypto-js": "^4.2.2",
     "@types/file-saver": "latest",
+    "@types/moment": "^2.13.0",
     "@types/papaparse": "latest",
     "@types/react": "latest",
     "@typescript-eslint/eslint-plugin": "latest",
@@ -56,6 +57,7 @@
     "eslint-plugin-storybook": "latest",
     "file-saver": "latest",
     "idb": "latest",
+    "moment": "^2.30.1",
     "mysql2": "latest",
     "typescript": "^5.3.3"
   },

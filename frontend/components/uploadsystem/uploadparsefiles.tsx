@@ -12,8 +12,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   const {
     uploadForm, personnelRecording, acceptedFiles,
     dataViewActive, setDataViewActive,
-    parseFile,
-    handleInitialSubmit, handleAddFile, handleReplaceFile, handleRemoveFile,
+    parseFile, handleInitialSubmit, handleAddFile, handleReplaceFile, handleRemoveFile,
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
@@ -34,7 +33,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
       <Grid container>
         <Grid item xs={6}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', mb: 10, mr: 10 }}>
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
             <DropzoneLogic onChange={handleFileChange}/>
             <Modal open={Boolean(fileToReplace)}
                    onClose={() => setFileToReplace(null)}>
@@ -73,12 +72,13 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               The person recording the data is {personnelRecording}.
             </Typography>
             <Box sx={{display: 'flex', flex: 1, justifyContent: 'center'}}>
-              <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
+              <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive}
+                        setDataViewActive={setDataViewActive}/>
               {acceptedFiles.length > 0 &&
                 <Button
                   variant="outlined"
                   onClick={() => handleRemoveFile(dataViewActive - 1)}
-                  sx={{ mt: 2 }}
+                  sx={{mt: 2}}
                 >
                   Delete Selected File
                 </Button>

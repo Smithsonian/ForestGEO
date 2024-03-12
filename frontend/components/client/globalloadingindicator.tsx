@@ -1,12 +1,12 @@
 "use client";
 import React from 'react';
-import { useLoading } from '@/app/contexts/loadingprovider'; // Adjust the path as needed
+import {useLoading} from '@/app/contexts/loadingprovider'; // Adjust the path as needed
 import CircularProgress from "@mui/joy/CircularProgress";
 import Box from "@mui/joy/Box";
 import Typography from '@mui/joy/Typography';
 
 export const GlobalLoadingIndicator: React.FC = () => {
-  const { isLoading, loadingMessage } = useLoading();
+  const {isLoading, loadingMessage} = useLoading();
 
   if (!isLoading) return null;
 
@@ -26,8 +26,8 @@ export const GlobalLoadingIndicator: React.FC = () => {
       <Box sx={{
         textAlign: 'center'
       }}>
-        <CircularProgress />
-        {loadingMessage && <Typography color={"danger"} level="h1" sx={{ mt: 2 }}>{loadingMessage}</Typography>}
+        <CircularProgress/>
+        {loadingMessage && <Typography color={"danger"} level="h1" sx={{mt: 2}}>{loadingMessage}</Typography>}
       </Box>
     </Box>
   );

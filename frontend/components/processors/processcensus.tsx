@@ -8,9 +8,10 @@ import {
   processStems,
   processTrees
 } from './processorhelperfunctions';
+import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
-  const {connection, rowData, plotID, censusID, fullName} = props;
+  const {connection, rowData, plotID, censusID, fullName, unitOfMeasurement} = props;
   const schema = process.env.AZURE_SQL_SCHEMA;
   if (!schema) throw new Error("Environmental variable extraction for schema failed");
   if (!plotID || !censusID || !fullName) throw new Error("Missing plotID, censusID, or full name");
@@ -70,6 +71,20 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     console.log(`personnelID: ${personnelID}`);
 
+    // Enhanced date handling
+    const parseDate = (dateString: string): Date | null => {
+      // Define an array of date formats to try
+      const formats = ['MM-DD-YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD', 'YYYY-DD-MM'];
+      for (const format of formats) {
+        if (moment(dateString, format, true).isValid()) {
+          return moment(dateString, format).toDate();
+        }
+      }
+      return null; // Return null if none of the formats match
+    };
+
+    const measurementDate = parseDate(rowData.date);
+
     const measurementInsertQuery = `
     INSERT INTO ${schema}.CoreMeasurements
     (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
@@ -83,11 +98,11 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       stemID,
       personnelID,
       booleanToBit(false), // isValidated is false by default
-      rowData.date ?? null,
+      measurementDate,
       rowData.dbh ?? null,
       rowData.hom ?? null,
       null,
-      null,
+      JSON.stringify({units: unitOfMeasurement}) ?? null,
     ]);
 
     if (dbhResult.affectedRows <= 0) {

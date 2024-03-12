@@ -2,107 +2,131 @@
 
 import {Box, Button, Grid} from "@mui/material";
 import {ReviewStates, TableHeadersByFormType, UploadStartProps} from "@/config/macros";
-import {Stack, Typography} from "@mui/joy";
+import {ListSubheader, Stack, Typography} from "@mui/joy";
 import SelectFormType from "@/components/uploadsystemhelpers/groupedformselection";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import React, {useEffect, useState} from "react";
 import CircularProgress from "@mui/joy/CircularProgress";
+import Select from "@mui/joy/Select";
+import List from "@mui/joy/List";
+import Option, { optionClasses } from '@mui/joy/Option';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const {
     uploadForm, personnelRecording,
     setUploadForm, setPersonnelRecording,
-    setExpectedHeaders, setReviewState
+    setExpectedHeaders, setReviewState,
+    unitOfMeasurement, setUnitOfMeasurement
   } = props;
+  const [finish, setFinish] = useState<boolean>(false);
 
-  const [timer, setTimer] = useState<number>(5);
-  const [isTimerActive, setIsTimerActive] = useState<boolean>(false);
+  const handleChange = (
+    _event: React.SyntheticEvent | null,
+    newValue: string | null,
+  ) => {
+    if (newValue) {
+      setUnitOfMeasurement(newValue);
+    }
+  };
+  const handleFormTypeBack = () => {
+    setUploadForm('');
+    setUnitOfMeasurement('');
+    setFinish(false);
+    // Other states to reset if necessary
+  };
+
+  const handlePersonnelRecordingBack = () => {
+    setPersonnelRecording('');
+    setUnitOfMeasurement('');
+    setFinish(false);
+    // Reset other states if required
+  };
+
+  const handleUnitOfMeasurementBack = () => {
+    setUnitOfMeasurement('');
+    setFinish(false);
+  }
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-
-    if (isTimerActive && timer > 0) {
-      interval = setInterval(() => {
-        setTimer((prevTimer) => prevTimer - 1);
-      }, 1000);
-    } else if (timer === 0) {
-      setReviewState(ReviewStates.UPLOAD_FILES);
-      setIsTimerActive(false); // Stop the timer
-    }
-
-    return () => clearInterval(interval);
-  }, [isTimerActive, timer, setReviewState]);
-
-  useEffect(() => {
-    if (uploadForm && personnelRecording) {
-      setIsTimerActive(true);
-    }
-  }, [uploadForm, personnelRecording]);
+    if (finish) setReviewState(ReviewStates.UPLOAD_FILES);
+  }, [finish]);
 
   return (
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
       <Grid container spacing={2} sx={{marginRight: 2}}>
-        <Button onClick={() => {
-          setPersonnelRecording('');
-        }} sx={{width: 'fit-content'}}>
-          Back
-        </Button>
         <Grid item xs={6}>
-          {(!TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording === '') && (
-            <Stack direction={"column"} sx={{width: 'fit-content'}}>
-              <Typography sx={{mb: 2}}>
-                Your file will need the correct headers in order to be uploaded to your intended table
-                destination.<br/> Please review the table header requirements before continuing:
-              </Typography>
-              <Box sx={{display: 'flex', width: 'fit-content', justifyContent: 'center', mb: 1}}>
+          <Stack direction={"column"} sx={{width: 'fit-content'}}>
+            {/* Form Type Selection */}
+            {uploadForm === '' && (
+              <>
+                <Typography sx={{mb: 2}}>
+                  Select the type of form you wish to upload:
+                </Typography>
                 <SelectFormType
                   externalState={uploadForm}
                   updateExternalState={setUploadForm}
                   updateExternalHeaders={setExpectedHeaders}
                 />
-              </Box>
-            </Stack>
-          )}
-          {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording === '') && (
-            <Stack direction={"column"} sx={{width: 'fit-content'}}>
-              <Typography sx={{mb: 2}}>
-                You have selected {uploadForm}. Please ensure that your file has the following headers
-                before
-                continuing: <br/>
-                {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
-                <br/>
-                Who recorded this data?
-              </Typography>
-              <Stack direction={"row"}>
-                <Button sx={{marginRight: 2, width: 'fit-content'}} onClick={() => setUploadForm('')}>
-                  Back
-                </Button>
+              </>
+            )}
+
+            {/* Personnel Recording Selection */}
+            {uploadForm !== '' && personnelRecording === '' && (
+              <>
+                <Button onClick={handleFormTypeBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
+                <Typography sx={{mb: 2}}>
+                  Who recorded this data?
+                </Typography>
                 <AutocompleteFixedData
                   dataType="personnel"
                   value={personnelRecording}
                   onChange={setPersonnelRecording}
                 />
-              </Stack>
-            </Stack>
-          )}
-          {(TableHeadersByFormType.hasOwnProperty(uploadForm) && personnelRecording !== '') && (
-            <Stack direction={"column"} sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
-              <Typography sx={{mb: 2}}>
-                You have selected {uploadForm}. Please ensure that your file has the following headers
-                before
-                continuing: <br/>
-                {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
-                <br/>
-                The person recording the data is {personnelRecording}. Please verify this before
-                continuing.
-              </Typography>
-              <Stack direction={"column"}>
-                {isTimerActive && (
-                  <CircularProgress value={(timer / 5) * 100}/>
-                )}
-              </Stack>
-            </Stack>
-          )}
+              </>
+            )}
+
+            {/* Unit of Measurement Selection for fixeddata_census */}
+            {uploadForm === 'fixeddata_census' && personnelRecording !== '' && unitOfMeasurement === '' && (
+              <>
+                <Button onClick={handlePersonnelRecordingBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
+                <Typography sx={{mb: 2}}>
+                  Select the unit of measurement:
+                </Typography>
+                <Select
+                  value={unitOfMeasurement}
+                  onChange={handleChange}
+                  placeholder="Select unit"
+                  sx={{minWidth: '200px'}}
+                >
+                  <List>
+                    <ListSubheader>Metric Units</ListSubheader>
+                    <Option value={"km"}>Kilometers (km)</Option>
+                    <Option value={"m"}>Meters (m)</Option>
+                    <Option value={"cm"}>Centimeters (cm)</Option>
+                    <Option value={"mm"}>Millimeters (mm)</Option>
+
+                    <ListSubheader>Imperial Units</ListSubheader>
+                    <Option value={"inches"}>Inches</Option>
+                    <Option value={"feet"}>Feet</Option>
+                    <Option value={"yards"}>Yards</Option>
+                    <Option value={"miles"}>Miles</Option>
+                  </List>
+                </Select>
+              </>
+            )}
+            {uploadForm === 'fixeddata_census' && personnelRecording !== '' && unitOfMeasurement !== '' && !finish && (
+              <>
+                <Button onClick={handleUnitOfMeasurementBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
+                <Typography sx={{mb: 2}}>You have selected:</Typography>
+                <Typography>Form: {uploadForm}</Typography>
+                <Typography>Personnel: {personnelRecording}</Typography>
+                <Typography>Units of measurement: {unitOfMeasurement}</Typography>
+                <Button onClick={() => setFinish(true)}>
+                  Finalize selections
+                </Button>
+              </>
+            )}
+          </Stack>
         </Grid>
         <Grid item xs={6}/>
       </Grid>

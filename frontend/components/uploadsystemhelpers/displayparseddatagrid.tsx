@@ -1,5 +1,5 @@
 "use client";
-import {Box, Paper, Tooltip, Typography,} from '@mui/material';
+import {Box, Paper, Typography,} from '@mui/material';
 import React, {Dispatch, SetStateAction} from 'react';
 import {FileWithPath} from 'react-dropzone';
 import '@/styles/validationtable.css';
@@ -62,6 +62,7 @@ export interface DisplayParsedDataProps {
   fileName: string;
   formType: string;
 }
+
 export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (props: Readonly<DisplayParsedDataProps>) => {
   const {
     parsedData, setParsedData, errors,
