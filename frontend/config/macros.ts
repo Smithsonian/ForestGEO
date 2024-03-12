@@ -13,7 +13,6 @@ import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
 import {CensusRDS} from "@/config/sqlmacros";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
-import {createHash} from "node:crypto";
 
 // INTERFACES
 export interface PlotRaw {
@@ -128,24 +127,27 @@ export type FileCollectionRowSet = {
 export type ValidationErrorID = number;
 
 export interface UploadStartProps {
+  // state vars
   uploadForm: string;
+  personnelRecording: string;
+  unitOfMeasurement: string;
+  // state setters
   setUploadForm: Dispatch<SetStateAction<string>>;
+  setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  personnelRecording: string;
-  setPersonnelRecording: Dispatch<SetStateAction<string>>;
+  setUnitOfMeasurement: Dispatch<SetStateAction<string>>;
 }
 
 export interface UploadParseFilesProps {
+  // state vars
   uploadForm: string;
   acceptedFiles: FileWithPath[];
-  isOverwriteConfirmDialogOpen: boolean;
-  setIsOverwriteConfirmDialogOpen: Dispatch<SetStateAction<boolean>>;
   personnelRecording: string;
-  setPersonnelRecording: Dispatch<SetStateAction<string>>;
   dataViewActive: number;
+  // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
-  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  // centralized functions
   parseFile: (file: FileWithPath) => Promise<void>;
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
@@ -154,6 +156,7 @@ export interface UploadParseFilesProps {
 }
 
 export interface UploadReviewFilesProps {
+  // state vars
   uploadForm: string;
   acceptedFiles: FileWithPath[];
   expectedHeaders: string[];
@@ -162,8 +165,9 @@ export interface UploadReviewFilesProps {
   errorRows: FileCollectionRowSet;
   confirmationDialogOpen: boolean;
   dataViewActive: number;
-  setDataViewActive: Dispatch<SetStateAction<number>>;
   currentFileHeaders: string[];
+  // state setters
+  setDataViewActive: Dispatch<SetStateAction<number>>;
   setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
@@ -171,64 +175,84 @@ export interface UploadReviewFilesProps {
   setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadError: Dispatch<SetStateAction<any>>;
   setErrorComponent: Dispatch<SetStateAction<string>>;
-  handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
+  // centralized functions
   areHeadersValid: (actualHeaders: string[]) => boolean;
+  handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
   handleApproval: () => Promise<void>;
   handleCancel: () => Promise<void>;
   handleConfirm: () => Promise<void>;
-  parseFile: (file: FileWithPath) => Promise<void>;
-  handleAddFile: (newFile: FileWithPath) => void;
   handleRemoveFile: (fileIndex: number) => void;
   handleReplaceFile: (fileIndex: number, newFile: FileWithPath) => Promise<void>;
 }
 
-export interface UploadFireProps extends UploadReviewFilesProps {
-  personnelRecording: string;
-  setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
+export interface UploadFireProps {
+  // contexts
   currentPlot: Plot;
   currentCensus: CensusRDS;
-  user: string;
+  // state vars
+  uploadForm: string;
+  personnelRecording: string;
+  unitOfMeasurement: string;
+  acceptedFiles: FileWithPath[];
+  parsedData: FileCollectionRowSet;
   uploadCompleteMessage: string;
+  // state setters
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
-  handleReturnToStart: () => Promise<void>;
-  allRowToCMID: DetailedCMIDRow[];
+  setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
+  setUploadError: React.Dispatch<React.SetStateAction<any>>;
+  setErrorComponent: React.Dispatch<React.SetStateAction<string>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   setAllRowToCMID: Dispatch<SetStateAction<DetailedCMIDRow[]>>;
 }
 
-export interface UploadFireAzureProps extends UploadFireProps {
+export interface UploadFireAzureProps {
+  // contexts
+  currentPlot: Plot;
+  currentCensus: CensusRDS;
+  user: string;
+  // state vars
+  uploadForm: string;
+  acceptedFiles: FileWithPath[];
   cmErrors: CMError[];
-  setCMErrors: Dispatch<SetStateAction<CMError[]>>;
+  allRowToCMID: DetailedCMIDRow[];
+  // state setters
+  setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
+  setUploadError: React.Dispatch<React.SetStateAction<any>>;
+  setErrorComponent: React.Dispatch<React.SetStateAction<string>>;
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
 }
 
 export interface UploadValidationProps {
-  setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
+  // contexts
   currentPlot: Plot;
   currentCensus: CensusRDS;
+  // state setters
+  setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
 }
 
 export interface UploadValidationErrorDisplayProps {
+  // state vars
   uploadForm: string;
   allRowToCMID: DetailedCMIDRow[]; // Updated to use DetailedCMIDRow[]
-  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   cmErrors: CMError[];
+  // state setters
+  setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   setCMErrors: Dispatch<SetStateAction<CMError[]>>;
 }
 
 export interface UploadUpdateValidationsProps {
-  validationPassedCMIDs: number[];
-  setValidationPassedCMIDs: Dispatch<SetStateAction<number[]>>;
-  validationPassedRowCount: number;
-  setValidationPassedRowCount: Dispatch<SetStateAction<number>>;
+  // contexts
   currentPlot: Plot;
   currentCensus: CensusRDS;
+  // state setters
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  allRowToCMID: DetailedCMIDRow[];
-  handleReturnToStart: () => Promise<void>;
 }
 
 export interface UploadCompleteProps {
-  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  // state vars
   uploadForm: string;
+  // state setters
+  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export interface ProgressStepperProps {
@@ -238,11 +262,14 @@ export interface ProgressStepperProps {
 }
 
 export interface UploadErrorProps {
+  // state vars
   error: any;
   component: string;
   acceptedFiles: FileWithPath[];
+  // state setters
   setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
+  // centralized functions
   handleReturnToStart: () => Promise<void>;
   resetError: () => Promise<void>;
 }
@@ -250,22 +277,11 @@ export interface UploadErrorProps {
 export enum HTTPResponses {
   OK = 200,
   CREATED = 201,
-  ACCEPTED = 202,
-  UNAUTHORIZED = 401,
-  FORBIDDEN = 403,
-  NOT_FOUND = 404,
-  METHOD_NOT_ALLOWED = 405,
   CONFLICT = 409,
   INTERNAL_SERVER_ERROR = 500,
-  NOT_IMPLEMENTED = 501,
-  BAD_GATEWAY = 502,
   SERVICE_UNAVAILABLE = 503,
-  GATEWAY_TIMEOUT = 504,
   SQL_CONNECTION_FAILURE = 408, // Custom code, example
-  STORAGE_CONNECTION_FAILURE = 507, // Custom code, example
   INVALID_REQUEST = 400, // Custom code, example
-  ERRORS_IN_FILE = 422, // Custom code, example
-  EMPTY_FILE = 204, // Custom code, example
 }
 
 export enum ReviewStates {
@@ -587,7 +603,35 @@ export type FileRowErrors = {
 
 export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string, formType: string, fileRowErrors: FileRowErrors[] = []) {
   const buffer = Buffer.from(await file.arrayBuffer());
-  console.log(`Uploading blob: ${file.name}`);
+  // New function to generate the filename with an incremented suffix
+  const generateNewFileName = async (fileName: string) => {
+    let newFileName = fileName;
+    let match;
+    let index = 0;
+
+    // Regex to find if the filename has a suffix pattern like _1, _2, etc.
+    const regex = /^(.+)(_)(\d+)(\..+)$/;
+
+    do {
+      const fileExists = await containerClient.getBlockBlobClient(newFileName).exists();
+      if (!fileExists) break;
+
+      match = newFileName.match(regex);
+      if (match) {
+        index = parseInt(match[3], 10) + 1;
+        newFileName = `${match[1]}_${index}${match[4]}`;
+      } else {
+        const parts = newFileName.split('.');
+        parts[0] += `_${index + 1}`;
+        newFileName = parts.join('.');
+      }
+    } while (true);
+
+    return newFileName;
+  };
+
+  const newFileName = await generateNewFileName(file.name);
+  console.log(`Uploading blob: ${newFileName}`);
 
   // Prepare metadata
   const metadata = {

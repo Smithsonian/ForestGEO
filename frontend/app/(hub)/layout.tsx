@@ -57,7 +57,7 @@ function renderSwitch(endpoint: string) {
 }
 
 export default function HubLayout({children,}: Readonly<{ children: React.ReactNode }>) {
-  const { setLoading } = useLoading();
+  const {setLoading} = useLoading();
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
@@ -126,7 +126,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
 
   return (
     <>
-      <Sidebar coreDataLoaded={coreDataLoaded} />
+      <Sidebar coreDataLoaded={coreDataLoaded}/>
       <Header/>
       <Box
         component="main"

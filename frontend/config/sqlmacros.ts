@@ -76,30 +76,30 @@ export type MeasurementsSummaryRDS = {
 
 export const MeasurementsSummaryGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'plotName', headerName: 'Plot Name', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotCensusNumber', headerName: 'Plot Census', headerClassName: 'header', flex: 1, align: 'left',},
-  {
-    field: 'censusStartDate',
-    headerName: 'Census Start',
-    type: "string",
-    headerClassName: 'header',
-    flex: 1,
-    valueGetter: (params) => {
-      if (!params.value) return null;
-      return new Date(params.value).toDateString();
-    }
-  },
-  {
-    field: 'censusEndDate',
-    headerName: 'Census End',
-    type: "string",
-    headerClassName: 'header',
-    flex: 1,
-    valueGetter: (params) => {
-      if (!params.value) return null;
-      return new Date(params.value).toDateString();
-    }
-  },
+  // {field: 'plotName', headerName: 'Plot Name', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'plotCensusNumber', headerName: 'Plot Census', headerClassName: 'header', flex: 1, align: 'left',},
+  // {
+  //   field: 'censusStartDate',
+  //   headerName: 'Census Start',
+  //   type: "string",
+  //   headerClassName: 'header',
+  //   flex: 1,
+  //   valueGetter: (params) => {
+  //     if (!params.value) return null;
+  //     return new Date(params.value).toDateString();
+  //   }
+  // },
+  // {
+  //   field: 'censusEndDate',
+  //   headerName: 'Census End',
+  //   type: "string",
+  //   headerClassName: 'header',
+  //   flex: 1,
+  //   valueGetter: (params) => {
+  //     if (!params.value) return null;
+  //     return new Date(params.value).toDateString();
+  //   }
+  // },
   {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'treeTag', headerName: 'Tag', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left',},
@@ -113,7 +113,7 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
   {field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left',},
   {
     field: 'measurementDate',
-    headerName: 'MeasurementDate',
+    headerName: 'Date',
     type: "string",
     headerClassName: 'header',
     flex: 1,

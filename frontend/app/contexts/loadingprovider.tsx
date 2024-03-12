@@ -9,7 +9,8 @@ const LoadingContext = createContext<{
 }>({
   isLoading: false,
   loadingMessage: '',
-  setLoading: () => {}
+  setLoading: () => {
+  }
 });
 
 export function LoadingProvider({children}: Readonly<{ children: React.ReactNode }>) {
@@ -22,7 +23,7 @@ export function LoadingProvider({children}: Readonly<{ children: React.ReactNode
   };
 
   return (
-    <LoadingContext.Provider value={{ isLoading, loadingMessage, setLoading }}>
+    <LoadingContext.Provider value={{isLoading, loadingMessage, setLoading}}>
       {children}
     </LoadingContext.Provider>
   );

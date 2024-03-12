@@ -11,7 +11,7 @@ import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
-import {Census, Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {Plot, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -37,7 +37,6 @@ import Option from '@mui/joy/Option';
 import {useCensusListContext, usePlotListContext} from "@/app/contexts/listselectionprovider";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
-import CircularProgress from "@mui/joy/CircularProgress";
 import {getData} from "@/config/db";
 import {useSession} from "next-auth/react";
 import {useLoading} from "@/app/contexts/loadingprovider";
@@ -95,9 +94,11 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
     </ListItemButton>
   );
 }
+
 interface SidebarProps {
   coreDataLoaded: boolean;
 }
+
 export default function Sidebar(props: SidebarProps) {
   const {data: session} = useSession();
   const {setLoading} = useLoading();
@@ -129,9 +130,7 @@ export default function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const checkSavedSession = async () => {
       const savedPlot: Plot | null = await getData('plot');
-      console.log(savedPlot);
       const savedCensus: CensusRDS | null = await getData('census');
-      console.log(savedCensus);
       if (savedPlot && savedCensus) {
         setStoredPlot(savedPlot);
         setStoredCensus(savedCensus);
@@ -143,24 +142,11 @@ export default function Sidebar(props: SidebarProps) {
     }
   }, [coreDataLoaded]);
 
-  // useEffect(() => {
-  //   setPlot(currentPlot);
-  //   setCensus(currentCensus);
-  // }, [currentPlot, currentCensus]);
-
-  useEffect(() => {
-    console.log('state variable plot ', plot);
-    console.log('state variable census ', census);
-    console.log('current plot context ', currentPlot);
-    console.log('current census context ', currentCensus);
-  }, [plot, census, currentPlot, currentCensus]);
-
   const onPlotChange = async (newValue: Plot | null) => {
     setLoading(true, 'Updating plot...');
     setPlot(newValue);
     if (plotDispatch && newValue) {
-      await plotDispatch({ plot: newValue });
-      console.log('onPlotChange --> context after dispatch: ', currentPlot);
+      await plotDispatch({plot: newValue});
     }
     setLoading(false);
   };
@@ -169,8 +155,7 @@ export default function Sidebar(props: SidebarProps) {
     setLoading(true, 'Updating Census...');
     setCensus(newValue);
     if (censusDispatch && newValue) {
-      await censusDispatch({ census: newValue });
-      console.log('onCensusChange --> context after dispatch: ', currentCensus);
+      await censusDispatch({census: newValue});
     }
     setLoading(false);
   };
@@ -311,24 +296,47 @@ export default function Sidebar(props: SidebarProps) {
               }
             })}
             <Divider orientation={"horizontal"}/>
-            <Breadcrumbs separator={<CommitIcon fontSize={"small"}/>}>
-              <Link component={"button"} onClick={() => {
-                setOpenPlotSelectionModal(true);
-              }}>
-                <Typography color={!currentPlot?.key ? "danger" : "success"}
-                            level="body-lg">
-                  {currentPlot ? `Plot: ${currentPlot.key}` : "No Plot"}
-                </Typography>
-              </Link>
-              <Link disabled={!currentPlot} component={"button"} onClick={() => {
-                setOpenCensusSelectionModal(true);
-              }}>
-                <Typography color={(!currentCensus) ? "danger" : "success"}
-                            level="body-lg">
-                  {currentCensus ? `Census: ${currentCensus.plotCensusNumber}` : 'No Census'}
-                </Typography>
-              </Link>
-            </Breadcrumbs>
+
+            <Link component={"button"} onClick={() => {
+              setOpenPlotSelectionModal(true);
+            }} sx={{
+              flexDirection: 'column',
+              alignSelf: 'flex-start',
+              alignItems: 'left',
+              textAlign: 'left',
+              width: '100%' // Ensure the link takes full width
+            }}>
+              <Typography color={!currentPlot?.key ? "danger" : "success"}
+                          level="body-lg"
+                          sx={{ display: 'flex', textAlign: 'left', alignSelf: 'flex-start' }}>
+                {currentPlot ? `Plot: ${currentPlot.key}` : "No Plot"}
+              </Typography>
+            </Link>
+            <CommitIcon sx={{transform: 'rotate(90deg)'}}/>
+            <Link component={"button"} onClick={() => {
+              setOpenCensusSelectionModal(true);
+            }} sx={{
+              flexDirection: 'column',
+              alignSelf: 'flex-start',
+              textAlign: 'left',
+              width: '100%' // Ensure the link takes full width
+            }}>
+              <Typography color={(!currentCensus) ? "danger" : "success"}
+                          level="body-lg"
+                          sx={{ display: 'flex', textAlign: 'left', alignSelf: 'flex-start' }}>
+                {currentCensus ? `Census: ${currentCensus.plotCensusNumber}` : 'No Census'}
+              </Typography>
+              <Typography color={(!currentCensus) ? "danger" : "primary"}
+                          level="body-md"
+                          sx={{ display: 'flex', textAlign: 'left', alignSelf: 'flex-start', paddingLeft: '1em' }}>
+                {currentCensus ? `Starting: ${new Date(currentCensus?.startDate!).toDateString()}` : ''}
+              </Typography>
+              <Typography color={(!currentCensus) ? "danger" : "primary"}
+                          level="body-md"
+                          sx={{ display: 'flex', textAlign: 'left', alignSelf: 'flex-start', paddingLeft: '1em' }}>
+                {currentCensus ? `Ending: ${new Date(currentCensus?.endDate!).toDateString()}` : ''}
+              </Typography>
+            </Link>
             <Divider orientation={"horizontal"}/>
             <Modal open={openPlotSelectionModal} onClose={() => {
               setPlot(currentPlot);
@@ -466,7 +474,7 @@ export default function Sidebar(props: SidebarProps) {
         <Modal open={showResumeDialog} onClose={() => setShowResumeDialog(false)}>
           <ModalDialog>
             <DialogTitle>Resume Previous Session?</DialogTitle>
-            <Divider />
+            <Divider/>
             <DialogContent>
               <Typography>You have a saved session. Would you like to resume?</Typography>
             </DialogContent>
