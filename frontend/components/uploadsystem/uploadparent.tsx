@@ -367,22 +367,16 @@ export default function UploadParent(props: UploadParentProps) {
         />;
       case ReviewStates.UPLOAD_AZURE:
         return <UploadFireAzure
-          personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
           uploadForm={uploadForm}
-          unitOfMeasurement={unitOfMeasurement}
-          parsedData={parsedData}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          uploadCompleteMessage={uploadCompleteMessage}
-          setUploadCompleteMessage={setUploadCompleteMessage}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
-          setAllRowToCMID={setAllRowToCMID}
           cmErrors={cmErrors}
-          user={session?.user?.name!}/>
+          user={session?.user?.name!} allRowToCMID={allRowToCMID}/>
       case ReviewStates.COMPLETE:
         return <UploadComplete setIsUploadModalOpen={setIsUploadModalOpen} uploadForm={uploadForm}/>;
       default:
