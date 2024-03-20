@@ -2,9 +2,7 @@ import {runQuery, SpecialProcessingProps} from "@/components/processors/processo
 import {getPersonnelIDByName} from "@/components/processors/processorhelperfunctions";
 
 export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
-  const {connection, rowData, plotID, censusID, fullName} = props;
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+  const {connection, rowData, schema, plotID, censusID, fullName} = props;
   if (!plotID || !censusID || !fullName) throw new Error("Missing plotID or fullName");
   console.log('inside processQuadrats');
   /**

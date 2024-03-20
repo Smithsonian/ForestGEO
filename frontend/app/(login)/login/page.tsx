@@ -4,7 +4,6 @@ import {useSession} from "next-auth/react";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
 import Box from "@mui/joy/Box";
-import EntryModal from "@/components/client/entrymodal";
 import UnauthenticatedSidebar from "@/components/unauthenticatedsidebar";
 
 const slides = [
@@ -49,7 +48,5 @@ export default function LoginPage() {
         <UnauthenticatedSidebar/>
       </Box>
     );
-  } else {
-    return <EntryModal/>;
   }
 }

@@ -47,6 +47,13 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   },
 }));
 
+export type SitesRDS = {
+  siteID: number;
+  siteName: string;
+  schemaName: string;
+}
+
+
 export type MeasurementsSummaryRDS = {
   id: number;
   coreMeasurementID: number;
@@ -384,9 +391,9 @@ export interface PersonnelRDS {
 
 export const PersonnelGridColumns: GridColDef[] = [
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: true},
 ]
 
 export type PlotRDS = {
@@ -429,12 +436,12 @@ export type QuadratsRDS = {
   quadratID: number;
   plotID: number | null;
   censusID: number | null;
-  personnelID: number | null;
   quadratName: string | null;
   dimensionX: number | null;
   dimensionY: number | null;
   area: number | null;
   quadratShape: string | null;
+  personnel?: PersonnelRDS[];
 }
 
 
@@ -442,7 +449,6 @@ export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1, align: 'left',},

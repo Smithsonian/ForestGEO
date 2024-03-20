@@ -2,10 +2,7 @@ import {booleanToBit} from "@/config/macros";
 import {runQuery, SpecialProcessingProps} from "@/components/processors/processormacros";
 
 export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
-  const {connection, rowData} = props;
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
+  const {connection, rowData, schema} = props;
   try {
     const genusResult = await runQuery(connection, `
       SELECT GenusID FROM ${schema}.Genus WHERE Genus = ?;

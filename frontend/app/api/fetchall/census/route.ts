@@ -1,14 +1,14 @@
 // FETCH ALL CENSUS ROUTE HANDLERS
-import {NextResponse} from "next/server";
+import {NextRequest, NextResponse} from "next/server";
 import {CensusRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
 import {CensusResult, getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {HTTPResponses} from "@/config/macros";
 
 
-export async function GET(): Promise<NextResponse<CensusRDS[]>> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+export async function GET(request: NextRequest): Promise<NextResponse<CensusRDS[]>> {
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error("Schema selection was not provided to API endpoint");
 
   let conn: PoolConnection | null = null;
   try {

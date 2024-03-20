@@ -7,12 +7,35 @@ import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
 export async function POST(request: NextRequest) {
   const fileRowSet: FileRowSet = await request.json();
   console.log(`file row set: ${Object.keys(fileRowSet)}`);
-  const fileName = request.nextUrl.searchParams.get('fileName')!.trim();
-  const plotID = parseInt(request.nextUrl.searchParams.get("plot")!.trim());
-  const censusID = parseInt(request.nextUrl.searchParams.get("census")!.trim());
-  const fullName = request.nextUrl.searchParams.get("user")!;
-  const formType = request.nextUrl.searchParams.get("formType")!.trim();
-  const unitOfMeasurement = request.nextUrl.searchParams.get('uom')?.trim();
+  // request parameter handling:
+  // schema
+  let schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema provided!');
+  schema = schema.trim();
+  // file name
+  let fileName = request.nextUrl.searchParams.get('fileName');
+  if (!fileName) throw new Error('no file name provided!');
+  fileName = fileName.trim();
+  // plot ID
+  let plotIDParam = request.nextUrl.searchParams.get("plot");
+  if (!plotIDParam) throw new Error('no plot id provided!');
+  let plotID = parseInt(plotIDParam.trim());
+  // census ID
+  let censusIDParam = request.nextUrl.searchParams.get("census");
+  if (!censusIDParam) throw new Error('no census id provided!');
+  let censusID = parseInt(censusIDParam.trim());
+  // full name
+  let fullName = request.nextUrl.searchParams.get("user");
+  if (!fullName) throw new Error('no full name provided!');
+  fullName = fullName.trim();
+  // form type
+  let formType = request.nextUrl.searchParams.get("formType");
+  if (!formType) throw new Error('no formType provided!');
+  formType = formType.trim();
+  // unit of measurement
+  let unitOfMeasurement = request.nextUrl.searchParams.get('uom');
+  if (!unitOfMeasurement) throw new Error('no unitOfMeasurement provided!');
+  unitOfMeasurement = unitOfMeasurement.trim();
 
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
@@ -58,7 +81,16 @@ export async function POST(request: NextRequest) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
     try {
-      let props: InsertUpdateProcessingProps = {connection, formType, rowData: row, plotID, censusID, fullName, unitOfMeasurement};
+      let props: InsertUpdateProcessingProps = {
+        schema,
+        connection,
+        formType,
+        rowData: row,
+        plotID,
+        censusID,
+        fullName,
+        unitOfMeasurement
+      };
       const coreMeasurementID = await insertOrUpdate(props);
       if (formType === 'fixeddata_census' && coreMeasurementID) {
         idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});

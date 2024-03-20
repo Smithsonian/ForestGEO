@@ -1,13 +1,13 @@
-import {NextResponse} from "next/server";
-import {getConn, getSchema, runQuery} from "@/components/processors/processormacros";
+import {NextRequest, NextResponse} from "next/server";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {CMError} from "@/config/macros";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
-
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     conn = await getConn();
     const query = `
       SELECT 

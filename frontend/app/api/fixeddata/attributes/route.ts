@@ -3,18 +3,15 @@ import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {AttributesRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection} from "mysql2/promise";
-import {
-  getSchema,
-  getSqlConnection,
-  parseAttributeRequestBody,
-  runQuery
-} from "@/components/processors/processormacros";
+import {getConn, parseAttributeRequestBody, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
   attributes: AttributesRDS[],
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   if (isNaN(page)) {
     console.error('page parseInt conversion failed');
@@ -25,10 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     // handle error or set default
   }
   try {
-    const schema = getSchema();
-    // Initialize the connection attempt counter
-    let attempt = 0;
-    conn = await getSqlConnection(attempt);
+    conn = await getConn();
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -67,10 +61,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const newRowData = await parseAttributeRequestBody(request, 'POST');
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Attributes`, newRowData]);
     await runQuery(conn, insertQuery);
@@ -94,10 +89,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (!deleteCode) {
     return new NextResponse(JSON.stringify({message: "Code parameter is required"}), {status: 400});
   }
-
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Attributes WHERE Code = ?`;
@@ -116,10 +111,11 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
   const code = request.nextUrl.searchParams.get('code')!;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const updateData = await parseAttributeRequestBody(request, 'PATCH');
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE Code = ?', [`${schema}.Attributes`, updateData, code]);
     await runQuery(conn, updateQuery);

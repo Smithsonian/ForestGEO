@@ -2,29 +2,22 @@
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
-import {
-  CensusResult,
-  getSchema,
-  getSqlConnection,
-  parseCensusRequestBody,
-  runQuery
-} from "@/components/processors/processormacros";
+import {CensusResult, getConn, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
   const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
-
+  if (isNaN(page) || isNaN(pageSize)) {
+    throw new Error('Invalid page, pageSize, or plotID parameter');
+  }
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0); // Utilize the retry mechanism effectively
-    if (isNaN(page) || isNaN(pageSize)) {
-      throw new Error('Invalid page, pageSize, or plotID parameter');
-    }
     // Initialize the connection attempt counter
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -79,9 +72,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     const {CensusID, ...newRowData} = await parseCensusRequestBody(request);
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Census`, newRowData]);
     await runQuery(conn, insertQuery);
@@ -96,10 +90,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const {CensusID, ...updateData} = await parseCensusRequestBody(request);
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CensusID = ?', [`${schema}.Census`, updateData, CensusID]);
     await runQuery(conn, updateQuery);
@@ -119,9 +114,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (isNaN(deleteID)) {
     return NextResponse.json({message: "Invalid censusID parameter"}, {status: 400});
   }
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Census WHERE CensusID = ?`;
