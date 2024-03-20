@@ -53,7 +53,7 @@ export default function PersonnelPage() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'personnelID'},
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'firstName'},
     }));
   };
   return (

@@ -6,12 +6,11 @@ import DataObjectIcon from '@mui/icons-material/DataObject';
 import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
-import GridOnIcon from '@mui/icons-material/GridOn';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
-import {CensusRDS} from "@/config/sqlmacros";
+import {CensusRDS, SitesRDS} from "@/config/sqlmacros";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 
 // INTERFACES
@@ -30,6 +29,8 @@ export interface QuadratRaw {
 }
 
 export type Quadrat = QuadratRaw | null;
+
+export type Site = SitesRDS | null;
 
 export interface Census {
   plotID: number;
@@ -70,12 +71,12 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
 };
 
 export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
-  "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
-  "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}],
-  "fixeddata_species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}],
-  "fixeddata_quadrat": [{label: "quadrat"}, {label: "dimx"}, {label: "dimy"}],
-  "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
-  "arcgis_xlsx": arcgisHeaders
+  "fixeddata_codes": [],
+  "fixeddata_personnel": [],
+  "fixeddata_species": [],
+  "fixeddata_quadrat": [],
+  "fixeddata_census": [],
+  "arcgis_xlsx": []
 }
 export const DBInputForms: string[] = [
   "fixeddata_codes",
@@ -189,6 +190,7 @@ export interface UploadFireProps {
   // contexts
   currentPlot: Plot;
   currentCensus: CensusRDS;
+  schema: string;
   // state vars
   uploadForm: string;
   personnelRecording: string;
@@ -226,6 +228,7 @@ export interface UploadValidationProps {
   // contexts
   currentPlot: Plot;
   currentCensus: CensusRDS;
+  schema: string;
   // state setters
   setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
 }
@@ -244,6 +247,7 @@ export interface UploadUpdateValidationsProps {
   // contexts
   currentPlot: Plot;
   currentCensus: CensusRDS;
+  schema: string;
   // state setters
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
 }
@@ -417,8 +421,8 @@ export const siteConfigNav: SiteConfigProps[] = [
     expanded: [],
   },
   {
-    label: "Core Measurements Hub",
-    href: "/coremeasurementshub",
+    label: "Measurements Hub",
+    href: "/measurementssummary",
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
     icon: DataObjectIcon,
     expanded: [],
@@ -435,12 +439,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: DescriptionIcon,
       },
-      {
-        label: 'Census',
-        href: '/census',
-        tip: '',
-        icon: GridOnIcon,
-      },
+      // {
+      //   label: 'Census',
+      //   href: '/census',
+      //   tip: '',
+      //   icon: GridOnIcon,
+      // },
       {
         label: 'Personnel',
         href: '/personnel',
@@ -461,20 +465,20 @@ export const siteConfigNav: SiteConfigProps[] = [
       }
     ]
   },
-  {
-    label: "Manual Input Forms (CTFSWeb)",
-    href: "/forms",
-    tip: 'forms from ctfsweb',
-    icon: SettingsSuggestIcon,
-    expanded: [
-      {
-        label: 'Census Form',
-        href: '/census',
-        tip: '',
-        icon: DescriptionIcon,
-      },
-    ]
-  },
+  // {
+  //   label: "Manual Input Forms (CTFSWeb)",
+  //   href: "/forms",
+  //   tip: 'forms from ctfsweb',
+  //   icon: SettingsSuggestIcon,
+  //   expanded: [
+  //     {
+  //       label: 'Census Form',
+  //       href: '/census',
+  //       tip: '',
+  //       icon: DescriptionIcon,
+  //     },
+  //   ]
+  // },
 ]
 
 // Define a type for the enhanced dispatch function
@@ -488,12 +492,10 @@ export function createEnhancedDispatch<T>(
     // Save to IndexedDB only if payload is not null
     if (payload[actionType] !== null) {
       await setData(actionType, payload[actionType]);
-      console.log(`setData call on key ${actionType} with value ${payload[actionType]} completed.`);
     }
 
     // Dispatch the action
     dispatch({type: actionType, payload});
-    console.log(`Dispatch of type ${actionType} placed`);
   };
 }
 
@@ -504,7 +506,6 @@ export type LoadAction<T> = {
 
 // Generic reducer function
 export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T | null {
-  console.log('Action:', action);
   switch (action.type) {
     case 'coreMeasurementLoad':
     case 'attributeLoad':
@@ -517,6 +518,7 @@ export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T
     case 'plotList':
     case 'censusList':
     case 'quadratList':
+    case 'siteList':
       if (action.type !== null && action.payload && action.type in action.payload) {
         return action.payload[action.type] ?? state;
       } else {
@@ -533,11 +535,8 @@ export function genericLoadContextReducer<T>(
   listContext: T[],
   validationFunction?: (list: T[], item: T) => boolean
 ): T | null {
-  console.log('action type: ', action.type);
-  console.log('action payload: ', action.payload);
   // Check if the action type is one of the specified types
-  const isRecognizedActionType = ['plot', 'census', 'quadrat'].includes(action.type);
-  console.log('was action recognized? ', isRecognizedActionType);
+  const isRecognizedActionType = ['plot', 'census', 'quadrat', 'site'].includes(action.type);
   if (!isRecognizedActionType) {
     return currentState;
   }

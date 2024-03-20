@@ -11,9 +11,7 @@ import {
 import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
-  const {connection, rowData, plotID, censusID, fullName, unitOfMeasurement} = props;
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+  const {connection, rowData, schema, plotID, censusID, fullName, unitOfMeasurement} = props;
   if (!plotID || !censusID || !fullName) throw new Error("Missing plotID, censusID, or full name");
   try {
     /**

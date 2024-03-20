@@ -2,7 +2,7 @@
 
 import {UploadCompleteProps} from "@/config/macros";
 import Typography from "@mui/joy/Typography";
-import {Box, Link, Stack} from "@mui/joy";
+import {Box} from "@mui/joy";
 import {redirect} from "next/navigation";
 import React, {useEffect, useState} from "react";
 import CircularProgress from "@mui/joy/CircularProgress";
@@ -35,7 +35,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       case 'fixeddata_quadrat':
         return redirect('/properties/quadrats');
       case 'fixeddata_census':
-        return redirect('/coremeasurementshub');
+        return redirect('/measurementssummary');
       case 'arcgis_files':
         return redirect('/dashboard');
       default:

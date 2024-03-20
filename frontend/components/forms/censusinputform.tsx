@@ -1,5 +1,5 @@
 "use client";
-import React from 'react';
+import React, {useState} from 'react';
 import {
   DataGrid,
   GridActionsCellItem,
@@ -25,7 +25,12 @@ import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import {AutocompleteMultiSelect} from "@/components/forms/autocompletemultiselect";
 import Divider from "@mui/joy/Divider";
 import Typography from "@mui/joy/Typography";
-import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
+import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
+import {useSession} from 'next-auth/react';
+import UploadValidation from "@/components/uploadsystem/uploadvalidation";
+import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
+import {ReviewStates} from "@/config/macros";
+import {DialogContent, DialogTitle, Modal, ModalDialog} from '@mui/joy';
 
 interface EditToolbarProps {
   setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
@@ -250,8 +255,21 @@ const CensusInputForm = () => {
   ];
   const [rows, setRows] = React.useState(initialRows);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
+  // New state to track if the form is ready for submission
+  const [isFormComplete, setIsFormComplete] = useState(false);
+
+  const [activeStep, setActiveStep] = useState('validation'); // 'validation', 'update', or 'summary'
+  const [validationResults, setValidationResults] = useState(null);
+  const [updateResults, setUpdateResults] = useState(null);
+
+  const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_SQL); // placeholder
+
+
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
+  let currentSite = useSiteContext();
+
+  const {data: session} = useSession();
   const handleQuadratChange = (id: number | string, newValue: string) => {
     setRows(rows.map((row) => (row.id === id ? {...row, quadratName: newValue} : row)));
   };
@@ -310,10 +328,101 @@ const CensusInputForm = () => {
     setRowModesModel(newRowModesModel);
   };
 
+  // Function to check if all required fields in a row are filled
+  const checkFormCompletion = () => {
+    const allRowsComplete = rows.every(row => {
+      // Add checks for all required fields here
+      return row.date && row.personnel && row.quadratName && row.treeTag && row.stemTag && row.speciesCode && row.dbh && row.hom;
+    });
+    setIsFormComplete(allRowsComplete);
+  };
+
+  // Update the form completion status whenever rows change
+  React.useEffect(() => {
+    checkFormCompletion();
+  }, [rows]);
+
+  // Function to format and submit data
+  const handleSubmit = async () => {
+    const formattedData = rows.reduce((acc, row) => {
+      // Map the row data to the FileRow structure
+      acc[row.id] = {
+        date: row.date.toISOString(),
+        personnel: row.personnel,
+        quadratName: row.quadratName,
+        treeTag: row.treeTag,
+        stemTag: row.stemTag,
+        speciesCode: row.speciesCode,
+        dbh: row.dbh.toString(),
+        hom: row.hom.toString(),
+        codes: row.codes.join(';')
+      };
+      return acc;
+    }, {});
+
+    const fileRowSet = {"censusData": formattedData}; // Assuming 'censusData' as the file name
+
+    try {
+      // Add code to retrieve additional required parameters like schema, fileName, etc.
+      const response = await fetch(`/api/sqlload?schema=${currentSite ? currentSite.schemaName : ''}&fileName=censusData&plot=${currentPlot?.id}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=fixeddata_census&uom=metric`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(fileRowSet),
+      });
+
+      const responseData = await response.json(); // not gonna do anything with this, this output is intended for upload system.
+      // Handle the response
+      if (response.ok) {
+        setReviewState(ReviewStates.VALIDATE);
+      } else {
+        console.error('Error submitting form:', responseData);
+        // Handle submission error
+      }
+    } catch (error) {
+      console.error('Error submitting form:', error);
+    }
+
+  };
+  // Render different components based on activeStep
+  let content;
+  switch (activeStep) {
+    case 'validation':
+      content = (
+        <UploadValidation
+          currentPlot={currentPlot}
+          currentCensus={currentCensus}
+          schema={currentSite ? currentSite.schemaName : ''}
+          setReviewState={setReviewState}/>
+      );
+      break;
+    case 'update':
+      content = (
+        <UploadUpdateValidations
+          currentPlot={currentPlot}
+          currentCensus={currentCensus}
+          schema={currentSite ? currentSite.schemaName : ''}
+          setReviewState={setReviewState}
+        />
+      );
+      break;
+    default:
+      content = null;
+  }
   return (
     <Box sx={{display: 'flex', width: '100%', height: '100%', flexDirection: 'column'}}>
       <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.key ?? 'None'}, Census
         ID: {currentCensus?.censusID ?? '0'}</Typography>
+      <Box sx={{display: 'flex', justifyContent: 'flex-end', marginTop: 2}}>
+        <Button
+          variant="contained"
+          disabled={!isFormComplete}
+          onClick={handleSubmit}
+        >
+          Submit
+        </Button>
+      </Box>
       <Divider orientation={"horizontal"}/>
       <DataGrid
         getCellClassName={() => "dataGridCell"}
@@ -335,6 +444,29 @@ const CensusInputForm = () => {
           toolbar: {setRows, setRowModesModel},
         }}
       />
+      <Modal open={reviewState === ReviewStates.VALIDATE || reviewState === ReviewStates.UPDATE}>
+        <ModalDialog variant="outlined" role="alertdialog">
+          <DialogTitle>
+            Validation and Update Stages
+          </DialogTitle>
+          <DialogContent>
+            {reviewState === ReviewStates.VALIDATE && (
+              <UploadValidation
+                currentPlot={currentPlot}
+                currentCensus={currentCensus}
+                schema={currentSite ? currentSite.schemaName : ''}
+                setReviewState={setReviewState}/>
+            )}
+            {reviewState === ReviewStates.UPDATE && (
+              <UploadUpdateValidations
+                currentPlot={currentPlot}
+                currentCensus={currentCensus}
+                schema={currentSite ? currentSite.schemaName : ''}
+                setReviewState={setReviewState}/>
+            )}
+          </DialogContent>
+        </ModalDialog>
+      </Modal>
     </Box>
   );
 };

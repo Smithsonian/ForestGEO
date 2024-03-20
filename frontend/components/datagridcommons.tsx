@@ -23,7 +23,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
-import {Typography} from "@mui/joy";
+import {Stack, Typography} from "@mui/joy";
 import {StyledDataGrid} from "@/config/sqlmacros";
 import {
   computeMutation,
@@ -31,11 +31,13 @@ import {
   createFetchQuery,
   createProcessQuery,
   EditToolbarProps,
-  getGridID
+  getGridID,
+  validateRowStructure,
 } from "@/config/datagridhelpers";
 import {CMError, Plot} from "@/config/macros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 import {useSession} from "next-auth/react";
+import {useSiteContext} from "@/app/contexts/userselectionprovider";
 
 const errorMapping: { [key: string]: string[] } = {
   '1': ["attributes"],
@@ -108,26 +110,26 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
   // State to store validation errors
   const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
-  const [showErrorRows, setShowErrorRows] = useState<boolean>(false);
+  const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
+  const [showValidRows, setShowValidRows] = useState<boolean>(true);
+
   const {data: session} = useSession();
-  let lastname = session?.user?.name;
-  let email = session?.user?.email;
-  if (!lastname || !email) {
-    lastname = '';
-    email = '';
-  }
-  // Split lastname to get the actual last name
-  lastname = lastname.split(' ')[1];
+  let email = session?.user?.email ?? '';
+  const currentSite = useSiteContext();
+  if (!currentSite) console.error('site not yet defined');
 
   const {updateQuadratsContext, updateCensusContext, updatePlotsContext} = UpdateContextsFromIDB({
-    lastName: lastname,
-    email: email
+    email: email, schema: currentSite ? currentSite.schemaName : '',
   });
 
   // Toggle function for the checkbox
   const handleShowErrorRowsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setShowErrorRows(event.target.checked);
   };
+
+  const handleShowValidRowsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setShowValidRows(event.target.checked);
+  }
 
 
   const handleAddNewRow = () => {
@@ -154,7 +156,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleRefresh = async () => {
     setRefresh(true);
     try {
-      const query = createFetchQuery(gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.id);
+      const query = createFetchQuery(currentSite ? currentSite.schemaName : '', gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.id);
       const response = await fetch(query, {
         method: 'GET'
       });
@@ -177,7 +179,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const fetchPaginatedData = async (pageToFetch: number) => {
     console.log('fetchPaginatedData triggered');
     setRefresh(true);
-    let paginatedQuery = createFetchQuery(gridType, pageToFetch, paginationModel.pageSize, currentPlot?.id);
+    let paginatedQuery = createFetchQuery(currentSite ? currentSite.schemaName : '', gridType, pageToFetch, paginationModel.pageSize, currentPlot?.id);
     try {
       const response = await fetch(paginatedQuery, {method: 'GET'});
       const data = await response.json();
@@ -197,22 +199,22 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setRefresh(false);
   };
 
-  // ... useEffect for handling row addition logic
-  useEffect(() => {
-    if (isNewRowAdded) {
-      console.log('useEffect --> isNewRowAdded true');
-      const pageToFetch = shouldAddRowAfterFetch
-        ? Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1
-        : paginationModel.page;
-      fetchPaginatedData(pageToFetch).catch(console.error);
-      console.log('useEffect --> isNewRowAdded true, fetch completed');
-    }
-  }, [isNewRowAdded, rowCount, paginationModel, shouldAddRowAfterFetch]);
+  // // ... useEffect for handling row addition logic
+  // useEffect(() => {
+  //   if (isNewRowAdded) {
+  //     console.log('useEffect --> isNewRowAdded true');
+  //     const pageToFetch = shouldAddRowAfterFetch
+  //       ? Math.ceil((rowCount + 1) / paginationModel.pageSize) - 1
+  //       : paginationModel.page;
+  //     fetchPaginatedData(pageToFetch).catch(console.error);
+  //     console.log('useEffect --> isNewRowAdded true, fetch completed');
+  //   }
+  // }, [isNewRowAdded, rowCount, paginationModel, shouldAddRowAfterFetch]);
+  //
 
   // ... useEffect for handling page changes
   useEffect(() => {
     if (!isNewRowAdded) {
-      console.log('useEffect --> isNewRowAdded false');
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
   }, [paginationModel.page]);
@@ -235,26 +237,39 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const processRowUpdate = React.useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
       console.log('processRowUpdate triggered');
+      console.log('new row: ', newRow);
+      console.log('old row: ', oldRow);
+
+      // Determine if the oldRow is a new row
+      const isNewRow = validateRowStructure(gridType, oldRow);
+      console.log('isNewRow:', isNewRow);
+
       const gridID = getGridID(gridType);
-      const fetchProcessQuery = createProcessQuery(gridType);
-      // Validate the primary key
+      const fetchProcessQuery = createProcessQuery(currentSite ? currentSite.schemaName : '', gridType);
+
       if (newRow[gridID] === '') {
         throw new Error(`Primary key ${gridID} cannot be empty!`);
       }
+
       try {
         let response, responseJSON;
         // If oldRow code is empty, it's a new row insertion
-        if (oldRow[gridID] === '') {
+        if (isNewRow) {
+          console.log('Handling new row insertion...');
+          console.log('fetch query: ', fetchProcessQuery);
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(newRow),
           });
           responseJSON = await response.json();
+          console.log('POST received: ', responseJSON);
           if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Insertion failed");
           setSnackbar({children: `New row added!`, severity: 'success'});
         } else {
           // If code is not empty, it's an update
+          console.log('Handling existing row update...');
+          console.log('fetch query: ', fetchProcessQuery);
           const mutation = computeMutation(gridType, newRow, oldRow);
           if (mutation) {
             response = await fetch(fetchProcessQuery, {
@@ -263,6 +278,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
               body: JSON.stringify(newRow),
             });
             responseJSON = await response.json();
+            console.log('PATCH received: ', responseJSON);
             if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Update failed");
             setSnackbar({children: `Row updated!`, severity: 'success'});
           }
@@ -325,7 +341,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       setIsNewRowAdded(false); // We are done adding a new row
       // Now we can refetch data for the current page without adding a new row
       setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
-      await fetchPaginatedData(paginationModel.page);
+      // await fetchPaginatedData(paginationModel.page);
     }
   };
 
@@ -342,7 +358,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
-      await fetchPaginatedData(paginationModel.page);
+      // await fetchPaginatedData(paginationModel.page);
     }
   };
 
@@ -421,7 +437,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (gridType !== 'measurementsSummary') return;
 
     try {
-      const response = await fetch('/api/validations/validationerrordisplay');
+      const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite ? currentSite.schemaName : ''}`);
       const errors: CMError[] = await response.json();
 
       // Define the type of the accumulator as Record<number, CMError>
@@ -465,44 +481,44 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       .join('; ');
   };
 
-
-  // Modify gridColumns to include validation errors
-  const modifiedColumns = gridColumns.map(column => ({
-    ...column,
-    renderCell: (params: GridCellParams) => {
-      const cellValue = params.value !== undefined ? params.value?.toString() : '';
-      const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
-      return (
-        <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5}}>
-          {cellError ? (
-            <>
-              <Typography sx={{
-                whiteSpace: 'normal',
-                lineHeight: 'normal'
-              }}>
-                {cellValue}
-              </Typography>
-              <Typography color={"danger"} variant={"solid"}
-                          sx={{
-                            color: 'error.main',
-                            fontSize: '0.75rem',
-                            mt: 1,
-                            whiteSpace: 'normal',
-                            lineHeight: 'normal'
-                          }}>
-                {cellError}
-              </Typography>
-            </>
-          ) : (
-            <Typography sx={{
-              whiteSpace: 'normal',
-              lineHeight: 'normal'
-            }}>{cellValue}</Typography>
-          )}
-        </Box>
-      );
+  // Modify gridColumns to include validation errors, but only for specific grid types
+  const modifiedColumns = gridColumns.map(column => {
+    // Apply custom renderCell only for specific grid types
+    if (gridType === 'coreMeasurements' || gridType === 'measurementsSummary') {
+      return {
+        ...column,
+        renderCell: (params: GridCellParams) => {
+          const cellValue = params.value !== undefined ? params.value?.toString() : '';
+          const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
+          return (
+            <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5}}>
+              {cellError ? (
+                <>
+                  <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
+                    {cellValue}
+                  </Typography>
+                  <Typography color={"danger"} variant={"solid"} sx={{
+                    color: 'error.main',
+                    fontSize: '0.75rem',
+                    mt: 1,
+                    whiteSpace: 'normal',
+                    lineHeight: 'normal'
+                  }}>
+                    {cellError}
+                  </Typography>
+                </>
+              ) : (
+                <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>{cellValue}</Typography>
+              )}
+            </Box>
+          );
+        }
+      };
+    } else {
+      // For other grid types, maintain the default rendering
+      return column;
     }
-  }));
+  });
 
   // Use useMemo to construct columns array conditionally based on 'locked' prop
   const columns = useMemo(() => {
@@ -521,17 +537,20 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   // Updated visibleRows computation
   const visibleRows = useMemo(() => {
     if (gridType === 'measurementsSummary') {
-      if (showErrorRows) {
+      if (showErrorRows && showValidRows) {
         console.log("Showing all rows, including those with errors.");
         return rows;
-      } else {
+      } else if (showValidRows && !showErrorRows) {
         console.log("Filtering out rows with errors.");
         return rows.filter(row => !rowHasError(row.id));
+      } else if (!showValidRows && showErrorRows) {
+        return rows.filter(row => rowHasError(row.id));
+      } else {
+        return [];
       }
     }
-    console.log("No filtering applied for non-measurementsSummary grid.");
     return rows;
-  }, [rows, showErrorRows, gridType, gridColumns]);
+  }, [rows, showErrorRows, showValidRows, gridType, gridColumns]);
 
   // Count the number of rows with errors
   const errorRowCount = useMemo(() => {
@@ -573,13 +592,22 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       >
         <Box sx={{width: '100%', flexDirection: 'column'}}>
           {gridType === 'measurementsSummary' && (
-            <Box>
-              <Checkbox
-                checked={showErrorRows}
-                onChange={handleShowErrorRowsChange}
-              />
-              Show rows with errors ({errorRowCount})
-            </Box>
+            <Stack direction={"row"}>
+              <Box>
+                <Checkbox
+                  checked={showErrorRows}
+                  onChange={handleShowErrorRowsChange}
+                />
+                Show rows with errors: ({errorRowCount})
+              </Box>
+              <Box>
+                <Checkbox
+                  checked={showValidRows}
+                  onChange={handleShowValidRowsChange}
+                />
+                Show rows without errors: ({rows.length - errorRowCount})
+              </Box>
+            </Stack>
           )}
           <Typography level={"title-lg"}>Note: The Grid is filtered by your selected Plot and Plot
             ID</Typography>

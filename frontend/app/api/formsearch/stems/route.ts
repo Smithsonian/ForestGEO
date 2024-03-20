@@ -1,9 +1,10 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
-import {getConn, getSchema, runQuery} from "@/components/processors/processormacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
-  const schema = getSchema();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema provided!');
   const partialStemTag = request.nextUrl.searchParams.get('searchfor')!;
   let conn: PoolConnection | null;
   conn = await getConn();

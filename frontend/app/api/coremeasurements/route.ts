@@ -5,8 +5,6 @@ import {CoreMeasurementsRDS} from "@/config/sqlmacros";
 import {
   CoreMeasurementsResult,
   getConn,
-  getSchema,
-  getSqlConnection,
   parseCoreMeasurementsRequestBody,
   runQuery
 } from "@/components/processors/processormacros";
@@ -18,15 +16,15 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('Schema to connect to was not provided!');
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
   const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
+  if (isNaN(page) || isNaN(pageSize)) {
+    throw new Error('Invalid page, pageSize, or plotID parameter');
+  }
   try {
-    const schema = getSchema();
-
-    if (isNaN(page) || isNaN(pageSize)) {
-      throw new Error('Invalid page, pageSize, or plotID parameter');
-    }
     // Initialize the connection attempt counter
     conn = await getConn();
 
@@ -90,11 +88,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
 
 export async function POST(request: NextRequest) {
   let conn;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
     // Parse the request body
-    const schema = getSchema();
     const {CoreMeasurementID, ...newRowData} = await parseCoreMeasurementsRequestBody(request);
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     // Insert the new row
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.CoreMeasurements`, newRowData]);
     await runQuery(conn, insertQuery);
@@ -111,10 +110,11 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   let conn;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const {CoreMeasurementID, ...updateData} = await parseCoreMeasurementsRequestBody(request);
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     // Build the update query
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CoreMeasurementID = ?', [`${schema}.CoreMeasurements`, updateData, CoreMeasurementID]);
     await runQuery(conn, updateQuery);
@@ -130,14 +130,14 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
-  const deleteCode = request.nextUrl.searchParams.get('coreMeasurementID')!;
+  const deleteCode = request.nextUrl.searchParams.get('coreMeasurementID');
+  if (!deleteCode) {
+    return new NextResponse(JSON.stringify({message: "coremeasurementID is required"}), {status: 400});
+  }
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
-    if (!deleteCode) {
-      return new NextResponse(JSON.stringify({message: "coremeasurementID is required"}), {status: 400});
-    }
-
+    conn = await getConn();
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.CoreMeasurements WHERE CoreMeasurementID = ?`;
     await runQuery(conn, deleteQuery, [deleteCode]);

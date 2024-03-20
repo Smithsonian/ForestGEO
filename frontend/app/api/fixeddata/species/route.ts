@@ -1,18 +1,14 @@
 // FIXED DATA SPECIES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {
-  getSchema,
-  getSqlConnection,
-  parseSpeciesRequestBody,
-  runQuery,
-  SpeciesResult
-} from "@/components/processors/processormacros";
+import {getConn, parseSpeciesRequestBody, runQuery, SpeciesResult} from "@/components/processors/processormacros";
 import {bitToBoolean, ErrorMessages} from "@/config/macros";
 import {SpeciesRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ species: SpeciesRDS[], totalCount: number }>> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   if (isNaN(page)) {
     console.error('page parseInt conversion failed');
@@ -23,10 +19,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
     // handle error or set default
   }
   try {
-    const schema = getSchema();
-    // Initialize the connection attempt counter
-    let attempt = 0;
-    conn = await getSqlConnection(attempt);
+    conn = await getConn();
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -68,10 +61,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
 
 export async function POST(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const {SpeciesID, ...newRowData} = await parseSpeciesRequestBody(request);
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Species`, newRowData]);
     await runQuery(conn, insertQuery);
 
@@ -87,9 +81,10 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   let conn: PoolConnection | null = null;
   const deleteSpeciesID = parseInt(request.nextUrl.searchParams.get('speciesID')!);
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Species WHERE [SpeciesID] = ${deleteSpeciesID}`);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
@@ -105,10 +100,11 @@ export async function DELETE(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const {SpeciesID, ...updateData} = await parseSpeciesRequestBody(request);
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     // Build the update query
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SpeciesID = ?', [`${schema}.Species`, updateData, SpeciesID]);
     await runQuery(conn, updateQuery);

@@ -17,7 +17,8 @@ export default function QuadratsPage() {
       dimensionX: 0,
       dimensionY: 0,
       area: 0,
-      quadratShape: ''
+      quadratShape: '',
+      personnel: [],
     },
   ]
   const [rows, setRows] = React.useState(initialRows);
@@ -50,6 +51,7 @@ export default function QuadratsPage() {
       dimensionY: 0,
       area: 0,
       quadratShape: '',
+      personnel: [],
       isNew: true,
     };
     // Add the new row to the state

@@ -17,7 +17,11 @@ export async function middleware(request: NextRequest) {
     }
   } else if (url.pathname === '/') {
     // Redirect from home to dashboard if authenticated, or login if not
-    url.pathname = '/login';
+    if (!session) {
+      url.pathname = '/login';
+    } else {
+      url.pathname = '/dashboard';
+    }
     return NextResponse.redirect(url);
   }
 

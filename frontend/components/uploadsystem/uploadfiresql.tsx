@@ -1,6 +1,6 @@
 "use client";
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Box, Button, Typography} from '@mui/material';
+import {Box, Typography} from '@mui/material';
 import {FileCollectionRowSet, FileRow, formatDate, ReviewStates, UploadFireProps} from '@/config/macros';
 import {Stack} from "@mui/joy";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
@@ -16,7 +16,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
   ({
      personnelRecording, acceptedFiles, unitOfMeasurement, parsedData,
      uploadForm, setIsDataUnsaved, currentPlot, currentCensus,
-     uploadCompleteMessage, setUploadCompleteMessage,
+     schema, uploadCompleteMessage, setUploadCompleteMessage,
      setUploadError, setErrorComponent,
      setReviewState, setAllRowToCMID,
    }) => {
@@ -34,7 +34,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
       try {
         setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
         const response = await fetch(
-          `/api/sqlload?formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&${unitOfMeasurement !== '' ? `&uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
+          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&${unitOfMeasurement !== '' ? `&uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(fileData[fileName])
@@ -45,7 +45,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
           if (uploadForm === 'fixeddata_census') {
             // Fetch additional details for each coreMeasurementID
             Promise.all(result.idToRows.map(({coreMeasurementID}: IDToRow) =>
-              fetch(`/api/details/cmid?cmid=${coreMeasurementID}`)
+              fetch(`/api/details/cmid?schema=${schema}&cmid=${coreMeasurementID}`)
                 .then(response => response.json())
             )).then(details => {
               // Combine details with idToRows data

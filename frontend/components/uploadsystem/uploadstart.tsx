@@ -1,15 +1,14 @@
 "use client";
 
 import {Box, Button, Grid} from "@mui/material";
-import {ReviewStates, TableHeadersByFormType, UploadStartProps} from "@/config/macros";
+import {ReviewStates, UploadStartProps} from "@/config/macros";
 import {ListSubheader, Stack, Typography} from "@mui/joy";
 import SelectFormType from "@/components/uploadsystemhelpers/groupedformselection";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import React, {useEffect, useState} from "react";
-import CircularProgress from "@mui/joy/CircularProgress";
 import Select from "@mui/joy/Select";
 import List from "@mui/joy/List";
-import Option, { optionClasses } from '@mui/joy/Option';
+import Option from '@mui/joy/Option';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const {
@@ -69,9 +68,18 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 />
               </>
             )}
-
+            {uploadForm !== '' && uploadForm !== 'fixeddata_census' && (
+              <>
+                <Button onClick={handleUnitOfMeasurementBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
+                <Typography sx={{mb: 2}}>You have selected:</Typography>
+                <Typography>Form: {uploadForm}</Typography>
+                <Button onClick={() => setFinish(true)}>
+                  Finalize selections
+                </Button>
+              </>
+            )}
             {/* Personnel Recording Selection */}
-            {uploadForm !== '' && personnelRecording === '' && (
+            {uploadForm === 'fixeddata_census' && personnelRecording === '' && (
               <>
                 <Button onClick={handleFormTypeBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
                 <Typography sx={{mb: 2}}>

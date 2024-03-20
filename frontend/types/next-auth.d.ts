@@ -1,4 +1,6 @@
 import 'next-auth';
+import {SitesRDS} from "@/config/sqlmacros";
+import {Profile} from "next-auth";
 
 declare module 'next-auth' {
   /**
@@ -10,6 +12,8 @@ declare module 'next-auth' {
       name?: string;
       email?: string;
       image?: string;
+      sites: SitesRDS[];
+      allsites: SitesRDS[];
     }
   }
 
@@ -22,10 +26,14 @@ declare module 'next-auth' {
    */
   interface User {
     isAdmin: boolean;
+    sites: SitesRDS[];
+    allsites: SitesRDS[];
   }
 
   // Extend the Token type
   interface Token {
     isAdmin: boolean;
+    sites: SitesRDS[];
+    allsites: SitesRDS[];
   }
 }

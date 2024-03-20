@@ -10,14 +10,17 @@ import {
   Quadrat
 } from "@/config/macros";
 import {getData} from "@/config/db";
+import {SitesRDS} from "@/config/sqlmacros";
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const QuadratListContext = createContext<Quadrat[] | null>(null);
 export const CensusListContext = createContext<Census[] | null>(null);
 export const FirstLoadContext = createContext<boolean | null>(null);
+export const SiteListContext = createContext<SitesRDS[] | null>(null);
 export const PlotListDispatchContext = createContext<EnhancedDispatch<Plot[]> | null>(null);
 export const QuadratListDispatchContext = createContext<EnhancedDispatch<Quadrat[]> | null>(null);
 export const CensusListDispatchContext = createContext<EnhancedDispatch<Census[]> | null>(null);
+export const SiteListDispatchContext = createContext<EnhancedDispatch<SitesRDS[]> | null>(null);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
 
 export function ListSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
@@ -30,6 +33,9 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
   const [censusList, censusListDispatch] =
     useReducer<React.Reducer<Census[] | null, LoadAction<Census[]>>>(genericLoadReducer, []);
 
+  const [siteList, siteListDispatch] =
+    useReducer<React.Reducer<SitesRDS[] | null, LoadAction<SitesRDS[]>>>(genericLoadReducer, []);
+
   const [firstLoad, firstLoadDispatch] = useReducer(
     firstLoadReducer,
     true
@@ -38,6 +44,7 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
   const enhancedPlotListDispatch = createEnhancedDispatch(plotListDispatch, 'plotList');
   const enhancedQuadratListDispatch = createEnhancedDispatch(quadratListDispatch, 'quadratList');
   const enhancedCensusListDispatch = createEnhancedDispatch(censusListDispatch, 'censusList');
+  const enhancedSiteListDispatch = createEnhancedDispatch(siteListDispatch, 'siteList');
 
 
   useEffect(() => {
@@ -50,6 +57,9 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
 
       const censusListData: Census[] | undefined = await getData('censusList');
       if (censusListData) await enhancedCensusListDispatch({censusList: censusListData});
+
+      const siteListData: SitesRDS[] | undefined = await getData('siteList');
+      if (siteListData) await enhancedSiteListDispatch({siteList: siteListData});
     };
 
     fetchData().catch(console.error);
@@ -62,23 +72,27 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
 
 
   return (
-    <PlotListContext.Provider value={plotList}>
-      <PlotListDispatchContext.Provider value={enhancedPlotListDispatch}>
-        <QuadratListContext.Provider value={quadratList}>
-          <QuadratListDispatchContext.Provider value={enhancedQuadratListDispatch}>
-            <CensusListContext.Provider value={censusList}>
-              <CensusListDispatchContext.Provider value={enhancedCensusListDispatch}>
-                <FirstLoadContext.Provider value={firstLoad}>
-                  <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
-                    {children}
-                  </FirstLoadDispatchContext.Provider>
-                </FirstLoadContext.Provider>
-              </CensusListDispatchContext.Provider>
-            </CensusListContext.Provider>
-          </QuadratListDispatchContext.Provider>
-        </QuadratListContext.Provider>
-      </PlotListDispatchContext.Provider>
-    </PlotListContext.Provider>
+    <SiteListContext.Provider value={siteList}>
+      <SiteListDispatchContext.Provider value={enhancedSiteListDispatch}>
+        <PlotListContext.Provider value={plotList}>
+          <PlotListDispatchContext.Provider value={enhancedPlotListDispatch}>
+            <QuadratListContext.Provider value={quadratList}>
+              <QuadratListDispatchContext.Provider value={enhancedQuadratListDispatch}>
+                <CensusListContext.Provider value={censusList}>
+                  <CensusListDispatchContext.Provider value={enhancedCensusListDispatch}>
+                    <FirstLoadContext.Provider value={firstLoad}>
+                      <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+                        {children}
+                      </FirstLoadDispatchContext.Provider>
+                    </FirstLoadContext.Provider>
+                  </CensusListDispatchContext.Provider>
+                </CensusListContext.Provider>
+              </QuadratListDispatchContext.Provider>
+            </QuadratListContext.Provider>
+          </PlotListDispatchContext.Provider>
+        </PlotListContext.Provider>
+      </SiteListDispatchContext.Provider>
+    </SiteListContext.Provider>
   );
 }
 
@@ -117,4 +131,12 @@ export function useCensusListContext() {
 
 export function useCensusListDispatch() {
   return useContext(CensusListDispatchContext);
+}
+
+export function useSiteListContext() {
+  return useContext(SiteListContext);
+}
+
+export function useSiteListDispatch() {
+  return useContext(SiteListDispatchContext);
 }

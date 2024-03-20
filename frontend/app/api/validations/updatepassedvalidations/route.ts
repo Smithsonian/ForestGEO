@@ -1,9 +1,10 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getConn, getSchema, runQuery, UpdateValidationResponse} from "@/components/processors/processormacros";
+import {getConn, runQuery, UpdateValidationResponse} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest) {
   const conn = await getConn();
-  const schema = getSchema();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   const plotIDParam = request.nextUrl.searchParams.get('plotID');
   const censusIDParam = request.nextUrl.searchParams.get('censusID');
 

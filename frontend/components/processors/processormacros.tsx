@@ -31,6 +31,7 @@ export async function getConn() {
 export interface SpecialProcessingProps {
   connection: PoolConnection;
   rowData: FileRow;
+  schema: string;
   plotID?: number;
   censusID?: number;
   fullName?: string;
@@ -237,6 +238,7 @@ export async function parseQuadratsRequestBody(request: NextRequest) {
     DimensionY: requestBody.dimensionY,
     Area: requestBody.area,
     QuadratShape: requestBody.quadratShape,
+    Personnel: requestBody.personnel
   };
 }
 
@@ -366,7 +368,6 @@ export interface QuadratsResult {
   QuadratID: any;
   PlotID: any;
   CensusID: any;
-  PersonnelID: any;
   QuadratName: any;
   DimensionX: any;
   DimensionY: any;
@@ -404,4 +405,10 @@ export interface SubSpeciesResult {
   SubSpeciesCode: any;
   Authority: any;
   InfraSpecificLevel: any;
+}
+
+export interface SitesResult {
+  SiteID: any;
+  SiteName: any;
+  SchemaName: any;
 }

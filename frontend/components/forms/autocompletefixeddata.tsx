@@ -2,6 +2,7 @@
 import Autocomplete from "@mui/material/Autocomplete";
 import {useEffect, useState} from "react";
 import {CircularProgress, Popper, TextField} from "@mui/material";
+import {useSiteContext} from "@/app/contexts/userselectionprovider";
 
 interface AutocompleteFixedDataProps {
   dataType: string;
@@ -16,10 +17,13 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
 
+  const currentSite = useSiteContext();
+  if (!currentSite) throw new Error("Site must be selected!");
+
   // Function to refresh data
   const refreshData = () => {
     setLoading(true);
-    fetch(`/api/formsearch/${dataType}?searchfor=${encodeURIComponent(inputValue)}`)
+    fetch(`/api/formsearch/${dataType}?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`)
       .then((response) => response.json())
       .then((data) => {
         setOptions(data);

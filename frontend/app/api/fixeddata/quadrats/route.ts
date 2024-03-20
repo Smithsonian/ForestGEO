@@ -1,6 +1,6 @@
 // FIXED DATA QUADRATS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {getSchema, getSqlConnection, parseQuadratsRequestBody, runQuery} from "@/components/processors/processormacros";
+import {getConn, parseQuadratsRequestBody, runQuery} from "@/components/processors/processormacros";
 import {ErrorMessages} from "@/config/macros";
 import {QuadratsRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection} from "mysql2/promise";
@@ -10,41 +10,37 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
   const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
+  if (isNaN(page) || isNaN(pageSize)) {
+    throw new Error('Invalid page, pageSize, or plotID parameter');
+  }
 
   try {
-    const schema = getSchema();
-    if (isNaN(page) || isNaN(pageSize)) {
-      throw new Error('Invalid page, pageSize, or plotID parameter');
-    }
-    // Initialize the connection attempt counter
-    conn = await getSqlConnection(0);
-
-    /// Calculate the starting row for the query based on the page number and page size
+    conn = await getConn();
     const startRow = page * pageSize;
 
-    // Query to get the paginated data
-    let paginatedQuery: string;
-    let queryParams: any[];
-    if (plotID) {
-      paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Quadrats
-      WHERE PlotID = ?
-      LIMIT ?, ?
-      `;
-      queryParams = [plotID, startRow, pageSize];
-    } else {
-      paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Quadrats
-      LIMIT ?, ?
-    `;
-      queryParams = [startRow, pageSize];
-    }
+    let paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS q.*, 
+      GROUP_CONCAT(JSON_OBJECT(
+        'personnelID', p.PersonnelID,
+        'firstName', p.FirstName,
+        'lastName', p.LastName,
+        'role', qp.Role
+      ) SEPARATOR ',') AS personnel
+      FROM ${schema}.Quadrats q
+      LEFT JOIN ${schema}.quadratpersonnel qp ON q.QuadratID = qp.QuadratID
+      LEFT JOIN ${schema}.personnel p ON qp.PersonnelID = p.PersonnelID
+      ${plotID ? 'WHERE q.PlotID = ?' : ''}
+      GROUP BY q.QuadratID
+      LIMIT ?, ?`;
+    const queryParams = plotID ? [plotID, startRow, pageSize] : [startRow, pageSize];
+
     const paginatedResults = await runQuery(conn, paginatedQuery, queryParams.map(param => param.toString()));
 
-    // Query to get the total count of rows
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
@@ -54,13 +50,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
       quadratID: row.QuadratID,
       plotID: row.PlotID,
       censusID: row.CensusID,
-      personnelID: row.PersonnelID,
       quadratName: row.QuadratName,
       dimensionX: row.DimensionX,
       dimensionY: row.DimensionY,
       area: row.Area,
-      quadratShape: row.QuadratShape
+      quadratShape: row.QuadratShape,
+      personnel: row.personnel ? JSON.parse(`[${row.personnel}]`) : []
     }));
+
     return new NextResponse(JSON.stringify({quadrats: quadratRows, totalCount: totalRows}), {status: 200});
   } catch (error) {
     console.error('Error:', error);
@@ -72,16 +69,34 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
 
 export async function POST(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    const {QuadratID, ...newRowData} = await parseQuadratsRequestBody(request);
-    conn = await getSqlConnection(0);
-    // Insert the new row
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Quadrats`, newRowData]);
-    await runQuery(conn, insertQuery);
+    const {Personnel, ...newRowData} = await parseQuadratsRequestBody(request);
+    conn = await getConn();
 
+    // Start a transaction
+    await conn.beginTransaction();
+
+    // Insert the new quadrat row
+    const insertQuadratQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Quadrats`, newRowData]);
+    const result = await runQuery(conn, insertQuadratQuery);
+    const quadratID = result.insertId;
+
+    // Insert personnel associated with the new quadrat
+    if (Personnel && Personnel.length > 0) {
+      for (const person of Personnel) {
+        const insertPersonnelQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.quadratpersonnel`, {QuadratID: quadratID, ...person}]);
+        await runQuery(conn, insertPersonnelQuery);
+      }
+    }
+
+    // Commit the transaction
+    await conn.commit();
     return NextResponse.json({message: "Insert successful"}, {status: 200});
   } catch (error) {
+    // Rollback in case of an error
+    await conn?.rollback();
     console.error('Error:', error);
     throw new Error("Call failed");
   } finally {
@@ -89,15 +104,23 @@ export async function POST(request: NextRequest) {
   }
 }
 
+
 export async function DELETE(request: NextRequest) {
   let conn: PoolConnection | null = null;
   const deleteQuadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!);
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
-    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Quadrats WHERE [QuadratID] = ${deleteQuadratID}`);
+
+    // Delete associated personnel records
+    await runQuery(conn, `DELETE FROM ${schema}.quadratpersonnel WHERE QuadratID = ?`, [deleteQuadratID]);
+
+    // Delete the quadrat
+    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Quadrats WHERE QuadratID = ?`, [deleteQuadratID]);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
+
     if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
     return NextResponse.json({message: "Delete successful"}, {status: 200});
   } catch (error) {
@@ -110,17 +133,37 @@ export async function DELETE(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    const {QuadratID, ...updateData} = await parseQuadratsRequestBody(request);
-    conn = await getSqlConnection(0);
+    const {QuadratID, Personnel, ...updateData} = await parseQuadratsRequestBody(request);
+    conn = await getConn();
 
-    // Build the update query
+    // Start a transaction
+    await conn.beginTransaction();
+
+    // Update the quadrat information
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE QuadratID = ?', [`${schema}.Quadrats`, updateData, QuadratID]);
     await runQuery(conn, updateQuery);
 
+    // Delete existing personnel records for this quadrat
+    const deletePersonnelQuery = mysql.format('DELETE FROM ?? WHERE QuadratID = ?', [`${schema}.quadratpersonnel`, QuadratID]);
+    await runQuery(conn, deletePersonnelQuery);
+
+    // Insert new personnel records
+    if (Personnel && Personnel.length > 0) {
+      for (const person of Personnel) {
+        const insertPersonnelQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.quadratpersonnel`, {QuadratID, ...person}]);
+        await runQuery(conn, insertPersonnelQuery);
+      }
+    }
+
+    // Commit the transaction
+    await conn.commit();
     return NextResponse.json({message: "Update successful"}, {status: 200});
   } catch (error) {
+    // Rollback in case of an error
+    await conn?.rollback();
     console.error('Error:', error);
     throw new Error("Call failed");
   } finally {

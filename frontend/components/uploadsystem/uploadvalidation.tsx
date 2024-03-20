@@ -18,7 +18,7 @@ import CircularProgress from "@mui/joy/CircularProgress";
 
 const UploadValidation: React.FC<UploadValidationProps> = ({
                                                              setReviewState,
-                                                             currentPlot, currentCensus
+                                                             currentPlot, currentCensus, schema
                                                            }) => {
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
@@ -133,7 +133,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   };
 
   const performValidation = async (api: string): Promise<{ response: ValidationResponse, hasError: boolean }> => {
-    let queryParams = `plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`;
+    let queryParams = `schema=${schema}&plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`;
     if (['screendbhminmax', 'screenhomminmax'].includes(api)) {
       const values = minMaxValues[api] || defaultMinMaxValues[api]; // Use default if not set
       queryParams += `&minValue=${values.min}&maxValue=${values.max}`;

@@ -11,7 +11,7 @@ import {
   TableHeadersByFormType
 } from "@/config/macros";
 import {FileWithPath} from "react-dropzone";
-import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
+import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";
 import {parse, ParseResult} from "papaparse";
 import {Box, Tab, tabClasses, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
@@ -22,7 +22,6 @@ import UploadError from "@/components/uploadsystem/uploaderror";
 import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
 import UploadValidation from "@/components/uploadsystem/uploadvalidation";
 import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
-import UploadValidationErrorDisplay from "@/components/uploadsystem/uploadvalidationerrordisplay";
 import {Button} from "@mui/material";
 import UploadStart from "@/components/uploadsystem/uploadstart";
 import ListItemDecorator from "@mui/joy/ListItemDecorator";
@@ -50,10 +49,11 @@ export interface DetailedCMIDRow extends CMIDRow {
 interface UploadParentProps {
   setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   onReset: () => void;
+  overrideUploadForm?: string;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const {setIsUploadModalOpen, onReset} = props;
+  const {setIsUploadModalOpen, onReset, overrideUploadForm} = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
@@ -86,7 +86,13 @@ export default function UploadParent(props: UploadParentProps) {
   const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
+  let currentSite = useSiteContext();
+  if (!currentSite) throw new Error('site must be selected!');
   const {data: session} = useSession();
+
+  useEffect(() => {
+    if (overrideUploadForm) setUploadForm(overrideUploadForm);
+  }, [overrideUploadForm]);
 
   const handleCancelUpload = (): void => {
     handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
@@ -284,7 +290,7 @@ export default function UploadParent(props: UploadParentProps) {
   }, [progressTracker, reviewState]);
 
   const renderStateContent = () => {
-    if ((personnelRecording === '' || uploadForm === '') && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
+    if (uploadForm === '' && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
     switch (reviewState) {
       case ReviewStates.START:
         return <UploadStart
@@ -347,6 +353,7 @@ export default function UploadParent(props: UploadParentProps) {
           setIsDataUnsaved={setIsDataUnsaved}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
+          schema={currentSite.schemaName}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
           setUploadError={setUploadError}
@@ -358,12 +365,14 @@ export default function UploadParent(props: UploadParentProps) {
           setReviewState={setReviewState}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
+          schema={currentSite.schemaName}
         />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
           currentPlot={currentPlot}
           currentCensus={currentCensus}
+          schema={currentSite.schemaName}
         />;
       case ReviewStates.UPLOAD_AZURE:
         return <UploadFireAzure

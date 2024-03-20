@@ -1,9 +1,16 @@
 create table forestgeo_testing.attributes
 (
-    Code        varchar(10)                                                                               not null,
+    Code        varchar(10)                                                                               not null
+        primary key,
     Description text                                                                                      null,
-    Status      enum ('alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null,
-    primary key (Code)
+    Status      enum ('alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
+);
+
+create table forestgeo_testing.currentuser
+(
+    id       int          not null
+        primary key,
+    username varchar(255) null
 );
 
 create table forestgeo_testing.personnel
@@ -46,7 +53,6 @@ create table forestgeo_testing.census
     PlotCensusNumber int  null,
     constraint Census_Plots_PlotID_fk
         foreign key (PlotID) references forestgeo_testing.plots (PlotID)
-            on update cascade
 );
 
 create table forestgeo_testing.quadrats
@@ -54,18 +60,30 @@ create table forestgeo_testing.quadrats
     QuadratID    int auto_increment
         primary key,
     PlotID       int   null,
-    PersonnelID  int   null,
+    CensusID     int   null,
     QuadratName  text  null,
-    QuadratX     float null,
-    QuadratY     float null,
     DimensionX   int   null,
     DimensionY   int   null,
     Area         float null,
     QuadratShape text  null,
-    constraint Quadrats_Personnel_fk
-        foreign key (PersonnelID) references forestgeo_testing.personnel (PersonnelID),
     constraint Quadrats_Plots_FK
-        foreign key (PlotID) references forestgeo_testing.plots (PlotID)
+        foreign key (PlotID) references forestgeo_testing.plots (PlotID),
+    constraint quadrats_census_CensusID_fk
+        foreign key (CensusID) references forestgeo_testing.census (CensusID)
+);
+
+create table forestgeo_testing.quadratpersonnel
+(
+    QuadratPersonnelID int auto_increment
+        primary key,
+    QuadratID          int          null,
+    PersonnelID        int          null,
+    AssignedDate       date         null,
+    Role               varchar(150) null,
+    constraint fk_QuadratPersonnel_Personnel
+        foreign key (PersonnelID) references forestgeo_testing.personnel (PersonnelID),
+    constraint fk_QuadratPersonnel_Quadrats
+        foreign key (QuadratID) references forestgeo_testing.quadrats (QuadratID)
 );
 
 create table forestgeo_testing.reference
@@ -100,6 +118,17 @@ create table forestgeo_testing.genus
         foreign key (FamilyID) references forestgeo_testing.family (FamilyID),
     constraint Genus_Reference_ReferenceID_fk
         foreign key (ReferenceID) references forestgeo_testing.reference (ReferenceID)
+);
+
+create table forestgeo_testing.schemachangelog
+(
+    ChangeLogID    int auto_increment
+        primary key,
+    TableName      varchar(255)                       not null,
+    RowID          int                                not null,
+    ChangeType     enum ('INSERT', 'UPDATE')          not null,
+    ChangeDateTime datetime default CURRENT_TIMESTAMP not null,
+    ChangedBy      varchar(255)                       not null
 );
 
 create table forestgeo_testing.species
@@ -161,7 +190,6 @@ create table forestgeo_testing.subspecies
     InfraSpecificLevel char(32)     null,
     constraint SubSpecies_Species_SpeciesID_fk
         foreign key (SpeciesID) references forestgeo_testing.species (SpeciesID)
-            on update cascade
 );
 
 create table forestgeo_testing.trees
@@ -172,8 +200,7 @@ create table forestgeo_testing.trees
     SpeciesID    int         null,
     SubSpeciesID int         null,
     constraint Trees_Species_SpeciesID_fk
-        foreign key (SpeciesID) references forestgeo_testing.species (SpeciesID)
-            on update cascade,
+        foreign key (SpeciesID) references forestgeo_testing.species (SpeciesID),
     constraint Trees_SubSpecies_SubSpeciesID_fk
         foreign key (SubSpeciesID) references forestgeo_testing.subspecies (SubSpeciesID)
 );
@@ -195,11 +222,9 @@ create table forestgeo_testing.stems
     Moved           bit         null,
     StemDescription text        null,
     constraint FK_Stems_Quadrats
-        foreign key (QuadratID) references forestgeo_testing.quadrats (QuadratID)
-            on update cascade,
+        foreign key (QuadratID) references forestgeo_testing.quadrats (QuadratID),
     constraint FK_Stems_Trees
         foreign key (TreeID) references forestgeo_testing.trees (TreeID)
-            on update cascade
 );
 
 create table forestgeo_testing.coremeasurements
@@ -212,9 +237,6 @@ create table forestgeo_testing.coremeasurements
     TreeID            int              null,
     StemID            int              null,
     PersonnelID       int              null,
-    IsRemeasurement   bit              null,
-    IsCurrent         bit              null,
-    IsPrimaryStem     bit              null,
     IsValidated       bit default b'0' null,
     MeasurementDate   date             null,
     MeasuredDBH       decimal(10, 2)   null,
@@ -222,11 +244,9 @@ create table forestgeo_testing.coremeasurements
     Description       text             null,
     UserDefinedFields text             null,
     constraint CoreMeasurements_Census_CensusID_fk
-        foreign key (CensusID) references forestgeo_testing.census (CensusID)
-            on update cascade,
+        foreign key (CensusID) references forestgeo_testing.census (CensusID),
     constraint CoreMeasurements_Personnel_PersonnelID_fk
-        foreign key (PersonnelID) references forestgeo_testing.personnel (PersonnelID)
-            on update cascade,
+        foreign key (PersonnelID) references forestgeo_testing.personnel (PersonnelID),
     constraint CoreMeasurements_Plots_PlotID_fk
         foreign key (PlotID) references forestgeo_testing.plots (PlotID),
     constraint CoreMeasurements_Quadrats_QuadratID_fk
@@ -267,6 +287,17 @@ create index idx_treeid
 create index idx_stemid
     on forestgeo_testing.stems (StemID);
 
+create table forestgeo_testing.validationchangelog
+(
+    ValidationRunID int auto_increment
+        primary key,
+    ProcedureName   varchar(255)                       not null,
+    RunDateTime     datetime default CURRENT_TIMESTAMP not null,
+    TargetRowID     int                                null,
+    IsSuccessful    bit                                null,
+    ErrorMessage    varchar(255)                       null
+);
+
 create table forestgeo_testing.validationerrors
 (
     ValidationErrorID          int auto_increment
@@ -281,10 +312,8 @@ create table forestgeo_testing.cmverrors
     CoreMeasurementID int null,
     ValidationErrorID int null,
     constraint CMVErrors_CoreMeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references forestgeo_testing.coremeasurements (CoreMeasurementID)
-            on update cascade,
+        foreign key (CoreMeasurementID) references forestgeo_testing.coremeasurements (CoreMeasurementID),
     constraint cmverrors_validationerrors_ValidationErrorID_fk
         foreign key (ValidationErrorID) references forestgeo_testing.validationerrors (ValidationErrorID)
-            on update cascade
 );
 

@@ -1,11 +1,11 @@
 "use client";
-import React, { useEffect, useState } from "react";
-import { Box, Typography } from "@mui/material";
-import { ReviewStates, UploadUpdateValidationsProps } from "@/config/macros";
+import React, {useEffect, useState} from "react";
+import {Box, Typography} from "@mui/material";
+import {ReviewStates, UploadUpdateValidationsProps} from "@/config/macros";
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const {
-    currentPlot, currentCensus, setReviewState,
+    currentPlot, currentCensus, setReviewState, schema,
   } = props;
 
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
@@ -15,7 +15,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
 
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
-    const response = await fetch(`/api/validations/updatepassedvalidations?plotID=${currentPlot?.id.toString()}&censusID=${currentCensus?.censusID.toString()}`);
+    const response = await fetch(`/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id.toString()}&censusID=${currentCensus?.censusID.toString()}`);
     const result = await response.json();
     console.log('rows validated: ', result.rowsValidated);
     setIsUpdateValidationComplete(true);
