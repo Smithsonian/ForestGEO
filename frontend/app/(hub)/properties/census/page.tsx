@@ -46,8 +46,8 @@ export default function CensusPage() {
       censusID: nextCensusID,
       plotID: currentPlot ? currentPlot.id : 0,
       plotCensusNumber: 0,
-      startDate: null,
-      endDate: null,
+      startDate: new Date(),
+      endDate: new Date(),
       description: '',
       isNew: true
     };

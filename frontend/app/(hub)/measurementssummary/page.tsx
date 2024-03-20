@@ -100,7 +100,7 @@ export default function MeasurementsSummaryPage() {
   };
 
   if (!currentPlot) {
-    return <>You must select a plot to continue!</>;
+    return <>You must select a Plot to continue!</>;
   }
 
   return (

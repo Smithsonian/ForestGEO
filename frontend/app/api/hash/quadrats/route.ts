@@ -1,10 +1,11 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
-import {getSchema, getSqlConnection, runQuery} from "@/components/processors/processormacros";
+import {getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {generateHash} from "@/config/crypto-actions";
 
 export async function GET(request: NextRequest) {
-  const schema = getSchema();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema provided!');
   let conn: PoolConnection | null = null;
   try {
     conn = await getSqlConnection(0);

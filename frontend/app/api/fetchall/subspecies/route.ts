@@ -1,12 +1,12 @@
-import {NextResponse} from "next/server";
+import {NextRequest, NextResponse} from "next/server";
 import {SubSpeciesRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
 import {getSqlConnection, runQuery, SubSpeciesResult} from "@/components/processors/processormacros";
 import {bitToBoolean} from "@/config/macros";
 
-export async function GET(): Promise<NextResponse<SubSpeciesRDS[]>> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
+export async function GET(request: NextRequest): Promise<NextResponse<SubSpeciesRDS[]>> {
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error("Schema selection was not provided to API endpoint");
 
   let conn: PoolConnection | null = null;
   try {

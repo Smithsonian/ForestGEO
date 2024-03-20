@@ -2,13 +2,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages} from "@/config/macros";
 import {PersonnelRDS} from "@/config/sqlmacros";
-import {
-  getSchema,
-  getSqlConnection,
-  parsePersonnelRequestBody,
-  PersonnelResult,
-  runQuery
-} from "@/components/processors/processormacros";
+import {getConn, parsePersonnelRequestBody, PersonnelResult, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
@@ -16,6 +10,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   totalCount: number
 }>> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   if (isNaN(page)) {
     console.error('page parseInt conversion failed');
@@ -26,11 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     // handle error or set default
   }
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0); // Utilize the retry mechanism effectively
-    // Initialize the connection attempt counter
-    let attempt = 0;
-    conn = await getSqlConnection(attempt);
+    conn = await getConn();
 
     /// Calculate the starting row for the query based on the page number and page size
     const startRow = page * pageSize;
@@ -67,16 +59,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const {PersonnelID, ...newRowData} = await parsePersonnelRequestBody(request);
 
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Personnel`, newRowData]);
-    await runQuery(conn, insertQuery);
-
-    return NextResponse.json({message: "Insert successful"}, {status: 200});
+    const results = await runQuery(conn, insertQuery);
+    return NextResponse.json({message: "Insert successful", newPersonnelID: results.insertId}, {status: 200});
   } catch (error) {
     console.error('Error in POST:', error);
     return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
@@ -87,10 +79,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
     const {PersonnelID, ...updateData} = await parsePersonnelRequestBody(request);
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE PersonnelID = ?', [`${schema}.Personnel`, updateData, PersonnelID]);
     await runQuery(conn, updateQuery);
@@ -110,9 +103,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (isNaN(deletePersonnelID)) {
     return NextResponse.json({message: "Invalid PersonnelID"}, {status: 400});
   }
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
   try {
-    const schema = getSchema();
-    conn = await getSqlConnection(0);
+    conn = await getConn();
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
     const deleteQuery = `DELETE FROM ${schema}.Personnel WHERE PersonnelID = ?`;

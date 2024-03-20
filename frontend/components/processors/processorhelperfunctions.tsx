@@ -2,13 +2,14 @@ import {PoolConnection} from "mysql2/promise";
 import {
   fileMappings,
   getConn,
-  getSchema,
   InsertUpdateProcessingProps,
   runQuery,
+  SitesResult,
   ValidationResponse
 } from "@/components/processors/processormacros";
 import {processCensus} from "@/components/processors/processcensus";
 import {bitToBoolean} from "@/config/macros";
+import {SitesRDS} from "@/config/sqlmacros";
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
@@ -218,21 +219,19 @@ export async function getPersonnelIDByName(
 }
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | null> {
-  const {formType, ...subProps} = props;
+  const {formType, schema, ...subProps} = props;
   const {connection, rowData} = subProps;
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   console.log('INSERT OR UPDATE: schema & mapping found');
   if (formType === 'fixeddata_census') {
-    return await processCensus(subProps);
+    return await processCensus({...subProps, schema});
   } else {
     if (mapping.specialProcessing) {
       console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
-      await mapping.specialProcessing(subProps);
+      await mapping.specialProcessing({...subProps, schema});
     } else {
       console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
       const columns = Object.keys(mapping.columnMappings);
@@ -264,11 +263,10 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
   }
 }
 
-export async function runValidationProcedure(procedureName: string, plotID: number | null, censusID: number | null, min?: number, max?: number) {
+export async function runValidationProcedure(schema: string, procedureName: string, plotID: number | null, censusID: number | null, min?: number, max?: number) {
   const conn = await getConn();
   let query, parameters;
 
-  const schema = getSchema();
   if (min !== undefined && max !== undefined) {
     query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
     parameters = [censusID, plotID, min, max];
@@ -304,33 +302,19 @@ export async function runValidationProcedure(procedureName: string, plotID: numb
   }
 }
 
-export async function verifyLastName(lastName: string): Promise<{ verified: boolean, isAdmin: boolean }> {
+export async function verifyEmail(email: string): Promise<{ emailVerified: boolean, isAdmin: boolean }> {
   const connection: PoolConnection | null = await getConn();
   try {
-    // The query now selects the IsAdmin field as well
-    const query = `SELECT COUNT(*) AS count, IsAdmin FROM catalog.users WHERE LastName = ? GROUP BY IsAdmin`;
-    const results = await runQuery(connection, query, [lastName]);
-
-    const verified = results.length > 0 && results[0].count > 0;
-    // Use the bitToBoolean function to convert the IsAdmin field
-    const isAdmin = verified && bitToBoolean(results[0].IsAdmin);
-    return {verified, isAdmin};
-  } catch (error) {
-    console.error('Error verifying last name in database: ', error);
-    throw error;
-  } finally {
-    if (connection) connection.release();
-  }
-}
-
-export async function verifyEmail(email: string): Promise<{ emailVerified: boolean }> {
-  const connection: PoolConnection | null = await getConn();
-  try {
-    const query = `SELECT COUNT(*) as count from catalog.users WHERE Email = ? GROUP BY IsAdmin`;
+    // Query to fetch the IsAdmin field for a given email
+    const query = `SELECT IsAdmin FROM catalog.users WHERE Email = ? LIMIT 1`;
     const results = await runQuery(connection, query, [email]);
 
-    const emailVerified = results.length > 0 && results[0].count > 0;
-    return {emailVerified};
+    // emailVerified is true if there is at least one result
+    const emailVerified = results.length > 0;
+    // isAdmin is determined based on the IsAdmin field if email is verified
+    const isAdmin = emailVerified && bitToBoolean(results[0]?.IsAdmin);
+
+    return {emailVerified, isAdmin};
   } catch (error: any) {
     console.error('Error verifying email in database: ', error);
     throw error;
@@ -338,3 +322,65 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
     if (connection) connection.release();
   }
 }
+
+export async function getAllSchemas(): Promise<SitesRDS[]> {
+  const connection: PoolConnection | null = await getConn();
+  try {
+    // Query to get sites
+    const sitesQuery = `
+      SELECT *
+      FROM catalog.sites
+    `;
+    const sitesParams: any[] | undefined = [];
+    const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
+
+    return sitesResults.map((row: SitesResult) => ({
+      siteID: row.SiteID,
+      siteName: row.SiteName,
+      schemaName: row.SchemaName,
+    }));
+  } catch (error: any) {
+    throw new Error(error);
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
+  const connection: PoolConnection | null = await getConn();
+  try {
+    // Query to get user ID
+    const userQuery = `
+      SELECT UserID FROM catalog.users
+      WHERE Email = ?
+    `;
+    const userParams = [email];
+    const userResults = await runQuery(connection, userQuery, userParams);
+
+    if (userResults.length === 0) {
+      throw new Error('User not found');
+    }
+    const userID = userResults[0].UserID;
+
+    // Query to get sites
+    const sitesQuery = `
+      SELECT s.*
+      FROM catalog.sites AS s
+      JOIN catalog.usersiterelations AS usr ON s.SiteID = usr.SiteID
+      WHERE usr.UserID = ?
+    `;
+    const sitesParams = [userID];
+    const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
+
+    return sitesResults.map((row: SitesResult) => ({
+      siteID: row.SiteID,
+      siteName: row.SiteName,
+      schemaName: row.SchemaName,
+    }));
+  } catch (error: any) {
+    throw new Error(error);
+  } finally {
+    if (connection) connection.release();
+  }
+}
+

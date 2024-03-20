@@ -8,9 +8,22 @@ import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import LoginRoundedIcon from "@mui/icons-material/LoginRounded";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {Skeleton} from "@mui/joy";
+import {useRouter} from "next/navigation";
 
 export const LoginLogout = () => {
   const {data: session, status} = useSession();
+  const router = useRouter();
+
+  const handleRetryLogin = () => {
+    signIn("azure-ad", {callbackUrl: '/dashboard'}, {prompt: "login"})
+      .catch((error: any) => {
+        console.error('Login error:', error);
+        signOut({callbackUrl: `/loginfailed?reason=${error.message}`})
+          .then(() => localStorage.clear())
+          .then(() => sessionStorage.clear());
+      });
+  };
+
   if (status == "unauthenticated") {
     return (
       <Box sx={{display: 'flex', gap: 1, alignItems: 'center'}}>
@@ -25,7 +38,7 @@ export const LoginLogout = () => {
           <Typography level="body-xs">your information</Typography>
         </Box>
         <IconButton size="sm" variant="plain" color="neutral"
-                    onClick={() => void signIn("azure-ad")}>
+                    onClick={handleRetryLogin}>
           <LoginRoundedIcon/>
         </IconButton>
       </Box>
@@ -53,7 +66,7 @@ export const LoginLogout = () => {
             </Skeleton>
           </Typography>
         </Box>
-        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut()}>
+        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({callbackUrl: '/login'})}>
           {status == "loading" ? <CircularProgress size={"lg"}/> : <LogoutRoundedIcon/>}
         </IconButton>
       </Box>

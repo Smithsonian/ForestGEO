@@ -1,26 +1,32 @@
 "use client";
-import React, {useCallback, useEffect, useState} from "react";
+import React, {useCallback, useEffect, useRef, useState} from "react";
 import {subtitle, title} from "@/config/primitives";
 import {useSession} from "next-auth/react";
 import {usePathname} from "next/navigation";
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
-import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {
+  useCensusListDispatch,
+  usePlotListDispatch,
+  useQuadratListDispatch,
+  useSiteListDispatch
+} from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
 import {siteConfig} from "@/config/macros";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
 import {Box} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
-import {loadServerDataIntoIDB} from "@/components/client/clientmacros";
 import {useLoading} from "@/app/contexts/loadingprovider";
+import {loadServerDataIntoIDB} from "@/config/updatecontextsfromidb";
+import {useSiteContext} from "@/app/contexts/userselectionprovider";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
       return (
-        <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard View</h3>
+        <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>
       );
-    case '/coremeasurementshub':
+    case '/measurementssummary':
       return (
         <h3 className={title({color: "green"})} key={endpoint}>Core Measurements Hub</h3>
       );
@@ -64,69 +70,100 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const plotsListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
+  const siteListDispatch = useSiteListDispatch();
+  const currentSite = useSiteContext();
   const {data: session} = useSession();
+  const previousSiteRef = useRef<string | undefined>(undefined);
 
+  const [siteListLoaded, setSiteListLoaded] = useState(false);
   const [coreDataLoaded, setCoreDataLoaded] = useState(false);
 
   let pathname = usePathname();
 
-  const fetchAndDispatchCoreData = useCallback(async () => {
+  const fetchAndUpdateCoreData = useCallback(async () => {
+    const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
+    // Load data from server into IndexedDB
+    if (session && currentSite) {
+      let email = session?.user?.email ?? '';
+      if (email === '') {
+        throw new Error("Session user's name or email is undefined");
+      }
+      try {
+        setLoading(true, 'Loading Quadrats...');
+        await loadServerDataIntoIDB('quadrats', email, currentSite.schemaName);
+        const quadratsData = await getData('quadratsLoad');
+        const quadratsList = await getData('quadratList');
+        quadratsLoadDispatch ? await quadratsLoadDispatch({quadratsLoad: quadratsData}) : undefined;
+        quadratListDispatch ? await quadratListDispatch({quadratList: quadratsList}) : undefined;
+        await delay(500);
+        setLoading(true, 'Loading Census...');
+        await loadServerDataIntoIDB('census', email, currentSite.schemaName);
+        const censusData = await getData('censusLoad');
+        const censusList = await getData('censusList');
+        censusLoadDispatch ? await censusLoadDispatch({censusLoad: censusData}) : undefined;
+        censusListDispatch ? await censusListDispatch({censusList: censusList}) : undefined;
+
+        await delay(500);
+        setLoading(true, 'Loading Plots...');
+        await loadServerDataIntoIDB('plots', email, currentSite.schemaName);
+        const plotsData = await getData('plotsLoad');
+        const plotList = await getData('plotList');
+        plotsLoadDispatch ? await plotsLoadDispatch({plotsLoad: plotsData}) : undefined;
+        plotsListDispatch ? await plotsListDispatch({plotList: plotList}) : undefined;
+      } catch (error) {
+        console.error('Error loading server data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+  }, [currentSite, session])
+
+  const fetchSiteList = useCallback(async () => {
     // Removed direct use of Dispatch functions for core data, as it's handled within clientmacros now.
     const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
     setLoading(true, 'Loading Core Data...');
 
-    let lastname = session?.user?.name;
-    let email = session?.user?.email;
-    if (!lastname || !email) {
-      console.error("Session user's name or email is undefined");
-      return;
+    if (session && !siteListLoaded) {
+      let email = session?.user?.email ?? '';
+      if (email === '') {
+        throw new Error("Session user's name or email is undefined");
+      }
+      let sites = session?.user?.allsites ?? [];
+      if (sites.length === 0) {
+        throw new Error("Session sites undefined");
+      } else {
+        setLoading(true, 'Loading Sites...');
+        siteListDispatch ? await siteListDispatch({siteList: sites}) : undefined;
+        await delay(500);
+      }
     }
-
-    // Split lastname to get the actual last name
-    lastname = lastname.split(' ')[1];
-
-    // Load data from server into IndexedDB
-    try {
-      setLoading(true, 'Loading Quadrats...');
-      await loadServerDataIntoIDB('quadrats', lastname, email);
-      const quadratsData = await getData('quadratsLoad');
-      const quadratsList = await getData('quadratList');
-      quadratsLoadDispatch ? await quadratsLoadDispatch({quadratsLoad: quadratsData}) : undefined;
-      quadratListDispatch ? await quadratListDispatch({quadratList: quadratsList}) : undefined;
-      await delay(500);
-      setLoading(true, 'Loading Census...');
-      await loadServerDataIntoIDB('census', lastname, email);
-      const censusData = await getData('censusLoad');
-      const censusList = await getData('censusList');
-      censusLoadDispatch ? await censusLoadDispatch({censusLoad: censusData}) : undefined;
-      censusListDispatch ? await censusListDispatch({censusList: censusList}) : undefined;
-
-      await delay(500);
-      setLoading(true, 'Loading Plots...');
-      await loadServerDataIntoIDB('plots', lastname, email);
-      const plotsData = await getData('plotsLoad');
-      const plotList = await getData('plotList');
-      plotsLoadDispatch ? await plotsLoadDispatch({plotsLoad: plotsData}) : undefined;
-      plotsListDispatch ? await plotsListDispatch({plotList: plotList}) : undefined;
-    } catch (error) {
-      console.error('Error loading server data:', error);
-    }
-
-    await delay(500); // Artificial delay for user experience
     setLoading(false);
   }, [session]);
 
   useEffect(() => {
-    // Fetch and dispatch core data
-    // Once done, set coreDataLoaded to true
-    fetchAndDispatchCoreData()
-      .then(() => setCoreDataLoaded(true))
-      .catch(console.error);
-  }, [fetchAndDispatchCoreData]);
+    if (session && !siteListLoaded) {
+      fetchSiteList().then(() => setSiteListLoaded(true)).catch(console.error);
+    }
+  }, [fetchSiteList, session, siteListLoaded]);
+
+  useEffect(() => {
+    // Track if the current site has changed
+    const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
+    if (siteListLoaded && currentSite && hasSiteChanged) {
+      // Site changed, reset coreDataLoaded to false
+      setCoreDataLoaded(false);
+      previousSiteRef.current = currentSite.siteName; // Update previous site reference
+    }
+
+    if (siteListLoaded && currentSite && !coreDataLoaded) {
+      // Site list loaded and current site selected, fetch core data
+      fetchAndUpdateCoreData().then(() => setCoreDataLoaded(true)).catch(console.error);
+    }
+  }, [siteListLoaded, currentSite, coreDataLoaded, fetchAndUpdateCoreData]);
 
   return (
     <>
-      <Sidebar coreDataLoaded={coreDataLoaded}/>
+      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded}/>
       <Header/>
       <Box
         component="main"
