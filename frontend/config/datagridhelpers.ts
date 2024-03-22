@@ -1,5 +1,6 @@
 // datagridhelpers.ts
 import {GridRowModel} from "@mui/x-data-grid";
+import { PersonnelRDS } from "./sqlmacros";
 
 const coreMeasurementsFields = [
   'censusID', 'plotID', 'quadratID', 'treeID', 'stemID', 'personnelID',
@@ -217,7 +218,7 @@ export const createDeleteQuery: ProcessQueryFunction = (siteSchema: string, grid
   return baseQuery;
 }
 
-export function getGridID(gridType: string) {
+export function getGridID(gridType: string): string {
   switch (gridType) {
     case 'coreMeasurements':
       return 'coreMeasurementID';
@@ -238,15 +239,11 @@ export function getGridID(gridType: string) {
   }
 }
 
-export function postOrPatch(gridType: string, oldRow: GridRowModel) {
-  switch(gridType) {
-    case 'coreMeasurements':
-
-  }
-}
+const comparePersonnelObjects = (obj1: any, obj2: any) => {
+  return Object.entries(obj1).some(([key, value]) => obj2[key] !== value);
+};
 
 export function computeMutation(gridType: string, newRow: GridRowModel, oldRow: GridRowModel) {
-  let fields: string[] = [];
   switch (gridType) {
     case 'coreMeasurements':
       return coreMeasurementsFields.some(field => newRow[field] !== oldRow[field]);
@@ -257,7 +254,15 @@ export function computeMutation(gridType: string, newRow: GridRowModel, oldRow: 
     case 'personnel':
       return personnelFields.some(field => newRow[field] !== oldRow[field]);
     case 'quadrats':
-      return quadratsFields.some(field => newRow[field] !== oldRow[field]);
+      return quadratsFields.some(field => {
+        if (field === 'personnel') {
+          console.log('old row personnel: ', oldRow[field]);
+          console.log('new row personnel: ', newRow[field]);
+          // Special handling for 'personnel' field, which is an array
+          return comparePersonnelObjects(newRow[field], oldRow[field]);
+        }
+        return newRow[field] !== oldRow[field];
+      });
     case 'species':
       return speciesFields.some(field => newRow[field] !== oldRow[field]);
     case 'subSpecies':

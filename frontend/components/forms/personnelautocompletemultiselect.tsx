@@ -1,38 +1,46 @@
-import React, {useEffect, useState} from 'react';
+"use client";
+import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
-import {useSiteContext} from "@/app/contexts/userselectionprovider";
+import { useSiteContext } from "@/app/contexts/userselectionprovider";
 import {PersonnelRDS} from "@/config/sqlmacros";
 
-interface PersonnelAutocompleteMultiSelectProps {
+export interface PersonnelAutocompleteMultiSelectProps {
   initialValue: PersonnelRDS[];
-  onChange: (selectedPersonnel: PersonnelRDS[]) => void;
-  quadratID: number;
+  onChange: (selected: PersonnelRDS[]) => void;
+  locked: boolean;
 }
 
-export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMultiSelectProps> = ({
-                                                                                                    initialValue,
-                                                                                                    onChange,
-                                                                                                    quadratID
-                                                                                                  }) => {
+export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMultiSelectProps> = (props) => {
+  const { initialValue, locked, onChange } = props;
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<PersonnelRDS[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const loading = open && options.length === 0;
   const currentSite = useSiteContext();
+  if (!currentSite) throw new Error("Site must be selected!");
 
   useEffect(() => {
-    if (!currentSite) throw new Error("Site must be selected!");
+    let active = true;
 
-    setLoading(true);
-    fetch(`/api/formsearch/personnel?schema=${currentSite.schemaName}`)
-      .then(response => response.json())
-      .then((data: PersonnelRDS[]) => {
-        setOptions(data);
-      })
-      .catch(error => console.error('Error fetching personnel:', error))
-      .finally(() => setLoading(false));
-  }, [currentSite]);
+    if (!loading) {
+      return undefined;
+    }
+
+    (async () => {
+      const response = await fetch(`/api/formsearch/personnelblock?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`);
+      const items = await response.json();
+      console.log(items);
+      if (active) {
+        setOptions(items);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [loading, inputValue]);
 
   useEffect(() => {
     if (!open) {
@@ -43,18 +51,21 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
   return (
     <Autocomplete
       multiple
+      className={"fullWidthAutoComplete"}
       open={open}
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}
       options={options}
-      getOptionLabel={(option) => `${option.firstName} ${option.lastName}`}
+      getOptionLabel={(option) => `${option.lastName}, ${option.firstName} | ${option.role}`}
       isOptionEqualToValue={(option, value) => option.personnelID === value.personnelID}
       loading={loading}
       value={initialValue}
+      disabled={locked}
       onChange={(_event, newValue) => onChange(newValue)}
       filterSelectedOptions
       renderInput={(params) => (
         <TextField
+          sx={{marginTop: '10px', marginBottom: '5px'}}
           {...params}
           fullWidth
           label="Select Personnel"

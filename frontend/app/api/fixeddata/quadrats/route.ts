@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
         'personnelID', p.PersonnelID,
         'firstName', p.FirstName,
         'lastName', p.LastName,
-        'role', qp.Role
+        'role', p.Role
       ) SEPARATOR ',') AS personnel
       FROM ${schema}.Quadrats q
       LEFT JOIN ${schema}.quadratpersonnel qp ON q.QuadratID = qp.QuadratID
@@ -45,18 +45,26 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const quadratRows: QuadratsRDS[] = paginatedResults.map((row: any, index: number) => ({
-      id: index + 1,
-      quadratID: row.QuadratID,
-      plotID: row.PlotID,
-      censusID: row.CensusID,
-      quadratName: row.QuadratName,
-      dimensionX: row.DimensionX,
-      dimensionY: row.DimensionY,
-      area: row.Area,
-      quadratShape: row.QuadratShape,
-      personnel: row.personnel ? JSON.parse(`[${row.personnel}]`) : []
-    }));
+    const quadratRows: QuadratsRDS[] = paginatedResults.map((row: any, index: number) => {
+      // Parse the personnel JSON and add the 'id' property
+      const personnelWithId = row.personnel ? JSON.parse(`[${row.personnel}]`).map((p: any, idx: number) => ({
+        ...p,
+        id: idx + 1
+      })) : [];
+
+      return {
+        id: index + 1,
+        quadratID: row.QuadratID,
+        plotID: row.PlotID,
+        censusID: row.CensusID,
+        quadratName: row.QuadratName,
+        dimensionX: row.DimensionX,
+        dimensionY: row.DimensionY,
+        area: row.Area,
+        quadratShape: row.QuadratShape,
+        personnel: personnelWithId
+      };
+    });
 
     return new NextResponse(JSON.stringify({quadrats: quadratRows, totalCount: totalRows}), {status: 200});
   } catch (error) {
@@ -145,18 +153,6 @@ export async function PATCH(request: NextRequest) {
     // Update the quadrat information
     const updateQuery = mysql.format('UPDATE ?? SET ? WHERE QuadratID = ?', [`${schema}.Quadrats`, updateData, QuadratID]);
     await runQuery(conn, updateQuery);
-
-    // Delete existing personnel records for this quadrat
-    const deletePersonnelQuery = mysql.format('DELETE FROM ?? WHERE QuadratID = ?', [`${schema}.quadratpersonnel`, QuadratID]);
-    await runQuery(conn, deletePersonnelQuery);
-
-    // Insert new personnel records
-    if (Personnel && Personnel.length > 0) {
-      for (const person of Personnel) {
-        const insertPersonnelQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.quadratpersonnel`, {QuadratID, ...person}]);
-        await runQuery(conn, insertPersonnelQuery);
-      }
-    }
 
     // Commit the transaction
     await conn.commit();
