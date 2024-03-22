@@ -446,15 +446,15 @@ export type QuadratsRDS = {
 
 
 export const QuadratsGridColumns: GridColDef[] = [
-  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratShape', headerName: 'QuadratShape', headerClassName: 'header', flex: 1, align: 'left',},
-]
+  {field: 'quadratID', headerName: 'ID', headerClassName: 'header', maxWidth: 75, align: 'left',},
+  // {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'quadratName', headerName: 'Name', headerClassName: 'header', flex: 1, maxWidth: 140, align: 'left', editable: true},
+  {field: 'dimensionX', headerName: 'X', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
+  {field: 'dimensionY', headerName: 'Y', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
+  {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
+  {field: 'quadratShape', headerName: 'Shape', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
+];
 
 export type ReferenceRDS = {
   id: number;

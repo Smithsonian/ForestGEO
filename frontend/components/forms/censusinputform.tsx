@@ -364,7 +364,7 @@ const CensusInputForm = () => {
 
     try {
       // Add code to retrieve additional required parameters like schema, fileName, etc.
-      const response = await fetch(`/api/sqlload?schema=${currentSite ? currentSite.schemaName : ''}&fileName=censusData&plot=${currentPlot?.id}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=fixeddata_census&uom=metric`, {
+      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.id}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=fixeddata_census&uom=metric`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -393,7 +393,7 @@ const CensusInputForm = () => {
         <UploadValidation
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          schema={currentSite ? currentSite.schemaName : ''}
+          schema={currentSite?.schemaName ?? ''}
           setReviewState={setReviewState}/>
       );
       break;
@@ -402,7 +402,7 @@ const CensusInputForm = () => {
         <UploadUpdateValidations
           currentPlot={currentPlot}
           currentCensus={currentCensus}
-          schema={currentSite ? currentSite.schemaName : ''}
+          schema={currentSite?.schemaName ?? ''}
           setReviewState={setReviewState}
         />
       );
@@ -454,14 +454,14 @@ const CensusInputForm = () => {
               <UploadValidation
                 currentPlot={currentPlot}
                 currentCensus={currentCensus}
-                schema={currentSite ? currentSite.schemaName : ''}
+                schema={currentSite?.schemaName ?? ''}
                 setReviewState={setReviewState}/>
             )}
             {reviewState === ReviewStates.UPDATE && (
               <UploadUpdateValidations
                 currentPlot={currentPlot}
                 currentCensus={currentCensus}
-                schema={currentSite ? currentSite.schemaName : ''}
+                schema={currentSite?.schemaName ?? ''}
                 setReviewState={setReviewState}/>
             )}
           </DialogContent>
