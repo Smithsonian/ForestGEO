@@ -231,9 +231,8 @@ export async function parseQuadratsRequestBody(request: NextRequest) {
   return {
     QuadratID: requestBody.quadratID,
     PlotID: requestBody.plotID,
+    CensusID: requestBody.censusID,
     QuadratName: requestBody.quadratName,
-    QuadratX: requestBody.quadratX,
-    QuadratY: requestBody.quadratY,
     DimensionX: requestBody.dimensionX,
     DimensionY: requestBody.dimensionY,
     Area: requestBody.area,

@@ -119,7 +119,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   if (!currentSite) console.error('site not yet defined');
 
   const {updateQuadratsContext, updateCensusContext, updatePlotsContext} = UpdateContextsFromIDB({
-    email: email, schema: currentSite ? currentSite.schemaName : '',
+    email: email, schema: currentSite?.schemaName ?? '',
   });
 
   // Toggle function for the checkbox
@@ -156,7 +156,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleRefresh = async () => {
     setRefresh(true);
     try {
-      const query = createFetchQuery(currentSite ? currentSite.schemaName : '', gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.id);
+      const query = createFetchQuery(currentSite?.schemaName ?? '', gridType, paginationModel.page, paginationModel.pageSize, currentPlot?.id);
       const response = await fetch(query, {
         method: 'GET'
       });
@@ -179,7 +179,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const fetchPaginatedData = async (pageToFetch: number) => {
     console.log('fetchPaginatedData triggered');
     setRefresh(true);
-    let paginatedQuery = createFetchQuery(currentSite ? currentSite.schemaName : '', gridType, pageToFetch, paginationModel.pageSize, currentPlot?.id);
+    let paginatedQuery = createFetchQuery(currentSite?.schemaName ?? '', gridType, pageToFetch, paginationModel.pageSize, currentPlot?.id);
     try {
       const response = await fetch(paginatedQuery, {method: 'GET'});
       const data = await response.json();
@@ -236,16 +236,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
   const processRowUpdate = React.useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
-      console.log('processRowUpdate triggered');
-      console.log('new row: ', newRow);
-      console.log('old row: ', oldRow);
+      console.log('Processing row update. Old row:', oldRow, '; New row:', newRow);
 
       // Determine if the oldRow is a new row
       const isNewRow = validateRowStructure(gridType, oldRow);
-      console.log('isNewRow:', isNewRow);
 
       const gridID = getGridID(gridType);
-      const fetchProcessQuery = createProcessQuery(currentSite ? currentSite.schemaName : '', gridType);
+      const fetchProcessQuery = createProcessQuery(currentSite?.schemaName ?? '', gridType);
 
       if (newRow[gridID] === '') {
         throw new Error(`Primary key ${gridID} cannot be empty!`);
@@ -255,21 +252,16 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         let response, responseJSON;
         // If oldRow code is empty, it's a new row insertion
         if (isNewRow) {
-          console.log('Handling new row insertion...');
-          console.log('fetch query: ', fetchProcessQuery);
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(newRow),
           });
           responseJSON = await response.json();
-          console.log('POST received: ', responseJSON);
           if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Insertion failed");
           setSnackbar({children: `New row added!`, severity: 'success'});
         } else {
           // If code is not empty, it's an update
-          console.log('Handling existing row update...');
-          console.log('fetch query: ', fetchProcessQuery);
           const mutation = computeMutation(gridType, newRow, oldRow);
           if (mutation) {
             response = await fetch(fetchProcessQuery, {
@@ -278,7 +270,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
               body: JSON.stringify(newRow),
             });
             responseJSON = await response.json();
-            console.log('PATCH received: ', responseJSON);
             if (response.status > 299 || response.status < 200) throw new Error(responseJSON.message || "Update failed");
             setSnackbar({children: `Row updated!`, severity: 'success'});
           }
@@ -341,8 +332,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       setIsNewRowAdded(false); // We are done adding a new row
       // Now we can refetch data for the current page without adding a new row
       setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
-      // await fetchPaginatedData(paginationModel.page);
     }
+    await fetchPaginatedData(paginationModel.page);
   };
 
   const handleDeleteClick = (id: GridRowId) => async () => {
@@ -358,7 +349,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     else {
       setSnackbar({children: "Row successfully deleted", severity: 'success'});
       setRows(rows.filter((row) => row.id !== id));
-      // await fetchPaginatedData(paginationModel.page);
+      await fetchPaginatedData(paginationModel.page);
     }
   };
 
@@ -435,9 +426,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
   const fetchValidationErrors = async () => {
     if (gridType !== 'measurementsSummary') return;
-
     try {
-      const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite ? currentSite.schemaName : ''}`);
+      const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`);
       const errors: CMError[] = await response.json();
 
       // Define the type of the accumulator as Record<number, CMError>

@@ -174,7 +174,6 @@ export default function Sidebar(props: SidebarProps) {
 
   useEffect(() => {
     if (storedSite && storedPlot && storedCensus) {
-      console.log('all stored values populated.')
       setShowResumeDialog(true);
     }
   }, [storedSite, storedPlot, storedCensus, siteListLoaded]);
@@ -188,23 +187,22 @@ export default function Sidebar(props: SidebarProps) {
     if (currentCensus) setIsCensusSelectionRequired(false);
   }, [currentSite, currentPlot, currentCensus, coreDataLoaded]);
 
-  useEffect(() => {
-    console.log('new context site: ', currentSite);
-    console.log('new context plot: ', currentPlot);
-    console.log('new context census: ', currentCensus);
-  }, [siteDispatch, plotDispatch, censusDispatch]);
-
-  useEffect(() => {
-    console.log('updated stored site: ', storedSite);
-    console.log('updated stored plot: ', storedPlot);
-    console.log('updated stored census: ', storedCensus);
-  }, [storedSite, storedPlot, storedCensus]);
+  // useEffect(() => {
+  //   console.log('sidebar --> new context site: ', currentSite);
+  //   console.log('sidebar --> new context plot: ', currentPlot);
+  //   console.log('sidebar --> new context census: ', currentCensus);
+  // }, [siteDispatch, plotDispatch, censusDispatch]);
+  //
+  // useEffect(() => {
+  //   console.log('sidebar --> updated stored site: ', storedSite);
+  //   console.log('sidebar --> updated stored plot: ', storedPlot);
+  //   console.log('sidebar --> updated stored census: ', storedCensus);
+  // }, [storedSite, storedPlot, storedCensus]);
 
   // This function is an additional layer to manage UI state changes on site selection
   const handleSiteSelection = async (selectedSite: Site | null) => {
     // Update the site context (original onSiteChange functionality)
     setSite(selectedSite);
-    console.log('handleSiteSelection new site: ', site);
     if (siteDispatch) {
       setLoading(true, 'Dispatching Site...');
       await siteDispatch({site: selectedSite});

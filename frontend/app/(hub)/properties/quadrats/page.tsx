@@ -1,11 +1,19 @@
 "use client";
-import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {
+  GridColDef,
+  GridRenderCellParams,
+  GridRowId,
+  GridRowModes,
+  GridRowModesModel,
+  GridRowsProp
+} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
-import React, {useState} from "react";
-import {QuadratsGridColumns} from "@/config/sqlmacros";
-import {usePlotContext} from "@/app/contexts/userselectionprovider";
+import React, {useCallback, useState} from "react";
+import {PersonnelRDS, QuadratsGridColumns, QuadratsGridColumns as BaseQuadratsGridColumns} from "@/config/sqlmacros";
+import {usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
+import {PersonnelAutocompleteMultiSelect} from "@/components/forms/personnelautocompletemultiselect";
 
 export default function QuadratsPage() {
   const initialRows: GridRowsProp = [
@@ -35,6 +43,8 @@ export default function QuadratsPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [personnel, setPersonnel] = useState<PersonnelRDS[]>([]);
+  let currentSite = useSiteContext();
   let currentPlot = usePlotContext();
 
   const addNewRowToGrid = () => {
@@ -59,13 +69,69 @@ export default function QuadratsPage() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratID'},
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
     }));
   };
+
+  const updatePersonnelInRows = useCallback((id: GridRowId, newPersonnel: PersonnelRDS[]) => {
+    setRows(rows => rows.map(row =>
+      row.id === id
+        ? { ...row, personnel: newPersonnel.map(person => ({ ...person })) }
+        : row
+    ));
+  }, []);
+
+  const handlePersonnelChange = useCallback(
+    async (rowId: GridRowId, selectedPersonnel: PersonnelRDS[]) => {
+      const quadratId = rows.find((row) => row.id === rowId)?.quadratID;
+      const personnelIds = selectedPersonnel.map(person => person.personnelID);
+
+      try {
+        const response = await fetch(`/api/updatepersonnel?quadratID=${quadratId}&schema=${currentSite?.schemaName ?? ''}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(personnelIds)
+        });
+
+        if (!response.ok) {
+          setSnackbar({children: `Personnel updates failed!`, severity: 'error'});
+          throw new Error('Failed to update personnel');
+        }
+
+        // Handle successful response
+        const responseData = await response.json();
+        // Optionally, refresh the data grid or take other UI actions
+        updatePersonnelInRows(rowId, selectedPersonnel);
+        setRefresh(true);
+        setSnackbar({children: `${responseData.message}`, severity: 'success'});
+      } catch (error) {
+        console.error("Error updating personnel:", error);
+      }
+    },
+    []
+  );
+
+  const quadratsGridColumns: GridColDef[] = [...BaseQuadratsGridColumns,
+    {
+      field: 'personnel',
+      headerName: 'Personnel',
+      flex: 1,
+      renderCell: (params) => (
+        <PersonnelAutocompleteMultiSelect
+          initialValue={params.row.personnel}
+          onChange={(newPersonnel) => handlePersonnelChange(params.id, newPersonnel)}
+          locked={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
+        />
+      ),
+    }
+  ]
+
   return (
     <DataGridCommons
       gridType="quadrats"
-      gridColumns={QuadratsGridColumns}
+      gridColumns={quadratsGridColumns}
       rows={rows}
       setRows={setRows}
       rowCount={rowCount}
