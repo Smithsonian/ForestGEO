@@ -83,26 +83,35 @@ export default function QuadratsPage() {
 
   const handlePersonnelChange = useCallback(
     async (rowId: GridRowId, selectedPersonnel: PersonnelRDS[]) => {
-      const quadratId = rows.find((row) => row.id === rowId)?.quadratID;
+      console.log(rows);
+      const row = rows.find((row) => row.id === rowId);
+      const quadratId = row?.quadratID;
       const personnelIds = selectedPersonnel.map(person => person.personnelID);
-
+      console.log('new personnel ids: ', personnelIds);
+  
+      // Check if quadratID is valid and not equal to the initial row's quadratID
+      if (quadratId === undefined || quadratId === initialRows[0].quadratID) {
+        console.error("Invalid quadratID, personnel update skipped.");
+        setSnackbar({children: "Personnel update skipped due to invalid quadratID.", severity: 'error'});
+        return;
+      }
+  
       try {
-        const response = await fetch(`/api/updatepersonnel?quadratID=${quadratId}&schema=${currentSite?.schemaName ?? ''}`, {
+        const response = await fetch(`/api/formsearch/personnelblock?quadratID=${quadratId}&schema=${currentSite?.schemaName ?? ''}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(personnelIds)
         });
-
+  
         if (!response.ok) {
           setSnackbar({children: `Personnel updates failed!`, severity: 'error'});
           throw new Error('Failed to update personnel');
         }
-
+  
         // Handle successful response
         const responseData = await response.json();
-        // Optionally, refresh the data grid or take other UI actions
         updatePersonnelInRows(rowId, selectedPersonnel);
         setRefresh(true);
         setSnackbar({children: `${responseData.message}`, severity: 'success'});
@@ -110,8 +119,9 @@ export default function QuadratsPage() {
         console.error("Error updating personnel:", error);
       }
     },
-    []
+    [rows, currentSite?.schemaName, setSnackbar, setRefresh, updatePersonnelInRows]
   );
+  
 
   const quadratsGridColumns: GridColDef[] = [...BaseQuadratsGridColumns,
     {

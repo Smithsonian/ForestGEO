@@ -15,7 +15,17 @@ import {
   GridRowsProp,
   GridToolbarContainer,
 } from '@mui/x-data-grid';
-import {Alert, AlertProps, Button, Checkbox, Snackbar} from '@mui/material';
+import {
+  Alert,
+  AlertProps,
+  Button,
+  Checkbox,
+  Dialog, DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Snackbar
+} from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -99,6 +109,19 @@ export interface DataGridCommonProps {
   locked?: boolean;
 }
 
+// Define types for the new states and props
+type PendingAction = {
+  actionType: 'save' | 'delete' | '';
+  actionId: GridRowId | null;
+};
+
+interface ConfirmationDialogProps {
+  isOpen: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  message: string;
+}
+
 export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const {
     addNewRowToGrid, gridColumns, gridType, rows, setRows, rowCount, setRowCount, rowModesModel,
@@ -112,6 +135,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
+  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
 
   const {data: session} = useSession();
   let email = session?.user?.email ?? '';
@@ -121,6 +146,71 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const {updateQuadratsContext, updateCensusContext, updatePlotsContext} = UpdateContextsFromIDB({
     email: email, schema: currentSite?.schemaName ?? '',
   });
+
+  const openConfirmationDialog = (actionType: 'save' | 'delete', actionId: GridRowId) => {
+    setPendingAction({ actionType, actionId });
+    setIsDialogOpen(true);
+  };
+
+  const handleConfirmAction = async () => {
+    setIsDialogOpen(false);
+    if (pendingAction.actionType === 'save' && pendingAction.actionId !== null) {
+      await performSaveAction(pendingAction.actionId);
+    } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
+      await performDeleteAction(pendingAction.actionId);
+    }
+    setPendingAction({ actionType: '', actionId: null });
+  };
+
+  const handleCancelAction = () => {
+    setIsDialogOpen(false);
+    setPendingAction({ actionType: '', actionId: null });
+  };
+
+  const performSaveAction = async (id: GridRowId) => {
+    if (locked) return;
+    console.log('save confirmed');
+    setRowModesModel((oldModel) => ({
+      ...oldModel,
+      [id]: {mode: GridRowModes.View},
+    }));
+
+    // If the row was newly added, reset isNewRowAdded
+    const row = rows.find((row) => row.id === id);
+    if (row?.isNew) {
+      setIsNewRowAdded(false); // We are done adding a new row
+      // Now we can refetch data for the current page without adding a new row
+      setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
+    }
+    await fetchPaginatedData(paginationModel.page);
+  };
+
+  const performDeleteAction = async (id: GridRowId) => {
+    if (locked) return;
+    console.log('delete confirm');
+    let gridID = getGridID(gridType);
+    const deletionID = rows.find((row) => row.id == id)![gridID];
+    const deleteQuery = createDeleteQuery(gridType, deletionID);
+    const response = await fetch(deleteQuery, {
+      method: 'DELETE'
+    });
+    if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
+    else {
+      setSnackbar({children: "Row successfully deleted", severity: 'success'});
+      setRows(rows.filter((row) => row.id !== id));
+      await fetchPaginatedData(paginationModel.page);
+    }
+  };
+
+  const handleSaveClick = (id: GridRowId) => () => {
+    if (locked) return;
+    openConfirmationDialog('save', id);
+  };
+
+  const handleDeleteClick = (id: GridRowId) => () => {
+    if (locked) return;
+    openConfirmationDialog('delete', id);
+  };
 
   // Toggle function for the checkbox
   const handleShowErrorRowsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -316,41 +406,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (locked) return;
     console.log('edit button');
     setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
-  };
-
-  const handleSaveClick = (id: GridRowId) => async () => {
-    if (locked) return;
-    console.log('save button');
-    setRowModesModel((oldModel) => ({
-      ...oldModel,
-      [id]: {mode: GridRowModes.View},
-    }));
-
-    // If the row was newly added, reset isNewRowAdded
-    const row = rows.find((row) => row.id === id);
-    if (row?.isNew) {
-      setIsNewRowAdded(false); // We are done adding a new row
-      // Now we can refetch data for the current page without adding a new row
-      setShouldAddRowAfterFetch(false); // Ensure we do not add a row during fetch
-    }
-    await fetchPaginatedData(paginationModel.page);
-  };
-
-  const handleDeleteClick = (id: GridRowId) => async () => {
-    if (locked) return;
-    console.log('delete button');
-    let gridID = getGridID(gridType);
-    const deletionID = rows.find((row) => row.id == id)![gridID];
-    const deleteQuery = createDeleteQuery(gridType, deletionID);
-    const response = await fetch(deleteQuery, {
-      method: 'DELETE'
-    });
-    if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
-    else {
-      setSnackbar({children: "Row successfully deleted", severity: 'success'});
-      setRows(rows.filter((row) => row.id !== id));
-      await fetchPaginatedData(paginationModel.page);
-    }
   };
 
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
@@ -640,7 +695,36 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             <Alert {...snackbar} onClose={handleCloseSnackbar}/>
           </Snackbar>
         )}
+        <ConfirmationDialog
+          isOpen={isDialogOpen}
+          onConfirm={handleConfirmAction}
+          onCancel={handleCancelAction}
+          message={pendingAction.actionType === 'save' ? 'Are you sure you want to save changes?' : 'Are you sure you want to delete this row?'}
+        />
       </Box>
     );
   }
 }
+
+// ConfirmationDialog component with TypeScript types
+const ConfirmationDialog: React.FC<ConfirmationDialogProps> = (props) => {
+  const { isOpen, onConfirm, onCancel, message } = props;
+  return (
+    <Dialog open={isOpen} onClose={onCancel}>
+      <DialogTitle>Confirm Action</DialogTitle>
+      <DialogContent>
+        <DialogContentText>
+          {message}
+        </DialogContentText>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onCancel} color="primary">
+          Cancel
+        </Button>
+        <Button onClick={onConfirm} color="primary">
+          Confirm
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
