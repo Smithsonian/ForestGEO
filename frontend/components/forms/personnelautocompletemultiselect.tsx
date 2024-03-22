@@ -63,6 +63,20 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
     }
   }, [open]);
 
+  const getChangeMessage = () => {
+    const added = tempSelectedPersonnel.filter(p => !initialValue.some(ip => ip.personnelID === p.personnelID));
+    const removed = initialValue.filter(ip => !tempSelectedPersonnel.some(p => p.personnelID === ip.personnelID));
+
+    let message = '';
+    if (added.length > 0) {
+      message += `Adding: ${added.map(p => p.firstName + ' ' + p.lastName).join(', ')}; `;
+    }
+    if (removed.length > 0) {
+      message += `Removing: ${removed.map(p => p.firstName + ' ' + p.lastName).join(', ')}; `;
+    }
+    return message || 'No changes.';
+  };
+
   return (
     <>
       <Autocomplete
@@ -104,7 +118,9 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         <DialogTitle>Confirm Personnel Change</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to change the assigned personnel?
+            {`Are you sure you want to change the assigned personnel? `}
+            <br /><br />
+            <strong>{getChangeMessage()}</strong>
           </DialogContentText>
         </DialogContent>
         <DialogActions>
