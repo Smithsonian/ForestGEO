@@ -64,17 +64,20 @@ async function fetchData(endpoint: string) {
 }
 
 async function checkHashAndUpdateData(hashEndpoint: string, dataEndpoint: string, localHashKey: string, dataKey: string) {
-  const serverHash = await fetchHash(hashEndpoint);
-  const localHash = await getData(localHashKey);
+  // const serverHash = await fetchHash(hashEndpoint);
+  // const localHash = await getData(localHashKey);
 
-  if (serverHash !== localHash) {
-    const data = await fetchData(dataEndpoint);
-    await setData(localHashKey, serverHash);
-    await setData(dataKey, data);
-    return data;
-  }
+  // if (serverHash !== localHash) {
+  //   const data = await fetchData(dataEndpoint);
+  //   await setData(localHashKey, serverHash);
+  //   await setData(dataKey, data);
+  //   return data;
+  // }
 
-  return await getData(dataKey);
+  // return await getData(dataKey);
+  const data = await fetchData(dataEndpoint);
+  await setData(dataKey, data);
+  return data;
 }
 
 async function updateQuadratsIDB(schema: string) {
