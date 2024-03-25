@@ -13,14 +13,12 @@ import {SitesRDS} from "@/config/sqlmacros";
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
+  schema: string,
   tableName: string,
   columnNameToExtract: string,
   columnNameToSearch: string,
   columnValueToSearch: T
 ): Promise<T | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   if (!columnNameToExtract || !columnNameToSearch || !columnValueToSearch) throw new Error('accidentally handed undefined value in parameter');
 
   try {
@@ -45,11 +43,9 @@ export async function getColumnValueByColumnName<T>(
 
 export async function getSubSpeciesID(
   connection: PoolConnection,
+  schema: string,
   speciesID: number
 ): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   if (!speciesID) throw new Error('received undefined species ID in getSubSpeciesID');
 
   try {
@@ -77,12 +73,10 @@ export async function getSubSpeciesID(
 
 export async function processCode(
   connection: PoolConnection,
+  schema: string,
   codesArray: string[],
   coreMeasurementIDConnected: number
 ) {
-  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   if (!codesArray || !coreMeasurementIDConnected) throw new Error('undefined codes array OR coremeasurementID received in processCode');
 
   try {
@@ -118,13 +112,11 @@ export async function processCode(
 
 export async function processTrees(
   connection: PoolConnection,
+  schema: string,
   treeTag: any,
   speciesID: any,
   subSpeciesID: any
 ): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   if (!treeTag || !speciesID) throw new Error('undefined treetag or speciesid passed to processTrees');
 
   try {
@@ -152,15 +144,13 @@ export async function processTrees(
 
 export async function processStems(
   connection: PoolConnection,
+  schema: string,
   stemTag: any,
   treeID: any,
   quadratID: any,
   stemQuadX: any,
   stemQuadY: any
 ): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   if (!stemTag || !treeID || !quadratID || !stemQuadX || !stemQuadY) throw new Error('process stems: 1 or more undefined parameters received');
 
   try {
@@ -186,11 +176,9 @@ export async function processStems(
 
 export async function getPersonnelIDByName(
   connection: PoolConnection,
+  schema: string,
   fullName: string
 ): Promise<number | null> {
-  const schema = process.env.AZURE_SQL_SCHEMA; // Adjust to your MySQL schema environment variable
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-
   // Split the full name into first and last names
   const [firstName, lastName] = fullName.split(" ");
   if (!firstName || !lastName) {
