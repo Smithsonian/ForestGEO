@@ -183,7 +183,7 @@ export type CensusRDS = CensusRaw | null;
 export const CensusGridColumns: GridColDef[] = [
   {
     field: 'censusID',
-    headerName: 'CensusID',
+    headerName: 'ID',
     type: 'number',
     headerClassName: 'header',
     flex: 1,
@@ -218,7 +218,7 @@ export const CensusGridColumns: GridColDef[] = [
     valueGetter: (params: any) => params.value === null ? null : new Date(params.value),
     valueFormatter: (params: any) => {
       // Display "Open" when endDate is specifically null
-      return params.value === null ? "Ongoing" : new Date(params.value).toLocaleDateString();
+      return (params === null || params.value === null) ? "Ongoing" : new Date(params.value).toLocaleDateString();
     }
   },
   {
@@ -232,7 +232,7 @@ export const CensusGridColumns: GridColDef[] = [
     valueGetter: (params: any) => params.value === null ? null : new Date(params.value),
     valueFormatter: (params: any) => {
       // Display "Open" when endDate is specifically null
-      return params.value === null ? "Ongoing" : new Date(params.value).toLocaleDateString();
+      return  (params === null || params.value === null) ? "Ongoing" : new Date(params.value).toLocaleDateString();
     }
   },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
