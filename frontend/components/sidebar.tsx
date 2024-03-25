@@ -11,7 +11,7 @@ import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
-import {Plot, Site, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {Census, Plot, Site, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -35,7 +35,12 @@ import {
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import {useCensusListContext, usePlotListContext, useSiteListContext} from "@/app/contexts/listselectionprovider";
+import {
+  useCensusListContext,
+  useCensusListDispatch,
+  usePlotListContext,
+  useSiteListContext
+} from "@/app/contexts/listselectionprovider";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 import {getData} from "@/config/db";
@@ -121,6 +126,7 @@ export default function Sidebar(props: SidebarProps) {
   let censusListContext = useCensusListContext();
   let censusLoadContext = useCensusLoadContext();
   let siteListContext = useSiteListContext();
+  let censusListDispatch = useCensusListDispatch(); // Ensure you have this dispatch method
 
   const [plot, setPlot] = useState<Plot>(currentPlot);
   const [census, setCensus] = useState<CensusRDS>(currentCensus);
@@ -145,26 +151,65 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
   const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
 
+  useEffect(() => {
+    const updateCensusList = async () => {
+      // Fetch the updated list of censuses. Replace the below line with your actual data fetching logic.
+      if (!censusLoadContext) return;
+      let uniqueCensusMap = new Map();
+      censusLoadContext.forEach(censusRDS => {
+        const plotCensusNumber = censusRDS?.plotCensusNumber || 0;
+        let existingCensus = uniqueCensusMap.get(plotCensusNumber);
+        if (!existingCensus) {
+          uniqueCensusMap.set(plotCensusNumber, {
+            plotID: censusRDS?.plotID || 0,
+            plotCensusNumber,
+            startDate: censusRDS?.startDate || new Date(),
+            endDate: censusRDS?.endDate || null,  // Handle null endDate
+            description: censusRDS?.description || ''
+          });
+        } else {
+          existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate || 0).getTime()));
+          if (censusRDS?.endDate) {
+            existingCensus.endDate = existingCensus.endDate
+              ? new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS.endDate).getTime()))
+              : new Date(censusRDS.endDate);  // Update endDate only if it's not null
+          }
+        }
+      });
+      
+      // Check if the census list actually needs to be updated
+      const newCensusList = Array.from(uniqueCensusMap.values());
+      if (JSON.stringify(censusListContext) !== JSON.stringify(newCensusList)) {
+        console.log('Updating Census List...'); // Debugging Log
+        if (censusListDispatch) {
+          setLoading(true, "Updating Census Selection...");
+          await censusListDispatch({ censusList: newCensusList });
+          setLoading(false);
+        }
+      }
+    };
+
+    updateCensusList().catch(console.error);
+  }, [censusLoadContext, censusListContext, censusListDispatch, setLoading]);
   const {coreDataLoaded, siteListLoaded} = props;
 
   const getSortedCensusData = () => {
     const ongoingCensus = censusListContext?.filter(c => c.endDate === null);
     const historicalCensuses = censusListContext?.filter(c => c.endDate !== null)
-      .sort((a, b) => (b.startDate?.getTime() ?? 0) - (a.startDate?.getTime() ?? 0));
+      .sort((a, b) => {
+        // Convert startDate to Date objects if they are not already
+        const dateA = new Date(a.startDate);
+        const dateB = new Date(b.startDate);
 
-    return {ongoingCensus, historicalCensuses};
+        return (dateB.getTime() ?? 0) - (dateA.getTime() ?? 0);
+      });
+
+    return { ongoingCensus, historicalCensuses };
   };
+
   const {ongoingCensus, historicalCensuses} = getSortedCensusData();
 
   useEffect(() => {
-    const checkSavedSession = async () => {
-      const savedSite: Site = await getData('site') as Site;
-      const savedPlot: Plot = await getData('plot');
-      const savedCensus: CensusRDS = await getData('census');
-      setStoredSite(savedSite);
-      setStoredPlot(savedPlot);
-      setStoredCensus(savedCensus);
-    };
     if (siteListLoaded) {
       getData('site').then((savedSite: Site) => setStoredSite(savedSite)).catch(console.error);
       getData('plot').then((savedPlot: Plot) => setStoredPlot(savedPlot)).catch(console.error);
@@ -186,18 +231,6 @@ export default function Sidebar(props: SidebarProps) {
     if (currentPlot) setIsPlotSelectionRequired(false);
     if (currentCensus) setIsCensusSelectionRequired(false);
   }, [currentSite, currentPlot, currentCensus, coreDataLoaded]);
-
-  // useEffect(() => {
-  //   console.log('sidebar --> new context site: ', currentSite);
-  //   console.log('sidebar --> new context plot: ', currentPlot);
-  //   console.log('sidebar --> new context census: ', currentCensus);
-  // }, [siteDispatch, plotDispatch, censusDispatch]);
-  //
-  // useEffect(() => {
-  //   console.log('sidebar --> updated stored site: ', storedSite);
-  //   console.log('sidebar --> updated stored plot: ', storedPlot);
-  //   console.log('sidebar --> updated stored census: ', storedCensus);
-  // }, [storedSite, storedPlot, storedCensus]);
 
   // This function is an additional layer to manage UI state changes on site selection
   const handleSiteSelection = async (selectedSite: Site | null) => {
@@ -437,7 +470,7 @@ export default function Sidebar(props: SidebarProps) {
                   <Typography color={(!currentCensus) ? "danger" : "primary"}
                               level="body-md"
                               sx={{textAlign: 'left', paddingLeft: '1em'}}>
-                    {currentCensus ? `Ending: ${new Date(currentCensus?.endDate!).toDateString()}` : ''}
+                    {currentCensus?.endDate ? `Ending ${new Date(currentCensus.endDate).toDateString()}` : `Ongoing`}
                   </Typography>
                 </Box>
               </Box>
@@ -697,9 +730,6 @@ export default function Sidebar(props: SidebarProps) {
                     <List>
                       <Option value={""}>None</Option>
                       <Divider orientation={"horizontal"}/>
-                      <ListItem>
-                        Ongoing Censuses
-                      </ListItem>
                       {ongoingCensus && ongoingCensus.length > 0 && (
                         ongoingCensus.map((item) => (
                           <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
@@ -713,9 +743,6 @@ export default function Sidebar(props: SidebarProps) {
                         ))
                       )}
                       <Divider orientation={"horizontal"}/>
-                      <ListItem>
-                        Historical Censuses
-                      </ListItem>
                       {historicalCensuses && historicalCensuses.length > 0 && (
                         historicalCensuses.map((item) => (
                           <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
