@@ -11,13 +11,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error("Schema selection was not provided to API endpoint");
   try {
-    const catalogSchema = getCatalogSchema();
+    // const catalogSchema = getCatalogSchema();
     conn = await getConn();
     const userQuery = `
-      SELECT UserID FROM ${catalogSchema}.users
+      SELECT UserID FROM catalog.users
       WHERE Email = ?
     `;
-    const userParams = [email];
+    const userParams = [email.toLowerCase()];
     const userResults = await runQuery(conn, userQuery, userParams);
 
     if (userResults.length === 0) {
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
     const plotQuery = `
       SELECT p.*
       FROM ${schema}.Plots AS p
-      LEFT JOIN ${catalogSchema}.UserPlotRelations AS upr ON p.PlotID = upr.PlotID
+      LEFT JOIN catalog.UserPlotRelations AS upr ON p.PlotID = upr.PlotID
       WHERE (upr.UserID = ? OR upr.AllPlots = 1) AND (upr.UserID IS NOT NULL)
     `;
     const plotParams = [userID];
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
     return new NextResponse(JSON.stringify(plotRows), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
-    throw new Error('Failed to fetch plot data');
+    throw new Error(`Failed to fetch plot data --> ${error}`);
   } finally {
     if (conn) conn.release();
   }
