@@ -31,6 +31,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.log('extracting species ID by code');
     const speciesID = await getColumnValueByColumnName(
       connection,
+      schema,
       'Species',
       'SpeciesID',
       'SpeciesCode',
@@ -42,6 +43,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.log('extracting quadrat ID by quadrat name');
     const quadratID = await getColumnValueByColumnName(
       connection,
+      schema,
       'Quadrats',
       'QuadratID',
       'QuadratName',
@@ -52,20 +54,20 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     console.log('attempting subspecies ID by speciesID');
     let subSpeciesID = null;
-    if (speciesID) subSpeciesID = await getSubSpeciesID(connection, parseInt(speciesID));
+    if (speciesID) subSpeciesID = await getSubSpeciesID(connection, schema, parseInt(speciesID));
     if (!subSpeciesID) console.log('no subspeciesID found');
 
     // Insert or update Trees with SpeciesID and SubSpeciesID
-    const treeID = await processTrees(connection, rowData.tag, speciesID, subSpeciesID ?? null);
+    const treeID = await processTrees(connection, schema, rowData.tag, speciesID, subSpeciesID ?? null);
     if (treeID === null) throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
     console.log(`treeID: ${treeID}`);
 
     // Insert or update Stems
-    const stemID = await processStems(connection, rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly);
+    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly);
     if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly]}`)
     console.log(`stemID: ${stemID}`);
 
-    const personnelID = await getPersonnelIDByName(connection, fullName);
+    const personnelID = await getPersonnelIDByName(connection, schema, fullName);
     if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     console.log(`personnelID: ${personnelID}`);
 
@@ -114,7 +116,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     // Process Attributes and CMAttributes for codes
     const codesArray = rowData.codes.split(';').filter(code => code.trim());
-    await processCode(connection, codesArray, dbhCMID);
+    await processCode(connection, schema, codesArray, dbhCMID);
 
     // Commit transaction
     await connection.commit();
