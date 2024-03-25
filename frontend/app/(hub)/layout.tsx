@@ -117,7 +117,13 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         };
   
         // Parallelize data loading
-        await Promise.all([loadQuadratsData(), loadCensusData(), loadPlotsData()]);
+        setLoading(true, 'Loading Quadrats...');
+        await loadQuadratsData();
+        setLoading(true, 'Loading Census...');
+        await loadCensusData();
+        setLoading(true, 'Loading Plots...');
+        await loadPlotsData();
+        setLoading(false);
       } catch (error) {
         console.error('Error loading server data:', error);
       } finally {
