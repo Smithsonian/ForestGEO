@@ -25,6 +25,7 @@
     "@mui/system": "latest",
     "@mui/x-data-grid": "latest",
     "@mui/x-data-grid-generator": "latest",
+    "@mui/x-date-pickers": "^7.0.0",
     "@react-spring/web": "latest",
     "autoprefixer": "latest",
     "crypto-browserify": "^3.12.0",

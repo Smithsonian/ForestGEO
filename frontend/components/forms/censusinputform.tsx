@@ -12,7 +12,9 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbarContainer
+  GridToolbarContainer,
+  GridToolbarProps,
+  ToolbarPropsOverrides
 } from '@mui/x-data-grid';
 import {randomId} from "@mui/x-data-grid-generator";
 import AddIcon from "@mui/icons-material/Add";
@@ -32,18 +34,20 @@ import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalid
 import {ReviewStates} from "@/config/macros";
 import {DialogContent, DialogTitle, Modal, ModalDialog} from '@mui/joy';
 
-interface EditToolbarProps {
-  setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
-  setRowModesModel: (
-    newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
-  ) => void;
+interface EditToolbarCustomProps {
+  handleAddNewRow?: () => void;
+  handleRefresh?: () => Promise<void>;
+  locked?: boolean;
 }
+
+type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
+
 
 function EditToolbar(props: Readonly<EditToolbarProps>) {
   const {setRows, setRowModesModel} = props;
   const handleClick = () => {
     const id = randomId();
-    setRows((oldRows) => [...oldRows,
+    setRows((oldRows: any) => [...oldRows,
       {
         id,
         date: new Date(),
@@ -60,7 +64,7 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
         comments: '',
         isNew: true
       }]);
-    setRowModesModel((oldModel) => ({
+    setRowModesModel((oldModel: any) => ({
       ...oldModel,
       [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
     }));
@@ -113,7 +117,7 @@ const CensusInputForm = () => {
       flex: 1,
       align: 'left',
       editable: true,
-      valueGetter: (params) => {
+      valueGetter: (params: any) => {
         if (!params.value) return null;
         return new Date(params.value);
       }
