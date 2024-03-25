@@ -19,7 +19,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
   try {
     console.log('processquadrats: beginning transaction');
     await connection.beginTransaction();
-    const personnelID = await getPersonnelIDByName(connection, fullName);
+    const personnelID = await getPersonnelIDByName(connection, schema, fullName);
     if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     const query = `
       INSERT INTO ${schema}.Quadrats (PlotID, CensusID, PersonnelID, QuadratName, DimensionX, DimensionY, Area, QuadratShape)
