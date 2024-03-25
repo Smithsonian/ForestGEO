@@ -37,6 +37,7 @@ jobs:
           echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
           echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
           echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
           echo NODE_ENV=development >> frontend/.env
           echo PORT=3000 >> frontend/.env

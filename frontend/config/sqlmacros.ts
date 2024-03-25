@@ -215,11 +215,10 @@ export const CensusGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     editable: true,
-    valueGetter: (params: any) => {
-      return params.value ? new Date(params.value) : null;
-    },
+    valueGetter: (params: any) => params.value === null ? null : new Date(params.value),
     valueFormatter: (params: any) => {
-      return params.value ? new Date(params.value).toLocaleDateString() : "Ongoing";
+      // Display "Open" when endDate is specifically null
+      return params.value === null ? "Ongoing" : new Date(params.value).toLocaleDateString();
     }
   },
   {

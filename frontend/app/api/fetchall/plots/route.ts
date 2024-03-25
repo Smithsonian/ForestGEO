@@ -35,6 +35,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
     const plotParams = [userID];
     const plotResults = await runQuery(conn, plotQuery, plotParams);
 
+    if (plotResults.length === 0) {
+      throw new Error('No plots found');
+    }
+
     const plotRows: PlotRDS[] = plotResults.map((row: PlotsResult, index: number) => ({
       id: index + 1,
       plotID: row.PlotID,
