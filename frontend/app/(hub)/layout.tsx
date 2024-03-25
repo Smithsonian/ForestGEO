@@ -123,9 +123,8 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         await loadCensusData();
         setLoading(true, 'Loading Plots...');
         await loadPlotsData();
-        setLoading(false);
-      } catch (error) {
-        console.error('Error loading server data:', error);
+      } catch (error: any) {
+        console.error('Error loading server data:', error.message);
       } finally {
         setLoading(false);
       }
