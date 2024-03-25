@@ -12,6 +12,7 @@ import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
 import {CensusRDS, PersonnelRDS, SitesRDS} from "@/config/sqlmacros";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
+import GridOnIcon from '@mui/icons-material/GridOn';
 
 // INTERFACES
 export interface PlotRaw {
@@ -439,12 +440,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: DescriptionIcon,
       },
-      // {
-      //   label: 'Census',
-      //   href: '/census',
-      //   tip: '',
-      //   icon: GridOnIcon,
-      // },
+            {
+              label: 'Census',
+              href: '/census',
+              tip: '',
+              icon: GridOnIcon,
+            },
       {
         label: 'Personnel',
         href: '/personnel',

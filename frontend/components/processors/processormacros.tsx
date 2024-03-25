@@ -210,8 +210,8 @@ export async function parseCensusRequestBody(request: NextRequest) {
     CensusID: requestBody.censusID,
     PlotID: requestBody.plotID ?? null,
     PlotCensusNumber: requestBody.plotCensusNumber ?? null,
-    StartDate: new Date(requestBody.startDate ?? null),
-    EndDate: new Date(requestBody.endDate ?? null),
+    StartDate: requestBody.startDate ? new Date(requestBody.startDate) : null,
+    EndDate: requestBody.endDate ? new Date(requestBody.endDate) : null,
     Description: requestBody.description ?? null,
   }
 }

@@ -1,5 +1,5 @@
 // datagridhelpers.ts
-import {GridRowModel} from "@mui/x-data-grid";
+import {GridRowModel, GridToolbarProps} from "@mui/x-data-grid";
 import { PersonnelRDS } from "./sqlmacros";
 
 const coreMeasurementsFields = [
@@ -158,7 +158,7 @@ export function validateRowStructure(gridType: string, oldRow: GridRowModel): bo
 export type FetchQueryFunction = (siteSchema: string, gridType: string, page: number, pageSize: number, plotID?: number) => string;
 export type ProcessQueryFunction = (siteSchema: string, gridType: string, deletionID?: number) => string;
 
-export interface EditToolbarProps {
+export interface EditToolbarProps extends GridToolbarProps {
   locked?: boolean;
   handleAddNewRow: () => void;
   handleRefresh: () => Promise<void>;

@@ -81,42 +81,50 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   let pathname = usePathname();
 
   const fetchAndUpdateCoreData = useCallback(async () => {
-    const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
-    // Load data from server into IndexedDB
     if (session && currentSite) {
       let email = session?.user?.email ?? '';
       if (email === '') {
         throw new Error("Session user's name or email is undefined");
       }
       try {
-        setLoading(true, 'Loading Quadrats...');
-        await loadServerDataIntoIDB('quadrats', email, currentSite.schemaName);
-        const quadratsData = await getData('quadratsLoad');
-        const quadratsList = await getData('quadratList');
-        quadratsLoadDispatch ? await quadratsLoadDispatch({quadratsLoad: quadratsData}) : undefined;
-        quadratListDispatch ? await quadratListDispatch({quadratList: quadratsList}) : undefined;
-        await delay(500);
-        setLoading(true, 'Loading Census...');
-        await loadServerDataIntoIDB('census', email, currentSite.schemaName);
-        const censusData = await getData('censusLoad');
-        const censusList = await getData('censusList');
-        censusLoadDispatch ? await censusLoadDispatch({censusLoad: censusData}) : undefined;
-        censusListDispatch ? await censusListDispatch({censusList: censusList}) : undefined;
-
-        await delay(500);
-        setLoading(true, 'Loading Plots...');
-        await loadServerDataIntoIDB('plots', email, currentSite.schemaName);
-        const plotsData = await getData('plotsLoad');
-        const plotList = await getData('plotList');
-        plotsLoadDispatch ? await plotsLoadDispatch({plotsLoad: plotsData}) : undefined;
-        plotsListDispatch ? await plotsListDispatch({plotList: plotList}) : undefined;
+        setLoading(true, 'Loading Core Data...');
+  
+        // Function to load and dispatch Quadrats data
+        const loadQuadratsData = async () => {
+          await loadServerDataIntoIDB('quadrats', email, currentSite.schemaName);
+          const quadratsData = await getData('quadratsLoad');
+          const quadratsList = await getData('quadratList');
+          quadratsLoadDispatch && await quadratsLoadDispatch({quadratsLoad: quadratsData});
+          quadratListDispatch && await quadratListDispatch({quadratList: quadratsList});
+        };
+  
+        // Function to load and dispatch Census data
+        const loadCensusData = async () => {
+          await loadServerDataIntoIDB('census', email, currentSite.schemaName);
+          const censusData = await getData('censusLoad');
+          const censusList = await getData('censusList');
+          censusLoadDispatch && await censusLoadDispatch({censusLoad: censusData});
+          censusListDispatch && await censusListDispatch({censusList: censusList});
+        };
+  
+        // Function to load and dispatch Plots data
+        const loadPlotsData = async () => {
+          await loadServerDataIntoIDB('plots', email, currentSite.schemaName);
+          const plotsData = await getData('plotsLoad');
+          const plotList = await getData('plotList');
+          plotsLoadDispatch && await plotsLoadDispatch({plotsLoad: plotsData});
+          plotsListDispatch && await plotsListDispatch({plotList: plotList});
+        };
+  
+        // Parallelize data loading
+        await Promise.all([loadQuadratsData(), loadCensusData(), loadPlotsData()]);
       } catch (error) {
         console.error('Error loading server data:', error);
       } finally {
         setLoading(false);
       }
     }
-  }, [currentSite, session])
+  }, [currentSite, session]);  
 
   const fetchSiteList = useCallback(async () => {
     // Removed direct use of Dispatch functions for core data, as it's handled within clientmacros now.
@@ -134,7 +142,6 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
       } else {
         setLoading(true, 'Loading Sites...');
         siteListDispatch ? await siteListDispatch({siteList: sites}) : undefined;
-        await delay(500);
       }
     }
     setLoading(false);

@@ -1,7 +1,7 @@
 /**
  * macros for sql table props:
  */
-import {DataGrid, GridColDef} from '@mui/x-data-grid';
+import {DataGrid, GridColDef, GridEditCellProps} from '@mui/x-data-grid';
 import {styled} from '@mui/material/styles';
 
 export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
@@ -124,7 +124,7 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
     type: "string",
     headerClassName: 'header',
     flex: 1,
-    valueGetter: (params) => {
+    valueGetter: (params: any) => {
       if (!params.value) return null;
       return new Date(params.value).toDateString();
     }
@@ -190,14 +190,14 @@ export const CensusGridColumns: GridColDef[] = [
     align: 'left',
     editable: true
   },
-  {
-    field: 'plotID',
-    headerName: 'PlotID',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: true
-  },
+  // {
+  //   field: 'plotID',
+  //   headerName: 'PlotID',
+  //   headerClassName: 'header',
+  //   flex: 1,
+  //   align: 'left',
+  //   editable: true
+  // },
   {
     field: 'plotCensusNumber',
     headerName: 'PlotCensusNumber',
@@ -215,9 +215,11 @@ export const CensusGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     editable: true,
-    valueGetter: (params) => {
-      if (!params.value) return null;
-      return new Date(params.value);
+    valueGetter: (params: any) => {
+      return params.value ? new Date(params.value) : null;
+    },
+    valueFormatter: (params: any) => {
+      return params.value ? new Date(params.value).toLocaleDateString() : "Ongoing";
     }
   },
   {
@@ -228,9 +230,10 @@ export const CensusGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     editable: true,
-    valueGetter: (params) => {
-      if (!params.value) return null;
-      return new Date(params.value);
+    valueGetter: (params: any) => params.value === null ? null : new Date(params.value),
+    valueFormatter: (params: any) => {
+      // Display "Open" when endDate is specifically null
+      return params.value === null ? "Ongoing" : new Date(params.value).toLocaleDateString();
     }
   },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
@@ -295,7 +298,7 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
     type: "date",
     headerClassName: 'header',
     flex: 1,
-    valueGetter: (params) => {
+    valueGetter: (params: any) => {
       if (!params.value) return null;
       return new Date(params.value);
     }
@@ -325,7 +328,7 @@ export const CurrentObsoleteGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
-    valueGetter: (params) => {
+    valueGetter: (params: any) => {
       if (!params.value) return null;
       return new Date(params.value);
     }
@@ -476,7 +479,7 @@ export const ReferenceGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
-    valueGetter: (params) => {
+    valueGetter: (params: any) => {
       if (!params.value) return null;
       return new Date(params.value);
     }
@@ -548,18 +551,18 @@ export type StemRDS = {
 }
 
 export const StemGridColumns: GridColDef[] = [
-  {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemTag', headerName: 'StemTag', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemPlotX', headerName: 'StemPlotX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemPlotY', headerName: 'StemPlotY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemPlotZ', headerName: 'StemPlotZ', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemQuadX', headerName: 'StemQuadX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemQuadY', headerName: 'StemQuadY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'stemQuadZ', headerName: 'StemQuadZ', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemTag', headerName: 'Stem Tag', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'treeTag', headerName: 'Tree Tag', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemPlotX', headerName: 'Plot X', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemPlotY', headerName: 'Plot Y', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemPlotZ', headerName: 'StemPlotZ', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemQuadX', headerName: 'Quadrat X', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'stemQuadY', headerName: 'Quadrat Y', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'stemQuadZ', headerName: 'StemQuadZ', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'moved', headerName: 'Moved', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ]
@@ -597,8 +600,8 @@ export type TreeRDS = {
 }
 
 export const TreeGridColumns: GridColDef[] = [
-  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'treeTag', headerName: 'TreeTag', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'treeTag', headerName: 'Tree Tag', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
 ]
