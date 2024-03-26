@@ -2,7 +2,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {QuadratsRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {getConn, getSqlConnection, QuadratsResult, runQuery} from "@/components/processors/processormacros";
+import {getConn, QuadratsResult, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<QuadratsRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');

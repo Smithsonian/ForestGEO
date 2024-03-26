@@ -1,11 +1,11 @@
 "use client";
-import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import React, {useEffect, useState} from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
-import { useSiteContext } from "@/app/contexts/userselectionprovider";
+import {useSiteContext} from "@/app/contexts/userselectionprovider";
 import {PersonnelRDS} from "@/config/sqlmacros";
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle } from '@mui/material';
+import {Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle} from '@mui/material';
 
 export interface PersonnelAutocompleteMultiSelectProps {
   initialValue: PersonnelRDS[];
@@ -14,7 +14,7 @@ export interface PersonnelAutocompleteMultiSelectProps {
 }
 
 export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMultiSelectProps> = (props) => {
-  const { initialValue, locked, onChange } = props;
+  const {initialValue, locked, onChange} = props;
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<PersonnelRDS[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -94,11 +94,11 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         onChange={(_event, newValue) => {
           setTempSelectedPersonnel(newValue);
           setOpenDialog(true);
-        } }
+        }}
         filterSelectedOptions
         renderInput={(params) => (
           <TextField
-            sx={{ marginTop: '10px', marginBottom: '5px' }}
+            sx={{marginTop: '10px', marginBottom: '5px'}}
             {...params}
             fullWidth
             label="Select Personnel"
@@ -106,20 +106,20 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
               ...params.InputProps,
               endAdornment: (
                 <>
-                  {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                  {loading ? <CircularProgress color="inherit" size={20}/> : null}
                   {params.InputProps.endAdornment}
                 </>
               ),
-            }} 
+            }}
           />
-        )} 
+        )}
       />
       <Dialog open={openDialog} onClose={handleCancel}>
         <DialogTitle>Confirm Personnel Change</DialogTitle>
         <DialogContent>
           <DialogContentText>
             {`Are you sure you want to change the assigned personnel? `}
-            <br /><br />
+            <br/><br/>
             <strong>{getChangeMessage()}</strong>
           </DialogContentText>
         </DialogContent>

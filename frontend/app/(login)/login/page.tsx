@@ -5,7 +5,7 @@ import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
 import Box from "@mui/joy/Box";
 import UnauthenticatedSidebar from "@/components/unauthenticatedsidebar";
-import { redirect } from "next/navigation";
+import {redirect} from "next/navigation";
 
 const slides = [
   'background-1.jpg',
