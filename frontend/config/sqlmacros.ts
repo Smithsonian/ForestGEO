@@ -211,13 +211,14 @@ export const CensusGridColumns: GridColDef[] = [
     field: 'startDate',
     headerName: 'StartDate',
     headerClassName: 'header',
-    type: 'date',
     flex: 1,
     align: 'left',
+    type: 'date',
     editable: true,
     valueFormatter: (params: any) => {
-      // Format the date, or return a placeholder for null
-      return new Date(params).toLocaleDateString() ?? new Date(0).toLocaleDateString();
+      if (params) {
+        return new Date(params).toDateString();
+      } else return new Date().toDateString();
     }
   },
   {
@@ -229,8 +230,9 @@ export const CensusGridColumns: GridColDef[] = [
     align: 'left',
     editable: true,
     valueFormatter: (params: any) => {
-      // Format the date, or return a placeholder for null
-      return new Date(params).toLocaleDateString() ?? new Date(0).toLocaleDateString();
+      if (params) {
+        return new Date(params).toDateString();
+      } else return new Date().toDateString();
     }
   },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
