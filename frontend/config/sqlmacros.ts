@@ -1,7 +1,7 @@
 /**
  * macros for sql table props:
  */
-import {DataGrid, GridColDef, GridEditCellProps} from '@mui/x-data-grid';
+import {DataGrid, GridColDef, GridValueFormatterParams, GridValueGetter} from '@mui/x-data-grid';
 import {styled} from '@mui/material/styles';
 
 export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
@@ -210,29 +210,27 @@ export const CensusGridColumns: GridColDef[] = [
   {
     field: 'startDate',
     headerName: 'StartDate',
-    type: 'date',
     headerClassName: 'header',
+    type: 'date',
     flex: 1,
     align: 'left',
     editable: true,
-    valueGetter: (params: any) => params.value === null ? null : new Date(params.value),
     valueFormatter: (params: any) => {
-      // Display "Open" when endDate is specifically null
-      return (params === null || params.value === null) ? "Ongoing" : new Date(params.value).toLocaleDateString();
+      // Format the date, or return a placeholder for null
+      return new Date(params).toLocaleDateString() ?? new Date(0).toLocaleDateString();
     }
   },
   {
     field: 'endDate',
     headerName: 'EndDate',
-    type: 'date',
     headerClassName: 'header',
+    type: 'date',
     flex: 1,
     align: 'left',
     editable: true,
-    valueGetter: (params: any) => params.value === null ? null : new Date(params.value),
     valueFormatter: (params: any) => {
-      // Display "Open" when endDate is specifically null
-      return  (params === null || params.value === null) ? "Ongoing" : new Date(params.value).toLocaleDateString();
+      // Format the date, or return a placeholder for null
+      return new Date(params).toLocaleDateString() ?? new Date(0).toLocaleDateString();
     }
   },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},

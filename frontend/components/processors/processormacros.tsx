@@ -1,4 +1,4 @@
-import mysql, {PoolConnection} from 'mysql2/promise';
+import mysql, {PoolConnection, PoolOptions} from 'mysql2/promise';
 import {booleanToBit, FileRow} from "@/config/macros";
 
 import {processSpecies} from "@/components/processors/processspecies";
@@ -6,25 +6,26 @@ import * as fs from "fs";
 import {NextRequest} from "next/server";
 import {processQuadrats} from "@/components/processors/processquadrats";
 import {processCensus} from "@/components/processors/processcensus";
+import {PoolMonitor} from "@/config/poolmonitor";
 
 export async function getConn() {
-  let conn: PoolConnection | null = null; // Use PoolConnection type
+  let conn: PoolConnection | null = null;
   try {
     let i = 0;
+    console.log("Attempting to get SQL connection");
     conn = await getSqlConnection(i);
-  } catch (error) {
-    if (error instanceof Error) {
-      console.error("Error processing files:", error.message);
-      throw new Error(error.message);
-    } else {
-      console.error("Unknown error in connecting to SQL:", error);
-      throw new Error('unknown');
-    }
+    console.log("SQL connection obtained");
+  } catch (error: any) {
+    console.error("Error processing files:", error.message);
+    throw new Error(error.message);
   }
   if (!conn) {
     console.error("Container client or SQL connection is undefined.");
     throw new Error('conn empty');
   }
+  conn.on('release', () => {
+    console.log("Connection released back to pool");
+  });
   return conn;
 }
 
@@ -103,7 +104,7 @@ export const fileMappings: Record<string, FileMapping> = {
     specialProcessing: processCensus
   },
 };
-const sqlConfig: any = {
+const sqlConfig: PoolOptions = {
   user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
   password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
   host: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
@@ -111,12 +112,13 @@ const sqlConfig: any = {
   database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
   ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
 }
-const pool = mysql.createPool(sqlConfig);
+const poolMonitor = new PoolMonitor(sqlConfig);
+// const pool = mysql.createPool(sqlConfig);
 
 // Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
-    const connection = await pool.getConnection();
+    const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
     return connection; // Resolve the connection when successful
   } catch (err) {
@@ -151,8 +153,6 @@ export async function runQuery(connection: PoolConnection, query: string, params
   } catch (error: any) {
     console.error('Error executing query:', error.message);
     throw error;
-  } finally {
-    connection.release(); // Release the connection back to the pool
   }
 }
 

@@ -2,7 +2,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {CensusRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {CensusResult, getSqlConnection, runQuery} from "@/components/processors/processormacros";
+import {CensusResult, getConn, getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {HTTPResponses} from "@/config/macros";
 
 
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<CensusRDS[
 
   let conn: PoolConnection | null = null;
   try {
-    conn = await getSqlConnection(0); // Utilize the retry mechanism effectively
+    conn = await getConn();
 
     const results = await runQuery(conn, `SELECT * FROM ${schema}.Census`);
     if (!results) throw new Error("Call failed");

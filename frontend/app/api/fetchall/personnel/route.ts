@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PersonnelRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {getSqlConnection, PersonnelResult, runQuery} from "@/components/processors/processormacros";
+import {getConn, getSqlConnection, PersonnelResult, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -9,7 +9,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
 
   let conn: PoolConnection | null = null;
   try {
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     const query = `SELECT * FROM ${schema}.Quadrats`;
     const results = await runQuery(conn, query);
 
