@@ -112,7 +112,7 @@ const sqlConfig: PoolOptions = {
   database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
   ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
 }
-const poolMonitor = new PoolMonitor(sqlConfig);
+export const poolMonitor = new PoolMonitor(sqlConfig);
 // const pool = mysql.createPool(sqlConfig);
 
 // Function to get a connection from the pool

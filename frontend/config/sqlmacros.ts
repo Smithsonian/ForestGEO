@@ -209,7 +209,7 @@ export const CensusGridColumns: GridColDef[] = [
   },
   {
     field: 'startDate',
-    headerName: 'StartDate',
+    headerName: 'Starting',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -223,7 +223,7 @@ export const CensusGridColumns: GridColDef[] = [
   },
   {
     field: 'endDate',
-    headerName: 'EndDate',
+    headerName: 'Ending',
     headerClassName: 'header',
     type: 'date',
     flex: 1,
@@ -502,17 +502,17 @@ export type SpeciesRDS = {
 
 
 export const SpeciesGridColumns: GridColDef[] = [
-  {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'currentTaxonFlag', headerName: 'CurrentTaxonFlag', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'obsoleteTaxonFlag', headerName: 'ObsoleteTaxonFlag', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'speciesName', headerName: 'SpeciesName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'speciesCode', headerName: 'SpeciesCode', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'currentTaxonFlag', headerName: 'CurrentTaxonFlag', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'obsoleteTaxonFlag', headerName: 'ObsoleteTaxonFlag', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'speciesCode', headerName: 'Code', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'idLevel', headerName: 'IDLevel', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'authority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'fieldFamily', headerName: 'FieldFamily', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
+  // {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
 ]
 
 export type SpeciesInventoryRDS = {
