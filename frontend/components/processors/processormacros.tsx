@@ -1,4 +1,4 @@
-import mysql, {PoolConnection, PoolOptions} from 'mysql2/promise';
+import {PoolConnection, PoolOptions} from 'mysql2/promise';
 import {booleanToBit, FileRow} from "@/config/macros";
 
 import {processSpecies} from "@/components/processors/processspecies";

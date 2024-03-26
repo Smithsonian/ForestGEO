@@ -1,6 +1,5 @@
 // datagridhelpers.ts
 import {GridRowModel, GridToolbarProps} from "@mui/x-data-grid";
-import { PersonnelRDS } from "./sqlmacros";
 
 const coreMeasurementsFields = [
   'censusID', 'plotID', 'quadratID', 'treeID', 'stemID', 'personnelID',
@@ -51,37 +50,37 @@ const newRowTemplates: Templates = {
     code: {type: 'string', initialValue: ''},
     description: {type: 'string', initialValue: ''},
     status: {type: 'string', initialValue: ''},
-    isNew: { type: 'boolean', initialValue: true }
+    isNew: {type: 'boolean', initialValue: true}
   },
   census: {
-    id: { type: 'string' },
-    censusID: { type: 'number', initialValue: null }, // auto-incremented
-    plotID: { type: 'number', initialValue: 0 },
-    plotCensusNumber: { type: 'number', initialValue: 0 },
-    startDate: { type: 'date' }, // Special handling for dates
-    endDate: { type: 'date' },   // Special handling for dates
-    description: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    censusID: {type: 'number', initialValue: null}, // auto-incremented
+    plotID: {type: 'number', initialValue: 0},
+    plotCensusNumber: {type: 'number', initialValue: 0},
+    startDate: {type: 'date'}, // Special handling for dates
+    endDate: {type: 'date'},   // Special handling for dates
+    description: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   },
   personnel: {
-    id: { type: 'string' },
-    personnelID: { type: 'number', initialValue: null }, // null indicates auto-incremented
-    firstName: { type: 'string', initialValue: '' },
-    lastName: { type: 'string', initialValue: '' },
-    role: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    personnelID: {type: 'number', initialValue: null}, // null indicates auto-incremented
+    firstName: {type: 'string', initialValue: ''},
+    lastName: {type: 'string', initialValue: ''},
+    role: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   },
   quadrats: {
-    id: { type: 'string' },
-    quadratID: { type: 'number', initialValue: null }, // auto-incremented
-    plotID: { type: 'number', initialValue: 0 },
-    quadratName: { type: 'string', initialValue: '' },
-    dimensionX: { type: 'number', initialValue: 0 },
-    dimensionY: { type: 'number', initialValue: 0 },
-    area: { type: 'number', initialValue: 0 },
-    quadratShape: { type: 'string', initialValue: '' },
-    personnel: { type: 'array', initialValue: [] },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    quadratID: {type: 'number', initialValue: null}, // auto-incremented
+    plotID: {type: 'number', initialValue: 0},
+    quadratName: {type: 'string', initialValue: ''},
+    dimensionX: {type: 'number', initialValue: 0},
+    dimensionY: {type: 'number', initialValue: 0},
+    area: {type: 'number', initialValue: 0},
+    quadratShape: {type: 'string', initialValue: ''},
+    personnel: {type: 'array', initialValue: []},
+    isNew: {type: 'boolean', initialValue: true}
   },
   species: {
     id: {type: 'string'},

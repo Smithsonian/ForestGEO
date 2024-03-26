@@ -76,7 +76,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     // Commit the transaction
     await conn.commit();
 
-    return NextResponse.json({ message: "Personnel updated successfully" }, { status: 200 });
+    return NextResponse.json({message: "Personnel updated successfully"}, {status: 200});
   } catch (error) {
     await conn?.rollback();
     console.error('Error:', error);

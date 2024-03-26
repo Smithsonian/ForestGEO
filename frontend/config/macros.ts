@@ -10,7 +10,7 @@ import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
 import {setData} from "@/config/db";
-import {CensusRDS, PersonnelRDS, SitesRDS} from "@/config/sqlmacros";
+import {CensusRDS, SitesRDS} from "@/config/sqlmacros";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import GridOnIcon from '@mui/icons-material/GridOn';
 
@@ -440,12 +440,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: DescriptionIcon,
       },
-            {
-              label: 'Census',
-              href: '/census',
-              tip: '',
-              icon: GridOnIcon,
-            },
+      {
+        label: 'Census',
+        href: '/census',
+        tip: '',
+        icon: GridOnIcon,
+      },
       {
         label: 'Personnel',
         href: '/personnel',

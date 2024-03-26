@@ -1,7 +1,7 @@
 /**
  * macros for sql table props:
  */
-import {DataGrid, GridColDef, GridValueFormatterParams, GridValueGetter} from '@mui/x-data-grid';
+import {DataGrid, GridColDef} from '@mui/x-data-grid';
 import {styled} from '@mui/material/styles';
 
 export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
@@ -451,11 +451,43 @@ export const QuadratsGridColumns: GridColDef[] = [
   {field: 'quadratID', headerName: 'ID', headerClassName: 'header', maxWidth: 75, align: 'left',},
   // {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
   // {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'quadratName', headerName: 'Name', headerClassName: 'header', flex: 1, maxWidth: 140, align: 'left', editable: true},
-  {field: 'dimensionX', headerName: 'X', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
-  {field: 'dimensionY', headerName: 'Y', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
+  {
+    field: 'quadratName',
+    headerName: 'Name',
+    headerClassName: 'header',
+    flex: 1,
+    maxWidth: 140,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'dimensionX',
+    headerName: 'X',
+    headerClassName: 'header',
+    flex: 1,
+    maxWidth: 125,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'dimensionY',
+    headerName: 'Y',
+    headerClassName: 'header',
+    flex: 1,
+    maxWidth: 125,
+    align: 'left',
+    editable: true
+  },
   {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
-  {field: 'quadratShape', headerName: 'Shape', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true},
+  {
+    field: 'quadratShape',
+    headerName: 'Shape',
+    headerClassName: 'header',
+    flex: 1,
+    maxWidth: 125,
+    align: 'left',
+    editable: true
+  },
 ];
 
 export type ReferenceRDS = {
