@@ -155,7 +155,7 @@ export function validateRowStructure(gridType: string, oldRow: GridRowModel): bo
 }
 
 export type FetchQueryFunction = (siteSchema: string, gridType: string, page: number, pageSize: number, plotID?: number) => string;
-export type ProcessQueryFunction = (siteSchema: string, gridType: string, deletionID?: number) => string;
+export type ProcessQueryFunction = (siteSchema: string, gridType: string, deletionID?: number | string) => string;
 
 export interface EditToolbarProps extends GridToolbarProps {
   locked?: boolean;
@@ -210,7 +210,7 @@ export const createFetchQuery: FetchQueryFunction = (siteSchema: string, gridTyp
   return baseQuery;
 };
 
-export const createDeleteQuery: ProcessQueryFunction = (siteSchema: string, gridType: string, deletionID?: number) => {
+export const createDeleteQuery: ProcessQueryFunction = (siteSchema: string, gridType: string, deletionID?: number | string) => {
   let gridID = getGridID(gridType);
   let baseQuery = createProcessQuery(siteSchema, gridType);
   baseQuery += `&${gridID}=${deletionID!.toString()}`;
@@ -218,7 +218,7 @@ export const createDeleteQuery: ProcessQueryFunction = (siteSchema: string, grid
 }
 
 export function getGridID(gridType: string): string {
-  switch (gridType) {
+  switch (gridType.trim()) {
     case 'coreMeasurements':
       return 'coreMeasurementID';
     case 'attributes':
@@ -234,7 +234,7 @@ export function getGridID(gridType: string): string {
     case 'subSpecies':
       return 'subSpeciesID';
     default:
-      throw new Error('Invalid grid type submitted');
+      return "breakage";
   }
 }
 

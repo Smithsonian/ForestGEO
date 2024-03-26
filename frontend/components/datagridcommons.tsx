@@ -200,9 +200,11 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
     console.log('delete confirm');
+    console.log('gridType: ', gridType);
     let gridID = getGridID(gridType);
+    console.log('gridID: ', gridID);
     const deletionID = rows.find((row) => row.id == id)![gridID];
-    const deleteQuery = createDeleteQuery(gridType, deletionID);
+    const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, deletionID);
     const response = await fetch(deleteQuery, {
       method: 'DELETE'
     });
