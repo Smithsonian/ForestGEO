@@ -218,7 +218,7 @@ export const CensusGridColumns: GridColDef[] = [
     valueFormatter: (params: any) => {
       if (params) {
         return new Date(params).toDateString();
-      } else return new Date().toDateString();
+      } else return "null";
     }
   },
   {
@@ -232,7 +232,7 @@ export const CensusGridColumns: GridColDef[] = [
     valueFormatter: (params: any) => {
       if (params) {
         return new Date(params).toDateString();
-      } else return new Date().toDateString();
+      } else return "null";
     }
   },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
