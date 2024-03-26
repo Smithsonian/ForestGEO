@@ -1,0 +1,5 @@
+code,description,status
+TA,test attribute,alive
+TB,test attribute B,dead
+TC,test attribute C,missing
+TD,test attribute D,broken below
