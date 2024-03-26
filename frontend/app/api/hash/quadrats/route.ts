@@ -1,6 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
-import {getSqlConnection, runQuery} from "@/components/processors/processormacros";
+import {getConn, getSqlConnection, runQuery} from "@/components/processors/processormacros";
 import {generateHash} from "@/config/crypto-actions";
 
 export async function GET(request: NextRequest) {
@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (!schema) throw new Error('no schema provided!');
   let conn: PoolConnection | null = null;
   try {
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     const query = `SELECT * FROM ${schema}.Quadrats`;
     const results = await runQuery(conn, query);
     return new NextResponse(JSON.stringify(generateHash(results)), {status: 200});

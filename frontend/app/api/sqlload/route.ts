@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getSqlConnection, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
+import {getConn, getSqlConnection, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {FileRow, FileRowSet, HTTPResponses} from "@/config/macros";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
@@ -41,10 +41,7 @@ export async function POST(request: NextRequest) {
 
   try {
     let i = 0;
-    connection = await getSqlConnection(i);
-    if (!connection) {
-      throw new Error("SQL connection failed");
-    }
+    connection = await getConn();
   } catch (error) {
     if (error instanceof Error) {
       console.error("Error processing files:", error.message);

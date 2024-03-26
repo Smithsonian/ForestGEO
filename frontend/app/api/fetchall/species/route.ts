@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {SpeciesRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {getSqlConnection, runQuery, SpeciesResult} from "@/components/processors/processormacros";
+import {getConn, getSqlConnection, runQuery, SpeciesResult} from "@/components/processors/processormacros";
 import {bitToBoolean} from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<SpeciesRDS[]>> {
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SpeciesRDS
 
   let conn: PoolConnection | null = null;
   try {
-    conn = await getSqlConnection(0);
+    conn = await getConn();
     const query = `SELECT * FROM ${schema}.Quadrats`;
     const results = await runQuery(conn, query);
 

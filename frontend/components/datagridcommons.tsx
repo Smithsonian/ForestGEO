@@ -428,25 +428,25 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
     if (locked) return;
     console.log('cancel button');
-    // Prevent default action for the event if it exists
     event?.preventDefault();
 
-    const isOnlyRowOnNewPage = rowCount % paginationModel.pageSize === 1 && isNewRowAdded;
+    const row = rows.find(r => r.id === id);
+    if (row?.isNew) {
+      // If it's a new row, remove it from the grid
+      setRows(oldRows => oldRows.filter(row => row.id !== id));
+      setIsNewRowAdded(false);
 
-    // Remove the new row and reset the isNewRowAdded flag
-    setRows((oldRows) => oldRows.filter((row) => row.id !== id));
-    setIsNewRowAdded(false);
-
-    if (isOnlyRowOnNewPage) {
-      // Move back to the previous page if it was the only row on a new page
-      const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
-      setPaginationModel({ ...paginationModel, page: newPage });
+      // Adjust pagination if this was the only row on a new page
+      if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
+        const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
+        setPaginationModel({ ...paginationModel, page: newPage });
+      }
     } else {
-      // For existing rows, just switch the mode to view
-      setRowModesModel({
-        ...rowModesModel,
+      // For existing rows, just switch the mode back to view
+      setRowModesModel(oldModel => ({
+        ...oldModel,
         [id]: { mode: GridRowModes.View, ignoreModifications: true },
-      });
+      }));
     }
   };
 
