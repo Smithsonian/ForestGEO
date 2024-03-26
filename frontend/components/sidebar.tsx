@@ -11,7 +11,7 @@ import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
-import {Census, Plot, Site, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import {Plot, Site, siteConfigNav, SiteConfigProps} from "@/config/macros";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -163,11 +163,16 @@ export default function Sidebar(props: SidebarProps) {
           uniqueCensusMap.set(plotCensusNumber, {
             plotID: censusRDS?.plotID || 0,
             plotCensusNumber,
-            startDate: censusRDS?.startDate || new Date(),
+            startDate: censusRDS?.startDate || null, // need to handle null start date too
             endDate: censusRDS?.endDate || null,  // Handle null endDate
             description: censusRDS?.description || ''
           });
         } else {
+          if (censusRDS?.startDate) {
+            existingCensus.startDate = existingCensus.startDate
+              ? new Date(Math.max(existingCensus.startDate.getTime(), new Date(censusRDS.startDate).getTime()))
+              : new Date(censusRDS.startDate);  // Update startDate only if it's not null
+          }
           existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate || 0).getTime()));
           if (censusRDS?.endDate) {
             existingCensus.endDate = existingCensus.endDate
@@ -176,14 +181,14 @@ export default function Sidebar(props: SidebarProps) {
           }
         }
       });
-      
+
       // Check if the census list actually needs to be updated
       const newCensusList = Array.from(uniqueCensusMap.values());
       if (JSON.stringify(censusListContext) !== JSON.stringify(newCensusList)) {
         console.log('Updating Census List...'); // Debugging Log
         if (censusListDispatch) {
           setLoading(true, "Updating Census Selection...");
-          await censusListDispatch({ censusList: newCensusList });
+          await censusListDispatch({censusList: newCensusList});
           setLoading(false);
         }
       }
@@ -204,7 +209,7 @@ export default function Sidebar(props: SidebarProps) {
         return (dateB.getTime() ?? 0) - (dateA.getTime() ?? 0);
       });
 
-    return { ongoingCensus, historicalCensuses };
+    return {ongoingCensus, historicalCensuses};
   };
 
   const {ongoingCensus, historicalCensuses} = getSortedCensusData();

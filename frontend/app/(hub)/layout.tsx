@@ -88,7 +88,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
       }
       try {
         setLoading(true, 'Loading Core Data...');
-  
+
         // Function to load and dispatch Quadrats data
         const loadQuadratsData = async () => {
           await loadServerDataIntoIDB('quadrats', email, currentSite.schemaName);
@@ -97,7 +97,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
           quadratsLoadDispatch && await quadratsLoadDispatch({quadratsLoad: quadratsData});
           quadratListDispatch && await quadratListDispatch({quadratList: quadratsList});
         };
-  
+
         // Function to load and dispatch Census data
         const loadCensusData = async () => {
           await loadServerDataIntoIDB('census', email, currentSite.schemaName);
@@ -106,7 +106,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
           censusLoadDispatch && await censusLoadDispatch({censusLoad: censusData});
           censusListDispatch && await censusListDispatch({censusList: censusList});
         };
-  
+
         // Function to load and dispatch Plots data
         const loadPlotsData = async () => {
           await loadServerDataIntoIDB('plots', email, currentSite.schemaName);
@@ -115,7 +115,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
           plotsLoadDispatch && await plotsLoadDispatch({plotsLoad: plotsData});
           plotsListDispatch && await plotsListDispatch({plotList: plotList});
         };
-  
+
         // Parallelize data loading
         setLoading(true, 'Loading Quadrats...');
         await loadQuadratsData();
@@ -129,7 +129,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         setLoading(false);
       }
     }
-  }, [currentSite, session]);  
+  }, [currentSite, session]);
 
   const fetchSiteList = useCallback(async () => {
     // Removed direct use of Dispatch functions for core data, as it's handled within clientmacros now.

@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {AttributesRDS} from "@/config/sqlmacros";
 import {PoolConnection} from "mysql2/promise";
-import {getConn, getSqlConnection, runQuery} from "@/components/processors/processormacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<AttributesRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
