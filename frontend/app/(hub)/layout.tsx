@@ -18,7 +18,7 @@ import {Box} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import {useLoading} from "@/app/contexts/loadingprovider";
 import {loadServerDataIntoIDB} from "@/config/updatecontextsfromidb";
-import {useSiteContext} from "@/app/contexts/userselectionprovider";
+import {useCensusDispatch, usePlotDispatch, useSiteContext} from "@/app/contexts/userselectionprovider";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
@@ -71,9 +71,15 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
   const siteListDispatch = useSiteListDispatch();
+  // plot & census selection dispatches to reset plot/census when census changes
+  const censusDispatch = useCensusDispatch();
+  const plotDispatch = usePlotDispatch();
+  // site/session definition
   const currentSite = useSiteContext();
   const {data: session} = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
+  const previousCensusRef = useRef<string | undefined>(undefined);
+  const previousPlotRef = useRef<string | undefined>(undefined);
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
   const [coreDataLoaded, setCoreDataLoaded] = useState(false);
@@ -170,6 +176,9 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     if (siteListLoaded && currentSite && !coreDataLoaded) {
       // Site list loaded and current site selected, fetch core data
       fetchAndUpdateCoreData().then(() => setCoreDataLoaded(true)).catch(console.error);
+      // clear currently selected plot & census
+      if (censusDispatch) censusDispatch({census: null});
+      if (plotDispatch) plotDispatch({plot: null});
     }
   }, [siteListLoaded, currentSite, coreDataLoaded, fetchAndUpdateCoreData]);
 
