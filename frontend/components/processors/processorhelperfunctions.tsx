@@ -1,4 +1,4 @@
-import {PoolConnection} from "mysql2/promise";
+import { PoolConnection } from "mysql2/promise";
 import {
   fileMappings,
   getConn,
@@ -7,9 +7,9 @@ import {
   SitesResult,
   ValidationResponse
 } from "@/components/processors/processormacros";
-import {processCensus} from "@/components/processors/processcensus";
-import {bitToBoolean} from "@/config/macros";
-import {SitesRDS} from "@/config/sqlmacros";
+import { processCensus } from "@/components/processors/processcensus";
+import { bitToBoolean } from "@/config/macros";
+import { SitesRDS } from "@/config/sqlmacros";
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
@@ -207,19 +207,19 @@ export async function getPersonnelIDByName(
 }
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | null> {
-  const {formType, schema, ...subProps} = props;
-  const {connection, rowData} = subProps;
+  const { formType, schema, ...subProps } = props;
+  const { connection, rowData } = subProps;
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   console.log('INSERT OR UPDATE: schema & mapping found');
   if (formType === 'measurements') {
-    return await processCensus({...subProps, schema});
+    return await processCensus({ ...subProps, schema });
   } else {
     if (mapping.specialProcessing) {
       console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
-      await mapping.specialProcessing({...subProps, schema});
+      await mapping.specialProcessing({ ...subProps, schema });
     } else {
       console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
       const columns = Object.keys(mapping.columnMappings);
@@ -251,20 +251,28 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
   }
 }
 
-export async function runValidationProcedure(schema: string, procedureName: string, plotID: number | null, censusID: number | null, min?: number, max?: number) {
+export async function runValidationProcedure(
+  schema: string,
+  procedureName: string,
+  plotID: number | null,
+  censusID: number | null,
+  min?: number | null, // Adjusted type here
+  max?: number | null  // And here
+) {
   const conn = await getConn();
   let query, parameters;
 
+  // Since min and max are already either numbers or null, you don't need to convert them here
+  const minDBH = min;
+  const maxDBH = max;
+
   if (procedureName === "ValidateScreenMeasuredDiameterMinMax" || procedureName === "ValidateHOMUpperAndLowerBounds") {
     query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
-    // Pass JavaScript null for SQL NULL
-    parameters = [censusID, plotID, min !== undefined ? min : null, max !== undefined ? max : null];
+    parameters = [censusID, plotID, minDBH, maxDBH];
   } else {
     query = `CALL ${schema}.${procedureName}(?, ?)`;
     parameters = [censusID, plotID];
   }
-
-
   try {
     await conn.beginTransaction();
     const resultSets = await runQuery(conn, query, parameters);
@@ -275,11 +283,11 @@ export async function runValidationProcedure(schema: string, procedureName: stri
     // The second result set contains the failedValidationIds (if present)
     const failedValidationIds = resultSets.length > 1 ? resultSets[1].map((row: any) => row.CoreMeasurementID) : [];
 
-    const validationResponse: ValidationResponse = {
+    const validationResponse = {
       totalRows: validationSummary.TotalRows,
       failedRows: validationSummary.FailedRows,
       message: validationSummary.Message,
-      ...(failedValidationIds.length > 0 && {failedCoreMeasurementIDs: failedValidationIds})
+      ...(failedValidationIds.length > 0 && { failedCoreMeasurementIDs: failedValidationIds })
     };
 
     await conn.commit();
@@ -291,6 +299,7 @@ export async function runValidationProcedure(schema: string, procedureName: stri
     if (conn) conn.release();
   }
 }
+
 
 export async function verifyEmail(email: string): Promise<{ emailVerified: boolean, isAdmin: boolean }> {
   const connection: PoolConnection | null = await getConn();
@@ -304,7 +313,7 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
     // isAdmin is determined based on the IsAdmin field if email is verified
     const isAdmin = emailVerified && bitToBoolean(results[0]?.IsAdmin);
 
-    return {emailVerified, isAdmin};
+    return { emailVerified, isAdmin };
   } catch (error: any) {
     console.error('Error verifying email in database: ', error);
     throw error;
