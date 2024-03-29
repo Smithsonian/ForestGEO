@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
   const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 
   // Convert to numbers only if the parameters are not undefined
-  const minHOM = minHOMParam !== null ? parseFloat(minHOMParam) : undefined;
-  const maxHOM = maxHOMParam !== null ? parseFloat(maxHOMParam) : undefined;
+  const minHOM = minHOMParam !== 'undefined' && minHOMParam !== null ? parseFloat(minHOMParam) : null;
+  const maxHOM = maxHOMParam !== 'undefined' && maxHOMParam !== null ? parseFloat(maxHOMParam) : null;
 
   try {
     const validationResponse = await runValidationProcedure(schema, 'ValidateHOMUpperAndLowerBounds', plotID, censusID, minHOM, maxHOM);
