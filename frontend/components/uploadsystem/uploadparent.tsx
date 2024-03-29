@@ -19,16 +19,13 @@ import UploadParseFiles from "@/components/uploadsystem/uploadparsefiles";
 import UploadReviewFiles from "@/components/uploadsystem/uploadreviewfiles";
 import UploadFireSQL from "@/components/uploadsystem/uploadfiresql";
 import UploadError from "@/components/uploadsystem/uploaderror";
-import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
 import UploadValidation from "@/components/uploadsystem/uploadvalidation";
 import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
 import {Button} from "@mui/material";
 import UploadStart from "@/components/uploadsystem/uploadstart";
-import ListItemDecorator from "@mui/joy/ListItemDecorator";
-import ViewListIcon from '@mui/icons-material/ViewList';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 import UploadFireAzure from "@/components/uploadsystem/uploadfireazure";
 import UploadComplete from "@/components/uploadsystem/uploadcomplete";
+import moment from "moment";
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -202,6 +199,35 @@ export default function UploadParent(props: UploadParentProps) {
         header: true,
         skipEmptyLines: true,
         transformHeader: (h) => h.trim(),
+        transform: (value, field) => {
+          // Handle the 'date' field for 'measurements' form type
+          if (uploadForm === 'measurements' && field === 'date') {
+            const regex = /(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
+            const match = value.match(regex);
+  
+            if (match) {
+              let normalizedDate;
+              // Check if the format is YYYY-MM-DD
+              if (match[1]) {
+                normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+              } else { // Otherwise, assume DD-MM-YYYY
+                normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+              }
+  
+              const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+              if (parsedDate.isValid()) {
+                return parsedDate.toDate();
+              } else {
+                console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+                return value; // Returning the original value, but you might want to handle this differently.
+              }
+            } else {
+              console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+              return value;
+            }
+          }
+          return value;
+        },
         complete: function (results: ParseResult<FileRow>) {
           const expectedHeaders = TableHeadersByFormType[uploadForm];
           const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];

@@ -206,10 +206,7 @@ export default function Sidebar(props: SidebarProps) {
     // Update the site context (original onSiteChange functionality)
     setSite(selectedSite);
     if (siteDispatch) {
-      setLoading(true, 'Dispatching Site...');
       await siteDispatch({ site: selectedSite });
-      await delay(500);
-      setLoading(false);
     }
     if (selectedSite === null) { // site's been reset, plot needs to be voided
       await handlePlotSelection(null);
@@ -220,10 +217,7 @@ export default function Sidebar(props: SidebarProps) {
   const handlePlotSelection = async (selectedPlot: Plot | null) => {
     setPlot(selectedPlot);
     if (plotDispatch) {
-      setLoading(true, 'Dispatching plot...');
       await plotDispatch({ plot: selectedPlot });
-      await delay(500);
-      setLoading(false);
     }
     if (selectedPlot === null) {
       await handleCensusSelection(null); // if plot's reset, then census needs to be voided too
@@ -234,10 +228,7 @@ export default function Sidebar(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: CensusRDS | null) => {
     setCensus(selectedCensus);
     if (censusDispatch) {
-      setLoading(true, 'Dispatching Census...');
       await censusDispatch({ census: selectedCensus });
-      await delay(500);
-      setLoading(false);
     }
   };
 
@@ -369,9 +360,9 @@ export default function Sidebar(props: SidebarProps) {
         <GlobalStyles
           styles={(theme) => ({
             ':root': {
-              '--Sidebar-width': '375px',
+              '--Sidebar-width': '380px',
               [theme.breakpoints.up('lg')]: {
-                '--Sidebar-width': '375px',
+                '--Sidebar-width': '380px',
               },
             },
           })}
@@ -386,9 +377,11 @@ export default function Sidebar(props: SidebarProps) {
             </Stack> */}
             <Typography level="h1">
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <RainbowIcon />
-                {session?.user.isAdmin && <Typography level="h1" sx={{ marginRight: '8px'}}>AV</Typography>}
+                <Box sx={{ marginRight: 1.5 }}>
+                  <RainbowIcon />
+                </Box>
                 ForestGEO
+                {session?.user.isAdmin && <Typography level="h1" color='danger' sx={{marginLeft: 0.5}}>(Admin)</Typography>}
               </Box>
             </Typography>
             <Divider orientation='horizontal' sx={{ my: 0.75 }} />
@@ -508,7 +501,7 @@ export default function Sidebar(props: SidebarProps) {
                           style={{ transitionDelay: `${delay}ms` }} direction="up">
                           <ListItem>
                             <ListItemButton selected={pathname === item.href}
-                              disabled={isPlotSelectionRequired}
+                              disabled={isPlotSelectionRequired || isCensusSelectionRequired}
                               color={pathname === item.href ? 'primary' : undefined}
                               onClick={() => router.push(item.href)}>
                               <Icon />
@@ -543,7 +536,7 @@ export default function Sidebar(props: SidebarProps) {
                                       <ListItem sx={{ marginTop: 0.5 }}>
                                         <ListItemButton
                                           selected={pathname == (item.href + link.href)}
-                                          disabled={isPlotSelectionRequired}
+                                          disabled={isPlotSelectionRequired || isCensusSelectionRequired}
                                           onClick={() => router.push((item.href + link.href))}>
                                           <SubIcon />
                                           <ListItemContent>
