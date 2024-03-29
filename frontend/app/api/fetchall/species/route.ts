@@ -11,7 +11,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SpeciesRDS
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    const query = `SELECT * FROM ${schema}.Quadrats`;
+    const query = `SELECT * FROM ${schema}.species`;
     const results = await runQuery(conn, query);
 
     const speciesRows: SpeciesRDS[] = results.map((row: SpeciesResult, index: number) => ({
@@ -26,7 +26,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<SpeciesRDS
       authority: row.Authority,
       fieldFamily: row.FieldFamily,
       description: row.Description,
-      referenceID: row.ReferenceID
+      referenceID: row.ReferenceID,
+      defaultDBHMin: row.DefaultDBHMin,
+      defaultDBHMax: row.DefaultDBHMax,
+      defaultHOMMin: row.DefaultHOMMin,
+      defaultHOMMax: row.DefaultHOMMax
     }));
 
     return new NextResponse(JSON.stringify(speciesRows), {status: 200});

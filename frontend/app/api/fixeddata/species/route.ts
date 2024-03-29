@@ -26,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
 
     // Query to get the paginated data
     const paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Species
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.species
       LIMIT ?, ?
     `;
     const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
@@ -48,7 +48,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ species:
       authority: row.Authority,
       fieldFamily: row.FieldFamily,
       description: row.Description,
-      referenceID: row.ReferenceID
+      referenceID: row.ReferenceID,
+      defaultDBHMin: row.DefaultDBHMin,
+      defaultDBHMax: row.DefaultDBHMax,
+      defaultHOMMin: row.DefaultHOMMin,
+      defaultHOMMax: row.DefaultHOMMax
     }));
     return new NextResponse(JSON.stringify({species: speciesRows, totalCount: totalRows}), {status: 200});
   } catch (error) {
@@ -66,7 +70,7 @@ export async function POST(request: NextRequest) {
   try {
     const {SpeciesID, ...newRowData} = await parseSpeciesRequestBody(request);
     conn = await getConn();
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Species`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.species`, newRowData]);
     await runQuery(conn, insertQuery);
 
     return NextResponse.json({message: "Insert successful"}, {status: 200});
@@ -86,7 +90,7 @@ export async function DELETE(request: NextRequest) {
   try {
     conn = await getConn();
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
-    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.Species WHERE [SpeciesID] = ${deleteSpeciesID}`);
+    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.species WHERE [SpeciesID] = ${deleteSpeciesID}`);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
     if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
     return NextResponse.json({message: "Delete successful"}, {status: 200});
@@ -106,7 +110,7 @@ export async function PATCH(request: NextRequest) {
     const {SpeciesID, ...updateData} = await parseSpeciesRequestBody(request);
     conn = await getConn();
     // Build the update query
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SpeciesID = ?', [`${schema}.Species`, updateData, SpeciesID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SpeciesID = ?', [`${schema}.species`, updateData, SpeciesID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});

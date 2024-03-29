@@ -1,7 +1,7 @@
 // useUpdateContextsFromIDB.ts
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
 import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
-import {getData, setData} from "@/config/db";
+import {clearDataByKey, getData, setData} from "@/config/db";
 import {Census, Plot, Quadrat} from "@/config/macros";
 import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
 
@@ -80,6 +80,12 @@ async function checkHashAndUpdateData(hashEndpoint: string, dataEndpoint: string
   return data;
 }
 
+export async function clearAllHashes() {
+  await clearDataByKey('quadratsHash');
+  await clearDataByKey('plotsHash');
+  await clearDataByKey('censusHash');
+}
+
 async function updateQuadratsIDB(schema: string) {
   const hashEndpoint = `/api/hash/quadrats?schema=${schema}`;
   const dataEndpoint = `/api/fetchall/quadrats?schema=${schema}`;
@@ -88,9 +94,9 @@ async function updateQuadratsIDB(schema: string) {
   await createAndUpdateQuadratList(quadratsRDSLoad);
 }
 
-async function updatePlotsIDB(email: string, schema: string) {
-  const hashEndpoint = `/api/hash/plots?schema=${schema}&email=${email}`;
-  const dataEndpoint = `/api/fetchall/plots?schema=${schema}&email=${email}`;
+async function updatePlotsIDB(schema: string) {
+  const hashEndpoint = `/api/hash/plots?schema=${schema}`;
+  const dataEndpoint = `/api/fetchall/plots?schema=${schema}`;
   const plotRDSLoad = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'plotsHash', 'plotsLoad');
   let quadratsRDSLoad: QuadratsRDS[] = await getData('quadratsLoad');
   if (!quadratsRDSLoad) {
@@ -106,13 +112,12 @@ async function updateCensusIDB(schema: string) {
   await createAndUpdateCensusList(censusRDSLoad);
 }
 
-export async function loadServerDataIntoIDB(dataType: string, userEmail: string, schema: string) {
-  if (!userEmail) throw new Error('session user information was not provided');
+export async function loadServerDataIntoIDB(dataType: string, schema: string) {
   switch (dataType) {
     case 'quadrats':
       return await updateQuadratsIDB(schema);
     case 'plots':
-      return await updatePlotsIDB(userEmail, schema);
+      return await updatePlotsIDB(schema);
     case 'census':
       return await updateCensusIDB(schema);
     default:
@@ -135,7 +140,7 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
 
   const updateQuadratsContext = async () => {
     // IDB load stored separately: QUADRATS
-    await loadServerDataIntoIDB('quadrats', email, schema);
+    await loadServerDataIntoIDB('quadrats', schema);
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData: QuadratsRDS[] = await getData('quadratsLoad');
     if (!quadratsLoadData || quadratsLoadData.length === 0) throw new Error('quadratsLoad data failed');
@@ -148,7 +153,7 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
 
   const updateCensusContext = async () => {
     // IDB load stored separately: CENSUS
-    await loadServerDataIntoIDB('census', email, schema);
+    await loadServerDataIntoIDB('census', schema);
     let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
     if (!censusRDSLoad || censusRDSLoad.length === 0) throw new Error('censusLoad data failed');
     if (censusLoadDispatch) await censusLoadDispatch({censusLoad: censusRDSLoad});
@@ -159,7 +164,7 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
 
   const updatePlotsContext = async () => {
     // IDB load stored separately: PLOTS
-    await loadServerDataIntoIDB('plots', email, schema);
+    await loadServerDataIntoIDB('plots', schema);
     // Check if plotsLoad data is available in localStorage
     const plotsLoadData: PlotRDS[] = await getData('plotsLoad');
     if (!plotsLoadData || plotsLoadData.length === 0) throw new Error('plotsLoad data failed');

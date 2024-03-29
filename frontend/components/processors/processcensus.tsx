@@ -86,7 +86,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const measurementDate = parseDate(rowData.date);
 
     const measurementInsertQuery = `
-    INSERT INTO ${schema}.CoreMeasurements
+    INSERT INTO ${schema}.coremeasurements
     (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;

@@ -22,7 +22,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
     const personnelID = await getPersonnelIDByName(connection, schema, fullName);
     if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     const query = `
-      INSERT INTO ${schema}.Quadrats (PlotID, CensusID, PersonnelID, QuadratName, DimensionX, DimensionY, Area, QuadratShape)
+      INSERT INTO ${schema}.quadrats (PlotID, CensusID, PersonnelID, QuadratName, DimensionX, DimensionY, Area, QuadratShape)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?);
     `;
     await runQuery(connection, query, [

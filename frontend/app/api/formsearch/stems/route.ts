@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
+import { FORMSEARCH_LIMIT } from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -13,12 +14,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
       `SELECT StemTag
       FROM ${schema}.stems
       ORDER BY StemTag
-      LIMIT 5` :
+      LIMIT ${FORMSEARCH_LIMIT}` :
       `SELECT StemTag
       FROM ${schema}.stems
       WHERE StemTag LIKE ?
       ORDER BY StemTag
-      LIMIT 5`;
+      LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialStemTag === '' ? [] : [`%${partialStemTag}%`];
     const results = await runQuery(conn, query, queryParams);
     return new NextResponse(JSON.stringify(results.map((row: any) => row.StemTag ? row.StemTag : '')), {status: 200});

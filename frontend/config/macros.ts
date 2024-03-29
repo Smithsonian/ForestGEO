@@ -9,10 +9,13 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import React, {Dispatch, SetStateAction} from "react";
-import {setData} from "@/config/db";
+import {clearDataByKey, setData} from "@/config/db";
 import {CensusRDS, SitesRDS} from "@/config/sqlmacros";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import GridOnIcon from '@mui/icons-material/GridOn';
+import CloudCircleIcon from '@mui/icons-material/CloudCircle';
+
+export const FORMSEARCH_LIMIT: number = 3;
 
 // INTERFACES
 export interface PlotRaw {
@@ -63,28 +66,28 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
 }));
 
 export const TableHeadersByFormType: Record<string, { label: string }[]> = {
-  "fixeddata_codes": [{label: "code"}, {label: "description"}, {label: "status"}],
-  "fixeddata_personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
-  "fixeddata_species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
-  "fixeddata_quadrat": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
-  "fixeddata_census": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
+  "attributes": [{label: "code"}, {label: "description"}, {label: "status"}],
+  "personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
+  "species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
+  "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
+  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
   "arcgis_xlsx": arcgisHeaders
 };
 
 export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
-  "fixeddata_codes": [],
-  "fixeddata_personnel": [],
-  "fixeddata_species": [],
-  "fixeddata_quadrat": [],
-  "fixeddata_census": [],
+  "attributes": [],
+  "personnel": [],
+  "species": [],
+  "quadrats": [],
+  "measurements": [],
   "arcgis_xlsx": []
 }
 export const DBInputForms: string[] = [
-  "fixeddata_codes",
-  "fixeddata_personnel",
-  "fixeddata_species",
-  "fixeddata_quadrat",
-  "fixeddata_census"
+  "attributes",
+  "personnel",
+  "species",
+  "quadrats",
+  "measurements"
 ];
 export const FormGroups: Record<string, string[]> = {
   "Database Forms": DBInputForms,
@@ -286,7 +289,8 @@ export enum HTTPResponses {
   INTERNAL_SERVER_ERROR = 500,
   SERVICE_UNAVAILABLE = 503,
   SQL_CONNECTION_FAILURE = 408, // Custom code, example
-  INVALID_REQUEST = 400, // Custom code, example
+  INVALID_REQUEST = 400,
+  NOT_FOUND, // Custom code, example
 }
 
 export enum ReviewStates {
@@ -429,6 +433,13 @@ export const siteConfigNav: SiteConfigProps[] = [
     expanded: [],
   },
   {
+    label: "Uploaded Files",
+    href: "/uploadedfiles",
+    tip: "uploaded file display",
+    icon: CloudCircleIcon,
+    expanded: []
+  },
+  {
     label: "Measurement Properties Hub",
     href: "/properties",
     tip: 'View Modifiable Properties',
@@ -493,6 +504,8 @@ export function createEnhancedDispatch<T>(
     // Save to IndexedDB only if payload is not null
     if (payload[actionType] !== null) {
       await setData(actionType, payload[actionType]);
+    } else {
+      await clearDataByKey(actionType);
     }
 
     // Dispatch the action

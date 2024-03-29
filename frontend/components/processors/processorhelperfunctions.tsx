@@ -52,7 +52,7 @@ export async function getSubSpeciesID(
     // MySQL query with placeholder for speciesID
     const query = `
       SELECT SubSpeciesID
-      FROM ${schema}.SubSpecies
+      FROM ${schema}.subspecies
       WHERE SpeciesID = ?
     `;
 
@@ -83,12 +83,12 @@ export async function processCode(
     // Prepare the query to check if the attribute exists
     const attributeExistsQuery = `
       SELECT Code
-      FROM ${schema}.Attributes
+      FROM ${schema}.attributes
       WHERE Code = ?
     `;
     // Prepare the query to insert code into CMAttributes
     const insertCMAttributeQuery = `
-      INSERT INTO ${schema}.CMAttributes (CoreMeasurementID, Code)
+      INSERT INTO ${schema}.cmattributes (CoreMeasurementID, Code)
       VALUES (?, ?);
     `;
 
@@ -122,7 +122,7 @@ export async function processTrees(
   try {
     // Prepare the query with the new alias method
     const query = `
-    INSERT INTO ${schema}.Trees (TreeTag, SpeciesID, SubSpeciesID)
+    INSERT INTO ${schema}.trees (TreeTag, SpeciesID, SubSpeciesID)
     VALUES (?, ?, ?) AS new_data
     ON DUPLICATE KEY UPDATE 
       SpeciesID = new_data.SpeciesID, 
@@ -156,7 +156,7 @@ export async function processStems(
   try {
     // Prepare the query
     const query = `
-      INSERT INTO ${schema}.Stems (TreeID, QuadratID, StemTag, StemQuadX, StemQuadY)
+      INSERT INTO ${schema}.stems (TreeID, QuadratID, StemTag, StemQuadX, StemQuadY)
       VALUES (?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         TreeID = VALUES(TreeID),
@@ -189,7 +189,7 @@ export async function getPersonnelIDByName(
     // Prepare the query
     const query = `
       SELECT PersonnelID
-      FROM ${schema}.Personnel
+      FROM ${schema}.personnel
       WHERE FirstName = ? AND LastName = ?
     `;
 
@@ -214,7 +214,7 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   console.log('INSERT OR UPDATE: schema & mapping found');
-  if (formType === 'fixeddata_census') {
+  if (formType === 'measurements') {
     return await processCensus({...subProps, schema});
   } else {
     if (mapping.specialProcessing) {
@@ -255,13 +255,15 @@ export async function runValidationProcedure(schema: string, procedureName: stri
   const conn = await getConn();
   let query, parameters;
 
-  if (min !== undefined && max !== undefined) {
+  if (procedureName === "ValidateScreenMeasuredDiameterMinMax" || procedureName === "ValidateHOMUpperAndLowerBounds") {
     query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
-    parameters = [censusID, plotID, min, max];
+    // Pass JavaScript null for SQL NULL
+    parameters = [censusID, plotID, min !== undefined ? min : null, max !== undefined ? max : null];
   } else {
     query = `CALL ${schema}.${procedureName}(?, ?)`;
     parameters = [censusID, plotID];
   }
+
 
   try {
     await conn.beginTransaction();

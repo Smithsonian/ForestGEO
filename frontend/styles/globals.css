@@ -23,3 +23,21 @@ body {
 .error-row {
     background-color: rgba(255, 0, 0, 0.1);
 }
+
+@keyframes rainbowColor {
+    0% { color: red; }
+    20% { color: orange; }
+    40% { color: yellow; }
+    60% { color: green; }
+    80% { color: blue; }
+    100% { color: purple; }
+}
+
+@keyframes rotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.rainbowCircularProgress {
+    animation: rotate 2s linear infinite, rainbowColor 6s linear infinite;
+}
