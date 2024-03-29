@@ -11,7 +11,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<QuadratsRD
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    const query = `SELECT * FROM ${schema}.Quadrats`;
+    const query = `SELECT * FROM ${schema}.quadrats`;
     const results = await runQuery(conn, query);
 
     const quadratRows: QuadratsRDS[] = results.map((row: QuadratsResult, index: number) => ({

@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   try {
     conn = await getConn();// Utilize the retry mechanism effectively
 
-    const results = await runQuery(conn, `SELECT * FROM ${schema}.Census`);
+    const results = await runQuery(conn, `SELECT * FROM ${schema}.census`);
     if (!results) throw new Error("Call failed");
 
     return new NextResponse(JSON.stringify(generateHash(results)), {status: 200});

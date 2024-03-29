@@ -6,11 +6,16 @@ export async function GET(request: NextRequest) {
   if (!schema) throw new Error('no schema variable provided!');
   const plotIDParam = request.nextUrl.searchParams.get('plotID');
   const censusIDParam = request.nextUrl.searchParams.get('censusID');
-  const minDBH = parseFloat(request.nextUrl.searchParams.get('minValue')!);
-  const maxDBH = parseFloat(request.nextUrl.searchParams.get('maxValue')!);
+  // Use `get` method directly without `parseFloat`, to allow `undefined` values
+  const minDBHParam = request.nextUrl.searchParams.get('minValue');
+  const maxDBHParam = request.nextUrl.searchParams.get('maxValue');
+
   const plotID = plotIDParam ? parseInt(plotIDParam) : null;
   const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 
+  // Convert to numbers only if the parameters are not undefined
+  const minDBH = minDBHParam !== null ? parseFloat(minDBHParam) : undefined;
+  const maxDBH = maxDBHParam !== null ? parseFloat(maxDBHParam) : undefined;
   try {
     const validationResponse = await runValidationProcedure(schema, 'ValidateScreenMeasuredDiameterMinMax', plotID, censusID, minDBH, maxDBH);
     return new NextResponse(JSON.stringify(validationResponse), {status: 200});

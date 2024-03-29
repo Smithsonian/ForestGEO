@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
+import { FORMSEARCH_LIMIT } from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -10,8 +11,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
   conn = await getConn();
   try {
     const query = partialCode === '' ?
-      `SELECT DISTINCT Code FROM ${schema}.attributes ORDER BY Code LIMIT 5` :
-      `SELECT DISTINCT Code FROM ${schema}.attributes WHERE Code LIKE ? ORDER BY Code LIMIT 5`;
+      `SELECT DISTINCT Code FROM ${schema}.attributes ORDER BY Code LIMIT ${FORMSEARCH_LIMIT}` :
+      `SELECT DISTINCT Code FROM ${schema}.attributes WHERE Code LIKE ? ORDER BY Code LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialCode === '' ? [] : [`%${partialCode}%`];
     const results = await runQuery(conn, query, queryParams);
 

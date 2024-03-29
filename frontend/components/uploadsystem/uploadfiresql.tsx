@@ -42,7 +42,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
         setCompletedOperations((prevCompleted) => prevCompleted + 1);
         const result = await response.json();
         if (result.idToRows) {
-          if (uploadForm === 'fixeddata_census') {
+          if (uploadForm === 'measurements') {
             // Fetch additional details for each coreMeasurementID
             Promise.all(result.idToRows.map(({coreMeasurementID}: IDToRow) =>
               fetch(`/api/details/cmid?schema=${schema}&cmid=${coreMeasurementID}`)
@@ -112,14 +112,14 @@ const UploadFireSQL: React.FC<UploadFireProps> =
 
     useEffect(() => {
       switch (uploadForm) {
-        case "fixeddata_codes":
-        case "fixeddata_role":
-        case "fixeddata_personnel":
-        case "fixeddata_species":
-        case "fixeddata_quadrat":
+        case "attributes":
+        case "roles":
+        case "personnel":
+        case "species":
+        case "quadrats":
           setUploadCompleteMessage("Upload complete! Moving to Azure upload stage...");
           break;
-        case "fixeddata_census":
+        case "measurements":
           setUploadCompleteMessage("Upload complete!\nYour upload included measurements, which must be validated before proceeding...");
           break;
         default:
@@ -171,7 +171,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
         timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
         // Use 'window.setTimeout' and type assertion to treat the return as a number
       } else if (countdown === 0) {
-        if (uploadForm === "fixeddata_census") {
+        if (uploadForm === "measurements") {
           setReviewState(ReviewStates.VALIDATE);
         } else {
           setReviewState(ReviewStates.UPLOAD_AZURE);

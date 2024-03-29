@@ -41,7 +41,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`);
       let formData = new FormData();
       formData.append(file.name, file);
-      if (uploadForm === 'fixeddata_census') {
+      if (uploadForm === 'measurements') {
         const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
         formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
       }

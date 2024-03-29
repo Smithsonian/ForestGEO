@@ -410,7 +410,10 @@ export default function UploadParent(props: UploadParentProps) {
             Drag and drop files into the box to upload them to storage
           </Typography>
           <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-            <Tabs sx={{display: 'flex', flex: 1}} variant={"outlined"} aria-label={"File Hub Options"}
+            <Box sx={{display: 'flex', width: '100%', flex: 1}}>
+              {renderStateContent()}
+            </Box>
+            {/* <Tabs sx={{display: 'flex', flex: 1}} variant={"outlined"} aria-label={"File Hub Options"}
                   size={"lg"}
                   className={""}>
               <TabList sticky={"top"} variant="soft"
@@ -452,11 +455,10 @@ export default function UploadParent(props: UploadParentProps) {
               </TabPanel>
               <TabPanel value={1}>
                 <Box sx={{display: 'flex', width: '100%', flex: 1}}>
-
                   {renderStateContent()}
                 </Box>
               </TabPanel>
-            </Tabs>
+            </Tabs> */}
             <Button onClick={handleCancelUpload} sx={{marginY: 2}}>Cancel Upload</Button>
           </Box>
         </Box>

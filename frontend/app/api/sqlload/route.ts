@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
         unitOfMeasurement
       };
       const coreMeasurementID = await insertOrUpdate(props);
-      if (formType === 'fixeddata_census' && coreMeasurementID) {
+      if (formType === 'measurements' && coreMeasurementID) {
         idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});
       }
     } catch (error) {
