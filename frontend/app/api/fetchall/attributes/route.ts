@@ -10,7 +10,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<Attributes
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    const query = `SELECT * FROM ${schema}.Quadrats`;
+    const query = `SELECT * FROM ${schema}.attributes`;
     const results = await runQuery(conn, query);
 
     const attributeRows: AttributesRDS[] = results.map((row: any, index: number) => ({

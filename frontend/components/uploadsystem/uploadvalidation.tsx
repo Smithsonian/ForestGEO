@@ -24,7 +24,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
   const [errorsFound, setErrorsFound] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
-  const [minMaxValues, setMinMaxValues] = useState<Record<string, { min: number, max: number }>>({});
+  const [minMaxValues, setMinMaxValues] = useState<Record<string, { min?: number, max?: number }>>({});
 
   const [promptOpen, setPromptOpen] = useState<boolean>(false);
   const [currentPromptApi, setCurrentPromptApi] = useState<string>('');
@@ -50,9 +50,9 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     'treestemsdiffquadrats',
   ];
 
-  const defaultMinMaxValues: Record<string, { min: number, max: number }> = {
-    'screendbhminmax': {min: 1, max: 500},
-    'screenhomminmax': {min: 1, max: 1.5},
+  const defaultMinMaxValues: Record<string, { min?: number, max?: number }> = {
+    'screendbhminmax': {min: undefined, max: undefined},
+    'screenhomminmax': {min: undefined, max: undefined},
     // ... [other default values]
   };
 
@@ -134,8 +134,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
 
   const performValidation = async (api: string): Promise<{ response: ValidationResponse, hasError: boolean }> => {
     let queryParams = `schema=${schema}&plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`;
-    if (['screendbhminmax', 'screenhomminmax'].includes(api)) {
-      const values = minMaxValues[api] || defaultMinMaxValues[api]; // Use default if not set
+    if (!useDefaultValues && ['screendbhminmax', 'screenhomminmax'].includes(api)) {
+      const values = minMaxValues[api] || defaultMinMaxValues[api];
       queryParams += `&minValue=${values.min}&maxValue=${values.max}`;
     }
     try {

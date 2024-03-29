@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
+import { FORMSEARCH_LIMIT } from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -13,12 +14,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
       `SELECT FirstName, LastName
       FROM ${schema}.personnel
       ORDER BY LastName
-      LIMIT 5` :
+      LIMIT ${FORMSEARCH_LIMIT}` :
       `SELECT FirstName, LastName
       FROM ${schema}.personnel
       WHERE LastName LIKE ?
       ORDER BY LastName
-      LIMIT 5`;
+      LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialLastName === '' ? [] : [`%${partialLastName}%`];
     const results = await runQuery(conn, query, queryParams);
 

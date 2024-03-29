@@ -68,7 +68,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 />
               </>
             )}
-            {uploadForm !== '' && uploadForm !== 'fixeddata_census' && (
+            {uploadForm !== '' && uploadForm !== 'measurements' && (
               <>
                 <Button onClick={handleUnitOfMeasurementBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
                 <Typography sx={{mb: 2}}>You have selected:</Typography>
@@ -79,7 +79,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               </>
             )}
             {/* Personnel Recording Selection */}
-            {uploadForm === 'fixeddata_census' && personnelRecording === '' && (
+            {uploadForm === 'measurements' && personnelRecording === '' && (
               <>
                 <Button onClick={handleFormTypeBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
                 <Typography sx={{mb: 2}}>
@@ -93,8 +93,8 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               </>
             )}
 
-            {/* Unit of Measurement Selection for fixeddata_census */}
-            {uploadForm === 'fixeddata_census' && personnelRecording !== '' && unitOfMeasurement === '' && (
+            {/* Unit of Measurement Selection for measurements */}
+            {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement === '' && (
               <>
                 <Button onClick={handlePersonnelRecordingBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
                 <Typography sx={{mb: 2}}>
@@ -122,7 +122,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 </Select>
               </>
             )}
-            {uploadForm === 'fixeddata_census' && personnelRecording !== '' && unitOfMeasurement !== '' && !finish && (
+            {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement !== '' && !finish && (
               <>
                 <Button onClick={handleUnitOfMeasurementBack} sx={{width: 'fit-content', mb: 2}}>Back</Button>
                 <Typography sx={{mb: 2}}>You have selected:</Typography>

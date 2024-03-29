@@ -69,7 +69,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               continuing: <br/>
               {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
               <br/>
-              {uploadForm === 'fixeddata_census' && personnelRecording !== '' && (
+              {uploadForm === 'measurements' && personnelRecording !== '' && (
                 <>
                   The person recording the data is {personnelRecording}.
                 </>

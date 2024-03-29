@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
 
     // Query to get the paginated data
     const paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.SubSpecies
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.subspecies
       LIMIT ?, ?
     `;
     const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     const {SubSpeciesID, ...newRowData} = await parseSubSpeciesRequestBody(request);
     conn = await getConn();
 
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.SubSpecies`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.subspecies`, newRowData]);
     await runQuery(conn, insertQuery);
 
     return NextResponse.json({message: "Insert successful"}, {status: HTTPResponses.CREATED});
@@ -90,7 +90,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const {SubSpeciesID, ...updateData} = await parseSubSpeciesRequestBody(request);
     conn = await getConn();
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SubSpeciesID = ?', [`${schema}.SubSpecies`, updateData, SubSpeciesID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE SubSpeciesID = ?', [`${schema}.subspecies`, updateData, SubSpeciesID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});
@@ -111,7 +111,7 @@ export async function DELETE(request: NextRequest) {
     conn = await getConn();
     if (!conn) throw new Error('SQL connection failed');
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
-    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.SubSpecies WHERE [SubSpeciesID] = ?`, [deleteSubSpeciesID]);
+    const deleteRow = await runQuery(conn, `DELETE FROM ${schema}.subspecies WHERE [SubSpeciesID] = ?`, [deleteSubSpeciesID]);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
     if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: HTTPResponses.INVALID_REQUEST});
 

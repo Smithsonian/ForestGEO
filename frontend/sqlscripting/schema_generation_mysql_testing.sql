@@ -1,19 +1,19 @@
-create table attributes
+create table forestgeo_testing.attributes
 (
-    Code        varchar(10)                                                                               not null
+    Code        varchar(10)                                                                                                     not null
         primary key,
-    Description text                                                                                      null,
-    Status      enum ('alive', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
+    Description text                                                                                                            null,
+    Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
-create table currentuser
+create table forestgeo_testing.currentuser
 (
     id       int          not null
         primary key,
     username varchar(255) null
 );
 
-create table personnel
+create table forestgeo_testing.personnel
 (
     PersonnelID int auto_increment
         primary key,
@@ -22,7 +22,7 @@ create table personnel
     Role        varchar(150) null
 );
 
-create table plots
+create table forestgeo_testing.plots
 (
     PlotID          int auto_increment
         primary key,
@@ -42,7 +42,7 @@ create table plots
     PlotDescription text  null
 );
 
-create table census
+create table forestgeo_testing.census
 (
     CensusID         int auto_increment
         primary key,
@@ -52,10 +52,10 @@ create table census
     Description      text null,
     PlotCensusNumber int  null,
     constraint Census_Plots_PlotID_fk
-        foreign key (PlotID) references plots (PlotID)
+        foreign key (PlotID) references forestgeo_testing.plots (PlotID)
 );
 
-create table quadrats
+create table forestgeo_testing.quadrats
 (
     QuadratID    int auto_increment
         primary key,
@@ -67,12 +67,12 @@ create table quadrats
     Area         float null,
     QuadratShape text  null,
     constraint Quadrats_Plots_FK
-        foreign key (PlotID) references plots (PlotID),
+        foreign key (PlotID) references forestgeo_testing.plots (PlotID),
     constraint quadrats_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID)
+        foreign key (CensusID) references forestgeo_testing.census (CensusID)
 );
 
-create table quadratpersonnel
+create table forestgeo_testing.quadratpersonnel
 (
     QuadratPersonnelID int auto_increment
         primary key,
@@ -81,12 +81,12 @@ create table quadratpersonnel
     AssignedDate       date         null,
     Role               varchar(150) null,
     constraint fk_QuadratPersonnel_Personnel
-        foreign key (PersonnelID) references personnel (PersonnelID),
+        foreign key (PersonnelID) references forestgeo_testing.personnel (PersonnelID),
     constraint fk_QuadratPersonnel_Quadrats
-        foreign key (QuadratID) references quadrats (QuadratID)
+        foreign key (QuadratID) references forestgeo_testing.quadrats (QuadratID)
 );
 
-create table reference
+create table forestgeo_testing.reference
 (
     ReferenceID       int auto_increment
         primary key,
@@ -96,17 +96,17 @@ create table reference
     Citation          varchar(50) null
 );
 
-create table family
+create table forestgeo_testing.family
 (
     FamilyID    int auto_increment
         primary key,
     Family      varchar(32) null,
     ReferenceID int         null,
     constraint Family_Reference_ReferenceID_fk
-        foreign key (ReferenceID) references reference (ReferenceID)
+        foreign key (ReferenceID) references forestgeo_testing.reference (ReferenceID)
 );
 
-create table genus
+create table forestgeo_testing.genus
 (
     GenusID     int auto_increment
         primary key,
@@ -115,12 +115,12 @@ create table genus
     ReferenceID int         null,
     Authority   varchar(32) null,
     constraint Genus_Family_FamilyID_fk
-        foreign key (FamilyID) references family (FamilyID),
+        foreign key (FamilyID) references forestgeo_testing.family (FamilyID),
     constraint Genus_Reference_ReferenceID_fk
-        foreign key (ReferenceID) references reference (ReferenceID)
+        foreign key (ReferenceID) references forestgeo_testing.reference (ReferenceID)
 );
 
-create table schemachangelog
+create table forestgeo_testing.schemachangelog
 (
     ChangeLogID    int auto_increment
         primary key,
@@ -131,7 +131,7 @@ create table schemachangelog
     ChangedBy      varchar(255)                       not null
 );
 
-create table species
+create table forestgeo_testing.species
 (
     SpeciesID         int auto_increment
         primary key,
@@ -140,18 +140,22 @@ create table species
     CurrentTaxonFlag  bit          null,
     ObsoleteTaxonFlag bit          null,
     SpeciesName       varchar(64)  null,
+    DefaultDBHMin     float        null,
+    DefaultDBHMax     float        null,
+    DefaultHOMMin     float        null,
+    DefaultHomMax     float        null,
     IDLevel           varchar(8)   null,
     Authority         varchar(128) null,
     FieldFamily       varchar(32)  null,
     Description       text         null,
     ReferenceID       int          null,
     constraint Species_Genus_GenusID_fk
-        foreign key (GenusID) references genus (GenusID),
+        foreign key (GenusID) references forestgeo_testing.genus (GenusID),
     constraint Species_Reference_ReferenceID_fk
-        foreign key (ReferenceID) references reference (ReferenceID)
+        foreign key (ReferenceID) references forestgeo_testing.reference (ReferenceID)
 );
 
-create table currentobsolete
+create table forestgeo_testing.currentobsolete
 (
     SpeciesID         int  not null,
     ObsoleteSpeciesID int  not null,
@@ -160,12 +164,12 @@ create table currentobsolete
     ChangeNote        text null,
     primary key (SpeciesID, ObsoleteSpeciesID, ChangeDate),
     constraint CurrentObsolete_Species_SpeciesID_fk
-        foreign key (SpeciesID) references species (SpeciesID),
+        foreign key (SpeciesID) references forestgeo_testing.species (SpeciesID),
     constraint CurrentObsolete_Species_SpeciesID_fk2
-        foreign key (ObsoleteSpeciesID) references species (SpeciesID)
+        foreign key (ObsoleteSpeciesID) references forestgeo_testing.species (SpeciesID)
 );
 
-create table speciesinventory
+create table forestgeo_testing.speciesinventory
 (
     SpeciesInventoryID int auto_increment
         primary key,
@@ -174,10 +178,10 @@ create table speciesinventory
     SpeciesID          int null,
     SubSpeciesID       int null,
     constraint SpeciesInventory_Plots_PlotID_fk
-        foreign key (PlotID) references plots (PlotID)
+        foreign key (PlotID) references forestgeo_testing.plots (PlotID)
 );
 
-create table subspecies
+create table forestgeo_testing.subspecies
 (
     SubSpeciesID       int auto_increment
         primary key,
@@ -189,10 +193,10 @@ create table subspecies
     Authority          varchar(128) null,
     InfraSpecificLevel char(32)     null,
     constraint SubSpecies_Species_SpeciesID_fk
-        foreign key (SpeciesID) references species (SpeciesID)
+        foreign key (SpeciesID) references forestgeo_testing.species (SpeciesID)
 );
 
-create table trees
+create table forestgeo_testing.trees
 (
     TreeID       int auto_increment
         primary key,
@@ -200,12 +204,12 @@ create table trees
     SpeciesID    int         null,
     SubSpeciesID int         null,
     constraint Trees_Species_SpeciesID_fk
-        foreign key (SpeciesID) references species (SpeciesID),
+        foreign key (SpeciesID) references forestgeo_testing.species (SpeciesID),
     constraint Trees_SubSpecies_SubSpeciesID_fk
-        foreign key (SubSpeciesID) references subspecies (SubSpeciesID)
+        foreign key (SubSpeciesID) references forestgeo_testing.subspecies (SubSpeciesID)
 );
 
-create table stems
+create table forestgeo_testing.stems
 (
     StemID          int auto_increment
         primary key,
@@ -222,12 +226,12 @@ create table stems
     Moved           bit         null,
     StemDescription text        null,
     constraint FK_Stems_Quadrats
-        foreign key (QuadratID) references quadrats (QuadratID),
+        foreign key (QuadratID) references forestgeo_testing.quadrats (QuadratID),
     constraint FK_Stems_Trees
-        foreign key (TreeID) references trees (TreeID)
+        foreign key (TreeID) references forestgeo_testing.trees (TreeID)
 );
 
-create table coremeasurements
+create table forestgeo_testing.coremeasurements
 (
     CoreMeasurementID int auto_increment
         primary key,
@@ -244,50 +248,50 @@ create table coremeasurements
     Description       text             null,
     UserDefinedFields text             null,
     constraint CoreMeasurements_Census_CensusID_fk
-        foreign key (CensusID) references census (CensusID),
+        foreign key (CensusID) references forestgeo_testing.census (CensusID),
     constraint CoreMeasurements_Personnel_PersonnelID_fk
-        foreign key (PersonnelID) references personnel (PersonnelID),
+        foreign key (PersonnelID) references forestgeo_testing.personnel (PersonnelID),
     constraint CoreMeasurements_Plots_PlotID_fk
-        foreign key (PlotID) references plots (PlotID),
+        foreign key (PlotID) references forestgeo_testing.plots (PlotID),
     constraint CoreMeasurements_Quadrats_QuadratID_fk
-        foreign key (QuadratID) references quadrats (QuadratID),
+        foreign key (QuadratID) references forestgeo_testing.quadrats (QuadratID),
     constraint FK_CoreMeasurements_Stems
-        foreign key (StemID) references stems (StemID),
+        foreign key (StemID) references forestgeo_testing.stems (StemID),
     constraint FK_CoreMeasurements_Trees
-        foreign key (TreeID) references trees (TreeID)
+        foreign key (TreeID) references forestgeo_testing.trees (TreeID)
 );
 
-create table cmattributes
+create table forestgeo_testing.cmattributes
 (
     CMAID             int auto_increment
         primary key,
     CoreMeasurementID int         null,
     Code              varchar(10) null,
     constraint CMAttributes_Attributes_Code_fk
-        foreign key (Code) references attributes (Code),
+        foreign key (Code) references forestgeo_testing.attributes (Code),
     constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
+        foreign key (CoreMeasurementID) references forestgeo_testing.coremeasurements (CoreMeasurementID)
 );
 
 create index idx_censusid
-    on coremeasurements (CensusID);
+    on forestgeo_testing.coremeasurements (CensusID);
 
 create index idx_plotid
-    on coremeasurements (PlotID);
+    on forestgeo_testing.coremeasurements (PlotID);
 
 create index idx_quadratid
-    on coremeasurements (QuadratID);
+    on forestgeo_testing.coremeasurements (QuadratID);
 
 create index idx_stemid
-    on coremeasurements (StemID);
+    on forestgeo_testing.coremeasurements (StemID);
 
 create index idx_treeid
-    on coremeasurements (TreeID);
+    on forestgeo_testing.coremeasurements (TreeID);
 
 create index idx_stemid
-    on stems (StemID);
+    on forestgeo_testing.stems (StemID);
 
-create table validationchangelog
+create table forestgeo_testing.validationchangelog
 (
     ValidationRunID int auto_increment
         primary key,
@@ -298,22 +302,22 @@ create table validationchangelog
     ErrorMessage    varchar(255)                       null
 );
 
-create table validationerrors
+create table forestgeo_testing.validationerrors
 (
     ValidationErrorID          int auto_increment
         primary key,
     ValidationErrorDescription text null
 );
 
-create table cmverrors
+create table forestgeo_testing.cmverrors
 (
     CMVErrorID        int auto_increment
         primary key,
     CoreMeasurementID int null,
     ValidationErrorID int null,
     constraint CMVErrors_CoreMeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID),
+        foreign key (CoreMeasurementID) references forestgeo_testing.coremeasurements (CoreMeasurementID),
     constraint cmverrors_validationerrors_ValidationErrorID_fk
-        foreign key (ValidationErrorID) references validationerrors (ValidationErrorID)
+        foreign key (ValidationErrorID) references forestgeo_testing.validationerrors (ValidationErrorID)
 );
 

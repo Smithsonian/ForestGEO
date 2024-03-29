@@ -50,7 +50,7 @@ export type FileMapping = {
 };
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
-  "fixeddata_codes": {
+  "attributes": {
     tableName: "Attributes",
     columnMappings: {
       "code": "Code",
@@ -58,7 +58,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "status": "Status"
     }
   },
-  "fixeddata_personnel": {
+  "personnel": {
     tableName: "Personnel",
     columnMappings: {
       "firstname": "FirstName",
@@ -66,7 +66,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "role": "Role"
     }
   },
-  "fixeddata_species": {
+  "species": {
     tableName: "",
     columnMappings: {
       "spcode": "Species.SpeciesCode",
@@ -78,7 +78,7 @@ export const fileMappings: Record<string, FileMapping> = {
     },
     specialProcessing: processSpecies
   },
-  "fixeddata_quadrat": {
+  "quadrats": {
     tableName: "",
     columnMappings: {
       "quadrat": "Quadrats.QuadratName",
@@ -87,7 +87,7 @@ export const fileMappings: Record<string, FileMapping> = {
     },
     specialProcessing: processQuadrats
   },
-  "fixeddata_census": {
+  "measurements": {
     tableName: "", // Multiple tables involved
     columnMappings: {
       "tag": "Trees.TreeTag",
@@ -393,6 +393,10 @@ export interface SpeciesResult {
   FieldFamily: any;
   Description: any;
   ReferenceID: any;
+  DefaultDBHMin: any;
+  DefaultDBHMax: any;
+  DefaultHOMMin: any;
+  DefaultHOMMax: any;
 }
 
 export interface SubSpeciesResult {

@@ -31,7 +31,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
         'lastName', p.LastName,
         'role', p.Role
       ) SEPARATOR ',') AS personnel
-      FROM ${schema}.Quadrats q
+      FROM ${schema}.quadrats q
       LEFT JOIN ${schema}.quadratpersonnel qp ON q.QuadratID = qp.QuadratID
       LEFT JOIN ${schema}.personnel p ON qp.PersonnelID = p.PersonnelID
       ${plotID ? 'WHERE q.PlotID = ?' : ''}

@@ -14,26 +14,41 @@ export interface PersonnelAutocompleteMultiSelectProps {
 }
 
 export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMultiSelectProps> = (props) => {
-  const {initialValue, locked, onChange} = props;
+  const {locked, onChange} = props;
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<PersonnelRDS[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [openDialog, setOpenDialog] = useState(false);
   const [tempSelectedPersonnel, setTempSelectedPersonnel] = useState<PersonnelRDS[]>([]);
+  const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
 
   const loading = open && options.length === 0;
   const currentSite = useSiteContext();
   if (!currentSite) throw new Error("Site must be selected!");
 
+  // Function to refresh data
+  const refreshData = () => {
+    fetch(`/api/formsearch/personnelblock?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`)
+      .then((response) => response.json())
+      .then((data) => {
+        setOptions(data);
+      })
+      .catch((error) => {
+        console.error('Error fetching data:', error);
+      })
+  };
   const handleConfirm = () => {
-    setOpenDialog(false);
     onChange(tempSelectedPersonnel);
   };
 
-  const handleCancel = () => {
-    setOpenDialog(false);
-    setTempSelectedPersonnel(initialValue);
-  };
+  useEffect(() => {
+    if (timer) clearTimeout(timer);
+    const newTimer = setTimeout(refreshData, 5000); // Refresh after 5 seconds of inactivity
+    setTimer(newTimer);
+
+    return () => {
+      clearTimeout(newTimer);
+    };
+  }, [inputValue]);
 
 
   useEffect(() => {
@@ -63,19 +78,10 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
     }
   }, [open]);
 
-  const getChangeMessage = () => {
-    const added = tempSelectedPersonnel.filter(p => !initialValue.some(ip => ip.personnelID === p.personnelID));
-    const removed = initialValue.filter(ip => !tempSelectedPersonnel.some(p => p.personnelID === ip.personnelID));
-
-    let message = '';
-    if (added.length > 0) {
-      message += `Adding: ${added.map(p => p.firstName + ' ' + p.lastName).join(', ')}; `;
-    }
-    if (removed.length > 0) {
-      message += `Removing: ${removed.map(p => p.firstName + ' ' + p.lastName).join(', ')}; `;
-    }
-    return message || 'No changes.';
-  };
+  useEffect(() => {
+    // Pre-load options with empty input value
+    refreshData();
+  }, []); // This will run only once when the component mounts
 
   return (
     <>
@@ -87,14 +93,17 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         onClose={() => setOpen(false)}
         options={options}
         getOptionLabel={(option) => `${option.lastName}, ${option.firstName} | ${option.role}`}
-        isOptionEqualToValue={(option, value) => option.personnelID === value.personnelID}
+        isOptionEqualToValue={(option, value) => JSON.stringify(option) === JSON.stringify(value)}
         loading={loading}
-        value={initialValue}
+        value={undefined}
         disabled={locked}
         onChange={(_event, newValue) => {
           setTempSelectedPersonnel(newValue);
-          setOpenDialog(true);
+          handleConfirm();
+          setInputValue('');
         }}
+        inputValue={inputValue}
+        onInputChange={(_event, newInputValue) => setInputValue(newInputValue)}
         filterSelectedOptions
         renderInput={(params) => (
           <TextField
@@ -114,20 +123,6 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
           />
         )}
       />
-      <Dialog open={openDialog} onClose={handleCancel}>
-        <DialogTitle>Confirm Personnel Change</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            {`Are you sure you want to change the assigned personnel? `}
-            <br/><br/>
-            <strong>{getChangeMessage()}</strong>
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCancel}>Cancel</Button>
-          <Button onClick={handleConfirm} color="primary">Confirm</Button>
-        </DialogActions>
-      </Dialog>
     </>
   );
 };

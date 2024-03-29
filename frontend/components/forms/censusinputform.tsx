@@ -368,7 +368,7 @@ const CensusInputForm = () => {
 
     try {
       // Add code to retrieve additional required parameters like schema, fileName, etc.
-      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.id}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=fixeddata_census&uom=metric`, {
+      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.id}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=measurements&uom=metric`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

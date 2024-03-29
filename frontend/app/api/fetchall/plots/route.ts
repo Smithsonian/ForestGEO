@@ -6,34 +6,15 @@ import {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>> {
   let conn: PoolConnection | null = null;
-  const email = request.nextUrl.searchParams.get('email');
-  if (!email) throw new Error('missing email');
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error("Schema selection was not provided to API endpoint");
   try {
-    // const catalogSchema = getCatalogSchema();
     conn = await getConn();
-    const userQuery = `
-      SELECT UserID FROM catalog.users
-      WHERE Email = ?
-    `;
-    const userParams = [email.toLowerCase()];
-    const userResults = await runQuery(conn, userQuery, userParams);
-
-    if (userResults.length === 0) {
-      throw new Error('User not found');
-    }
-    const userID = userResults[0].UserID;
-
     // Query to get plots
     const plotQuery = `
-      SELECT p.*
-      FROM ${schema}.Plots AS p
-      LEFT JOIN catalog.UserPlotRelations AS upr ON p.PlotID = upr.PlotID
-      WHERE (upr.UserID = ? OR upr.AllPlots = 1) AND (upr.UserID IS NOT NULL)
+      SELECT * FROM ${schema}.plots
     `;
-    const plotParams = [userID];
-    const plotResults = await runQuery(conn, plotQuery, plotParams);
+    const plotResults = await runQuery(conn, plotQuery, []);
 
     if (plotResults.length === 0) {
       throw new Error('No plots found');

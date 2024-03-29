@@ -5,7 +5,7 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
   const {connection, rowData, schema} = props;
   try {
     const genusResult = await runQuery(connection, `
-      SELECT GenusID FROM ${schema}.Genus WHERE Genus = ?;
+      SELECT GenusID FROM ${schema}.genus WHERE Genus = ?;
     `, [rowData.genus]);
 
     const genusID = genusResult[0].GenusID;
@@ -21,7 +21,7 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>) {
 
     // Insert or update Species
     await runQuery(connection, `
-      INSERT INTO ${schema}.Species (GenusID, SpeciesCode, CurrentTaxonFlag, ObsoleteTaxonFlag, SpeciesName, IDLevel, Authority, FieldFamily, Description)
+      INSERT INTO ${schema}.species (GenusID, SpeciesCode, CurrentTaxonFlag, ObsoleteTaxonFlag, SpeciesName, IDLevel, Authority, FieldFamily, Description)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
       GenusID = VALUES(GenusID),

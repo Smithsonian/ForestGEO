@@ -11,7 +11,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SubSpecies
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    const query = `SELECT * FROM ${schema}.Quadrats`;
+    const query = `SELECT * FROM ${schema}.subspecies`;
     const results = await runQuery(conn, query);
 
     const subSpeciesRows: SubSpeciesRDS[] = results.map((row: SubSpeciesResult, index: number) => ({

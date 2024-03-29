@@ -1,17 +1,17 @@
 "use client";
 import * as React from 'react';
-import {Dispatch, SetStateAction, useEffect, useState} from 'react';
+import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
 import List from '@mui/joy/List';
 import ListItem from '@mui/joy/ListItem';
-import ListItemButton, {listItemButtonClasses} from '@mui/joy/ListItemButton';
+import ListItemButton, { listItemButtonClasses } from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import {LoginLogout} from "@/components/loginlogout";
-import {Plot, Site, siteConfigNav, SiteConfigProps} from "@/config/macros";
+import { LoginLogout } from "@/components/loginlogout";
+import { Plot, Site, siteConfigNav, SiteConfigProps } from "@/config/macros";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -20,7 +20,7 @@ import {
   useSiteContext,
   useSiteDispatch
 } from "@/app/contexts/userselectionprovider";
-import {usePathname, useRouter} from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Button,
   DialogActions,
@@ -37,24 +37,25 @@ import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import {
   useCensusListContext,
-  useCensusListDispatch,
   usePlotListContext,
   useSiteListContext
 } from "@/app/contexts/listselectionprovider";
-import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
-import {CensusRDS} from "@/config/sqlmacros";
-import {getData} from "@/config/db";
-import {useSession} from "next-auth/react";
-import {useLoading} from "@/app/contexts/loadingprovider";
+import { useCensusLoadContext } from "@/app/contexts/coredataprovider";
+import { CensusRDS } from "@/config/sqlmacros";
+import { getData } from "@/config/db";
+import { useSession } from "next-auth/react";
+import { useLoading } from "@/app/contexts/loadingprovider";
 import Check from "@mui/icons-material/Check";
 import ListItemDecorator from "@mui/joy/ListItemDecorator";
-import {SlideToggle, TransitionComponent} from "@/components/client/clientmacros";
+import { SlideToggle, TransitionComponent } from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import {CensusLogo, PlotLogo} from "@/components/icons";
+import { CensusLogo, Logo, PlotLogo } from "@/components/icons";
+import { RainbowTypography } from '@/styles/rainbowtext'
+import { RainbowIcon } from '@/styles/rainbowicon';
 
-function SimpleToggler({isOpen, renderToggle, children,}: Readonly<{
+function SimpleToggler({ isOpen, renderToggle, children, }: Readonly<{
   isOpen: boolean;
   children: React.ReactNode;
   renderToggle: any;
@@ -86,7 +87,7 @@ interface MRTProps {
 
 function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean | undefined, setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined) {
   const Icon = siteConfigProps.icon;
-  const {plotSelectionRequired, censusSelectionRequired, pathname} = props;
+  const { plotSelectionRequired, censusSelectionRequired, pathname } = props;
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -97,12 +98,12 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
           setMenuOpen(!menuOpen);
         }
       }}>
-      <Icon/>
+      <Icon />
       <ListItemContent>
         <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
       </ListItemContent>
       <KeyboardArrowDownIcon
-        sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
+        sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }}
       />
     </ListItemButton>
   );
@@ -114,8 +115,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar(props: SidebarProps) {
-  const {data: session} = useSession();
-  const {setLoading} = useLoading();
+  const { data: session } = useSession();
+  const { setLoading } = useLoading();
   let currentSite = useSiteContext();
   let siteDispatch = useSiteDispatch();
   let currentPlot = usePlotContext();
@@ -126,7 +127,6 @@ export default function Sidebar(props: SidebarProps) {
   let censusListContext = useCensusListContext();
   let censusLoadContext = useCensusLoadContext();
   let siteListContext = useSiteListContext();
-  let censusListDispatch = useCensusListDispatch(); // Ensure you have this dispatch method
 
   const [plot, setPlot] = useState<Plot>(currentPlot);
   const [census, setCensus] = useState<CensusRDS>(currentCensus);
@@ -151,52 +151,9 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
   const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
 
-  useEffect(() => {
-    const updateCensusList = async () => {
-      // Fetch the updated list of censuses. Replace the below line with your actual data fetching logic.
-      if (!censusLoadContext) return;
-      let uniqueCensusMap = new Map();
-      censusLoadContext.forEach(censusRDS => {
-        const plotCensusNumber = censusRDS?.plotCensusNumber || 0;
-        let existingCensus = uniqueCensusMap.get(plotCensusNumber);
-        if (!existingCensus) {
-          uniqueCensusMap.set(plotCensusNumber, {
-            plotID: censusRDS?.plotID || 0,
-            plotCensusNumber,
-            startDate: censusRDS?.startDate || null, // need to handle null start date too
-            endDate: censusRDS?.endDate || null,  // Handle null endDate
-            description: censusRDS?.description || ''
-          });
-        } else {
-          if (censusRDS?.startDate) {
-            existingCensus.startDate = existingCensus.startDate
-              ? new Date(Math.max(existingCensus.startDate.getTime(), new Date(censusRDS.startDate).getTime()))
-              : new Date(censusRDS.startDate);  // Update startDate only if it's not null
-          }
-          existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate || 0).getTime()));
-          if (censusRDS?.endDate) {
-            existingCensus.endDate = existingCensus.endDate
-              ? new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS.endDate).getTime()))
-              : new Date(censusRDS.endDate);  // Update endDate only if it's not null
-          }
-        }
-      });
+  const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
 
-      // Check if the census list actually needs to be updated
-      const newCensusList = Array.from(uniqueCensusMap.values());
-      if (JSON.stringify(censusListContext) !== JSON.stringify(newCensusList)) {
-        console.log('Updating Census List...'); // Debugging Log
-        if (censusListDispatch) {
-          setLoading(true, "Updating Census Selection...");
-          await censusListDispatch({censusList: newCensusList});
-          setLoading(false);
-        }
-      }
-    };
-
-    updateCensusList().catch(console.error);
-  }, [censusLoadContext, censusListContext, censusListDispatch, setLoading]);
-  const {coreDataLoaded, siteListLoaded} = props;
+  const { coreDataLoaded, siteListLoaded } = props;
 
   const getSortedCensusData = () => {
     const ongoingCensus = censusListContext?.filter(c => c.endDate === null);
@@ -209,22 +166,29 @@ export default function Sidebar(props: SidebarProps) {
         return (dateB.getTime() ?? 0) - (dateA.getTime() ?? 0);
       });
 
-    return {ongoingCensus, historicalCensuses};
+    return { ongoingCensus, historicalCensuses };
   };
 
-  const {ongoingCensus, historicalCensuses} = getSortedCensusData();
+  const { ongoingCensus, historicalCensuses } = getSortedCensusData();
 
   useEffect(() => {
-    if (siteListLoaded) {
+    if (siteListLoaded && session) {
       getData('site').then((savedSite: Site) => setStoredSite(savedSite)).catch(console.error);
       getData('plot').then((savedPlot: Plot) => setStoredPlot(savedPlot)).catch(console.error);
       getData('census').then((savedCensus: CensusRDS) => setStoredCensus(savedCensus)).catch(console.error);
     }
-  }, [siteListLoaded]);
+  }, [siteListLoaded, session]);
 
   useEffect(() => {
-    if (storedSite && storedPlot && storedCensus) {
-      setShowResumeDialog(true);
+    if (storedSite && session) {
+      // Retrieve the user's allowed sites
+      const allowedSiteIDs = new Set(session.user.sites.map(site => site.siteID));
+      if (allowedSiteIDs.has(storedSite.siteID)) {
+        handleResumeSession().catch(console.error);
+      } else {
+        handleSiteSelection(null).catch(console.error);
+      }
+      // setShowResumeDialog(true);
     }
   }, [storedSite, storedPlot, storedCensus, siteListLoaded]);
 
@@ -243,8 +207,12 @@ export default function Sidebar(props: SidebarProps) {
     setSite(selectedSite);
     if (siteDispatch) {
       setLoading(true, 'Dispatching Site...');
-      await siteDispatch({site: selectedSite});
+      await siteDispatch({ site: selectedSite });
+      await delay(500);
       setLoading(false);
+    }
+    if (selectedSite === null) { // site's been reset, plot needs to be voided
+      await handlePlotSelection(null);
     }
   };
 
@@ -253,8 +221,12 @@ export default function Sidebar(props: SidebarProps) {
     setPlot(selectedPlot);
     if (plotDispatch) {
       setLoading(true, 'Dispatching plot...');
-      await plotDispatch({plot: selectedPlot});
+      await plotDispatch({ plot: selectedPlot });
+      await delay(500);
       setLoading(false);
+    }
+    if (selectedPlot === null) {
+      await handleCensusSelection(null); // if plot's reset, then census needs to be voided too
     }
   };
 
@@ -263,7 +235,8 @@ export default function Sidebar(props: SidebarProps) {
     setCensus(selectedCensus);
     if (censusDispatch) {
       setLoading(true, 'Dispatching Census...');
-      await censusDispatch({census: selectedCensus});
+      await censusDispatch({ census: selectedCensus });
+      await delay(500);
       setLoading(false);
     }
   };
@@ -273,8 +246,7 @@ export default function Sidebar(props: SidebarProps) {
     storedSite ? await handleSiteSelection(storedSite) : undefined;
     storedPlot ? await handlePlotSelection(storedPlot) : undefined;
     storedCensus ? await handleCensusSelection(storedCensus) : undefined;
-    ;
-    setShowResumeDialog(false);
+    // setShowResumeDialog(false);
   };
 
   const renderCensusValue = (option: SelectOption<string> | null) => {
@@ -311,10 +283,10 @@ export default function Sidebar(props: SidebarProps) {
   // Define the array type
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
-    {toggle: undefined, setToggle: undefined},
-    {toggle: undefined, setToggle: undefined},
-    {toggle: propertiesToggle, setToggle: setPropertiesToggle},
-    {toggle: formsToggle, setToggle: setFormsToggle}
+    { toggle: undefined, setToggle: undefined },
+    { toggle: undefined, setToggle: undefined },
+    { toggle: propertiesToggle, setToggle: setPropertiesToggle },
+    { toggle: formsToggle, setToggle: setFormsToggle }
   ];
 
   const renderSiteOptions = () => {
@@ -340,7 +312,7 @@ export default function Sidebar(props: SidebarProps) {
         }}
       >
         {/* Allowed Sites Group */}
-        <List aria-labelledby="allowed-sites-group" sx={{'--ListItemDecorator-size': '28px'}}>
+        <List aria-labelledby="allowed-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="allowed-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
@@ -353,10 +325,10 @@ export default function Sidebar(props: SidebarProps) {
           ))}
         </List>
 
-        <ListDivider role="none"/>
+        <ListDivider role="none" />
 
         {/* Other Sites Group */}
-        <List aria-labelledby="other-sites-group" sx={{'--ListItemDecorator-size': '28px'}}>
+        <List aria-labelledby="other-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="other-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
@@ -373,7 +345,7 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   return (
-    <Stack direction={"row"} sx={{display: 'flex', width: 'fit-content'}}>
+    <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
       {/*BASE SIDEBAR*/}
       <Box
         className="Sidebar"
@@ -404,12 +376,22 @@ export default function Sidebar(props: SidebarProps) {
             },
           })}
         />
-        <Box sx={{flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2}}>
-          <Box sx={{display: 'flex', alignItems: 'left', flexDirection: 'column'}}>
-            {session?.user.isAdmin && (
-              <Typography level="h1">ADMIN VIEW:</Typography>
-            )}
-            <Typography level="h1">ForestGEO </Typography>
+        <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
+            {/* <Stack direction={"row"}>
+              {session?.user.isAdmin && (
+                <Typography level="h1">AV</Typography>
+              )}
+              <Typography level="h1">ForestGEO</Typography>
+            </Stack> */}
+            <Typography level="h1">
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <RainbowIcon />
+                {session?.user.isAdmin && <Typography level="h1" sx={{ marginRight: '8px'}}>AV</Typography>}
+                ForestGEO
+              </Box>
+            </Typography>
+            <Divider orientation='horizontal' sx={{ my: 0.75 }} />
             <Link component={"button"} onClick={() => {
               if (siteListLoaded) {
                 setOpenSiteSelectionModal(true);
@@ -417,14 +399,14 @@ export default function Sidebar(props: SidebarProps) {
                 alert('Site list loading failed. Please contact an administrator.');
               }
             }} sx={{
-              display: 'flex', alignItems: 'center', paddingBottom: '1em', width: '100%', textAlign: 'left'
+              display: 'flex', alignItems: 'center', paddingBottom: '0.25em', width: '100%', textAlign: 'left'
             }}>
               <Avatar>
-                <TravelExploreIcon/>
+                <TravelExploreIcon />
               </Avatar>
               <Typography
                 color={!currentSite?.siteName ? "danger" : "success"}
-                level="body-lg"
+                level="h2"
                 sx={{
                   marginLeft: 1, display: 'flex', flexGrow: 1
                 }}>
@@ -440,151 +422,161 @@ export default function Sidebar(props: SidebarProps) {
               display: 'flex', alignItems: 'center', paddingBottom: '0.75em', width: '100%', textAlign: 'left'
             }}>
               <Avatar size={"sm"}>
-                <PlotLogo/>
+                <PlotLogo />
               </Avatar>
               <Typography color={!currentPlot?.key ? "danger" : "success"}
-                          level="body-lg"
-                          sx={{marginLeft: 1, display: 'flex', flexGrow: 1}}>
+                level="h3"
+                sx={{ marginLeft: 1, display: 'flex', flexGrow: 1 }}>
                 {currentPlot ? `Plot: ${currentPlot.key}` : "Select Plot"}
               </Typography>
             </Link>
             <SlideToggle
               isOpen={!isPlotSelectionRequired}>
               {/* This block will slide down when a plot is selected */}
-              <Box sx={{display: 'flex', flexDirection: 'column'}}>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                 <Link component={"button"} onClick={() => {
                   setOpenCensusSelectionModal(true);
                 }}
-                      sx={{display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left'}}>
+                  sx={{ display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left' }}>
                   <Avatar size={"sm"}>
-                    <CensusLogo/>
+                    <CensusLogo />
                   </Avatar>
                   <Typography color={(!currentCensus) ? "danger" : "success"}
-                              level="body-lg"
-                              sx={{marginLeft: 1}}>
+                    level="h4"
+                    sx={{ marginLeft: 1 }}>
                     {currentCensus ? `Census: ${currentCensus.plotCensusNumber}` : 'Select Census'}
                   </Typography>
                 </Link>
                 <Box
-                  sx={{marginLeft: '2.5em'}}> {/* Adjust marginLeft to match Avatar's width plus its marginLeft, mt for slight vertical adjustment */}
+                  sx={{ marginLeft: '2.5em' }}> {/* Adjust marginLeft to match Avatar's width plus its marginLeft, mt for slight vertical adjustment */}
                   <Typography color={(!currentCensus) ? "danger" : "primary"}
-                              level="body-md"
-                              sx={{textAlign: 'left', paddingLeft: '1em'}}>
-                    {currentCensus ? `Starting: ${new Date(currentCensus?.startDate!).toDateString()}` : ''}
+                    level="body-md"
+                    sx={{ textAlign: 'left', paddingLeft: '1em' }}>
+                    {(currentCensus !== null) && (
+                      <>{(currentCensus.startDate) ? `Starting: ${new Date(currentCensus?.startDate!).toDateString()}` : ''}</>
+                    )}
                   </Typography>
                   <Typography color={(!currentCensus) ? "danger" : "primary"}
-                              level="body-md"
-                              sx={{textAlign: 'left', paddingLeft: '1em'}}>
-                    {currentCensus?.endDate ? `Ending ${new Date(currentCensus.endDate).toDateString()}` : `Ongoing`}
+                    level="body-md"
+                    sx={{ textAlign: 'left', paddingLeft: '1em' }}>
+
+                    {(currentCensus !== null) && (
+                      <>{(currentCensus.endDate) ? `Ending ${new Date(currentCensus.endDate).toDateString()}` : `Ongoing`}</>
+                    )}
                   </Typography>
                 </Box>
               </Box>
-
+              <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
+              {/* Remaining Parts of Navigation Menu -- want this to be accessible from plot selection since not all links need census selection */}
               <SlideToggle isOpen={!isCensusSelectionRequired}>
-                {/* Remaining Parts of Navigation Menu */}
-                <Box
-                  sx={{
-                    minHeight: 0,
-                    overflow: 'hidden auto',
-                    flexGrow: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    [`& .${listItemButtonClasses.root}`]: {
-                      gap: 1.5,
-                    },
-                  }}
-                >
-                  <List
-                    size="lg"
-                    sx={{
-                      gap: 1,
-                      '--List-nestedInsetStart': '30px',
-                      '--ListItem-radius': (theme) => theme.vars.radius.sm,
-                    }}
-                  >
-                    {siteConfigNav.map((item, index: number) => {
-                      const Icon = item.icon;
-                      const {toggle, setToggle} = toggleArray[index];
-
-                      // Calculate delay based on index (e.g., 100ms per item)
-                      const delay = (index) * 200;
-
-                      if (item.expanded.length === 0) {
-                        return (
-                          <TransitionComponent key={item.href} in={!isCensusSelectionRequired}
-                                               style={{transitionDelay: `${delay}ms`}} direction="up">
-                            <ListItem>
-                              <ListItemButton selected={pathname === item.href}
-                                              disabled={isPlotSelectionRequired || isCensusSelectionRequired}
-                                              color={pathname === item.href ? 'primary' : undefined}
-                                              onClick={() => router.push(item.href)}>
-                                <Icon/>
-                                <ListItemContent>
-                                  <Typography level={"title-sm"}>{item.label}</Typography>
-                                </ListItemContent>
-                              </ListItemButton>
-                            </ListItem>
-                          </TransitionComponent>
-                        );
-                      } else {
-                        return (
-                          <TransitionComponent key={item.href} in={!isCensusSelectionRequired}
-                                               style={{transitionDelay: `${delay}ms`}} direction="up">
-                            <ListItem nested>
-                              <SimpleToggler
-                                renderToggle={MenuRenderToggle({
-                                  plotSelectionRequired: isPlotSelectionRequired,
-                                  censusSelectionRequired: isCensusSelectionRequired,
-                                  pathname
-                                }, item, toggle, setToggle)}
-                                isOpen={!!toggle}
-                              >
-                                <List sx={{gap: 0.5}} size={"sm"}>
-                                  {item.expanded.map((link, subIndex) => {
-                                    const SubIcon = link.icon;
-                                    // Calculate delay based on index (e.g., 100ms per item)
-                                    const delay = (subIndex + 1) * 200;
-                                    return (
-                                      <TransitionComponent key={link.href} in={!!toggle}
-                                                           style={{transitionDelay: `${delay}ms`}} direction="up">
-                                        <ListItem sx={{marginTop: 0.5}}>
-                                          <ListItemButton
-                                            selected={pathname == (item.href + link.href)}
-                                            disabled={isPlotSelectionRequired || isCensusSelectionRequired}
-                                            onClick={() => router.push((item.href + link.href))}>
-                                            <SubIcon/>
-                                            <ListItemContent>
-                                              <Typography
-                                                level={"title-sm"}>{link.label}</Typography>
-                                            </ListItemContent>
-                                          </ListItemButton>
-                                        </ListItem>
-                                      </TransitionComponent>
-                                    );
-                                  })}
-                                </List>
-                              </SimpleToggler>
-                            </ListItem>
-                          </TransitionComponent>
-                        );
-                      }
-                    })}
-                  </List>
+                <Box sx={{ display: 'flex', flexDirection: 'column', marginTop: 1 }}>
+                  <Typography level="body-lg" color='neutral'>Azure Storage Container:</Typography>
+                  <Typography level="body-md" color='primary'>{currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}</Typography>
+                  <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
                 </Box>
               </SlideToggle>
+              <Box
+                sx={{
+                  minHeight: 0,
+                  overflow: 'hidden auto',
+                  flexGrow: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  [`& .${listItemButtonClasses.root}`]: {
+                    gap: 1.5,
+                  },
+                }}
+              >
+                <List
+                  size="lg"
+                  sx={{
+                    gap: 1,
+                    '--List-nestedInsetStart': '30px',
+                    '--ListItem-radius': (theme) => theme.vars.radius.sm,
+                  }}
+                >
+                  {siteConfigNav.map((item, index: number) => {
+                    const Icon = item.icon;
+                    const { toggle, setToggle } = toggleArray[index];
+
+                    // Calculate delay based on index (e.g., 100ms per item)
+                    const delay = (index) * 200;
+
+                    if (item.expanded.length === 0) {
+                      return (
+                        <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
+                          style={{ transitionDelay: `${delay}ms` }} direction="up">
+                          <ListItem>
+                            <ListItemButton selected={pathname === item.href}
+                              disabled={isPlotSelectionRequired}
+                              color={pathname === item.href ? 'primary' : undefined}
+                              onClick={() => router.push(item.href)}>
+                              <Icon />
+                              <ListItemContent>
+                                <Typography level={"title-sm"}>{item.label}</Typography>
+                              </ListItemContent>
+                            </ListItemButton>
+                          </ListItem>
+                        </TransitionComponent>
+                      );
+                    } else {
+                      return (
+                        <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
+                          style={{ transitionDelay: `${delay}ms` }} direction="up">
+                          <ListItem nested>
+                            <SimpleToggler
+                              renderToggle={MenuRenderToggle({
+                                plotSelectionRequired: isPlotSelectionRequired,
+                                censusSelectionRequired: isCensusSelectionRequired,
+                                pathname
+                              }, item, toggle, setToggle)}
+                              isOpen={!!toggle}
+                            >
+                              <List sx={{ gap: 0.5 }} size={"sm"}>
+                                {item.expanded.map((link, subIndex) => {
+                                  const SubIcon = link.icon;
+                                  // Calculate delay based on index (e.g., 100ms per item)
+                                  const delay = (subIndex + 1) * 200;
+                                  return (
+                                    <TransitionComponent key={link.href} in={!!toggle}
+                                      style={{ transitionDelay: `${delay}ms` }} direction="up">
+                                      <ListItem sx={{ marginTop: 0.5 }}>
+                                        <ListItemButton
+                                          selected={pathname == (item.href + link.href)}
+                                          disabled={isPlotSelectionRequired}
+                                          onClick={() => router.push((item.href + link.href))}>
+                                          <SubIcon />
+                                          <ListItemContent>
+                                            <Typography
+                                              level={"title-sm"}>{link.label}</Typography>
+                                          </ListItemContent>
+                                        </ListItemButton>
+                                      </ListItem>
+                                    </TransitionComponent>
+                                  );
+                                })}
+                              </List>
+                            </SimpleToggler>
+                          </ListItem>
+                        </TransitionComponent>
+                      );
+                    }
+                  })}
+                </List>
+              </Box>
             </SlideToggle>
           </SlideToggle>
         </Box>
-        <Box sx={{display: 'flex', alignItems: 'left', flexDirection: 'column'}}>
-          <Divider orientation={"horizontal"} sx={{mb: 2}}/>
-          <LoginLogout/>
+        <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
+          <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
+          <LoginLogout />
         </Box>
         <Modal open={showResumeDialog} onClose={() => setShowResumeDialog(false)}>
           <ModalDialog>
             <DialogTitle>Resume Previous Session?</DialogTitle>
-            <Divider/>
+            <Divider />
             <DialogContent>
-              <Typography>You have a saved session. Would you like to resume?</Typography>
+              <Typography>Would you like to continue with the last Site you chose?</Typography>
             </DialogContent>
             <DialogActions>
               <Button onClick={handleResumeSession}>Resume</Button>
@@ -598,12 +590,12 @@ export default function Sidebar(props: SidebarProps) {
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon/>
+              <WarningRoundedIcon />
               Site Selection
             </DialogTitle>
-            <Divider/>
-            <DialogContent sx={{width: 750}}>
-              <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+            <Divider />
+            <DialogContent sx={{ width: 750 }}>
+              <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Select Site:</Typography>
                   {renderSiteOptions()}
@@ -611,11 +603,12 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </DialogContent>
             <DialogActions>
-              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                 <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                   setSite(currentSite);
                   setOpenSiteSelectionModal(false);
-                  setIsInitialSiteSelectionRequired(true);
+                  if (site) setIsInitialSiteSelectionRequired(false);
+                  else setIsInitialSiteSelectionRequired(true);
                 }}>
                   Cancel
                 </Button>
@@ -637,12 +630,12 @@ export default function Sidebar(props: SidebarProps) {
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon/>
+              <WarningRoundedIcon />
               Plot Selection
             </DialogTitle>
-            <Divider/>
-            <DialogContent sx={{width: 750}}>
-              <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+            <Divider />
+            <DialogContent sx={{ width: 750 }}>
+              <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Select Plot:</Typography>
                   <Select
@@ -661,12 +654,12 @@ export default function Sidebar(props: SidebarProps) {
                     <Option value={""}>None</Option>
                     {plotListContext?.map((item) => (
                       <Option value={item?.key} key={item?.key}>
-                        <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                           <Typography level="body-lg">{item?.key}</Typography>
-                          <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                          <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                             Quadrats: {item?.num}
                           </Typography>
-                          <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                          <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                             ID: {item?.id}
                           </Typography>
                         </Box>
@@ -677,11 +670,12 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </DialogContent>
             <DialogActions>
-              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                 <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                   setPlot(currentPlot);
                   setOpenPlotSelectionModal(false);
-                  setIsPlotSelectionRequired(true);
+                  if (plot) setIsPlotSelectionRequired(false);
+                  else setIsPlotSelectionRequired(true);
                 }}>
                   Cancel
                 </Button>
@@ -703,12 +697,12 @@ export default function Sidebar(props: SidebarProps) {
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon/>
+              <WarningRoundedIcon />
               Census Selection
             </DialogTitle>
-            <Divider/>
-            <DialogContent sx={{width: 750}}>
-              <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+            <Divider />
+            <DialogContent sx={{ width: 750 }}>
+              <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Select Census:</Typography>
                   <Select
@@ -734,50 +728,50 @@ export default function Sidebar(props: SidebarProps) {
                   >
                     <List>
                       <Option value={""}>None</Option>
-                      <Divider orientation={"horizontal"}/>
+                      <Divider orientation={"horizontal"} />
                       {ongoingCensus && ongoingCensus.length > 0 && (
                         ongoingCensus.map((item) => (
                           <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
-                            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                               <Typography level="body-lg">Census: {item.plotCensusNumber}</Typography>
-                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                                 {`Started: ${new Date(item.startDate).toDateString()}`}
                               </Typography>
                             </Box>
                           </Option>
                         ))
                       )}
-                      <Divider orientation={"horizontal"}/>
+                      <Divider orientation={"horizontal"} />
                       {historicalCensuses && historicalCensuses.length > 0 && (
                         historicalCensuses.map((item) => (
                           <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
-                            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                               <Typography level="body-lg">Census {item.plotCensusNumber}</Typography>
-                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                                 {`Started: ${new Date(item.startDate).toDateString()}`}
                               </Typography>
-                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                                 {item.endDate && `Ended: ${new Date(item.endDate).toDateString()}`}
                               </Typography>
                             </Box>
-                            <ListItemDecorator sx={{opacity: 0}}>
-                              <Check/>
+                            <ListItemDecorator sx={{ opacity: 0 }}>
+                              <Check />
                             </ListItemDecorator>
                           </Option>
                         ))
                       )}
-                      <Divider orientation={"horizontal"}/>
+                      <Divider orientation={"horizontal"} />
                     </List>
                   </Select>
                 </Stack>
               </Box>
             </DialogContent>
             <DialogActions>
-              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                 <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                   setCensus(currentCensus);
-                  setOpenCensusSelectionModal(false);
-                  setIsCensusSelectionRequired(true);
+                  if (census) setIsCensusSelectionRequired(false);
+                  else setIsCensusSelectionRequired(true);
                 }}>
                   Cancel
                 </Button>

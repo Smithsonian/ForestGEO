@@ -27,14 +27,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ census: 
     let queryParams: any[];
     if (plotID) {
       paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Census
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.census
       WHERE PlotID = ?
       LIMIT ?, ?
       `;
       queryParams = [plotID, startRow, pageSize];
     } else {
       paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Census
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.census
       LIMIT ?, ?
     `;
       queryParams = [startRow, pageSize];
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     conn = await getConn();
     const {CensusID, ...newRowData} = await parseCensusRequestBody(request);
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Census`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.census`, newRowData]);
     await runQuery(conn, insertQuery);
     return NextResponse.json({message: "Insert successful"}, {status: 200});
   } catch (error) {
@@ -96,7 +96,7 @@ export async function PATCH(request: NextRequest) {
     const {CensusID, ...updateData} = await parseCensusRequestBody(request);
     conn = await getConn();
 
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CensusID = ?', [`${schema}.Census`, updateData, CensusID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CensusID = ?', [`${schema}.census`, updateData, CensusID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: HTTPResponses.OK});
@@ -120,7 +120,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     conn = await getConn();
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
-    const deleteQuery = `DELETE FROM ${schema}.Census WHERE CensusID = ?`;
+    const deleteQuery = `DELETE FROM ${schema}.census WHERE CensusID = ?`;
     await runQuery(conn, deleteQuery, [deleteID]);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
 

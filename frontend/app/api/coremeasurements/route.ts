@@ -36,14 +36,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     let queryParams: any[];
     if (plotID) {
       paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.CoreMeasurements
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.coremeasurements
       WHERE PlotID = ?
       LIMIT ?, ?
       `;
       queryParams = [plotID, startRow, pageSize];
     } else {
       paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.CoreMeasurements
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.coremeasurements
       LIMIT ?, ?
     `;
       queryParams = [startRow, pageSize];
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     const {CoreMeasurementID, ...newRowData} = await parseCoreMeasurementsRequestBody(request);
     conn = await getConn();
     // Insert the new row
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.CoreMeasurements`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.coremeasurements`, newRowData]);
     await runQuery(conn, insertQuery);
 
     return NextResponse.json({message: "Insert successful"}, {status: 200});
@@ -116,7 +116,7 @@ export async function PATCH(request: NextRequest) {
     const {CoreMeasurementID, ...updateData} = await parseCoreMeasurementsRequestBody(request);
     conn = await getConn();
     // Build the update query
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CoreMeasurementID = ?', [`${schema}.CoreMeasurements`, updateData, CoreMeasurementID]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CoreMeasurementID = ?', [`${schema}.coremeasurements`, updateData, CoreMeasurementID]);
     await runQuery(conn, updateQuery);
 
     return NextResponse.json({message: "Update successful"}, {status: 200});
@@ -139,7 +139,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   try {
     conn = await getConn();
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
-    const deleteQuery = `DELETE FROM ${schema}.CoreMeasurements WHERE CoreMeasurementID = ?`;
+    const deleteQuery = `DELETE FROM ${schema}.coremeasurements WHERE CoreMeasurementID = ?`;
     await runQuery(conn, deleteQuery, [deleteCode]);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
 

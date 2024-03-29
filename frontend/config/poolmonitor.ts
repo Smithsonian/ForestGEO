@@ -43,7 +43,7 @@ export class PoolMonitor {
     return {
       activeConnections: this.activeConnections,
       totalConnectionsCreated: this.totalConnectionsCreated,
-      waitingForConnection: this.waitingForConnection
+      // waitingForConnection: this.waitingForConnection
     };
   }
 }

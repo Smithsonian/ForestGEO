@@ -130,7 +130,7 @@ export default function MeasurementsSummaryPage() {
           </Box>
 
           {/* Upload Button */}
-          <Button onClick={handleOpenUploadModal} variant="solid" color="primary">Upload Data</Button>
+          <Button onClick={handleOpenUploadModal} variant="solid" color="primary">Upload Measurements</Button>
         </Box>
       </Box>
 
@@ -170,7 +170,7 @@ export default function MeasurementsSummaryPage() {
           sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
         >
           <ModalClose onClick={handleCloseUploadModal}/>
-          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal}/>
+          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal} overrideUploadForm={"measurements"}/>
           {/* Additional modal content if needed */}
         </ModalDialog>
       </Modal>

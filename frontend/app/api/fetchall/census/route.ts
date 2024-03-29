@@ -14,8 +14,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<CensusRDS[
   try {
     conn = await getConn();
 
-    const results = await runQuery(conn, `SELECT * FROM ${schema}.Census`);
-    if (!results) throw new Error("Call failed");
+    const results = await runQuery(conn, `SELECT * FROM ${schema}.census`);
+    if (!results) return new NextResponse(null, { status: 500 });
 
     // Map the results to CensusRDS structure
     const censusRows: CensusRDS[] = results.map((row: CensusResult, index: any) => ({

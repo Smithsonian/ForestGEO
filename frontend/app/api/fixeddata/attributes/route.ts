@@ -28,7 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const startRow = page * pageSize;
     // Query to get the paginated data
     const paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Attributes
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.attributes
       LIMIT ?, ?
     `;
     const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const newRowData = await parseAttributeRequestBody(request, 'POST');
     conn = await getConn();
 
-    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Attributes`, newRowData]);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.attributes`, newRowData]);
     await runQuery(conn, insertQuery);
 
     return new NextResponse(JSON.stringify({message: "Insert successful"}), {status: 200});
@@ -95,7 +95,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     conn = await getConn();
 
     await runQuery(conn, `SET foreign_key_checks = 0;`, []);
-    const deleteQuery = `DELETE FROM ${schema}.Attributes WHERE Code = ?`;
+    const deleteQuery = `DELETE FROM ${schema}.attributes WHERE Code = ?`;
     await runQuery(conn, deleteQuery, [deleteCode]);
     await runQuery(conn, `SET foreign_key_checks = 1;`, []);
 
@@ -117,7 +117,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const updateData = await parseAttributeRequestBody(request, 'PATCH');
     conn = await getConn();
 
-    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE Code = ?', [`${schema}.Attributes`, updateData, code]);
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE Code = ?', [`${schema}.attributes`, updateData, code]);
     await runQuery(conn, updateQuery);
 
     return new NextResponse(JSON.stringify({message: "Update successful"}), {status: 200});

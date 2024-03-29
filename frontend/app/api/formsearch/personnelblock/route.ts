@@ -2,6 +2,7 @@ import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, PersonnelResult, runQuery} from "@/components/processors/processormacros";
 import {PersonnelRDS} from "@/config/sqlmacros";
+import { FORMSEARCH_LIMIT } from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -14,12 +15,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
       `SELECT DISTINCT PersonnelID, FirstName, LastName, Role
       FROM ${schema}.personnel
       ORDER BY LastName
-      LIMIT 5` :
+      LIMIT ${FORMSEARCH_LIMIT}` :
       `SELECT DISTINCT PersonnelID, FirstName, LastName, Role
       FROM ${schema}.personnel
       WHERE LastName LIKE ?
       ORDER BY LastName
-      LIMIT 5`;
+      LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialLastName === '' ? [] : [`%${partialLastName}%`];
     const results = await runQuery(conn, query, queryParams);
 
