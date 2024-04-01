@@ -1,5 +1,5 @@
 "use client";
-import { Alert, Box, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack, Tooltip, Typography } from "@mui/joy";
+import { Alert, Box, DialogActions, DialogContent, DialogTitle, List, ListItem, Modal, ModalDialog, Stack, Tooltip, Typography } from "@mui/joy";
 import { TableHeadersByFormType, UploadParseFilesProps } from "@/config/macros";
 import { Button, Grid } from "@mui/material";
 import { DropzoneLogic } from "@/components/uploadsystemhelpers/dropzone";
@@ -32,7 +32,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
 
   return (
     <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
-      <Grid container>
+      <Grid container spacing={2}>
         <Grid item xs={6}>
           <Box sx={{ display: 'flex', flexDirection: 'column', mb: 10, mr: 10 }}>
             <DropzoneLogic onChange={handleFileChange} />
@@ -70,24 +70,30 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
               <br />
             </Typography>
-
             {uploadForm === 'measurements' && (
               <>
                 <Alert
-                  startDecorator={<WarningIcon fontSize="inherit" />}
-                  variant="solid"
+                  startDecorator={<WarningIcon fontSize="large" />}
+                  variant="soft"
                   color="danger"
                   sx={{ mb: 2 }}
                 >
                   <Typography>
-                    Please note: For date fields, accepted formats are <br />
-                    <Tooltip title="Year-Month-Day. Separators can be '-', '.' or '/'">
-                      <strong>YYYY(-|.|/)MM(-|.|/)DD</strong>
-                    </Tooltip> and
-                    <Tooltip title="Day-Month-Year. Separators can be '-', '.' or '/'">
-                      <strong>DD(-|.|/)MM(-|.|/)YYYY</strong>
-                    </Tooltip>. <br />
-                    Ensure your dates follow one of these formats.
+                    Please note: For date fields, accepted formats are
+                    <List marker="decimal">
+                      <ListItem>
+                        <Tooltip size="lg" title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
+                          <Typography color="primary">YYYY-MM-DD</Typography>
+                        </Tooltip>
+                      </ListItem>
+                      <ListItem>
+                        <Tooltip size="lg" title="Accepted separators: '-' (dash), '.' (period) or '/' (forward-slash)">
+                          <Typography color="primary">DD-MM-YYYY</Typography>
+                        </Tooltip>
+                      </ListItem>
+                    </List>
+                    Hover over formats to see additionally accepted separators.<br />
+                    Please ensure your dates follow one of these formats. 
                   </Typography>
                 </Alert>
                 <Typography sx={{ mb: 2 }}>
@@ -95,21 +101,26 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                 </Typography>
               </>
             )}
-            <Box sx={{ display: 'flex', flex: 1, justifyContent: 'center' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
               <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive}
                 setDataViewActive={setDataViewActive} />
               {acceptedFiles.length > 0 &&
                 <Button
-                  variant="outlined"
+                  variant="contained"
+                  color="error"
                   onClick={() => handleRemoveFile(dataViewActive - 1)}
-                  sx={{ mt: 2 }}
+                  sx={{ mt: 2, alignSelf: 'center' }}
                 >
                   Delete Selected File
                 </Button>
               }
             </Box>
-            <LoadingButton disabled={acceptedFiles.length <= 0}
-              onClick={handleInitialSubmit}>
+            <LoadingButton
+              variant="contained"
+              color="primary"
+              disabled={acceptedFiles.length <= 0}
+              onClick={handleInitialSubmit}
+              sx={{ mt: 2 }}>
               Review Files
             </LoadingButton>
           </Stack>

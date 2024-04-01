@@ -485,7 +485,6 @@ export default function UploadParent(props: UploadParentProps) {
                 </Box>
               </TabPanel>
             </Tabs> */}
-            <Button onClick={handleCancelUpload} sx={{marginY: 2}}>Cancel Upload</Button>
           </Box>
         </Box>
       )}

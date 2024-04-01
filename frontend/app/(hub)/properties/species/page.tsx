@@ -9,6 +9,7 @@ import DataGridCommons from "@/components/datagridcommons";
 import {useSession} from "next-auth/react";
 import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
 import UploadParent from "@/components/uploadsystem/uploadparent";
+import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
 
 export default function SpeciesPage() {
   const initialRows: GridRowsProp = [
@@ -42,16 +43,7 @@ export default function SpeciesPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
-  const handleOpenUploadModal = (): void => {
-    setIsUploadModalOpen(true);
-  };
-
-  const handleCloseUploadModal = (): void => {
-    setIsUploadModalOpen(false);
-    setRefresh(true); // Trigger refresh of DataGrid
-  };
   let currentPlot = usePlotContext();
 
   const addNewRowToGrid = () => {
@@ -110,7 +102,7 @@ export default function SpeciesPage() {
           </Box>
 
           {/* Upload Button */}
-          <Button onClick={handleOpenUploadModal} variant="solid" color="primary">Upload Measurements</Button>
+          <UploadParentModal formType="species" setRefresh={setRefresh} />
         </Box>
       </Box>
 
@@ -136,23 +128,6 @@ export default function SpeciesPage() {
         currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
-
-      {/* Modal for upload */}
-      <Modal
-        open={isUploadModalOpen}
-        onClose={handleCloseUploadModal}
-        aria-labelledby="upload-dialog-title"
-        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
-      >
-        <ModalDialog
-          size="lg"
-          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
-        >
-          <ModalClose onClick={handleCloseUploadModal}/>
-          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal} overrideUploadForm={"quadrats"}/>
-          {/* Additional modal content if needed */}
-        </ModalDialog>
-      </Modal>
     </>
   );
 }

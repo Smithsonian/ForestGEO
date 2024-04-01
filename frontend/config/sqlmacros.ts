@@ -3,6 +3,7 @@
  */
 import {DataGrid, GridColDef} from '@mui/x-data-grid';
 import {styled} from '@mui/material/styles';
+import moment from 'moment';
 
 export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   border: 0,
@@ -28,7 +29,7 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   '& .MuiDataGrid-iconSeparator': {
     display: 'none',
   },
-  '& .MuiDataGrid-columnHeader, .MuiDataGrid-cell': {
+  '& .MuiDataGrid-columnHeader, . MuiDataGrid-cell': {
     borderRight: `1px solid ${
       theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'
     }`,
@@ -121,13 +122,19 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
   {
     field: 'measurementDate',
     headerName: 'Date',
-    type: "string",
     headerClassName: 'header',
     flex: 1,
-    valueGetter: (params: any) => {
-      if (!params.value) return null;
-      return new Date(params.value).toDateString();
-    }
+    valueGetter: (value: any) => {
+      // Check if the date is present and valid
+      if (!value || !moment(value).isValid()) return '';
+      console.log('measurements summary measurementDate value getter func params value: ', value);
+      // Format the date
+      return new Date(value).toDateString();
+    },
+    // valueFormatter: (value: any) => {
+    //   console.log('value formatter trigger: ', moment(value).format('MMMM DD, YYYY'));
+    //   return moment(value).format('MMMM DD, YYYY');
+    // }
   },
   {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left',},

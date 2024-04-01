@@ -10,6 +10,7 @@ import {AttributeGridColumns} from "@/config/sqlmacros";
 import {Box, Button, Modal, ModalClose, ModalDialog, Typography } from "@mui/joy";
 import UploadParent from "@/components/uploadsystem/uploadparent";
 import {useSession} from "next-auth/react";
+import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
 
 export default function AttributesPage() {
   const initialRows: GridRowsProp = [{id: 0, code: '', description: '', status: ''}];
@@ -24,18 +25,8 @@ export default function AttributesPage() {
   const [paginationModel, setPaginationModel] = useState({page: 0, pageSize: 10});
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const currentPlot = usePlotContext();
   const {data: session} = useSession();
-
-  const handleOpenUploadModal = (): void => {
-    setIsUploadModalOpen(true);
-  };
-
-  const handleCloseUploadModal = (): void => {
-    setIsUploadModalOpen(false);
-    setRefresh(true); // Trigger refresh of DataGrid
-  };
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -68,7 +59,7 @@ export default function AttributesPage() {
           </Box>
 
           {/* Upload Button */}
-          <Button onClick={handleOpenUploadModal} variant="solid" color="primary">Upload Attributes</Button>
+          <UploadParentModal formType="attributes" setRefresh={setRefresh} />
         </Box>
       </Box>
 
@@ -94,23 +85,6 @@ export default function AttributesPage() {
         currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
-
-      {/* Modal for upload */}
-      <Modal
-        open={isUploadModalOpen}
-        onClose={handleCloseUploadModal}
-        aria-labelledby="upload-dialog-title"
-        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
-      >
-        <ModalDialog
-          size="lg"
-          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
-        >
-          <ModalClose onClick={handleCloseUploadModal}/>
-          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal} overrideUploadForm={"attributes"}/>
-          {/* Additional modal content if needed */}
-        </ModalDialog>
-      </Modal>
     </>
   );
 }

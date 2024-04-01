@@ -9,6 +9,7 @@ import {useSession} from "next-auth/react";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import UploadParent from "@/components/uploadsystem/uploadparent";
+import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
 
 export default function MeasurementsSummaryPage() {
   const {data: session} = useSession();
@@ -129,8 +130,7 @@ export default function MeasurementsSummaryPage() {
             </Typography>
           </Box>
 
-          {/* Upload Button */}
-          <Button onClick={handleOpenUploadModal} variant="solid" color="primary">Upload Measurements</Button>
+          <UploadParentModal formType="measurements" setRefresh={setRefresh} />
         </Box>
       </Box>
 
@@ -157,23 +157,6 @@ export default function MeasurementsSummaryPage() {
         currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
-
-      {/* Modal for upload */}
-      <Modal
-        open={isUploadModalOpen}
-        onClose={handleCloseUploadModal}
-        aria-labelledby="upload-dialog-title"
-        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
-      >
-        <ModalDialog
-          size="lg"
-          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
-        >
-          <ModalClose onClick={handleCloseUploadModal}/>
-          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal} overrideUploadForm={"measurements"}/>
-          {/* Additional modal content if needed */}
-        </ModalDialog>
-      </Modal>
     </>
   );
 }

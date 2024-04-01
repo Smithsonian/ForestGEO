@@ -10,7 +10,8 @@
     "bs": "next build; next start",
     "bswin": "npm run build ; npm run start",
     "bdwin": "npm run build ; npm run dev",
-    "clean": "rm -rf .next node_modules package-lock.json build; npm install",
+    "clean": "rm -rf .next node_modules build; npm install",
+    "cleanbuild": "rm -rf .next node_modules build; npm install; next build",
     "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest"
   },
   "dependencies": {
@@ -27,10 +28,11 @@
     "@mui/x-data-grid-generator": "latest",
     "@mui/x-date-pickers": "^7.0.0",
     "@react-spring/web": "latest",
+    "@types/date-fns": "^2.6.0",
     "autoprefixer": "latest",
     "crypto-browserify": "^3.12.0",
     "crypto-js": "^4.2.0",
-    "date-fns": "latest",
+    "date-fns": "^3.6.0",
     "dotenv": "latest",
     "next": "latest",
     "next-auth": "latest",
