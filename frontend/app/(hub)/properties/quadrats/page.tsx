@@ -10,6 +10,7 @@ import {PersonnelAutocompleteMultiSelect} from "@/components/forms/personnelauto
 import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
 import UploadParent from "@/components/uploadsystem/uploadparent";
 import {useSession} from "next-auth/react";
+import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
 
 export default function QuadratsPage() {
   const initialRows: GridRowsProp = [
@@ -170,7 +171,7 @@ export default function QuadratsPage() {
           </Box>
 
           {/* Upload Button */}
-          <Button onClick={handleOpenUploadModal} variant="solid" color="primary">Upload Measurements</Button>
+          <UploadParentModal formType="quadrats" setRefresh={setRefresh} />
         </Box>
       </Box>
 
@@ -196,23 +197,6 @@ export default function QuadratsPage() {
         currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
-
-      {/* Modal for upload */}
-      <Modal
-        open={isUploadModalOpen}
-        onClose={handleCloseUploadModal}
-        aria-labelledby="upload-dialog-title"
-        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
-      >
-        <ModalDialog
-          size="lg"
-          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
-        >
-          <ModalClose onClick={handleCloseUploadModal}/>
-          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal} overrideUploadForm={"quadrats"}/>
-          {/* Additional modal content if needed */}
-        </ModalDialog>
-      </Modal>
     </>
   );
 }
