@@ -71,19 +71,18 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     console.log(`personnelID: ${personnelID}`);
 
-    // Enhanced date handling
-    const parseDate = (dateString: string): Date | null => {
-      // Define an array of date formats to try
-      const formats = ['MM-DD-YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD', 'YYYY-DD-MM'];
-      for (const format of formats) {
-        if (moment(dateString, format, true).isValid()) {
-          return moment(dateString, format).toDate();
-        }
-      }
-      return null; // Return null if none of the formats match
-    };
-
-    const measurementDate = parseDate(rowData.date);
+    // date parsing is not needed -- date is being parsed as part of file intake??
+    // // Enhanced date handling
+    // const parseDate = (dateString: string): Date | null => {
+    //   // Define an array of date formats to try
+    //   const formats = ['MM-DD-YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD', 'YYYY-DD-MM'];
+    //   for (const format of formats) {
+    //     if (moment(dateString, format, true).isValid()) {
+    //       return moment(dateString, format).toDate();
+    //     }
+    //   }
+    //   return null; // Return null if none of the formats match
+    // };
 
     const measurementInsertQuery = `
     INSERT INTO ${schema}.coremeasurements
@@ -98,7 +97,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       stemID,
       personnelID,
       booleanToBit(false), // isValidated is false by default
-      measurementDate,
+      moment(rowData.date).format('YYYY-MM-DD'),
       rowData.dbh ?? null,
       rowData.hom ?? null,
       null,
