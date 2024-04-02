@@ -9,7 +9,7 @@ import {useSession} from "next-auth/react";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import UploadParent from "@/components/uploadsystem/uploadparent";
-import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
+import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function MeasurementsSummaryPage() {
   const {data: session} = useSession();

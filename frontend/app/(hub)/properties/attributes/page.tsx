@@ -10,7 +10,7 @@ import {AttributeGridColumns} from "@/config/sqlmacros";
 import {Box, Button, Modal, ModalClose, ModalDialog, Typography } from "@mui/joy";
 import UploadParent from "@/components/uploadsystem/uploadparent";
 import {useSession} from "next-auth/react";
-import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
+import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function AttributesPage() {
   const initialRows: GridRowsProp = [{id: 0, code: '', description: '', status: ''}];
