@@ -15,16 +15,16 @@ import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/u
 import {useSession} from "next-auth/react";
 import {parse, ParseResult} from "papaparse";
 import {Box, Tab, tabClasses, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
-import UploadParseFiles from "@/components/uploadsystem/uploadparsefiles";
-import UploadReviewFiles from "@/components/uploadsystem/uploadreviewfiles";
-import UploadFireSQL from "@/components/uploadsystem/uploadfiresql";
-import UploadError from "@/components/uploadsystem/uploaderror";
-import UploadValidation from "@/components/uploadsystem/uploadvalidation";
-import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
+import UploadParseFiles from "@/components/uploadsystem/segments/uploadparsefiles";
+import UploadReviewFiles from "@/components/uploadsystem/segments/uploadreviewfiles";
+import UploadFireSQL from "@/components/uploadsystem/segments/uploadfiresql";
+import UploadError from "@/components/uploadsystem/segments/uploaderror";
+import UploadValidation from "@/components/uploadsystem/segments/uploadvalidation";
+import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
 import {Button} from "@mui/material";
-import UploadStart from "@/components/uploadsystem/uploadstart";
-import UploadFireAzure from "@/components/uploadsystem/uploadfireazure";
-import UploadComplete from "@/components/uploadsystem/uploadcomplete";
+import UploadStart from "@/components/uploadsystem/segments/uploadstart";
+import UploadFireAzure from "@/components/uploadsystem/segments/uploadfireazure";
+import UploadComplete from "@/components/uploadsystem/segments/uploadcomplete";
 import moment from "moment";
 
 export interface CMIDRow {

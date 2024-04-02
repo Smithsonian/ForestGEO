@@ -29,8 +29,8 @@ import Divider from "@mui/joy/Divider";
 import Typography from "@mui/joy/Typography";
 import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from 'next-auth/react';
-import UploadValidation from "@/components/uploadsystem/uploadvalidation";
-import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
+import UploadValidation from "@/components/uploadsystem/segments/uploadvalidation";
+import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
 import {ReviewStates} from "@/config/macros";
 import {DialogContent, DialogTitle, Modal, ModalDialog} from '@mui/joy';
 

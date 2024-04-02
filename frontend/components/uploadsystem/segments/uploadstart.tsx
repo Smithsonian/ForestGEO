@@ -9,7 +9,7 @@ import React, { useEffect, useState } from "react";
 import Select from "@mui/joy/Select";
 import List from "@mui/joy/List";
 import Option from '@mui/joy/Option';
-import FinalizeSelectionsButton from "../client/finalizeselectionsbutton";
+import FinalizeSelectionsButton from "../../client/finalizeselectionsbutton";
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
