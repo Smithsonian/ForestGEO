@@ -9,7 +9,7 @@ import DataGridCommons from "@/components/datagridcommons";
 import {useSession} from "next-auth/react";
 import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
 import UploadParent from "@/components/uploadsystem/uploadparent";
-import UploadParentModal from "@/components/uploadsystem/uploadparentmodal";
+import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function SpeciesPage() {
   const initialRows: GridRowsProp = [

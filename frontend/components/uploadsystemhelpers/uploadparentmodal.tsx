@@ -3,7 +3,7 @@
 import { Button, IconButton, Modal, ModalClose, ModalDialog } from "@mui/joy";
 import CloseIcon from "@mui/icons-material/Close";
 import { Dispatch, SetStateAction, useState } from "react";
-import UploadParent from "./uploadparent";
+import UploadParent from "../uploadsystem/uploadparent";
 
 interface UPMProps {
   setRefresh: Dispatch<SetStateAction<boolean>>;
