@@ -42,10 +42,9 @@ jobs:
           echo NODE_ENV=development >> frontend/.env
           echo PORT=3000 >> frontend/.env
 
-      - name: add in certificate (in frontend/ directory)
+      - name: Write Certificate to File
         run: |
-          touch frontend/DigiCertGlobalRootCA.crt.pem
-	  echo ${{ secrets.CERTIFICATE }} >> frontend/DigiCertGlobalRootCA.crt.pem
+          echo "${{ secrets.CERTIFICATE }}" > frontend/DigiCertGlobalRootCA.crt.pem
 
       - name: Cache node modules
         uses: actions/cache@v2
