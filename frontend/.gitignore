@@ -19,6 +19,7 @@
 /sampledata
 /sqlscripting
 /scripts
+DigiCertGlobalRootCA.crt.pem
 
 # misc
 .DS_Store
