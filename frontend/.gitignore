@@ -16,6 +16,9 @@
 
 # production
 /build
+/sampledata
+/sqlscripting
+/scripts
 
 # misc
 .DS_Store
