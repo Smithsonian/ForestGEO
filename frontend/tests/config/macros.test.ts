@@ -1,5 +1,6 @@
 import { setData } from '@/config/db';
-import { bitToBoolean, createEnhancedDispatch, genericLoadContextReducer, genericLoadReducer } from '@/config/macros';
+import { FileRowErrors, bitToBoolean, createEnhancedDispatch, formatDate, genericLoadContextReducer, genericLoadReducer, uploadValidFileAsBuffer } from '@/config/macros';
+import { ContainerClient } from '@azure/storage-blob';
 import '@testing-library/jest-dom';
 
 describe('macros', () => {
@@ -210,5 +211,307 @@ describe('macros', () => {
       const newState = genericLoadContextReducer(initialState, action, listContext);
       expect(newState).toBe(initialState);
     });
+  });
+});
+describe('getContainerClient', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...originalEnv };
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it('should throw an error if AZURE_STORAGE_CONNECTION_STRING is not set', async () => {
+    process.env.AZURE_STORAGE_CONNECTION_STRING = '';
+    const { getContainerClient } = require('@/config/macros');
+    await expect(getContainerClient('testContainer')).rejects.toThrow("process envs failed");
+  });
+
+  it('should log connection string and container name', async () => {
+    console.log = jest.fn();
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
+    const { getContainerClient } = require('@/config/macros');
+    await getContainerClient('testContainer');
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Connection String:'));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('container name: testContainer'));
+  });
+
+  it('should error if blob service client creation failed', async () => {
+    console.error = jest.fn();
+    jest.doMock('@azure/storage-blob', () => ({
+      BlobServiceClient: {
+        fromConnectionString: () => null,
+      },
+    }));
+    const { getContainerClient } = require('@/config/macros');
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
+    await expect(getContainerClient('testContainer')).rejects.toThrow();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('blob service client creation failed'));
+  });
+
+  it('should log success if blob service client created & connected', async () => {
+    console.error = jest.fn();
+    jest.doMock('@azure/storage-blob', () => ({
+      BlobServiceClient: {
+        fromConnectionString: () => ({
+          getContainerClient: () => ({
+            createIfNotExists: () => true,
+            url: 'http://example.com/testContainer',
+          }),
+        }),
+      },
+    }));
+    const { getContainerClient } = require('@/config/macros');
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
+    await getContainerClient('testContainer');
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('blob service client created & connected'));
+  });
+
+  it('should return container client if container exists or is created successfully', async () => {
+    jest.doMock('@azure/storage-blob', () => ({
+      BlobServiceClient: {
+        fromConnectionString: () => ({
+          getContainerClient: () => ({
+            createIfNotExists: () => true,
+            url: 'http://example.com/testContainer',
+          }),
+        }),
+      },
+    }));
+    const { getContainerClient } = require('@/config/macros');
+    process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
+    const containerClient = await getContainerClient('testContainer');
+    expect(containerClient).toBeDefined();
+    expect(containerClient.url).toBe('http://example.com/testContainer');
+  });
+});
+describe('uploadValidFileAsBuffer', () => {
+  const mockContainerClient = {
+    getBlockBlobClient: jest.fn().mockImplementation((fileName) => ({
+      uploadData: jest.fn().mockResolvedValue(true),
+      exists: jest.fn().mockResolvedValue(false)
+    }))
+  };
+
+  const mockFile = new File(["content"], "test.txt", {
+    type: "text/plain",
+  });
+
+  const user = "testUser";
+  const formType = "testForm";
+  const fileRowErrors = [{ row: 1, error: "Sample error" }];
+
+  it('should upload a file without errors', async () => {
+    const mockContainerClient = {
+      getBlockBlobClient: jest.fn().mockImplementation((fileName) => ({
+        uploadData: jest.fn().mockResolvedValue(true),
+        exists: jest.fn().mockResolvedValue(false),
+        url: `https://example.com/${fileName}`
+      }))
+    };
+
+    jest.mock('@azure/storage-blob', () => ({
+      ContainerClient: jest.fn().mockImplementation(() => mockContainerClient)
+    }));
+
+    const { uploadValidFileAsBuffer } = require('@/config/macros');
+
+    const mockFile = new File(["content"], "test.txt", {
+      type: "text/plain",
+    });
+
+    const user = "testUser";
+    const formType = "testForm";
+
+    const response = await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType);
+    expect(response).toBeTruthy();
+    expect(mockContainerClient.getBlockBlobClient).toHaveBeenCalledWith(mockFile.name);
+  });
+
+  it('should correctly handle file name increment on conflict', async () => {
+    const mockContainerClient = {
+      getBlockBlobClient: jest.fn().mockImplementationOnce((fileName) => ({
+        exists: jest.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+        uploadData: jest.fn().mockResolvedValue(true),
+        url: `https://example.com/${fileName}`
+      }))
+    };
+
+    jest.mock('@azure/storage-blob', () => ({
+      ContainerClient: jest.fn().mockImplementation(() => mockContainerClient)
+    }));
+
+    const { uploadValidFileAsBuffer } = require('@/config/macros');
+
+    const response = await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType);
+    expect(response).toBeTruthy();
+    expect(mockContainerClient.getBlockBlobClient).toHaveBeenCalledWith("test_1.txt");
+  });
+
+  it('should retry upload on failure and succeed', async () => {
+    let attempt = 0;
+    const mockBlockBlobClient = {
+      uploadData: jest.fn().mockImplementation(() => {
+        attempt++;
+        if (attempt < 3) {
+          throw new Error("Upload failed");
+        } else {
+          return Promise.resolve(true);
+        }
+      }),
+      exists: jest.fn().mockResolvedValue(false)
+    };
+    const mockContainerClient = {
+      getBlockBlobClient: jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+    };
+
+    const { uploadValidFileAsBuffer } = require('@/config/macros');
+
+    const response = await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType);
+    expect(response).toBeTruthy();
+    expect(attempt).toBe(3);
+  });
+
+  it('should throw error after max retries exceeded', async () => {
+    const mockBlockBlobClient = {
+      uploadData: jest.fn().mockRejectedValue(new Error("Upload failed")),
+      exists: jest.fn().mockResolvedValue(false)
+    };
+    const mockContainerClient = new ContainerClient('https://example.com/container');
+    mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient);
+
+    await expect(uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType)).rejects.toThrow("Upload failed");
+  });
+
+  describe('uploadValidFileAsBuffer additional tests', () => {
+    it('should call getBlockBlobClient with the correct parameters', async () => {
+      const mockUploadData = jest.fn().mockResolvedValue(true);
+      const mockBlockBlobClient = {
+        uploadData: mockUploadData,
+        exists: jest.fn().mockResolvedValue(true) // Changed to true to test existing file scenario
+      };
+      const mockContainerClient = new ContainerClient('https://example.com/container');
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+
+      const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
+        { row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1 }
+      ];
+
+      await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, fileRowErrors);
+      expect(mockContainerClient.getBlockBlobClient).toHaveBeenCalledWith(expect.any(String));
+    });
+
+    it('should not upload file if it already exists', async () => {
+      const mockUploadData = jest.fn().mockResolvedValue(true);
+      const mockBlockBlobClient = {
+        uploadData: mockUploadData,
+        exists: jest.fn().mockResolvedValue(true) // Simulating that the file already exists
+      };
+      const mockContainerClient = new ContainerClient('https://example.com/container');
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+
+      const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
+        { row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1 }
+      ];
+
+      await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, fileRowErrors);
+      expect(mockUploadData).not.toHaveBeenCalled();
+    });
+
+    it('should throw an error if uploadData fails', async () => {
+      const mockUploadData = jest.fn().mockRejectedValue(new Error('Upload failed'));
+      const mockBlockBlobClient = {
+        uploadData: mockUploadData,
+        exists: jest.fn().mockResolvedValue(false)
+      };
+      const mockContainerClient = new ContainerClient('https://example.com/container');
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+
+      const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
+        { row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1 }
+      ];
+
+      await expect(uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, fileRowErrors)).rejects.toThrow('Upload failed');
+    });
+
+    it('should correctly handle empty fileRowErrors', async () => {
+      const mockUploadData = jest.fn().mockResolvedValue(true);
+      const mockBlockBlobClient = {
+        uploadData: mockUploadData,
+        exists: jest.fn().mockResolvedValue(false)
+      };
+      const mockContainerClient = new ContainerClient('https://example.com/container');
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+
+      const emptyFileRowErrors: FileRowErrors[] | undefined = [];
+
+      await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, emptyFileRowErrors);
+      expect(mockUploadData).toHaveBeenCalledWith(expect.anything(), {
+        metadata: {
+          user: user,
+          FormType: formType,
+          FileErrorState: JSON.stringify(emptyFileRowErrors)
+        }
+      });
+    });
+  })
+});
+describe('formatDate', () => {
+  it('should correctly format an ISO date string to a readable date', () => {
+    const isoDateString = '2023-04-01';
+    const expectedDate = new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    }).format(new Date(isoDateString));
+    expect(formatDate(isoDateString)).toBe(expectedDate);
+  });
+
+  it('should handle leap years correctly', () => {
+    const isoDateString = '2020-02-29';
+    const expectedDate = new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    }).format(new Date(isoDateString));
+    expect(formatDate(isoDateString)).toBe(expectedDate);
+  });
+
+  it('should return "Invalid Date" for invalid ISO date strings', () => {
+    const isoDateString = 'not-a-date';
+    expect(formatDate(isoDateString)).toBe('Invalid Date');
+  });
+
+  it('should work with different locales', () => {
+    const isoDateString = '2023-04-01';
+    const expectedDate = new Intl.DateTimeFormat('fr-FR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    }).format(new Date(isoDateString));
+    const originalLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+    Intl.DateTimeFormat = jest.fn().mockImplementation(() => {
+      return {
+        format: () => expectedDate,
+        resolvedOptions: () => {
+          return { locale: 'fr-FR' };
+        },
+        supportedLocalesOf: () => ['fr-FR']
+      };
+    }) as any;
+    expect(formatDate(isoDateString)).toBe(expectedDate);
+    Intl.DateTimeFormat = jest.fn().mockImplementation(() => {
+      return {
+        format: () => 'mocked',
+        resolvedOptions: () => {
+          return { locale: originalLocale };
+        },
+        supportedLocalesOf: () => [originalLocale]
+      };
+    }) as any;
   });
 });
