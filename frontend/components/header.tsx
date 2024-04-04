@@ -5,13 +5,14 @@ import Sheet from '@mui/joy/Sheet';
 import IconButton from '@mui/joy/IconButton';
 import MenuIcon from '@mui/icons-material/Menu';
 
-import {toggleSidebar} from '@/config/utils';
+import { toggleSidebar } from '@/config/utils';
 
 export default function Header() {
   return (
     <Sheet
+      role="banner"
       sx={{
-        display: {xs: 'flex', md: 'none'},
+        display: { xs: 'flex', md: 'none' },
         alignItems: 'center',
         justifyContent: 'space-between',
         position: 'fixed',
@@ -37,12 +38,13 @@ export default function Header() {
         })}
       />
       <IconButton
+        role="button"
         onClick={() => toggleSidebar()}
         variant="outlined"
         color="neutral"
         size="sm"
       >
-        <MenuIcon/>
+        <MenuIcon />
       </IconButton>
     </Sheet>
   );
