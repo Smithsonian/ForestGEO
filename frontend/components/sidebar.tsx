@@ -55,11 +55,13 @@ import { CensusLogo, Logo, PlotLogo } from "@/components/icons";
 import { RainbowTypography } from '@/styles/rainbowtext'
 import { RainbowIcon } from '@/styles/rainbowicon';
 
-function SimpleToggler({ isOpen, renderToggle, children, }: Readonly<{
+export interface SimpleTogglerProps {
   isOpen: boolean;
   children: React.ReactNode;
   renderToggle: any;
-}>) {
+}
+
+export function SimpleToggler({ isOpen, renderToggle, children, }: Readonly<SimpleTogglerProps>) {
   return (
     <React.Fragment>
       {renderToggle}
@@ -116,7 +118,6 @@ interface SidebarProps {
 
 export default function Sidebar(props: SidebarProps) {
   const { data: session } = useSession();
-  const { setLoading } = useLoading();
   let currentSite = useSiteContext();
   let siteDispatch = useSiteDispatch();
   let currentPlot = usePlotContext();
@@ -151,7 +152,6 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
   const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
 
-  const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
 
   const { coreDataLoaded, siteListLoaded } = props;
 
