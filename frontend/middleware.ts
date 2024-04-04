@@ -18,9 +18,8 @@ export async function middleware (request: NextRequest) {
 
   if (
     url.pathname.startsWith('/dashboard') ||
-    url.pathname.startsWith('/coremeasurementhub') ||
+    url.pathname.startsWith('/measurementshub') ||
     url.pathname.startsWith('/properties') ||
-    url.pathname.startsWith('/uploadedfiles') ||
     url.pathname.startsWith('/admin')
   ) {
     if (!session) {
@@ -45,9 +44,8 @@ export async function middleware (request: NextRequest) {
 export const config = {
   matcher: [
     '/',
-    '/uploadedfiles',
     '/dashboard',
-    '/coremeasurementhub',
+    '/measurementshub',
     '/properties',
     '/admin'
   ]

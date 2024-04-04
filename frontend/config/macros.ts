@@ -19,6 +19,9 @@ import { CensusRDS, SitesRDS } from "@/config/sqlmacros";
 import { DetailedCMIDRow } from "@/components/uploadsystem/uploadparent";
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CloudCircleIcon from '@mui/icons-material/CloudCircle';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import GrassIcon from '@mui/icons-material/Grass';
+import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
 
 export const FORMSEARCH_LIMIT: number = 3;
 
@@ -432,17 +435,29 @@ export const siteConfigNav: SiteConfigProps[] = [
   },
   {
     label: "Measurements Hub",
-    href: "/measurementssummary",
+    href: "/measurementshub",
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
     icon: DataObjectIcon,
-    expanded: [],
-  },
-  {
-    label: "Uploaded Files",
-    href: "/uploadedfiles",
-    tip: "uploaded file display",
-    icon: CloudCircleIcon,
-    expanded: []
+    expanded: [
+      {
+        label: "View Measurements",
+        href: "/summary",
+        tip: '',
+        icon: VisibilityIcon
+      },
+      // {
+      //   label: "Validation History",
+      //   href: "/validationhistory",
+      //   tip: '',
+      //   icon: HistoryEduIcon
+      // },
+      {
+        label: "Uploaded Files",
+        href: "/uploadedfiles",
+        tip: "uploaded file display",
+        icon: CloudCircleIcon,
+      },
+    ],
   },
   {
     label: "Measurement Properties Hub",

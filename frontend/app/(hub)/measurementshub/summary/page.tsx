@@ -11,7 +11,7 @@ import {randomId} from "@mui/x-data-grid-generator";
 import UploadParent from "@/components/uploadsystem/uploadparent";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
-export default function MeasurementsSummaryPage() {
+export default function SummaryPage() {
   const {data: session} = useSession();
   const initialRows: GridRowsProp = [
     {

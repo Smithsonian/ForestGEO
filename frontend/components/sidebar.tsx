@@ -139,6 +139,7 @@ export default function Sidebar(props: SidebarProps) {
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
 
+  const [measurementsToggle, setMeasurementsToggle] = useState(false);
   const [propertiesToggle, setPropertiesToggle] = useState(false);
   const [formsToggle, setFormsToggle] = useState(false);
 
@@ -275,7 +276,7 @@ export default function Sidebar(props: SidebarProps) {
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
     { toggle: undefined, setToggle: undefined },
-    { toggle: undefined, setToggle: undefined },
+    { toggle: measurementsToggle, setToggle: setMeasurementsToggle },
     { toggle: propertiesToggle, setToggle: setPropertiesToggle },
     { toggle: formsToggle, setToggle: setFormsToggle }
   ];

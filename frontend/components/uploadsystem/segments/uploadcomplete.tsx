@@ -35,7 +35,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       case 'quadrats':
         return redirect('/properties/quadrats');
       case 'measurements':
-        return redirect('/measurementssummary');
+        return redirect('/measurementshub/summary');
       case 'arcgis_files':
         return redirect('/dashboard');
       default:
