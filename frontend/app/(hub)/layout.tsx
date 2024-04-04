@@ -36,42 +36,25 @@ import Typography from "@mui/joy/Typography";
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
-      return (
-        <h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>
-      );
-    case '/measurementssummary':
-      return (
-        <h3 className={title({ color: "green" })} key={endpoint}>Core Measurements Hub</h3>
-      );
+      return <h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>;
+    case '/measurementshub/summary':
+      return <h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3>;
+    case '/measurementshub/validationhistory':
+      return <h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3>;
     case '/properties/attributes':
-      return (
-        <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Attributes</h3>
-      );
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Attributes</h3>;
     case '/properties/census':
-      return (
-        <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Census</h3>
-      );
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Census</h3>;
     case '/properties/personnel':
-      return (
-        <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Personnel</h3>
-      );
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Personnel</h3>;
     case '/properties/quadrats':
-      return (
-        <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Quadrats</h3>
-      );
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Quadrats</h3>;
     case '/properties/species':
-      return (
-        <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Species</h3>
-      );
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Species</h3>;
     case '/censusform':
-      return (
-        <h3 className={title({ color: "sky" })} key={endpoint}>Census Form</h3>
-      );
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Census Form</h3>;
     default:
-      return (
-        <>
-        </>
-      );
+      return <></>;
   }
 }
 

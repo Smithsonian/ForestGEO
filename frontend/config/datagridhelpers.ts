@@ -65,6 +65,19 @@ const subSpeciesFields = [
   'infraSpecificLevel'
 ]
 
+const validationHistoryFields = [
+  'validationRunID',
+  'procedureName',
+  'runDatetime',
+  'targetRowID',
+  'validationOutcome',
+  'errorMessage',
+  'validationCriteria',
+  'measuredValue',
+  'expectedValueRange',
+  'additionalDetails'
+]
+
 interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown'
   initialValue?: string | number | boolean | any[] | null
@@ -139,10 +152,24 @@ const newRowTemplates: Templates = {
     authority: { type: 'string', initialValue: '' },
     infraSpecificLevel: { type: 'string', initialValue: '' },
     isNew: { type: 'boolean', initialValue: true }
+  },
+  validationHistory: {
+    id: { type: 'string' },
+    validationRunID: { type: 'number', initialValue: 0 },
+    procedureName: { type: 'string', initialValue: '' },
+    runDatetime: { type: 'date'},
+    targetRowID: { type: 'number', initialValue: null },
+    validationOutcome: { type: 'string', initialValue: '' },
+    errorMessage: { type: 'string', initialValue: '' },
+    validationCriteria: { type: 'string', initialValue: '' },
+    measuredValue: { type: 'string', initialValue: '' },
+    expectedValueRange: { type: 'string', initialValue: '' },
+    additionalDetails: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
   }
 }
 
-function getType (value: any): FieldTemplate['type'] {
+function getType(value: any): FieldTemplate['type'] {
   if (typeof value === 'number') {
     return 'number'
   } else if (typeof value === 'string') {
@@ -158,7 +185,7 @@ function getType (value: any): FieldTemplate['type'] {
   }
 }
 
-export function validateRowStructure (
+export function validateRowStructure(
   gridType: string,
   oldRow: GridRowModel
 ): boolean {
@@ -223,6 +250,7 @@ export const createProcessQuery: ProcessQueryFunction = (
     case 'personnel':
     case 'species':
     case 'subSpecies':
+    case 'validationHistory':
       baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}`
       break
     default:
@@ -256,6 +284,7 @@ export const createFetchQuery: FetchQueryFunction = (
     case 'personnel':
     case 'species':
     case 'subSpecies':
+    case 'validationHistory':
       baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
       break
     default:
@@ -275,7 +304,7 @@ export const createDeleteQuery: ProcessQueryFunction = (
   return baseQuery
 }
 
-export function getGridID (gridType: string): string {
+export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coreMeasurements':
       return 'coreMeasurementID'
@@ -291,6 +320,8 @@ export function getGridID (gridType: string): string {
       return 'speciesID'
     case 'subSpecies':
       return 'subSpeciesID'
+    case 'validationHistory':
+      return 'validationRunID';
     default:
       return 'breakage'
   }
@@ -300,7 +331,7 @@ const comparePersonnelObjects = (obj1: any, obj2: any) => {
   return Object.entries(obj1).some(([key, value]) => obj2[key] !== value)
 }
 
-export function computeMutation (
+export function computeMutation(
   gridType: string,
   newRow: GridRowModel,
   oldRow: GridRowModel
@@ -330,6 +361,8 @@ export function computeMutation (
       return speciesFields.some(field => newRow[field] !== oldRow[field])
     case 'subSpecies':
       return subSpeciesFields.some(field => newRow[field] !== oldRow[field])
+    case 'validationHistory':
+      return validationHistoryFields.some(field => newRow[field] !== oldRow[field]);
     default:
       throw new Error('invalid grid type submitted')
   }
