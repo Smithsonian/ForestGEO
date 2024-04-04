@@ -16,6 +16,7 @@ export default function UnauthenticatedSidebar() {
     <Stack direction={"row"} overflow={'hidden'} sx={{display: 'flex', width: 'fit-content'}}>
       <Box
         className="Sidebar"
+        data-testid="sidebar"
         sx={{
           position: {
             md: 'sticky',
@@ -60,7 +61,7 @@ export default function UnauthenticatedSidebar() {
         >
         </Box>
         <Divider/>
-        <LoginLogout/>
+        <LoginLogout data-testid="login-logout"/>
       </Box>
     </Stack>
   );
