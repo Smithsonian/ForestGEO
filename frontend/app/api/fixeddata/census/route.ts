@@ -1,120 +1,134 @@
+// FIXED DATA CENSUS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import sql from "mssql";
-import {ErrorMessages, sqlConfig} from "@/config/macros";
+import {ErrorMessages, HTTPResponses} from "@/config/macros";
 import {CensusRDS} from "@/config/sqlmacros";
+import {CensusResult, getConn, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
+import mysql, {PoolConnection} from "mysql2/promise";
 
-async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
+export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
+  let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
+  if (isNaN(page) || isNaN(pageSize)) {
+    throw new Error('Invalid page, pageSize, or plotID parameter');
+  }
+  try {
+    // Initialize the connection attempt counter
+    conn = await getConn();
+
+    /// Calculate the starting row for the query based on the page number and page size
+    const startRow = page * pageSize;
+
+    // Query to get the paginated data
+    let paginatedQuery: string;
+    let queryParams: any[];
+    if (plotID) {
+      paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Census
+      WHERE PlotID = ?
+      LIMIT ?, ?
+      `;
+      queryParams = [plotID, startRow, pageSize];
+    } else {
+      paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Census
+      LIMIT ?, ?
+    `;
+      queryParams = [startRow, pageSize];
     }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
+    const paginatedResults = await runQuery(conn, paginatedQuery, queryParams.map(param => param.toString()));
 
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
-  }
-  return await conn.request().query(query);
-}
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRows = totalRowsResult[0].totalRows;
 
-export async function GET(): Promise<NextResponse<CensusRDS[]>> {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Census`);
-  if (!results) throw new Error("call failed");
-  await conn.close();
-  let censusRows: CensusRDS[] = []
-  Object.values(results.recordset).map((row, index) => {
-    censusRows.push({
+    // Map the results to CensusRDS structure
+    const censusRows: CensusRDS[] = paginatedResults.map((row: CensusResult, index: number) => ({
       id: index + 1,
-      censusID: row['CensusID'],
-      plotID: row['PlotID'],
-      plotCensusNumber: row['PlotCensusNumber'],
-      startDate: row['StartDate'],
-      endDate: row['EndDate'],
-      description: row['Description'],
-    })
-  })
-  return new NextResponse(
-    JSON.stringify(censusRows),
-    {status: 200}
-  );
-}
+      censusID: row.CensusID,
+      plotID: row.PlotID,
+      plotCensusNumber: row.PlotCensusNumber,
+      startDate: row.StartDate,
+      endDate: row.EndDate,
+      description: row.Description,
+      // ... other fields as needed
+    }));
 
-export async function POST(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  const row: CensusRDS = {
-    id: 0,
-    censusID: parseInt(request.nextUrl.searchParams.get('censusID')!),
-    plotID: request.nextUrl.searchParams.get('plotID') ? parseInt(request.nextUrl.searchParams.get('plotID')!) : null,
-    plotCensusNumber: request.nextUrl.searchParams.get('plotCensusNumber') ? parseInt(request.nextUrl.searchParams.get('plotCensusNumber')!) : null,
-    startDate: request.nextUrl.searchParams.get('censusID') ? new Date(request.nextUrl.searchParams.get('censusID')!) : null,
-    endDate: request.nextUrl.searchParams.get('endDate') ? new Date(request.nextUrl.searchParams.get('censusID')!) : null,
-    description: request.nextUrl.searchParams.get('description') ? request.nextUrl.searchParams.get('description')! : null
+    return new NextResponse(JSON.stringify({
+      census: censusRows,
+      totalCount: totalRows
+    }), {status: HTTPResponses.OK});
+  } catch (error) {
+    console.error('Error in GET:', error);
+    throw new Error('Failed to fetch census data'); // Providing a more user-friendly error message
+  } finally {
+    if (conn) conn.release(); // Release the connection
   }
-  
-  let checkCensusID = await runQuery(conn, `SELECT * FROM forestgeo.Census WHERE [CensusID] = ${row.censusID}`);
-  if (!checkCensusID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  if (checkCensusID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Census (CensusID, PlotID, PlotCensusNumber, StartDate, EndDate, Description) VALUES
-    (${row.censusID}, ${row.plotID}, ${row.plotCensusNumber}, ${row.startDate}, ${row.endDate}, '${row.description}')`);
-  if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Insert successful"}, {status: 200});
 }
 
-export async function DELETE(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  
-  const deleteID = parseInt(request.nextUrl.searchParams.get('censusID')!);
-  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Census WHERE [CensusID] = ${deleteID}`);
-  if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400})
-  await conn.close();
-  return NextResponse.json({message: "Update successful",}, {status: 200});
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  try {
+    conn = await getConn();
+    const {CensusID, ...newRowData} = await parseCensusRequestBody(request);
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Census`, newRowData]);
+    await runQuery(conn, insertQuery);
+    return NextResponse.json({message: "Insert successful"}, {status: 200});
+  } catch (error) {
+    console.error('Error in POST:', error);
+    return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
+  } finally {
+    if (conn) conn.release(); // Release the connection
+  }
 }
 
 export async function PATCH(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  
-  const oldCensus = parseInt(request.nextUrl.searchParams.get('oldCensusID')!);
-  const row: CensusRDS = {
-    id: 0,
-    censusID: parseInt(request.nextUrl.searchParams.get('censusID')!),
-    plotID: request.nextUrl.searchParams.get('plotID') ? parseInt(request.nextUrl.searchParams.get('plotID')!) : null,
-    plotCensusNumber: request.nextUrl.searchParams.get('plotCensusNumber') ? parseInt(request.nextUrl.searchParams.get('plotCensusNumber')!) : null,
-    startDate: request.nextUrl.searchParams.get('startDate') ? new Date(request.nextUrl.searchParams.get('startDate')!) : null,
-    endDate: request.nextUrl.searchParams.get('endDate') ? new Date(request.nextUrl.searchParams.get('endDate')!) : null,
-    description: request.nextUrl.searchParams.get('description') ? request.nextUrl.searchParams.get('description')! : null
+  let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  try {
+    const {CensusID, ...updateData} = await parseCensusRequestBody(request);
+    conn = await getConn();
+
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE CensusID = ?', [`${schema}.Census`, updateData, CensusID]);
+    await runQuery(conn, updateQuery);
+
+    return NextResponse.json({message: "Update successful"}, {status: HTTPResponses.OK});
+  } catch (error) {
+    console.error('Error in PATCH:', error);
+    return NextResponse.json({message: ErrorMessages.UCF}, {status: 400});
+  } finally {
+    if (conn) conn.release(); // Release the connection
   }
-  
-  if (row.censusID !== oldCensus) { // PRIMARY KEY is being updated, unique key check needs to happen
-    let newCensusIDCheck = await runQuery(conn, `SELECT * FROM forestgeo.Census WHERE [CensusID] = '${row.censusID}'`);
-    if (!newCensusIDCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
-    if (newCensusIDCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-    
-    let results = await runQuery(conn, `UPDATE forestgeo.Census
-    SET [CensusID] = ${row.censusID}, [PlotID] = ${row.plotID}, [PlotCensusNumber] = ${row.plotCensusNumber},
-    [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = '${row.description}' WHERE [CensusID] = '${oldCensus}'`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
-  } else { // other column information is being updated, no PK check required
-    let results = await runQuery(conn, `UPDATE forestgeo.Census
-    SET [PlotID] = ${row.plotID}, [PlotCensusNumber] = ${row.plotCensusNumber},
-    [StartDate] = ${row.startDate}, [EndDate] = ${row.endDate}, [Description] = '${row.description}' WHERE [CensusID] = '${row.censusID}'`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  const deleteID = parseInt(request.nextUrl.searchParams.get('censusID')!);
+  if (isNaN(deleteID)) {
+    return NextResponse.json({message: "Invalid censusID parameter"}, {status: 400});
+  }
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  try {
+    conn = await getConn();
+
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
+    const deleteQuery = `DELETE FROM ${schema}.Census WHERE CensusID = ?`;
+    await runQuery(conn, deleteQuery, [deleteID]);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
+
+    return NextResponse.json({message: "Delete successful"}, {status: HTTPResponses.OK});
+  } catch (error) {
+    console.error('Error in DELETE:', error);
+    return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
+  } finally {
+    if (conn) conn.release(); // Release the connection
   }
 }

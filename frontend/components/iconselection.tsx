@@ -5,7 +5,7 @@ import Image from 'next/image';
 import NextLink from 'next/link';
 
 export function TemplateCard(image: any, cardIcon: any, cardTitle: string, cardLink: string) {
-  
+
   return (
     <>
       <AspectRatio ratio={"16/12"} flex sx={{width: 500}} variant="outlined" objectFit="cover">

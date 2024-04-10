@@ -1,29 +1,35 @@
 import "@/styles/globals.css";
 import {Providers} from "./providers";
 import React from "react";
-import {ContextsProvider} from "@/app/contexts/generalcontext";
+import {ListSelectionProvider} from "@/app/contexts/listselectionprovider";
 import {Box} from "@mui/joy";
-import {FixedDataProvider} from "./contexts/fixeddatacontext";
+import {CoreDataProvider} from "./contexts/coredataprovider";
+import UserSelectionProvider from "@/app/contexts/userselectionprovider";
+import {LoadingProvider} from "@/app/contexts/loadingprovider";
+import {GlobalLoadingIndicator} from "@/components/client/globalloadingindicator";
 
-export default function RootLayout({children,}: { children: React.ReactNode; }) {
+export default function RootLayout({children,}: Readonly<{ children: React.ReactNode; }>) {
   return (
-    <>
-      <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
-      <head>
-        <title>ForestGEO Data Entry</title>
-      </head>
-      <body>
-      <ContextsProvider>
-        <FixedDataProvider>
-          <Providers>
-            <Box sx={{display: 'flex', width: '100%', height: '100%'}}>
-              {children}
-            </Box>
-          </Providers>
-        </FixedDataProvider>
-      </ContextsProvider>
-      </body>
-      </html>
-    </>
+    <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
+    <head>
+      <title>ForestGEO Data Entry</title>
+    </head>
+    <body>
+    <Providers>
+      <LoadingProvider>
+        <GlobalLoadingIndicator/>
+        <CoreDataProvider>
+          <ListSelectionProvider>
+            <UserSelectionProvider>
+              <Box sx={{display: 'flex', width: '100%', height: '100%'}}>
+                {children}
+              </Box>
+            </UserSelectionProvider>
+          </ListSelectionProvider>
+        </CoreDataProvider>
+      </LoadingProvider>
+    </Providers>
+    </body>
+    </html>
   );
 }

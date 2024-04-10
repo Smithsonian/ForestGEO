@@ -11,3 +11,15 @@
 body {
     margin: 0;
 }
+
+.fullWidthAutoComplete {
+    width: 100%;
+}
+
+.dataGridCell {
+    overflow: visible !important;
+}
+
+.error-row {
+    background-color: rgba(255, 0, 0, 0.1);
+}

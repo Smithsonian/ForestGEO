@@ -38,3 +38,6 @@ yarn-error.log*
 next-env.d.ts
 .idea/*
 .vscode/*
+/*.zip
+.github/workflows/new-file-upload-system_forestgeo-livesite.yml
+.fleet/*

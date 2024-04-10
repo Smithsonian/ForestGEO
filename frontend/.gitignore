@@ -16,6 +16,10 @@
 
 # production
 /build
+/sampledata
+/sqlscripting
+/scripts
+DigiCertGlobalRootCA.crt.pem
 
 # misc
 .DS_Store
@@ -28,12 +32,13 @@ yarn-error.log*
 
 # local env files
 .env_jpac_deprecated.local
-.env*
+.env.local
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 .idea/*
+/.swc/
+/public/

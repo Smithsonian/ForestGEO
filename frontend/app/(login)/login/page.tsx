@@ -3,9 +3,9 @@ import React, {useEffect, useState} from "react";
 import {useSession} from "next-auth/react";
 import {animated, useTransition} from "@react-spring/web";
 import styles from "@/styles/styles.module.css";
-import Sidebar from "@/components/sidebar";
 import Box from "@mui/joy/Box";
-import EntryModal from "@/components/client/entrymodal";
+import UnauthenticatedSidebar from "@/components/unauthenticatedsidebar";
+import {redirect} from "next/navigation";
 
 const slides = [
   'background-1.jpg',
@@ -14,7 +14,8 @@ const slides = [
   'background-4.jpg',
 ]
 
-export default function Page() {
+export default function LoginPage() {
+  const {data: _session, status} = useSession();
   const [index, setIndex] = useState(0);
   const transitions = useTransition(index, {
     key: index,
@@ -29,31 +30,26 @@ export default function Page() {
     },
     exitBeforeEnter: true,
   })
-  useEffect(
-    () => {
-      void setInterval(() => setIndex(state => (state + 1) % slides.length), 5000)
-    }, []);
-  const {status} = useSession();
-  if (status == "authenticated") {
+
+  useEffect(() => {
+    setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
+  }, []);
+
+  if (status === "unauthenticated") {
     return (
-      <>
-        <EntryModal/>
-      </>
+      <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
+        {transitions((style, i) => (
+          <animated.div
+            className={styles.bg}
+            style={{
+              ...style,
+              backgroundImage: `url(${slides[i]})`,
+            }}/>
+        ))}
+        <UnauthenticatedSidebar/>
+      </Box>
     );
-  } else
-    return (
-      <>
-        <Box sx={{display: 'flex', minHeight: '100vh', minWidth: '100vh'}}>
-          {transitions((style, i) => (
-            <animated.div
-              className={styles.bg}
-              style={{
-                ...style,
-                backgroundImage: `url(${slides[i]})`,
-              }}/>
-          ))}
-          <Sidebar/>
-        </Box>
-      </>
-    );
+  } else if (status === "authenticated"){
+    redirect('/dashboard');
+  }
 }

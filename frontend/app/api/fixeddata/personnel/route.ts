@@ -1,113 +1,123 @@
+// FIXED DATA PERSONNEL ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import sql from "mssql";
-import {ErrorMessages, sqlConfig} from "@/config/macros";
+import {ErrorMessages} from "@/config/macros";
 import {PersonnelRDS} from "@/config/sqlmacros";
+import {getConn, parsePersonnelRequestBody, PersonnelResult, runQuery} from "@/components/processors/processormacros";
+import mysql, {PoolConnection} from "mysql2/promise";
 
-async function getSqlConnection(tries: number) {
-  return await sql.connect(sqlConfig).catch((err) => {
-    console.error(err);
-    if (tries == 5) {
-      throw new Error("Connection failure");
-    }
-    console.log("conn failed --> trying again!");
-    getSqlConnection(tries + 1);
-  });
-}
-
-async function runQuery(conn: sql.ConnectionPool, query: string) {
-  if (!conn) {
-    throw new Error("invalid ConnectionPool object. check connection string settings.")
+export async function GET(request: NextRequest): Promise<NextResponse<{
+  personnel: PersonnelRDS[],
+  totalCount: number
+}>> {
+  let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
+  if (isNaN(page)) {
+    console.error('page parseInt conversion failed');
   }
-  return await conn.request().query(query);
-}
+  const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
+  if (isNaN(pageSize)) {
+    console.error('pageSize parseInt conversion failed');
+    // handle error or set default
+  }
+  try {
+    conn = await getConn();
 
+    /// Calculate the starting row for the query based on the page number and page size
+    const startRow = page * pageSize;
 
-export async function GET(): Promise<NextResponse<PersonnelRDS[]>> {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  let results = await runQuery(conn, `SELECT * FROM forestgeo.Personnel`);
-  if (!results) throw new Error("call failed");
-  await conn.close();
-  let personnelRows: PersonnelRDS[] = []
-  Object.values(results.recordset).map((row, index) => {
-    personnelRows.push({
+    // Query to get the paginated data
+    const paginatedQuery = `
+      SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.Personnel
+      LIMIT ?, ?
+    `;
+    const paginatedResults = await runQuery(conn, paginatedQuery, [startRow.toString(), pageSize.toString()]);
+
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRows = totalRowsResult[0].totalRows;
+
+    const personnelRows: PersonnelRDS[] = paginatedResults.map((row: PersonnelResult, index: number) => ({
       id: index + 1,
-      personnelID: row['PersonnelID'],
-      firstName: row['FirstName'],
-      lastName: row['LastName'],
-      role: row['Role']
-    })
-  })
-  return new NextResponse(
-    JSON.stringify(personnelRows),
-    {status: 200}
-  );
-}
+      personnelID: row.PersonnelID,
+      firstName: row.FirstName,
+      lastName: row.LastName,
+      role: row.Role
+      // ... other fields as needed
+    }));
 
-export async function POST(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  const row: PersonnelRDS = {
-    id: 0,
-    personnelID: parseInt(request.nextUrl.searchParams.get('personnelID')!),
-    firstName: request.nextUrl.searchParams.get('firstName'),
-    lastName: request.nextUrl.searchParams.get('lastName'),
-    role: request.nextUrl.searchParams.get('role'),
-  }
-  
-  let checkPersonnelID = await runQuery(conn, `SELECT * FROM forestgeo.Personnel WHERE [PersonnelID] = ${row.personnelID}`);
-  if (!checkPersonnelID) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  if (checkPersonnelID.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-  let insertRow = await runQuery(conn, `INSERT INTO forestgeo.Personnel (PersonnelID, FirstName, LastName, Role) VALUES
-    (${row.personnelID}, '${row.firstName}', '${row.lastName}', '${row.role}')`);
-  if (!insertRow) return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Insert successful"}, {status: 200});
-}
-
-export async function PATCH(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  
-  const oldPersonnelID = parseInt(request.nextUrl.searchParams.get('oldPersonnelID')!);
-  const row: PersonnelRDS = {
-    id: 0,
-    personnelID: parseInt(request.nextUrl.searchParams.get('personnelID')!),
-    firstName: request.nextUrl.searchParams.get('firstName')!,
-    lastName: request.nextUrl.searchParams.get('lastName')!,
-    role: request.nextUrl.searchParams.get('role')!,
-  };
-  
-  // check to ensure new code is not already taken
-  if (row.personnelID !== oldPersonnelID) { // if CODE is being updated, this check needs to happen
-    let newCodeCheck = await runQuery(conn, `SELECT * FROM forestgeo.Personnel WHERE [PersonnelID] = '${row.personnelID}'`);
-    if (!newCodeCheck) return NextResponse.json({message: ErrorMessages.SCF}, {status: 400});
-    if (newCodeCheck.recordset.length !== 0) return NextResponse.json({message: ErrorMessages.UKAE}, {status: 409});
-    
-    let results = await runQuery(conn,
-      `UPDATE forestgeo.Personnel SET [PersonnelID] = ${row.personnelID}, [FirstName] = '${row.firstName}', [LastName] = '${row.lastName}', [Role] = '${row.role}' WHERE [PersonnelID] = '${oldPersonnelID}'`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
-  } else { // otherwise updating can focus solely on other columns
-    let results = await runQuery(conn, `UPDATE forestgeo.Personnel SET [FirstName] = '${row.firstName}', [LastName] = '${row.lastName}', [Role] = '${row.role}' WHERE [PersonnelID] = '${oldPersonnelID}'`);
-    if (!results) return NextResponse.json({message: ErrorMessages.UCF}, {status: 409});
-    await conn.close();
-    return NextResponse.json({message: "Update successful",}, {status: 200});
+    return new NextResponse(JSON.stringify({personnel: personnelRows, totalCount: totalRows}), {status: 200});
+  } catch (error) {
+    console.error('Error in GET:', error);
+    throw new Error('Failed to fetch personnel data');
+  } finally {
+    if (conn) conn.release();
   }
 }
 
-export async function DELETE(request: NextRequest) {
-  let i = 0;
-  let conn = await getSqlConnection(i);
-  if (!conn) throw new Error('sql connection failed');
-  
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  try {
+    const {PersonnelID, ...newRowData} = await parsePersonnelRequestBody(request);
+
+    conn = await getConn();
+
+    const insertQuery = mysql.format('INSERT INTO ?? SET ?', [`${schema}.Personnel`, newRowData]);
+    const results = await runQuery(conn, insertQuery);
+    return NextResponse.json({message: "Insert successful", newPersonnelID: results.insertId}, {status: 200});
+  } catch (error) {
+    console.error('Error in POST:', error);
+    return NextResponse.json({message: ErrorMessages.ICF}, {status: 400});
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  try {
+    const {PersonnelID, ...updateData} = await parsePersonnelRequestBody(request);
+    conn = await getConn();
+
+    const updateQuery = mysql.format('UPDATE ?? SET ? WHERE PersonnelID = ?', [`${schema}.Personnel`, updateData, PersonnelID]);
+    await runQuery(conn, updateQuery);
+
+    return NextResponse.json({message: "Update successful"}, {status: 200});
+  } catch (error) {
+    console.error('Error in PATCH:', error);
+    return NextResponse.json({message: ErrorMessages.UCF}, {status: 400});
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  let conn: PoolConnection | null = null;
   const deletePersonnelID = parseInt(request.nextUrl.searchParams.get('personnelID')!);
-  let deleteRow = await runQuery(conn, `DELETE FROM forestgeo.Personnel WHERE [PersonnelID] = ${deletePersonnelID}`);
-  if (!deleteRow) return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
-  await conn.close();
-  return NextResponse.json({message: "Delete successful",}, {status: 200});
+  if (isNaN(deletePersonnelID)) {
+    return NextResponse.json({message: "Invalid PersonnelID"}, {status: 400});
+  }
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  try {
+    conn = await getConn();
+
+    await runQuery(conn, `SET foreign_key_checks = 0;`, []);
+    const deleteQuery = `DELETE FROM ${schema}.Personnel WHERE PersonnelID = ?`;
+    await runQuery(conn, deleteQuery, [deletePersonnelID]);
+    await runQuery(conn, `SET foreign_key_checks = 1;`, []);
+
+    return NextResponse.json({message: "Delete successful"}, {status: 200});
+  } catch (error) {
+    console.error('Error in DELETE:', error);
+    return NextResponse.json({message: ErrorMessages.DCF}, {status: 400});
+  } finally {
+    if (conn) conn.release();
+  }
 }
