@@ -1,366 +1,158 @@
 "use client";
-import {
-  GridActionsCellItem,
-  GridColDef,
-  GridEventListener,
-  GridRowEditStopReasons,
-  GridRowId,
-  GridRowModel,
-  GridRowModes,
-  GridRowModesModel,
-  GridRowsProp,
-  GridToolbarContainer
-} from "@mui/x-data-grid";
+import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {AlertProps} from "@mui/material";
+import React, {useCallback, useState} from "react";
+import {PersonnelRDS, QuadratsGridColumns as BaseQuadratsGridColumns} from "@/config/sqlmacros";
+import {usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
-import {Alert, AlertProps, Button, Snackbar} from "@mui/material";
-import AddIcon from '@mui/icons-material/Add';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/DeleteOutlined';
-import SaveIcon from '@mui/icons-material/Save';
-import CancelIcon from '@mui/icons-material/Close';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import React, {useEffect, useState} from "react";
-import Box from "@mui/joy/Box";
-import {ErrorMessages} from "@/config/macros";
-import {usePlotsLoadContext, useQuadratsLoadContext} from "@/app/contexts/fixeddatacontext";
-import {QuadratGridColumns, StyledDataGrid} from "@/config/sqlmacros";
-import {usePlotContext} from "@/app/contexts/userselectioncontext";
+import DataGridCommons from "@/components/datagridcommons";
+import {PersonnelAutocompleteMultiSelect} from "@/components/forms/personnelautocompletemultiselect";
 
-interface EditToolbarProps {
-  setRows: (newRows: (oldRows: GridRowsProp) => GridRowsProp) => void;
-  setRowModesModel: (
-    newModel: (oldModel: GridRowModesModel) => GridRowModesModel,
-  ) => void;
-  setRefresh: (newState: boolean) => void;
-}
-
-function EditToolbar(props: EditToolbarProps) {
-  const {setRows, setRowModesModel, setRefresh} = props;
-  
-  const handleClick = async () => {
-    const id = randomId();
-    setRows((oldRows) => [...oldRows, {
-      id,
-      quadratID: 0,
-      plotID: null,
-      quadratName: null,
-      quadratX: null,
-      quadratY: null,
-      quadratZ: null,
-      dimensionX: null,
-      dimensionY: null,
-      area: null,
-      quadratShape: null
-    }]);
-    setRowModesModel((oldModel) => ({
-      ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratID'},
-    }));
-  };
-  
-  const handleRefresh = async () => {
-    setRefresh(true);
-    const response = await fetch(`/api/fixeddata/quadrats`, {
-      method: 'GET'
-    });
-    setRows(await response.json());
-    setRefresh(false);
-  }
-  
-  return (
-    <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
-        Add quadrat
-      </Button>
-      <Button color={"primary"} startIcon={<RefreshIcon/>} onClick={handleRefresh}>
-        Refresh
-      </Button>
-    </GridToolbarContainer>
-  );
-}
-
-function computeMutation(newRow: GridRowModel, oldRow: GridRowModel) {
-  return newRow.quadratID !== oldRow.quadratID ||
-    newRow.plotID !== oldRow.plotID ||
-    newRow.quadratName !== oldRow.quadratName ||
-    newRow.quadratX !== oldRow.quadratX ||
-    newRow.quadratY !== oldRow.quadratY ||
-    newRow.quadratZ !== oldRow.quadratZ ||
-    newRow.dimensionX !== oldRow.dimensionX ||
-    newRow.dimensionY !== oldRow.dimensionY ||
-    newRow.area !== oldRow.area ||
-    newRow.quadratShape !== oldRow.quadratShape;
-}
-
-export default function Page() {
+export default function QuadratsPage() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
       quadratID: 0,
       plotID: 0,
       quadratName: '',
-      quadratX: 0,
-      quadratY: 0,
-      quadratZ: 0,
       dimensionX: 0,
       dimensionY: 0,
       area: 0,
-      quadratShape: ''
+      quadratShape: '',
+      personnel: [],
     },
   ]
-  const initialPlots: GridRowsProp = [
-    {
-      id: 0,
-      plotID: 0,
-      plotName: '',
-      locationName: '',
-      countryName: '',
-      area: 0.0,
-      plotX: 0.0,
-      plotY: 0.0,
-      plotZ: 0.0,
-      plotShape: '',
-      plotDescription: ''
-    }
-  ]
   const [rows, setRows] = React.useState(initialRows);
-  const [plotRows, setPlotRows] = React.useState(initialPlots);
-  let quadratsLoad = useQuadratsLoadContext();
-  let plotsLoad = usePlotsLoadContext();
-  let currentPlot = usePlotContext();
-  useEffect(() => {
-    if (quadratsLoad) {
-      setRows(quadratsLoad);
-    }
-    if (plotsLoad) {
-      setPlotRows(plotsLoad);
-    }
-  }, [quadratsLoad, setRows, plotsLoad]);
+  const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const refreshData = async () => {
-    setRefresh(true);
-    const response = await fetch(`/api/fixeddata/quadrats`, {
-      method: 'GET'
-    });
-    setRows(await response.json());
-    setRefresh(false);
-  }
-  const handleCloseSnackbar = () => setSnackbar(null);
-  const handleProcessRowUpdateError = React.useCallback((error: Error) => {
-    setSnackbar({children: String(error), severity: 'error'});
+  const [paginationModel, setPaginationModel] = useState({
+    page: 0,
+    pageSize: 10,
+  });
+  const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
+  const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [personnel, setPersonnel] = useState<PersonnelRDS[]>([]);
+  let currentSite = useSiteContext();
+  let currentPlot = usePlotContext();
+
+  const addNewRowToGrid = () => {
+    const id = randomId();
+    const nextQuadratID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.quadratID, max), 0)
+      : 0) + 1;
+    const newRow = {
+      id: id,
+      quadratID: nextQuadratID,
+      plotID: currentPlot ? currentPlot.id : 0,
+      quadratName: '',
+      dimensionX: 0,
+      dimensionY: 0,
+      area: 0,
+      quadratShape: '',
+      personnel: [],
+      isNew: true,
+    };
+    // Add the new row to the state
+    setRows(oldRows => [...oldRows, newRow]);
+    // Set editing mode for the new row
+    setRowModesModel(oldModel => ({
+      ...oldModel,
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
+    }));
+  };
+
+  const updatePersonnelInRows = useCallback((id: GridRowId, newPersonnel: PersonnelRDS[]) => {
+    setRows(rows => rows.map(row =>
+      row.id === id
+        ? {...row, personnel: newPersonnel.map(person => ({...person}))}
+        : row
+    ));
   }, []);
-  
-  const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
-    if (params.reason === GridRowEditStopReasons.rowFocusOut) {
-      event.defaultMuiPrevented = true;
-    }
-  };
-  
-  const handleEditClick = (id: GridRowId) => () => {
-    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
-  };
-  
-  const handleSaveClick = (id: GridRowId) => () => {
-    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
-  };
-  
-  const handleDeleteClick = (id: GridRowId) => async () => {
-    const response = await fetch(`/api/fixeddata/quadrats?quadratID=${rows.find((row) => row.id == id)!.quadratID}`, {method: 'DELETE'});
-    if (!response.ok) setSnackbar({children: "Error: Deletion failed", severity: 'error'});
-    else {
-      setSnackbar({children: "Row successfully deleted", severity: 'success'});
-      setRows(rows.filter((row) => row.id !== id));
-      await refreshData();
-    }
-  };
-  
-  const handleCancelClick = (id: GridRowId) => () => {
-    setRowModesModel({
-      ...rowModesModel,
-      [id]: {mode: GridRowModes.View, ignoreModifications: true},
-    });
-    
-    const editedRow = rows.find((row) => row.id === id);
-    if (editedRow!.isNew) {
-      setRows(rows.filter((row) => row.id !== id));
-      setSnackbar({children: "Changes cancelled", severity: 'success'});
-    }
-  };
-  /**
-   *   quadratID: number;
-   *   plotID: number | null;
-   *   quadratName: string | null;
-   *   quadratX: number | null;
-   *   quadratY: number | null;
-   *   quadratZ: number | null;
-   *   dimensionX: number | null;
-   *   dimensionY: number | null;
-   *   area: number | null;
-   *   quadratShape: string | null;
-   */
-  const processRowUpdate = React.useCallback(
-    (newRow: GridRowModel, oldRow: GridRowModel) =>
-      new Promise<GridRowModel>(async (resolve, reject) => {
-        if (newRow.quadratID == '') {
-          reject(new Error("Primary key QuadratID cannot be empty!"));
-        } else if (oldRow.code == '') {
-          // inserting a row
-          const response = await fetch(`/api/fixeddata/quadrats?quadratID=${newRow.quadratID}&plotID=${newRow.plotID}
-          &quadratName=${newRow.quadratName}&quadratX=${newRow.quadratX}&quadratY=${newRow.quadratY}&quadratZ=${newRow.quadratZ}
-          &dimensionX=${newRow.dimensionX}&dimensionY=${newRow.dimensionY}&area=${newRow.area}&quadratShape=${newRow.quadratShape}`, {
-            method: 'POST'
-          });
-          const responseJSON = await response.json();
-          if (!response.ok && responseJSON.message == ErrorMessages.ICF) reject(new Error(ErrorMessages.ICF));
-          setSnackbar({children: `New row added!`, severity: 'success'});
-          resolve(newRow);
-        } else {
-          const mutation = computeMutation(newRow, oldRow);
-          if (mutation) {
-            const response = await fetch(`/api/fixeddata/quadrats?oldQuadratID=${oldRow.quadratID}&quadratID=${newRow.quadratID}
-            &plotID=${newRow.plotID}&quadratName=${newRow.quadratName}&quadratX=${newRow.quadratX}&quadratY=${newRow.quadratY}
-            &quadratZ=${newRow.quadratZ}&dimensionX=${newRow.dimensionX}&dimensionY=${newRow.dimensionY}
-            &area=${newRow.area}&quadratShape=${newRow.quadratShape}`, {
-              method: 'PATCH'
-            })
-            const responseJSON = await response.json();
-            if (!response.ok && responseJSON.message == ErrorMessages.UKAE) reject(new Error(ErrorMessages.UKAE));
-            setSnackbar({children: `Row edits saved!`, severity: 'success'});
-            resolve(newRow);
-          }
+
+  const handlePersonnelChange = useCallback(
+    async (rowId: GridRowId, selectedPersonnel: PersonnelRDS[]) => {
+      console.log(rows);
+      const row = rows.find((row) => row.id === rowId);
+      const quadratId = row?.quadratID;
+      const personnelIds = selectedPersonnel.map(person => person.personnelID);
+      console.log('new personnel ids: ', personnelIds);
+
+      // Check if quadratID is valid and not equal to the initial row's quadratID
+      if (quadratId === undefined || quadratId === initialRows[0].quadratID) {
+        console.error("Invalid quadratID, personnel update skipped.");
+        setSnackbar({children: "Personnel update skipped due to invalid quadratID.", severity: 'error'});
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/formsearch/personnelblock?quadratID=${quadratId}&schema=${currentSite?.schemaName ?? ''}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(personnelIds)
+        });
+
+        if (!response.ok) {
+          setSnackbar({children: `Personnel updates failed!`, severity: 'error'});
+          throw new Error('Failed to update personnel');
         }
-        await refreshData();
-      }),
-    [],
+
+        // Handle successful response
+        const responseData = await response.json();
+        updatePersonnelInRows(rowId, selectedPersonnel);
+        setRefresh(true);
+        setSnackbar({children: `${responseData.message}`, severity: 'success'});
+      } catch (error) {
+        console.error("Error updating personnel:", error);
+      }
+    },
+    [rows, currentSite?.schemaName, setSnackbar, setRefresh, updatePersonnelInRows]
   );
-  const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
-    setRowModesModel(newRowModesModel);
-  };
-  
-  // const plotIDs = plotRows.map((plotRow) => plotRow.plotID);
-  const columns: GridColDef[] = [
-    {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
+
+
+  const quadratsGridColumns: GridColDef[] = [...BaseQuadratsGridColumns,
     {
-      field: 'plotID',
-      headerName: 'PlotID',
-      headerClassName: 'header',
+      field: 'personnel',
+      headerName: 'Personnel',
       flex: 1,
-      align: 'left',
-      editable: true
-    },
-    {field: 'quadratName', headerName: 'QuadratName', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'quadratX', headerName: 'QuadratX', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'quadratY', headerName: 'QuadratY', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'quadratZ', headerName: 'QuadratZ', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'dimensionX', headerName: 'DimensionX', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'dimensionY', headerName: 'DimensionY', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left',},
-    {field: 'quadratShape', headerName: 'QuadratShape', headerClassName: 'header', flex: 1, align: 'left',},
-    {
-      field: 'actions',
-      type: 'actions',
-      headerName: 'Actions',
-      flex: 1,
-      cellClassName: 'actions',
-      getActions: ({id}) => {
-        const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
-        
-        if (isInEditMode) {
-          return [
-            <GridActionsCellItem
-              icon={<SaveIcon/>}
-              label="Save"
-              sx={{
-                color: 'primary.main',
-              }}
-              onClick={handleSaveClick(id)}
-            />,
-            <GridActionsCellItem
-              icon={<CancelIcon/>}
-              label="Cancel"
-              className="textPrimary"
-              onClick={handleCancelClick(id)}
-              color="inherit"
-            />,
-          ];
-        }
-        
-        return [
-          <GridActionsCellItem
-            icon={<EditIcon/>}
-            label="Edit"
-            className="textPrimary"
-            onClick={handleEditClick(id)}
-            color="inherit"
-          />,
-          <GridActionsCellItem
-            icon={<DeleteIcon/>}
-            label="Delete"
-            onClick={handleDeleteClick(id)}
-            color="inherit"
-          />,
-        ];
-      },
-    },
-  ];
-  
-  if (!currentPlot) {
-    return <>You must select a plot to continue!</>;
-  } else {
-    return (
-      <Box
-        sx={{
-          width: '100%',
-          '& .actions': {
-            color: 'text.secondary',
-          },
-          '& .textPrimary': {
-            color: 'text.primary',
-          },
-        }}
-      >
-        <Box sx={{width: '100%'}}>
-          <StyledDataGrid sx={{width: '100%'}}
-                          rows={rows}
-                          columns={columns}
-                          editMode="row"
-                          rowModesModel={rowModesModel}
-                          onRowModesModelChange={handleRowModesModelChange}
-                          onRowEditStop={handleRowEditStop}
-                          processRowUpdate={processRowUpdate}
-                          onProcessRowUpdateError={handleProcessRowUpdateError}
-                          loading={refresh}
-                          slots={{
-                            toolbar: EditToolbar,
-                          }}
-                          slotProps={{
-                            toolbar: {setRows, setRowModesModel, setRefresh},
-                          }}
-                          initialState={{
-                            filter: {
-                              filterModel: {
-                                items: [{ field: 'plotID', operator: 'equals', value: `${currentPlot!.id.toString()}` }],
-                              },
-                            },
-                          }}
-          />
-        </Box>
-        {!!snackbar && (
-          <Snackbar
-            open
-            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
-            onClose={handleCloseSnackbar}
-            autoHideDuration={6000}
-          >
-            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
-          </Snackbar>
-        )}
-      </Box>
-    );
-  }
+      renderCell: (params) => (
+        <PersonnelAutocompleteMultiSelect
+          initialValue={params.row.personnel}
+          onChange={(newPersonnel) => handlePersonnelChange(params.id, newPersonnel)}
+          locked={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
+        />
+      ),
+    }
+  ]
+
+  return (
+    <DataGridCommons
+      gridType="quadrats"
+      gridColumns={quadratsGridColumns}
+      rows={rows}
+      setRows={setRows}
+      rowCount={rowCount}
+      setRowCount={setRowCount}
+      rowModesModel={rowModesModel}
+      setRowModesModel={setRowModesModel}
+      snackbar={snackbar}
+      setSnackbar={setSnackbar}
+      refresh={refresh}
+      setRefresh={setRefresh}
+      paginationModel={paginationModel}
+      setPaginationModel={setPaginationModel}
+      isNewRowAdded={isNewRowAdded}
+      setIsNewRowAdded={setIsNewRowAdded}
+      shouldAddRowAfterFetch={shouldAddRowAfterFetch}
+      setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
+      currentPlot={currentPlot}
+      addNewRowToGrid={addNewRowToGrid}
+    />
+  );
 }

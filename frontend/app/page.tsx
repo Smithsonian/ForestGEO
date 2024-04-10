@@ -1,3 +1,5 @@
-export default function Page() {
-  return <>Accidentally reached root page, yikes :/</>;
+"use client";
+
+export default function HomePage() {
+  return <></>;
 }

@@ -1,0 +1,11 @@
+{
+  "extends": "next",
+  "settings": {
+    "next": {
+      "rootDir": "."
+    }
+  },
+  "rules": {
+    "react-hooks/exhaustive-deps": "off"
+  }
+}

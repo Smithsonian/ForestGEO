@@ -19,7 +19,7 @@ export type NextAppDirEmotionCacheProviderProps = {
 // Adapted from https://github.com/garronej/tss-react/blob/main/src/next/appDir.tsx
 export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionCacheProviderProps) {
   const {options, CacheProvider = DefaultCacheProvider, children} = props;
-  
+
   const [registry] = React.useState(() => {
     const cache = createCache(options);
     cache.compat = true;
@@ -42,7 +42,7 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
     };
     return {cache, flush};
   });
-  
+
   useServerInsertedHTML(() => {
     const inserted = registry.flush();
     if (inserted.length === 0) {
@@ -50,15 +50,15 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
     }
     let styles = '';
     let dataEmotionAttribute = registry.cache.key;
-    
+
     const globals: {
       name: string;
       style: string;
     }[] = [];
-    
+
     inserted.forEach(({name, isGlobal}) => {
       const style = registry.cache.inserted[name];
-      
+
       if (typeof style !== 'boolean') {
         if (isGlobal) {
           globals.push({name, style});
@@ -68,7 +68,7 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
         }
       }
     });
-    
+
     return (
       <React.Fragment>
         {globals.map(({name, style}) => (
@@ -89,6 +89,6 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
       </React.Fragment>
     );
   });
-  
+
   return <CacheProvider value={registry.cache}>{children}</CacheProvider>;
 }

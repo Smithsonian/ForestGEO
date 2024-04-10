@@ -1,0 +1,45 @@
+-- SELECT
+--     ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS CoreMeasurementID,
+--     MetricType AS MeasurementTypeID,
+--     MetricValue AS Measurement,
+--     ctfsweb.dbh.ExactDate as MeasurementDate
+-- FROM ctfsweb.dbh
+-- CROSS APPLY (
+--     VALUES
+--         ('1', DBH),
+--         ('2', HOM)
+-- ) AS CrossAppliedTable(MetricType, MetricValue);
+
+-- DECLARE @SchemaName NVARCHAR(255) = 'forestgeo';
+--
+-- DECLARE @TableName NVARCHAR(255);
+-- DECLARE @RowCount INT;
+-- DECLARE @Sql NVARCHAR(MAX);
+--
+-- DECLARE EmptyTablesCursor CURSOR FOR
+-- SELECT t.name
+-- FROM sys.tables t
+-- INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+-- WHERE s.name = @SchemaName;
+--
+-- OPEN EmptyTablesCursor;
+--
+-- FETCH NEXT FROM EmptyTablesCursor INTO @TableName;
+--
+-- WHILE @@FETCH_STATUS = 0
+-- BEGIN
+--     SET @Sql = N'SELECT @RowCount = COUNT(*) FROM ' + QUOTENAME(@SchemaName) + '.' + QUOTENAME(@TableName);
+--     EXEC sp_executesql @Sql, N'@RowCount INT OUTPUT', @RowCount OUTPUT;
+--
+--     IF @RowCount = 0
+--     BEGIN
+--         PRINT 'Table ' + QUOTENAME(@SchemaName) + '.' + QUOTENAME(@TableName) + ' is empty.';
+--         -- You can replace the PRINT statement with any action you want to perform for empty tables.
+--     END
+--
+--     FETCH NEXT FROM EmptyTablesCursor INTO @TableName;
+-- END
+--
+-- CLOSE EmptyTablesCursor;
+-- DEALLOCATE EmptyTablesCursor;
+
