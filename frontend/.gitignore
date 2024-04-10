@@ -13,13 +13,13 @@
 # next.js
 /.next/
 /out/
-/.fleet/*
-/.fleet
-/.vscode
-/.vscode/*
 
 # production
 /build
+/sampledata
+/sqlscripting
+/scripts
+DigiCertGlobalRootCA.crt.pem
 
 # misc
 .DS_Store
