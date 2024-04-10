@@ -1,6 +1,6 @@
 // DataGridCommons.tsx
 "use client";
-import React, {Dispatch, SetStateAction, useEffect, useMemo, useState} from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -36,8 +36,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
-import {Stack, Typography} from "@mui/joy";
-import {CensusRDS, StyledDataGrid} from "@/config/sqlmacros";
+import { Stack, Typography } from "@mui/joy";
+import { CensusRDS, StyledDataGrid } from "@/config/sqlmacros";
 import {
   computeMutation,
   createDeleteQuery,
@@ -46,10 +46,11 @@ import {
   getGridID,
   validateRowStructure,
 } from "@/config/datagridhelpers";
-import {CMError, Plot} from "@/config/macros";
+import { CMError, Plot } from "@/config/macros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
-import {useSession} from "next-auth/react";
-import {useSiteContext} from "@/app/contexts/userselectionprovider";
+import { useSession } from "next-auth/react";
+import { useSiteContext } from "@/app/contexts/userselectionprovider";
+import { saveAs } from 'file-saver';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -80,16 +81,16 @@ const errorMapping: { [key: string]: string[] } = {
 };
 
 export function EditToolbar(props: EditToolbarProps) {
-  const {handleAddNewRow, handleRefresh, locked = false} = props;
+  const { handleAddNewRow, handleRefresh, locked = false } = props;
 
   return (
     <GridToolbarContainer>
       {!locked && (
-        <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
+        <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
           Add Row
         </Button>
       )}
-      <Button color="primary" startIcon={<RefreshIcon/>} onClick={handleRefresh}>
+      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
         Refresh
       </Button>
     </GridToolbarContainer>
@@ -141,7 +142,7 @@ interface ConfirmationDialogProps {
  * validation errors and more. Renders a DataGrid component with customized
  * columns and cell renderers.
  */
-export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
+export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const {
     addNewRowToGrid,
     gridColumns,
@@ -175,6 +176,9 @@ export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true)
   const [showValidRows, setShowValidRows] = useState<boolean>(true)
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false)
+  const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
+
+
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
@@ -188,7 +192,66 @@ export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
     UpdateContextsFromIDB({
       email: email,
       schema: currentSite?.schemaName ?? ''
-    })
+    });
+
+  const extractErrorRows = () => {
+    if (gridType !== 'measurementsSummary') return;
+    const errorRows = rows.filter(row => rowHasError(row.id));
+    setErrorRowsForExport(errorRows);
+  };
+
+  const saveErrorRowsAsCSV = () => {
+    if (gridType !== 'measurementsSummary') return;
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += gridColumns.map(col => col.headerName).join(",") + "\r\n"; // Column headers
+    errorRowsForExport.forEach(row => {
+      const rowValues = gridColumns.map(col => row[col.field] ?? '').join(",");
+      csvContent += rowValues + "\r\n";
+    });
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    saveAs(blob, `validation_errors_${currentPlot?.key}.csv`);
+  };
+
+  const printErrorRows = () => {
+    if (gridType !== 'measurementsSummary') return;
+    let printContent = "<html><head><style>";
+    printContent += "table {width: 100%; border-collapse: collapse;}";
+    printContent += "th, td {border: 1px solid black; padding: 8px; text-align: left;}";
+    printContent += "</style></head><body>";
+    printContent += "<table><thead><tr>";
+
+    gridColumns.forEach(col => {
+      printContent += `<th>${col.headerName}</th>`;
+    });
+    printContent += "</tr></thead><tbody>";
+
+    errorRowsForExport.forEach(row => {
+      printContent += "<tr>";
+      gridColumns.forEach(col => {
+        printContent += `<td>${row[col.field] ?? ''}</td>`;
+      });
+      printContent += "</tr>";
+    });
+
+    printContent += "</tbody></table></body></html>";
+
+    const printWindow = window.open('', '', 'height=600,width=800');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  };
+
+  // UI Button to trigger export
+  const ExportErrorsButton = () => (
+    gridType === 'measurementsSummary' && (
+      <Button color="secondary" onClick={extractErrorRows}>
+        Export Errors
+      </Button>
+    )
+  );
 
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
@@ -541,7 +604,7 @@ export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
     }
   }
 
-  function getGridActionsColumn (): GridColDef {
+  function getGridActionsColumn(): GridColDef {
     return {
       field: 'actions',
       type: 'actions',
@@ -586,13 +649,12 @@ export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
       }
     }
   }
-  
+
   const fetchValidationErrors = async () => {
     if (gridType !== 'measurementsSummary' || !currentSite) return
     try {
       const response = await fetch(
-        `/api/validations/validationerrordisplay?schema=${
-          currentSite?.schemaName ?? ''
+        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''
         }`
       )
       const errors: CMError[] = await response.json()
@@ -791,6 +853,15 @@ export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
                 />
                 Show rows without errors: ({rows.length - errorRowCount})
               </Box>
+              <Box>
+                <ExportErrorsButton />
+                <Button color="primary" onClick={saveErrorRowsAsCSV}>
+                  Save Errors as CSV
+                </Button>
+                <Button color="primary" onClick={printErrorRows}>
+                  Print Errors
+                </Button>
+              </Box>
             </Stack>
           )}
           <Typography level={'title-lg'}>
@@ -853,7 +924,7 @@ export default function DataGridCommons (props: Readonly<DataGridCommonProps>) {
 
 // ConfirmationDialog component with TypeScript types
 const ConfirmationDialog: React.FC<ConfirmationDialogProps> = (props) => {
-  const {isOpen, onConfirm, onCancel, message} = props;
+  const { isOpen, onConfirm, onCancel, message } = props;
   return (
     <Dialog open={isOpen} onClose={onCancel}>
       <DialogTitle>Confirm Action</DialogTitle>
