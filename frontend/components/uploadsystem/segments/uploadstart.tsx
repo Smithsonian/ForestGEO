@@ -114,10 +114,10 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 <Option value={"mm"}>Millimeters (mm)</Option>
 
                 <ListSubheader>Imperial Units</ListSubheader>
-                <Option value={"inches"}>Inches</Option>
-                <Option value={"feet"}>Feet</Option>
-                <Option value={"yards"}>Yards</Option>
-                <Option value={"miles"}>Miles</Option>
+                <Option value={"in"}>Inches (in)</Option>
+                <Option value={"ft"}>Feet (ft)</Option>
+                <Option value={"yd"}>Yards (yd)</Option>
+                <Option value={"mi"}>Miles (mi)</Option>
               </List>
             </Select>
           </>
