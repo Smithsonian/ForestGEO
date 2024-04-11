@@ -1,12 +1,12 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Live Site Deployment (testing)
+name: ForestGEO Live Site Deployment Pipeline
 
 on:
   push:
     branches:
-      - new-file-upload-system
+      - main
   workflow_dispatch:
 
 jobs:
@@ -41,6 +41,10 @@ jobs:
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
           echo NODE_ENV=development >> frontend/.env
           echo PORT=3000 >> frontend/.env
+
+      - name: Write Certificate to File
+        run: |
+          echo "${{ secrets.CERTIFICATE }}" > frontend/DigiCertGlobalRootCA.crt.pem
 
       - name: Cache node modules
         uses: actions/cache@v2
