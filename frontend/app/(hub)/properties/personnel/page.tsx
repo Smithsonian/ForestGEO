@@ -88,7 +88,7 @@ export default function PersonnelPage() {
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="personnel" setRefresh={setRefresh} />
+          <UploadParentModal formType="personnel" setRefresh={setRefresh}/>
         </Box>
       </Box>
 

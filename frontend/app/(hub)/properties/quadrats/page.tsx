@@ -171,7 +171,7 @@ export default function QuadratsPage() {
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="quadrats" setRefresh={setRefresh} />
+          <UploadParentModal formType="quadrats" setRefresh={setRefresh}/>
         </Box>
       </Box>
 

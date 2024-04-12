@@ -1,8 +1,8 @@
 "use client";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { subtitle, title } from "@/config/primitives";
-import { useSession } from "next-auth/react";
-import { usePathname } from "next/navigation";
+import React, {useCallback, useEffect, useRef, useState} from "react";
+import {subtitle, title} from "@/config/primitives";
+import {useSession} from "next-auth/react";
+import {usePathname} from "next/navigation";
 import {
   useCensusLoadContext,
   useCensusLoadDispatch,
@@ -16,14 +16,14 @@ import {
   useQuadratListDispatch,
   useSiteListDispatch
 } from "@/app/contexts/listselectionprovider";
-import { getData } from "@/config/db";
-import { siteConfig } from "@/config/macros";
+import {getData} from "@/config/db";
+import {siteConfig} from "@/config/macros";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
-import { Box, CircularProgress } from "@mui/joy";
+import {Box, CircularProgress} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
-import { useLoading } from "@/app/contexts/loadingprovider";
-import { clearAllHashes, loadServerDataIntoIDB } from "@/config/updatecontextsfromidb";
+import {useLoading} from "@/app/contexts/loadingprovider";
+import {clearAllHashes, loadServerDataIntoIDB} from "@/config/updatecontextsfromidb";
 import {
   useCensusContext,
   useCensusDispatch, usePlotContext,
@@ -36,30 +36,30 @@ import Typography from "@mui/joy/Typography";
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
-      return <h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>;
+      return <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>;
     case '/measurementshub/summary':
-      return <h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3>;
+      return <h3 className={title({color: "green"})} key={endpoint}>Measurements Summary</h3>;
     case '/measurementshub/validationhistory':
-      return <h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3>;
+      return <h3 className={title({color: "green"})} key={endpoint}>Validation History</h3>;
     case '/properties/attributes':
-      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Attributes</h3>;
+      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Attributes</h3>;
     case '/properties/census':
-      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Census</h3>;
+      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Census</h3>;
     case '/properties/personnel':
-      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Personnel</h3>;
+      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Personnel</h3>;
     case '/properties/quadrats':
-      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Quadrats</h3>;
+      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Quadrats</h3>;
     case '/properties/species':
-      return <h3 className={title({ color: "sky" })} key={endpoint}>Properties Hub - Species</h3>;
+      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Species</h3>;
     case '/censusform':
-      return <h3 className={title({ color: "sky" })} key={endpoint}>Census Form</h3>;
+      return <h3 className={title({color: "sky"})} key={endpoint}>Census Form</h3>;
     default:
       return <></>;
   }
 }
 
-export default function HubLayout({ children, }: Readonly<{ children: React.ReactNode }>) {
-  const { isLoading, setLoading } = useLoading();
+export default function HubLayout({children,}: Readonly<{ children: React.ReactNode }>) {
+  const {isLoading, setLoading} = useLoading();
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
@@ -77,7 +77,7 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
   const delayValue = 500;
   // site/session definition
   const currentSite = useSiteContext();
-  const { data: session } = useSession();
+  const {data: session} = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
@@ -124,7 +124,7 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
       if (JSON.stringify(censusListContext) !== JSON.stringify(newCensusList)) {
         console.log('Updating Census List...'); // Debugging Log
         if (censusListDispatch) {
-          await censusListDispatch({ censusList: newCensusList });
+          await censusListDispatch({censusList: newCensusList});
         }
       }
     };
@@ -147,8 +147,8 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
           const censusList = await getData('censusList');
 
           if (!censusData || !censusList) return false;
-          censusLoadDispatch && await censusLoadDispatch({ censusLoad: censusData });
-          censusListDispatch && await censusListDispatch({ censusList: censusList });
+          censusLoadDispatch && await censusLoadDispatch({censusLoad: censusData});
+          censusListDispatch && await censusListDispatch({censusList: censusList});
           return true;
         };
 
@@ -161,16 +161,16 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
           const quadratsList = await getData('quadratList');
 
           if (!quadratsData || !quadratsList) return false;
-          quadratsLoadDispatch && await quadratsLoadDispatch({ quadratsLoad: quadratsData });
-          quadratListDispatch && await quadratListDispatch({ quadratList: quadratsList });
+          quadratsLoadDispatch && await quadratsLoadDispatch({quadratsLoad: quadratsData});
+          quadratListDispatch && await quadratListDispatch({quadratList: quadratsList});
 
           // load plots
           await loadServerDataIntoIDB('plots', currentSite.schemaName);
           const plotsData = await getData('plotsLoad');
           const plotList = await getData('plotList');
           if (!plotsData || !plotList) return false;
-          plotsLoadDispatch && await plotsLoadDispatch({ plotsLoad: plotsData });
-          plotsListDispatch && await plotsListDispatch({ plotList: plotList });
+          plotsLoadDispatch && await plotsLoadDispatch({plotsLoad: plotsData});
+          plotsListDispatch && await plotsListDispatch({plotList: plotList});
           await delay(delayValue);
           return true;
         };
@@ -198,7 +198,7 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
       if (sites.length === 0) {
         throw new Error("Session sites undefined");
       } else {
-        siteListDispatch ? await siteListDispatch({ siteList: sites }) : undefined;
+        siteListDispatch ? await siteListDispatch({siteList: sites}) : undefined;
         await delay(delayValue);
       }
     }
@@ -225,9 +225,9 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
     if (siteListLoaded && currentSite && !coreDataLoaded) {
       // clear currently selected plot & census
       setLoading(true, "Clearing selections...");
-      if (quadratDispatch) quadratDispatch({ quadrat: null }).catch(console.error);
-      if (censusDispatch) censusDispatch({ census: null }).catch(console.error);
-      if (plotDispatch) plotDispatch({ plot: null }).catch(console.error);
+      if (quadratDispatch) quadratDispatch({quadrat: null}).catch(console.error);
+      if (censusDispatch) censusDispatch({census: null}).catch(console.error);
+      if (plotDispatch) plotDispatch({plot: null}).catch(console.error);
       setLoading(false);
 
       // Site list loaded and current site selected, fetch core data
@@ -237,8 +237,8 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
 
   return (
     <>
-      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} />
-      <Header />
+      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded}/>
+      <Header/>
       <Box
         component="main"
         className="MainContent"
@@ -263,7 +263,7 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
         }}>
           {renderSwitch(pathname)}
         </Box>
-        <Divider orientation={"horizontal"} sx={{ my: '5px' }} />
+        <Divider orientation={"horizontal"} sx={{my: '5px'}}/>
         <Box
           sx={{
             display: 'flex',
@@ -279,21 +279,21 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
             </>
           )}
         </Box>
-        <Divider orientation={"horizontal"} />
+        <Divider orientation={"horizontal"}/>
         <Box mt={3}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            alignSelf: 'center',
-            flexDirection: 'row',
-            marginBottom: '15px'
-          }}>
+             sx={{
+               display: 'flex',
+               alignItems: 'center',
+               alignSelf: 'center',
+               flexDirection: 'row',
+               marginBottom: '15px'
+             }}>
           <Box>
-            <h1 className={title({ color: "violet" })}>{siteConfig.name}&nbsp;</h1>
+            <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
           </Box>
-          <Divider orientation={"vertical"} sx={{ marginRight: 2 }} />
+          <Divider orientation={"vertical"} sx={{marginRight: 2}}/>
           <Box>
-            <p className={subtitle({ color: "cyan" })}>{siteConfig.description}</p>
+            <p className={subtitle({color: "cyan"})}>{siteConfig.description}</p>
           </Box>
         </Box>
       </Box>

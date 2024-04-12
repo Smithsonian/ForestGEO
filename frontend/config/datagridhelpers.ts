@@ -2,7 +2,7 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { GridRowModel, GridToolbarProps } from '@mui/x-data-grid'
+import {GridRowModel, GridToolbarProps} from '@mui/x-data-grid'
 
 const coreMeasurementsFields = [
   'censusID',
@@ -91,81 +91,81 @@ interface Templates {
 
 const newRowTemplates: Templates = {
   attributes: {
-    id: { type: 'string' },
-    code: { type: 'string', initialValue: '' },
-    description: { type: 'string', initialValue: '' },
-    status: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    code: {type: 'string', initialValue: ''},
+    description: {type: 'string', initialValue: ''},
+    status: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   },
   census: {
-    id: { type: 'string' },
-    censusID: { type: 'number', initialValue: null }, // auto-incremented
-    plotID: { type: 'number', initialValue: 0 },
-    plotCensusNumber: { type: 'number', initialValue: 0 },
-    startDate: { type: 'date' }, // Special handling for dates
-    endDate: { type: 'date' }, // Special handling for dates
-    description: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    censusID: {type: 'number', initialValue: null}, // auto-incremented
+    plotID: {type: 'number', initialValue: 0},
+    plotCensusNumber: {type: 'number', initialValue: 0},
+    startDate: {type: 'date'}, // Special handling for dates
+    endDate: {type: 'date'}, // Special handling for dates
+    description: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   },
   personnel: {
-    id: { type: 'string' },
-    personnelID: { type: 'number', initialValue: null }, // null indicates auto-incremented
-    firstName: { type: 'string', initialValue: '' },
-    lastName: { type: 'string', initialValue: '' },
-    role: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    personnelID: {type: 'number', initialValue: null}, // null indicates auto-incremented
+    firstName: {type: 'string', initialValue: ''},
+    lastName: {type: 'string', initialValue: ''},
+    role: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   },
   quadrats: {
-    id: { type: 'string' },
-    quadratID: { type: 'number', initialValue: null }, // auto-incremented
-    plotID: { type: 'number', initialValue: 0 },
-    quadratName: { type: 'string', initialValue: '' },
-    dimensionX: { type: 'number', initialValue: 0 },
-    dimensionY: { type: 'number', initialValue: 0 },
-    area: { type: 'number', initialValue: 0 },
-    quadratShape: { type: 'string', initialValue: '' },
-    personnel: { type: 'array', initialValue: [] },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    quadratID: {type: 'number', initialValue: null}, // auto-incremented
+    plotID: {type: 'number', initialValue: 0},
+    quadratName: {type: 'string', initialValue: ''},
+    dimensionX: {type: 'number', initialValue: 0},
+    dimensionY: {type: 'number', initialValue: 0},
+    area: {type: 'number', initialValue: 0},
+    quadratShape: {type: 'string', initialValue: ''},
+    personnel: {type: 'array', initialValue: []},
+    isNew: {type: 'boolean', initialValue: true}
   },
   species: {
-    id: { type: 'string' },
-    speciesID: { type: 'number', initialValue: null },
-    genusID: { type: 'number', initialValue: 0 },
-    currentTaxonFlag: { type: 'boolean', initialValue: false },
-    obsoleteTaxonFlag: { type: 'boolean', initialValue: false },
-    speciesName: { type: 'string', initialValue: '' },
-    speciesCode: { type: 'string', initialValue: '' },
-    idLevel: { type: 'string', initialValue: '' },
-    authority: { type: 'string', initialValue: '' },
-    fieldFamily: { type: 'string', initialValue: '' },
-    description: { type: 'string', initialValue: '' },
-    referenceID: { type: 'number', initialValue: 0 },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    speciesID: {type: 'number', initialValue: null},
+    genusID: {type: 'number', initialValue: 0},
+    currentTaxonFlag: {type: 'boolean', initialValue: false},
+    obsoleteTaxonFlag: {type: 'boolean', initialValue: false},
+    speciesName: {type: 'string', initialValue: ''},
+    speciesCode: {type: 'string', initialValue: ''},
+    idLevel: {type: 'string', initialValue: ''},
+    authority: {type: 'string', initialValue: ''},
+    fieldFamily: {type: 'string', initialValue: ''},
+    description: {type: 'string', initialValue: ''},
+    referenceID: {type: 'number', initialValue: 0},
+    isNew: {type: 'boolean', initialValue: true}
   },
   subSpecies: {
-    id: { type: 'string' },
-    subSpeciesID: { type: 'number', initialValue: null },
-    subSpeciesName: { type: 'string', initialValue: '' },
-    subSpeciesCode: { type: 'string', initialValue: '' },
-    currentTaxonFlag: { type: 'boolean', initialValue: false },
-    obsoleteTaxonFlag: { type: 'boolean', initialValue: false },
-    authority: { type: 'string', initialValue: '' },
-    infraSpecificLevel: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    subSpeciesID: {type: 'number', initialValue: null},
+    subSpeciesName: {type: 'string', initialValue: ''},
+    subSpeciesCode: {type: 'string', initialValue: ''},
+    currentTaxonFlag: {type: 'boolean', initialValue: false},
+    obsoleteTaxonFlag: {type: 'boolean', initialValue: false},
+    authority: {type: 'string', initialValue: ''},
+    infraSpecificLevel: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   },
   validationHistory: {
-    id: { type: 'string' },
-    validationRunID: { type: 'number', initialValue: 0 },
-    procedureName: { type: 'string', initialValue: '' },
-    runDatetime: { type: 'date'},
-    targetRowID: { type: 'number', initialValue: null },
-    validationOutcome: { type: 'string', initialValue: '' },
-    errorMessage: { type: 'string', initialValue: '' },
-    validationCriteria: { type: 'string', initialValue: '' },
-    measuredValue: { type: 'string', initialValue: '' },
-    expectedValueRange: { type: 'string', initialValue: '' },
-    additionalDetails: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
+    id: {type: 'string'},
+    validationRunID: {type: 'number', initialValue: 0},
+    procedureName: {type: 'string', initialValue: ''},
+    runDatetime: {type: 'date'},
+    targetRowID: {type: 'number', initialValue: null},
+    validationOutcome: {type: 'string', initialValue: ''},
+    errorMessage: {type: 'string', initialValue: ''},
+    validationCriteria: {type: 'string', initialValue: ''},
+    measuredValue: {type: 'string', initialValue: ''},
+    expectedValueRange: {type: 'string', initialValue: ''},
+    additionalDetails: {type: 'string', initialValue: ''},
+    isNew: {type: 'boolean', initialValue: true}
   }
 }
 

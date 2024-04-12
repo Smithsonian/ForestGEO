@@ -1,10 +1,10 @@
 /**
  * Interface and type definitions for the ForestGEO upload system.
- * 
+ *
  * This file defines types used throughout the upload system components to define props, state, contexts etc. It also defines some utility functions used in the upload flow.
  */
-import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
-import { FileRejection, FileWithPath } from "react-dropzone";
+import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
+import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css'
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import DataObjectIcon from '@mui/icons-material/DataObject';
@@ -13,10 +13,10 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
-import React, { Dispatch, SetStateAction } from "react";
-import { clearDataByKey, setData } from "@/config/db";
-import { CensusRDS, SitesRDS } from "@/config/sqlmacros";
-import { DetailedCMIDRow } from "@/components/uploadsystem/uploadparent";
+import React, {Dispatch, SetStateAction} from "react";
+import {clearDataByKey, setData} from "@/config/db";
+import {CensusRDS, SitesRDS} from "@/config/sqlmacros";
+import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CloudCircleIcon from '@mui/icons-material/CloudCircle';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -74,11 +74,11 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
 }));
 
 export const TableHeadersByFormType: Record<string, { label: string }[]> = {
-  "attributes": [{ label: "code" }, { label: "description" }, { label: "status" }],
-  "personnel": [{ label: "firstname" }, { label: "lastname" }, { label: "role" }],
-  "species": [{ label: "spcode" }, { label: "genus" }, { label: "species" }, { label: "idlevel" }, { label: "family" }, { label: "authority" }],
-  "quadrats": [{ label: "quadrat" }, { label: "startx" }, { label: "starty" }, { label: "dimx" }, { label: "dimy" }],
-  "measurements": [{ label: "tag" }, { label: "stemtag" }, { label: "spcode" }, { label: "quadrat" }, { label: "lx" }, { label: "ly" }, { label: "dbh" }, { label: "codes" }, { label: "hom" }, { label: "date" }],
+  "attributes": [{label: "code"}, {label: "description"}, {label: "status"}],
+  "personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
+  "species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
+  "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
+  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
   "arcgis_xlsx": arcgisHeaders
 };
 
@@ -386,11 +386,11 @@ export interface DropzoneProps {
 
 // CONSTANT MACROS
 export const fileColumns = [
-  { key: 'name', label: 'File Name' },
-  { key: 'user', label: 'Uploaded By' },
-  { key: 'formType', label: 'Form Type' },
-  { key: 'fileErrors', label: 'Errors in File' },
-  { key: 'date', label: 'Date Entered' },
+  {key: 'name', label: 'File Name'},
+  {key: 'user', label: 'Uploaded By'},
+  {key: 'formType', label: 'Form Type'},
+  {key: 'fileErrors', label: 'Errors in File'},
+  {key: 'date', label: 'Date Entered'},
   // {key: 'version', label: 'Version'},
   // {key: 'isCurrentVersion', label: 'Is Current Version?'},
 ]
@@ -529,7 +529,7 @@ export function createEnhancedDispatch<T>(
     }
 
     // Dispatch the action
-    dispatch({ type: actionType, payload });
+    dispatch({type: actionType, payload});
   };
 }
 
@@ -676,7 +676,7 @@ export async function uploadValidFileAsBuffer(containerClient: ContainerClient, 
   // Retry mechanism for the upload
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, { metadata });
+      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata});
 
       // If upload is successful, return the response
       if (uploadResponse) {

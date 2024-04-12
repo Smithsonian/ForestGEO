@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
-import { FORMSEARCH_LIMIT } from "@/config/macros";
+import {FORMSEARCH_LIMIT} from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
   const schema = request.nextUrl.searchParams.get('schema');

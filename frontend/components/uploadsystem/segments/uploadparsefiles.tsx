@@ -1,12 +1,25 @@
 "use client";
-import { Alert, Box, DialogActions, DialogContent, DialogTitle, List, ListItem, Modal, ModalDialog, Stack, Tooltip, Typography } from "@mui/joy";
-import { TableHeadersByFormType, UploadParseFilesProps } from "@/config/macros";
-import { Button, Grid } from "@mui/material";
-import { DropzoneLogic } from "@/components/uploadsystemhelpers/dropzone";
-import { FileList } from "@/components/uploadsystemhelpers/filelist";
-import { LoadingButton } from "@mui/lab";
-import React, { useState } from "react";
-import { FileWithPath } from "react-dropzone";
+import {
+  Alert,
+  Box,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  List,
+  ListItem,
+  Modal,
+  ModalDialog,
+  Stack,
+  Tooltip,
+  Typography
+} from "@mui/joy";
+import {TableHeadersByFormType, UploadParseFilesProps} from "@/config/macros";
+import {Button, Grid} from "@mui/material";
+import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
+import {FileList} from "@/components/uploadsystemhelpers/filelist";
+import {LoadingButton} from "@mui/lab";
+import React, {useState} from "react";
+import {FileWithPath} from "react-dropzone";
 import WarningIcon from "@mui/icons-material/Warning";
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
@@ -31,13 +44,13 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   };
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+    <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
       <Grid container spacing={2}>
         <Grid item xs={6}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', mb: 10, mr: 10 }}>
-            <DropzoneLogic onChange={handleFileChange} />
+          <Box sx={{display: 'flex', flexDirection: 'column', mb: 10, mr: 10}}>
+            <DropzoneLogic onChange={handleFileChange}/>
             <Modal open={Boolean(fileToReplace)}
-              onClose={() => setFileToReplace(null)}>
+                   onClose={() => setFileToReplace(null)}>
               <ModalDialog>
                 <DialogTitle>Confirm File Replace</DialogTitle>
                 <DialogContent>
@@ -63,20 +76,20 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           </Box>
         </Grid>
         <Grid item xs={6}>
-          <Stack direction={"column"} sx={{ display: 'flex', flexDirection: 'column', mb: 10 }}>
-            <Typography sx={{ mb: 2 }}>
+          <Stack direction={"column"} sx={{display: 'flex', flexDirection: 'column', mb: 10}}>
+            <Typography sx={{mb: 2}}>
               You have selected {uploadForm}. Please ensure that your file has the following headers
-              before continuing: <br />
+              before continuing: <br/>
               {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
-              <br />
+              <br/>
             </Typography>
             {uploadForm === 'measurements' && (
               <>
                 <Alert
-                  startDecorator={<WarningIcon fontSize="large" />}
+                  startDecorator={<WarningIcon fontSize="large"/>}
                   variant="soft"
                   color="danger"
-                  sx={{ mb: 2 }}
+                  sx={{mb: 2}}
                 >
                   <Typography>
                     Please note: For date fields, accepted formats are
@@ -92,24 +105,24 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                         </Tooltip>
                       </ListItem>
                     </List>
-                    Hover over formats to see additionally accepted separators.<br />
-                    Please ensure your dates follow one of these formats. 
+                    Hover over formats to see additionally accepted separators.<br/>
+                    Please ensure your dates follow one of these formats.
                   </Typography>
                 </Alert>
-                <Typography sx={{ mb: 2 }}>
+                <Typography sx={{mb: 2}}>
                   The person recording the data is {personnelRecording}.
                 </Typography>
               </>
             )}
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2 }}>
+            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 2}}>
               <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive}
-                setDataViewActive={setDataViewActive} />
+                        setDataViewActive={setDataViewActive}/>
               {acceptedFiles.length > 0 &&
                 <Button
                   variant="contained"
                   color="error"
                   onClick={() => handleRemoveFile(dataViewActive - 1)}
-                  sx={{ mt: 2, alignSelf: 'center' }}
+                  sx={{mt: 2, alignSelf: 'center'}}
                 >
                   Delete Selected File
                 </Button>
@@ -120,7 +133,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
               color="primary"
               disabled={acceptedFiles.length <= 0}
               onClick={handleInitialSubmit}
-              sx={{ mt: 2 }}>
+              sx={{mt: 2}}>
               Review Files
             </LoadingButton>
           </Stack>

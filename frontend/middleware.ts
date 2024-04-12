@@ -5,11 +5,11 @@
  * Redirects authenticated users to the dashboard page from the home page.
  * Allows the request to continue if no redirect conditions are met.
  */
-import { getToken } from 'next-auth/jwt'
-import type { NextRequest } from 'next/server'
-import { NextResponse } from 'next/server'
+import {getToken} from 'next-auth/jwt'
+import type {NextRequest} from 'next/server'
+import {NextResponse} from 'next/server'
 
-export async function middleware (request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const session = await getToken({
     req: request,
     secret: process.env.NEXTAUTH_SECRET

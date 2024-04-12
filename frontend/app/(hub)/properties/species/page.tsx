@@ -102,7 +102,7 @@ export default function SpeciesPage() {
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="species" setRefresh={setRefresh} />
+          <UploadParentModal formType="species" setRefresh={setRefresh}/>
         </Box>
       </Box>
 

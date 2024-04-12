@@ -1,7 +1,7 @@
 'use client'
-import { Box, Paper, Typography } from '@mui/material'
-import React, { Dispatch, SetStateAction } from 'react'
-import { FileWithPath } from 'react-dropzone'
+import {Box, Paper, Typography} from '@mui/material'
+import React, {Dispatch, SetStateAction} from 'react'
+import {FileWithPath} from 'react-dropzone'
 import '@/styles/validationtable.css'
 import moment from 'moment'
 import {
@@ -17,7 +17,7 @@ import {
   GridRowModel,
   GridRowsProp
 } from '@mui/x-data-grid'
-import { StyledDataGrid } from '@/config/sqlmacros'
+import {StyledDataGrid} from '@/config/sqlmacros'
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */
@@ -168,7 +168,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
 
   Object.entries(singleFileData).forEach(([rowKey, rowData], index) => {
     if (typeof rowData === 'object' && rowData !== null) {
-      const row = { id: `${fileName}-${index}`, ...rowData }
+      const row = {id: `${fileName}-${index}`, ...rowData}
       tempRows.push(row)
     }
   })
@@ -178,7 +178,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
       newRow: GridRowModel,
       oldRow: GridRowModel
     ): Promise<GridRowModel> => {
-      const updatedRow = { ...newRow }
+      const updatedRow = {...newRow}
       const rowId = `row-${newRow.id}`
       if (!errorRows[fileName]?.[rowId]) {
         // If no errors for this row, do not allow updates
@@ -189,12 +189,12 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
       if (rowErrors) {
         setErrorRows(prevErrors => ({
           ...prevErrors,
-          [fileName]: { ...prevErrors[fileName], [updatedRow.id]: rowErrors }
+          [fileName]: {...prevErrors[fileName], [updatedRow.id]: rowErrors}
         }))
       } else {
         // Remove errors for this row if they exist
         setErrorRows(prevErrors => {
-          const newErrors = { ...prevErrors }
+          const newErrors = {...prevErrors}
           if (newErrors[fileName]?.[updatedRow.id]) {
             delete newErrors[fileName][updatedRow.id]
           }
@@ -205,7 +205,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
       // Update the parsed data state
       setParsedData(prevData => ({
         ...prevData,
-        [fileName]: { ...prevData[fileName], [updatedRow.id]: updatedRow }
+        [fileName]: {...prevData[fileName], [updatedRow.id]: updatedRow}
       }))
 
       return updatedRow
@@ -216,9 +216,9 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
   let rows: GridRowsProp = tempRows
 
   return (
-    <Paper style={{ height: '100%', width: '100%' }}>
+    <Paper style={{height: '100%', width: '100%'}}>
       <StyledDataGrid
-        sx={{ display: 'flex', flex: 1, width: '100%' }}
+        sx={{display: 'flex', flex: 1, width: '100%'}}
         rows={rows}
         columns={columns}
         processRowUpdate={processRowUpdate}

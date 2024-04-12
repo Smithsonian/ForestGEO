@@ -1,11 +1,11 @@
 "use client";
 
-import { Box, Button, Grid } from "@mui/material";
-import { ReviewStates, UploadStartProps } from "@/config/macros";
-import { ListSubheader, Stack, Tooltip, Typography } from "@mui/joy";
+import {Box, Button, Grid} from "@mui/material";
+import {ReviewStates, UploadStartProps} from "@/config/macros";
+import {ListSubheader, Stack, Tooltip, Typography} from "@mui/joy";
 import SelectFormType from "@/components/uploadsystemhelpers/groupedformselection";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
-import React, { useEffect, useState } from "react";
+import React, {useEffect, useState} from "react";
 import Select from "@mui/joy/Select";
 import List from "@mui/joy/List";
 import Option from '@mui/joy/Option';
@@ -50,14 +50,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const showBackButton = personnelRecording !== '' || unitOfMeasurement !== '';
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center' }}>
-      <Stack direction={"column"} sx={{ width: 'fit-content' }}>
+    <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+      <Stack direction={"column"} sx={{width: 'fit-content'}}>
         {showBackButton && (
           <Tooltip title="Go back to the previous step">
             <Button
               onClick={handleBack}
               variant="outlined"
-              startIcon={<ArrowBackIcon />}
+              startIcon={<ArrowBackIcon/>}
               sx={{
                 width: 'fit-content',
                 mb: 2,
@@ -76,14 +76,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         {/* Form Type Selection */}
         {uploadForm !== '' && uploadForm !== 'measurements' && !finish && (
           <>
-            <Typography sx={{ mb: 2 }}>You have selected:</Typography>
+            <Typography sx={{mb: 2}}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
           </>
         )}
         {/* Personnel Recording Selection */}
         {uploadForm === 'measurements' && personnelRecording === '' && (
           <>
-            <Typography sx={{ mb: 2 }}>
+            <Typography sx={{mb: 2}}>
               Who recorded this data?
             </Typography>
             <AutocompleteFixedData
@@ -97,14 +97,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         {/* Unit of Measurement Selection for measurements */}
         {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement === '' && (
           <>
-            <Typography sx={{ mb: 2 }}>
+            <Typography sx={{mb: 2}}>
               Select the unit of measurement:
             </Typography>
             <Select
               value={unitOfMeasurement}
               onChange={handleChange}
               placeholder="Select unit"
-              sx={{ minWidth: '200px' }}
+              sx={{minWidth: '200px'}}
             >
               <List>
                 <ListSubheader>Metric Units</ListSubheader>
@@ -124,7 +124,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         )}
         {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement !== '' && !finish && (
           <>
-            <Typography sx={{ mb: 2 }}>You have selected:</Typography>
+            <Typography sx={{mb: 2}}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
             <Typography>Personnel: {personnelRecording}</Typography>
             <Typography>Units of measurement: {unitOfMeasurement}</Typography>

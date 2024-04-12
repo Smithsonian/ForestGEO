@@ -2,8 +2,8 @@
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
 import React from 'react';
-import { keyframes } from '@emotion/react';
-import { Logo } from '@/components/icons';
+import {keyframes} from '@emotion/react';
+import {Logo} from '@/components/icons';
 
 const generateForestColors = (): string[] => {
   const forestColors = [
@@ -45,11 +45,11 @@ export const RainbowIcon: React.FC = () => {
     <RainbowIconWrapper>
       <svg width="0" height="0">
         <mask id="logo-mask">
-          <Logo fill="white" /> {/* Mask uses white to indicate visible areas */}
+          <Logo fill="white"/> {/* Mask uses white to indicate visible areas */}
         </mask>
       </svg>
       {/* Actual Logo component */}
-      <Logo fill="transparent" />
+      <Logo fill="transparent"/>
     </RainbowIconWrapper>
   );
 };
