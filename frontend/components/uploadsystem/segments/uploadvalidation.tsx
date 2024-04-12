@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   Box,
   Button,
@@ -12,18 +12,18 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { ReviewStates, UploadValidationProps } from "@/config/macros";
-import { ValidationResponse } from "@/components/processors/processormacros";
+import {ReviewStates, UploadValidationProps} from "@/config/macros";
+import {ValidationResponse} from "@/components/processors/processormacros";
 import CircularProgress from "@mui/joy/CircularProgress";
-import { useLoading } from '@/app/contexts/loadingprovider';
+import {useLoading} from '@/app/contexts/loadingprovider';
 // Define the type for validation messages
 type ValidationMessages = {
   [key: string]: string;
 };
 const UploadValidation: React.FC<UploadValidationProps> = ({
-  setReviewState,
-  currentPlot, currentCensus, schema
-}) => {
+                                                             setReviewState,
+                                                             currentPlot, currentCensus, schema
+                                                           }) => {
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
@@ -33,7 +33,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
 
   const [promptOpen, setPromptOpen] = useState<boolean>(false);
   const [currentPromptApi, setCurrentPromptApi] = useState<string>('');
-  const [tempMinMax, setTempMinMax] = useState<{ min: number | string, max: number | string }>({ min: '', max: '' });
+  const [tempMinMax, setTempMinMax] = useState<{ min: number | string, max: number | string }>({min: '', max: ''});
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
   const [useDefaultValues, setUseDefaultValues] = useState<boolean>(false);
   const [defaultValuesDialogOpen, setDefaultValuesDialogOpen] = useState<boolean>(true);
@@ -42,19 +42,19 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const {setLoading} = useLoading();
 
   const defaultMinMaxValues: Record<string, { min?: number, max?: number }> = {
-    'ValidateScreenMeasuredDiameterMinMax': { min: undefined, max: undefined },
-    'ValidateHOMUpperAndLowerBounds': { min: undefined, max: undefined },
+    'ValidateScreenMeasuredDiameterMinMax': {min: undefined, max: undefined},
+    'ValidateHOMUpperAndLowerBounds': {min: undefined, max: undefined},
     // ... [other default values]
   };
   useEffect(() => {
     setLoading(true, 'Loading Validations...');
-    fetch('/api/validations/validationlist', { method: 'GET' })
+    fetch('/api/validations/validationlist', {method: 'GET'})
       .then(response => response.json())
       .then(data => {
         setValidationMessages(data);
 
         // Set initial progress after fetching validation messages
-        const initialProgress = Object.keys(data).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
+        const initialProgress = Object.keys(data).reduce((acc, api) => ({...acc, [api]: 0}), {});
         setValidationProgress(initialProgress);
       })
       .then(() => setLoading(false))
@@ -76,14 +76,14 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const promptForInput = (api: string) => {
     setCurrentPromptApi(api);
     setPromptOpen(true);
-    setTempMinMax({ min: '', max: '' }); // Reset input fields
+    setTempMinMax({min: '', max: ''}); // Reset input fields
   };
 
   const handlePromptClose = () => {
-    const newMinMax = { min: Number(tempMinMax.min), max: Number(tempMinMax.max) };
+    const newMinMax = {min: Number(tempMinMax.min), max: Number(tempMinMax.max)};
 
     // Update minMaxValues for the current prompt
-    setMinMaxValues(prev => ({ ...prev, [currentPromptApi]: newMinMax }));
+    setMinMaxValues(prev => ({...prev, [currentPromptApi]: newMinMax}));
     setPromptOpen(false);
 
     if (currentPromptApi === 'ValidateScreenMeasuredDiameterMinMax') {
@@ -104,9 +104,9 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
 
     const api = Object.keys(validationMessages)[index];
 
-    performValidation(api).then(({ response, hasError }) => {
-      setValidationResults(prevResults => ({ ...prevResults, [api]: response }));
-      setValidationProgress(prevProgress => ({ ...prevProgress, [api]: 100 }));
+    performValidation(api).then(({response, hasError}) => {
+      setValidationResults(prevResults => ({...prevResults, [api]: response}));
+      setValidationProgress(prevProgress => ({...prevProgress, [api]: 100}));
       showNextPrompt(index + 1, foundError || hasError);
     });
   };
@@ -124,20 +124,20 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       }
       const result = await response.json();
       const hasError = result.failedRows > 0;
-      return { response: result, hasError };
+      return {response: result, hasError};
     } catch (error: any) {
       console.error(`Error performing validation for ${api}:`, error);
       setApiErrors(prev => [...prev, `Failed to execute ${api}: ${error.message}`]);
-      setValidationProgress(prevProgress => ({ ...prevProgress, [api]: -1 }));
-      return { response: { failedRows: 0, message: error.message, totalRows: 0 }, hasError: false };
+      setValidationProgress(prevProgress => ({...prevProgress, [api]: -1}));
+      return {response: {failedRows: 0, message: error.message, totalRows: 0}, hasError: false};
     }
   };
 
   const renderProgressBars = () => {
     return Object.keys(validationMessages).map(api => (
-      <Box key={api} sx={{ mb: 2 }}>
+      <Box key={api} sx={{mb: 2}}>
         <Typography variant="subtitle1">{validationMessages[api] || api}</Typography>
-        <LinearProgress variant="determinate" value={validationProgress[api]} />
+        <LinearProgress variant="determinate" value={validationProgress[api]}/>
       </Box>
     ));
   };
@@ -158,7 +158,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
             fullWidth
             variant="outlined"
             value={tempMinMax.min}
-            onChange={(e) => setTempMinMax({ ...tempMinMax, min: e.target.value })}
+            onChange={(e) => setTempMinMax({...tempMinMax, min: e.target.value})}
           />
           <TextField
             margin="dense"
@@ -167,11 +167,11 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
             fullWidth
             variant="outlined"
             value={tempMinMax.max}
-            onChange={(e) => setTempMinMax({ ...tempMinMax, max: e.target.value })}
+            onChange={(e) => setTempMinMax({...tempMinMax, max: e.target.value})}
           />
         </DialogContent>
         <DialogActions>
-          <Button sx={{ width: 'fit-content' }} onClick={handlePromptClose}>Submit</Button>
+          <Button sx={{width: 'fit-content'}} onClick={handlePromptClose}>Submit</Button>
         </DialogActions>
       </Dialog>
     );
@@ -211,24 +211,24 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   return (
     <>
       {Object.keys(validationMessages).length > 0 && (
-        <Box sx={{ width: '100%', p: 2, display: 'flex', flex: 1, flexDirection: 'column' }}>
+        <Box sx={{width: '100%', p: 2, display: 'flex', flex: 1, flexDirection: 'column'}}>
           {renderDefaultValuesDialog()}
           {renderPromptModal()}
 
           {!isValidationComplete ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
               <Typography variant="h6">Validating data...</Typography>
               {renderProgressBars()}
             </Box>
           ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <CircularProgress />
+            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
+              <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                <CircularProgress/>
                 <Typography>{countdown} seconds remaining</Typography>
               </Box>
               <Typography variant="h6">Validation Results</Typography>
               {apiErrors.length > 0 && (
-                <Box sx={{ mb: 2 }}>
+                <Box sx={{mb: 2}}>
                   <Typography color="error">Some validations could not be performed:</Typography>
                   {apiErrors.map((error) => (
                     <Typography key={error} color="error">- {error}</Typography>
@@ -236,7 +236,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
                 </Box>
               )}
               {Object.entries(validationResults).map(([api, result]) => (
-                <Box key={api} sx={{ mb: 2 }}>
+                <Box key={api} sx={{mb: 2}}>
                   <Typography>{api}:</Typography>
                   {result.failedRows > 0 ? (
                     <>

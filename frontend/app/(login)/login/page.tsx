@@ -49,7 +49,7 @@ export default function LoginPage() {
         <UnauthenticatedSidebar/>
       </Box>
     );
-  } else if (status === "authenticated"){
+  } else if (status === "authenticated") {
     redirect('/dashboard');
   }
 }

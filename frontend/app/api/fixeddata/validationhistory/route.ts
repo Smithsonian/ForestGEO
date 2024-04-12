@@ -1,9 +1,12 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import { ValidationChangelogRDS } from "@/config/sqlmacros";
-import { PoolConnection } from "mysql2/promise";
-import { NextRequest, NextResponse } from "next/server";
+import {getConn, runQuery} from "@/components/processors/processormacros";
+import {ValidationChangelogRDS} from "@/config/sqlmacros";
+import {PoolConnection} from "mysql2/promise";
+import {NextRequest, NextResponse} from "next/server";
 
-export async function GET(request: NextRequest): Promise<NextResponse<{ validationchangelog: ValidationChangelogRDS[], totalCount: number }>> {
+export async function GET(request: NextRequest): Promise<NextResponse<{
+  validationchangelog: ValidationChangelogRDS[],
+  totalCount: number
+}>> {
   let conn: PoolConnection | null = null;
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
@@ -37,7 +40,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<{ validati
       additionalDetails: row.AdditionalDetails
     }));
 
-    return new NextResponse(JSON.stringify({ validationchangelog: validationChangelogRows, totalCount: totalRows }), { status: 200 });
+    return new NextResponse(JSON.stringify({
+      validationchangelog: validationChangelogRows,
+      totalCount: totalRows
+    }), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
     throw new Error('Failed to fetch validation changelog data');

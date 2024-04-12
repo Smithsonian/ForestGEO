@@ -216,6 +216,25 @@ export async function parseCensusRequestBody(request: NextRequest) {
   }
 }
 
+export async function parseStemRequestBody(request: NextRequest) {
+  const requestBody = await request.json();
+  return {
+    StemID: requestBody.stemID,
+    TreeID: requestBody.treeID ?? null,
+    QuadratID: requestBody.quadratID ?? null,
+    StemNumber: requestBody.stemNumber ?? null,
+    StemTag: requestBody.stemTag ?? null,
+    StemPlotX: requestBody.stemPlotX ?? null,
+    StemPlotY: requestBody.stemPlotY ?? null,
+    StemPlotZ: requestBody.stemPlotZ ?? null,
+    StemQuadX: requestBody.stemQuadX ?? null,
+    StemQuadY: requestBody.stemQuadY ?? null,
+    StemQuadZ: requestBody.stemQuadZ ?? null,
+    Moved: requestBody.moved ?? null,
+    StemDescription: requestBody.stemDescription ?? null,
+  }
+}
+
 export async function parsePersonnelRequestBody(request: NextRequest) {
   const requestBody = await request.json();
   return {

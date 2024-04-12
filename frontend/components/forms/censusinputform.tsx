@@ -242,13 +242,13 @@ const CensusInputForm = () => {
       maxWidth: 100,
       cellClassName: 'actions',
       flex: 1, align: 'center',
-      getActions: ({ id }) => {
+      getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
 
         if (isInEditMode) {
           return [
             <GridActionsCellItem
-              icon={<SaveIcon />}
+              icon={<SaveIcon/>}
               label="Save"
               key="Save"
               sx={{
@@ -257,7 +257,7 @@ const CensusInputForm = () => {
               onClick={handleSaveClick(id)}
             />,
             <GridActionsCellItem
-              icon={<CancelIcon />}
+              icon={<CancelIcon/>}
               label="Cancel"
               key="Cancel"
               className="textPrimary"
@@ -269,7 +269,7 @@ const CensusInputForm = () => {
 
         return [
           <GridActionsCellItem
-            icon={<EditIcon />}
+            icon={<EditIcon/>}
             label="Edit"
             key="Edit"
             className="textPrimary"
@@ -277,7 +277,7 @@ const CensusInputForm = () => {
             color="inherit"
           />,
           <GridActionsCellItem
-            icon={<DeleteIcon />}
+            icon={<DeleteIcon/>}
             label="Delete"
             key="Delete"
             onClick={handleDeleteClick(id)}
@@ -303,24 +303,24 @@ const CensusInputForm = () => {
   let currentCensus = useCensusContext();
   let currentSite = useSiteContext();
 
-  const { data: session } = useSession();
+  const {data: session} = useSession();
   const handleQuadratChange = (id: number | string, newValue: string) => {
-    setRows(rows.map((row) => (row.id === id ? { ...row, quadratName: newValue } : row)));
+    setRows(rows.map((row) => (row.id === id ? {...row, quadratName: newValue} : row)));
   };
   const handlePersonnelChange = (id: number | string, newValue: string) => {
-    setRows(rows.map((row) => (row.id === id ? { ...row, personnel: newValue } : row)));
+    setRows(rows.map((row) => (row.id === id ? {...row, personnel: newValue} : row)));
   }
   const handleTreeTagChange = (id: number | string, newValue: string) => {
-    setRows(rows.map((row) => (row.id === id ? { ...row, treeTag: newValue } : row)));
+    setRows(rows.map((row) => (row.id === id ? {...row, treeTag: newValue} : row)));
   }
   const handleStemTagChange = (id: number | string, newValue: string) => {
-    setRows(rows.map((row) => (row.id === id ? { ...row, stemTag: newValue } : row)));
+    setRows(rows.map((row) => (row.id === id ? {...row, stemTag: newValue} : row)));
   }
   const handleSpeciesCodeChange = (id: number | string, newValue: string) => {
-    setRows(rows.map((row) => (row.id === id ? { ...row, speciesCode: newValue } : row)));
+    setRows(rows.map((row) => (row.id === id ? {...row, speciesCode: newValue} : row)));
   }
   const handleCodesChange = (id: GridRowId, newCodes: string[]) => {
-    setRows(rows.map((row) => (row.id === id ? { ...row, codes: newCodes } : row)));
+    setRows(rows.map((row) => (row.id === id ? {...row, codes: newCodes} : row)));
   };
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
@@ -329,11 +329,11 @@ const CensusInputForm = () => {
   };
 
   const handleEditClick = (id: GridRowId) => () => {
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
 
   const handleSaveClick = (id: GridRowId) => () => {
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.View } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
   };
 
   const handleDeleteClick = (id: GridRowId) => () => {
@@ -343,7 +343,7 @@ const CensusInputForm = () => {
   const handleCancelClick = (id: GridRowId) => () => {
     setRowModesModel({
       ...rowModesModel,
-      [id]: { mode: GridRowModes.View, ignoreModifications: true },
+      [id]: {mode: GridRowModes.View, ignoreModifications: true},
     });
 
     const editedRow = rows.find((row) => row.id === id);
@@ -353,7 +353,7 @@ const CensusInputForm = () => {
   };
 
   const processRowUpdate = (newRow: GridRowModel) => {
-    const updatedRow = { ...newRow, isNew: false };
+    const updatedRow = {...newRow, isNew: false};
     setRows(rows.map((row) => (row.id === newRow.id ? updatedRow : row)));
     return updatedRow;
   };
@@ -394,7 +394,7 @@ const CensusInputForm = () => {
       return acc;
     }, {});
 
-    const fileRowSet = { "censusData": formattedData }; // Assuming 'censusData' as the file name
+    const fileRowSet = {"censusData": formattedData}; // Assuming 'censusData' as the file name
 
     try {
       // Add code to retrieve additional required parameters like schema, fileName, etc.
@@ -428,7 +428,7 @@ const CensusInputForm = () => {
           currentPlot={currentPlot}
           currentCensus={currentCensus}
           schema={currentSite?.schemaName ?? ''}
-          setReviewState={setReviewState} />
+          setReviewState={setReviewState}/>
       );
       break;
     case 'update':
@@ -445,10 +445,10 @@ const CensusInputForm = () => {
       content = null;
   }
   return (
-    <Box sx={{ display: 'flex', width: '100%', height: '100%', flexDirection: 'column' }}>
+    <Box sx={{display: 'flex', width: '100%', height: '100%', flexDirection: 'column'}}>
       <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.key ?? 'None'}, Census
         ID: {currentCensus?.censusID ?? '0'}</Typography>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+      <Box sx={{display: 'flex', justifyContent: 'flex-end', marginTop: 2}}>
         <Button
           variant="contained"
           disabled={!isFormComplete}
@@ -457,7 +457,7 @@ const CensusInputForm = () => {
           Submit
         </Button>
       </Box>
-      <Divider orientation={"horizontal"} />
+      <Divider orientation={"horizontal"}/>
       <DataGrid
         getCellClassName={() => "dataGridCell"}
         rowHeight={75}
@@ -475,7 +475,7 @@ const CensusInputForm = () => {
           toolbar: EditToolbar,
         }}
         slotProps={{
-          toolbar: { setRows, setRowModesModel },
+          toolbar: {setRows, setRowModesModel},
         }}
       />
       <Modal open={reviewState === ReviewStates.VALIDATE || reviewState === ReviewStates.UPDATE}>
@@ -489,14 +489,14 @@ const CensusInputForm = () => {
                 currentPlot={currentPlot}
                 currentCensus={currentCensus}
                 schema={currentSite?.schemaName ?? ''}
-                setReviewState={setReviewState} />
+                setReviewState={setReviewState}/>
             )}
             {reviewState === ReviewStates.UPDATE && (
               <UploadUpdateValidations
                 currentPlot={currentPlot}
                 currentCensus={currentCensus}
                 schema={currentSite?.schemaName ?? ''}
-                setReviewState={setReviewState} />
+                setReviewState={setReviewState}/>
             )}
           </DialogContent>
         </ModalDialog>

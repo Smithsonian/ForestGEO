@@ -1,9 +1,9 @@
-import { getData, setData, clearAllIDBData, clearDataByKey } from '@/config/db';
+import {getData, setData, clearAllIDBData, clearDataByKey} from '@/config/db';
 import '@testing-library/jest-dom';
 
 describe('IndexedDB operations', () => {
   const testKey = 'testKey';
-  const testData = { name: 'Test Data' };
+  const testData = {name: 'Test Data'};
 
   beforeEach(async () => {
     await clearAllIDBData();

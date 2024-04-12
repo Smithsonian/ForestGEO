@@ -130,7 +130,7 @@ export default function SummaryPage() {
             </Typography>
           </Box>
 
-          <UploadParentModal formType="measurements" setRefresh={setRefresh} />
+          <UploadParentModal formType="measurements" setRefresh={setRefresh}/>
         </Box>
       </Box>
 

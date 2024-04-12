@@ -1,4 +1,4 @@
-import { PoolMonitor } from '@/config/poolmonitor';
+import {PoolMonitor} from '@/config/poolmonitor';
 import mysql from 'mysql2/promise';
 import '@testing-library/jest-dom';
 
@@ -30,7 +30,7 @@ describe('PoolMonitor', () => {
   });
 
   it('should increment activeConnections on acquire', () => {
-    const mockConnection = { threadId: 123 };
+    const mockConnection = {threadId: 123};
     mockPool.on.mock.calls.find(call => call[0] === 'acquire')[1](mockConnection);
     expect(poolMonitor.activeConnections).toBe(1);
   });
@@ -41,7 +41,7 @@ describe('PoolMonitor', () => {
   });
 
   it('should increment totalConnectionsCreated on connection', () => {
-    const mockConnection = { threadId: 456 };
+    const mockConnection = {threadId: 456};
     mockPool.on.mock.calls.find(call => call[0] === 'connection')[1](mockConnection);
     expect(poolMonitor.totalConnectionsCreated).toBe(1);
   });

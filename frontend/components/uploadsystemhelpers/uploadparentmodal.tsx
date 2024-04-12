@@ -1,16 +1,17 @@
 "use client";
 
-import { Button, IconButton, Modal, ModalClose, ModalDialog } from "@mui/joy";
+import {Button, IconButton, Modal, ModalClose, ModalDialog} from "@mui/joy";
 import CloseIcon from "@mui/icons-material/Close";
-import { Dispatch, SetStateAction, useState } from "react";
+import {Dispatch, SetStateAction, useState} from "react";
 import UploadParent from "../uploadsystem/uploadparent";
 
 interface UPMProps {
   setRefresh: Dispatch<SetStateAction<boolean>>;
   formType: string;
 }
+
 export default function UploadParentModal(props: UPMProps) {
-  const { setRefresh, formType } = props;
+  const {setRefresh, formType} = props;
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   const handleOpenUploadModal = (): void => {
@@ -27,23 +28,25 @@ export default function UploadParentModal(props: UPMProps) {
       {/* Modal for upload */}
       <Modal
         open={isUploadModalOpen}
-        onClose={() => { }}
+        onClose={() => {
+        }}
         aria-labelledby="upload-dialog-title"
-        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
       >
         <ModalDialog
           size="lg"
-          sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
+          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
           role="alertdialog"
         >
           <IconButton
             aria-label="close"
             onClick={handleCloseUploadModal}
-            sx={{ position: 'absolute', top: 8, right: 8 }}
+            sx={{position: 'absolute', top: 8, right: 8}}
           >
-            <CloseIcon />
+            <CloseIcon/>
           </IconButton>
-          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal} overrideUploadForm={formType} />
+          <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal}
+                        overrideUploadForm={formType}/>
         </ModalDialog>
       </Modal>
     </>

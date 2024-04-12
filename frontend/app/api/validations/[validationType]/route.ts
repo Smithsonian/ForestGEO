@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { runValidationProcedure } from "@/components/processors/processorhelperfunctions";
+import {NextRequest, NextResponse} from "next/server";
+import {runValidationProcedure} from "@/components/processors/processorhelperfunctions";
 
-export async function GET(request: NextRequest,  { params }: { params: { validationType: string } }) {
+export async function GET(request: NextRequest, {params}: { params: { validationType: string } }) {
   const schema = request.nextUrl.searchParams.get('schema');
   const plotIDParam = request.nextUrl.searchParams.get('plotID');
   const censusIDParam = request.nextUrl.searchParams.get('censusID');
@@ -19,8 +19,8 @@ export async function GET(request: NextRequest,  { params }: { params: { validat
 
   try {
     const validationResponse = await runValidationProcedure(schema, validationType, plotID, censusID, minValue, maxValue);
-    return new NextResponse(JSON.stringify(validationResponse), { status: 200 });
+    return new NextResponse(JSON.stringify(validationResponse), {status: 200});
   } catch (error: any) {
-    return new NextResponse(JSON.stringify({ error: error.message }), { status: 500 });
+    return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
   }
 }

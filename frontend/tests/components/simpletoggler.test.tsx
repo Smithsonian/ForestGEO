@@ -1,7 +1,7 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import {render, screen} from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { SimpleToggler } from '@/components/sidebar';
+import {SimpleToggler} from '@/components/sidebar';
 
 describe('SimpleToggler', () => {
   const mockRenderToggle = <button>Toggle</button>;
@@ -26,7 +26,7 @@ describe('SimpleToggler', () => {
   });
 
   it('renders the toggle button', () => {
-    render(<SimpleToggler isOpen={false} renderToggle={mockRenderToggle} children={undefined} />);
+    render(<SimpleToggler isOpen={false} renderToggle={mockRenderToggle} children={undefined}/>);
     const toggleButton = screen.getByText('Toggle');
     expect(toggleButton).toBeInTheDocument();
   });

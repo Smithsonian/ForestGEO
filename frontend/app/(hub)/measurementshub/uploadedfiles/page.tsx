@@ -1,8 +1,8 @@
 "use client";
 
-import { useCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
+import {useCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
-import { useState } from "react";
+import {useState} from "react";
 
 export default function UploadedFilesPage() {
   const [refreshFileList, setRefreshFileList] = useState(false);
@@ -10,6 +10,6 @@ export default function UploadedFilesPage() {
   const currentCensus = useCensusContext();
 
   return <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus}
-  refreshFileList={refreshFileList}
-  setRefreshFileList={setRefreshFileList}/>;
+                            refreshFileList={refreshFileList}
+                            setRefreshFileList={setRefreshFileList}/>;
 }

@@ -4,8 +4,8 @@
  */
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
-import { css, keyframes } from '@emotion/react';
-import React, { useEffect, useState } from 'react';
+import {css, keyframes} from '@emotion/react';
+import React, {useEffect, useState} from 'react';
 import Box from "@mui/joy/Box";
 import Typography from '@mui/joy/Typography';
 import {useLoading} from "@/app/contexts/loadingprovider";
@@ -43,11 +43,11 @@ const StyledSegment = styled.circle<StyledSegmentProps>`
   stroke-dasharray: 15 55;
   stroke-linecap: round;
   transform-origin: center;
-  ${({ gradientId }) => segmentAnimation(gradientId)};
+  ${({gradientId}) => segmentAnimation(gradientId)};
 `;
 
 export const GlobalLoadingIndicator: React.FC = () => {
-  const { isLoading, loadingMessage } = useLoading();
+  const {isLoading, loadingMessage} = useLoading();
   const [randomColors, setRandomColors] = useState<string[]>([]);
   const circumference = 44 * 2 * Math.PI;
 
@@ -61,9 +61,9 @@ export const GlobalLoadingIndicator: React.FC = () => {
     const nextColor = arr[(index + 1) % arr.length];
     return (
       <linearGradient key={index} id={`gradient-${index}`}>
-        <stop offset="30%" stopColor={color} />
-        <stop offset="50%" stopColor={nextColor} />
-        <stop offset="70%" stopColor={nextColor} />
+        <stop offset="30%" stopColor={color}/>
+        <stop offset="50%" stopColor={nextColor}/>
+        <stop offset="70%" stopColor={nextColor}/>
       </linearGradient>
     );
   });

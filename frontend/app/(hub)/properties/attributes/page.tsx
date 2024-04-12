@@ -7,7 +7,7 @@ import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
 import {AttributeGridColumns} from "@/config/sqlmacros";
-import {Box, Button, Modal, ModalClose, ModalDialog, Typography } from "@mui/joy";
+import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
 import UploadParent from "@/components/uploadsystem/uploadparent";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
@@ -59,7 +59,7 @@ export default function AttributesPage() {
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="attributes" setRefresh={setRefresh} />
+          <UploadParentModal formType="attributes" setRefresh={setRefresh}/>
         </Box>
       </Box>
 
