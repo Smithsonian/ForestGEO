@@ -1,6 +1,6 @@
 // DataGridCommons.tsx
 "use client";
-import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import React, {Dispatch, SetStateAction, useEffect, useMemo, useState} from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -36,8 +36,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
-import { Stack, Typography } from "@mui/joy";
-import { CensusRDS, StyledDataGrid } from "@/config/sqlmacros";
+import {Stack, Typography} from "@mui/joy";
+import {CensusRDS, StyledDataGrid} from "@/config/sqlmacros";
 import {
   computeMutation,
   createDeleteQuery,
@@ -46,11 +46,11 @@ import {
   getGridID,
   validateRowStructure,
 } from "@/config/datagridhelpers";
-import { CMError, Plot } from "@/config/macros";
+import {CMError, Plot} from "@/config/macros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
-import { useSession } from "next-auth/react";
-import { useSiteContext } from "@/app/contexts/userselectionprovider";
-import { saveAs } from 'file-saver';
+import {useSession} from "next-auth/react";
+import {useSiteContext} from "@/app/contexts/userselectionprovider";
+import {saveAs} from 'file-saver';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -81,16 +81,16 @@ const errorMapping: { [key: string]: string[] } = {
 };
 
 export function EditToolbar(props: EditToolbarProps) {
-  const { handleAddNewRow, handleRefresh, locked = false } = props;
+  const {handleAddNewRow, handleRefresh, locked = false} = props;
 
   return (
     <GridToolbarContainer>
       {!locked && (
-        <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
+        <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
           Add Row
         </Button>
       )}
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
+      <Button color="primary" startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
     </GridToolbarContainer>
@@ -184,11 +184,11 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     actionId: null
   })
 
-  const { data: session } = useSession()
+  const {data: session} = useSession()
   let email = session?.user?.email ?? ''
   const currentSite = useSiteContext()
 
-  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } =
+  const {updateQuadratsContext, updateCensusContext, updatePlotsContext} =
     UpdateContextsFromIDB({
       email: email,
       schema: currentSite?.schemaName ?? ''
@@ -209,7 +209,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       csvContent += rowValues + "\r\n";
     });
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([csvContent], {type: "text/csv;charset=utf-8;"});
     saveAs(blob, `validation_errors_${currentPlot?.key}.csv`);
   };
 
@@ -257,7 +257,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     actionType: 'save' | 'delete',
     actionId: GridRowId
   ) => {
-    setPendingAction({ actionType, actionId })
+    setPendingAction({actionType, actionId})
     setIsDialogOpen(true)
   }
 
@@ -274,12 +274,12 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     ) {
       await performDeleteAction(pendingAction.actionId)
     }
-    setPendingAction({ actionType: '', actionId: null })
+    setPendingAction({actionType: '', actionId: null})
   }
 
   const handleCancelAction = () => {
     setIsDialogOpen(false)
-    setPendingAction({ actionType: '', actionId: null })
+    setPendingAction({actionType: '', actionId: null})
   }
 
   const performSaveAction = async (id: GridRowId) => {
@@ -287,7 +287,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     console.log('save confirmed')
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.View }
+      [id]: {mode: GridRowModes.View}
     }))
 
     // If the row was newly added, reset isNewRowAdded
@@ -316,9 +316,9 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       method: 'DELETE'
     })
     if (!response.ok)
-      setSnackbar({ children: 'Error: Deletion failed', severity: 'error' })
+      setSnackbar({children: 'Error: Deletion failed', severity: 'error'})
     else {
-      setSnackbar({ children: 'Row successfully deleted', severity: 'success' })
+      setSnackbar({children: 'Row successfully deleted', severity: 'success'})
       setRows(rows.filter(row => row.id !== id))
       await fetchPaginatedData(paginationModel.page)
     }
@@ -372,10 +372,10 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setNewLastPage(calculatedNewLastPage) // update newLastPage state
 
     if (isNewPageNeeded) {
-      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage })
+      setPaginationModel({...paginationModel, page: calculatedNewLastPage})
     } else {
       // If no new page is needed, add the row immediately
-      setPaginationModel({ ...paginationModel, page: existingLastPage })
+      setPaginationModel({...paginationModel, page: existingLastPage})
       addNewRowToGrid()
     }
   }
@@ -419,7 +419,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       currentPlot?.id
     )
     try {
-      const response = await fetch(paginatedQuery, { method: 'GET' })
+      const response = await fetch(paginatedQuery, {method: 'GET'})
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || 'Error fetching data')
       setRows(data[gridType])
@@ -432,7 +432,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       }
     } catch (error) {
       console.error('Error fetching data:', error)
-      setSnackbar({ children: 'Error fetching data', severity: 'error' })
+      setSnackbar({children: 'Error fetching data', severity: 'error'})
     }
     setRefresh(false)
   }
@@ -503,26 +503,26 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         if (isNewRow) {
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(newRow)
           })
           responseJSON = await response.json()
           if (response.status > 299 || response.status < 200)
             throw new Error(responseJSON.message || 'Insertion failed')
-          setSnackbar({ children: `New row added!`, severity: 'success' })
+          setSnackbar({children: `New row added!`, severity: 'success'})
         } else {
           // If code is not empty, it's an update
           const mutation = computeMutation(gridType, newRow, oldRow)
           if (mutation) {
             response = await fetch(fetchProcessQuery, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {'Content-Type': 'application/json'},
               body: JSON.stringify(newRow)
             })
             responseJSON = await response.json()
             if (response.status > 299 || response.status < 200)
               throw new Error(responseJSON.message || 'Update failed')
-            setSnackbar({ children: `Row updated!`, severity: 'success' })
+            setSnackbar({children: `Row updated!`, severity: 'success'})
           }
         }
 
@@ -545,7 +545,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
         return newRow
       } catch (error: any) {
-        setSnackbar({ children: error.message, severity: 'error' })
+        setSnackbar({children: error.message, severity: 'error'})
         throw error
       }
     },
@@ -575,7 +575,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleEditClick = (id: GridRowId) => () => {
     if (locked) return
     console.log('edit button')
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } })
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}})
   }
 
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
@@ -593,13 +593,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
         const newPage =
           paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0
-        setPaginationModel({ ...paginationModel, page: newPage })
+        setPaginationModel({...paginationModel, page: newPage})
       }
     } else {
       // For existing rows, just switch the mode back to view
       setRowModesModel(oldModel => ({
         ...oldModel,
-        [id]: { mode: GridRowModes.View, ignoreModifications: true }
+        [id]: {mode: GridRowModes.View, ignoreModifications: true}
       }))
     }
   }
@@ -611,20 +611,20 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       headerName: 'Actions',
       width: 100,
       cellClassName: 'actions',
-      getActions: ({ id }) => {
+      getActions: ({id}) => {
         if (locked) return []
         const isInEditMode = rowModesModel[id]?.mode === 'edit'
 
         if (isInEditMode) {
           return [
             <GridActionsCellItem
-              icon={<SaveIcon />}
+              icon={<SaveIcon/>}
               label='Save'
               key={'save'}
               onClick={handleSaveClick(id)}
             />,
             <GridActionsCellItem
-              icon={<CancelIcon />}
+              icon={<CancelIcon/>}
               label='Cancel'
               key={'cancel'}
               onClick={event => handleCancelClick(id, event)}
@@ -634,13 +634,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
         return [
           <GridActionsCellItem
-            icon={<EditIcon />}
+            icon={<EditIcon/>}
             label='Edit'
             key={'edit'}
             onClick={handleEditClick(id)}
           />,
           <GridActionsCellItem
-            icon={<DeleteIcon />}
+            icon={<DeleteIcon/>}
             label='Delete'
             key={'delete'}
             onClick={handleDeleteClick(id)}
@@ -731,7 +731,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
               {cellError ? (
                 <>
                   <Typography
-                    sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}
+                    sx={{whiteSpace: 'normal', lineHeight: 'normal'}}
                   >
                     {cellValue}
                   </Typography>
@@ -750,7 +750,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                   </Typography>
                 </>
               ) : (
-                <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+                <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
                   {cellValue}
                 </Typography>
               )}
@@ -836,7 +836,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
           }
         }}
       >
-        <Box sx={{ width: '100%', flexDirection: 'column' }}>
+        <Box sx={{width: '100%', flexDirection: 'column'}}>
           {gridType === 'measurementsSummary' && (
             <Stack direction={'row'}>
               <Box>
@@ -854,7 +854,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                 Show rows without errors: ({rows.length - errorRowCount})
               </Box>
               <Box>
-                <ExportErrorsButton />
+                <ExportErrorsButton/>
                 <Button color="primary" onClick={saveErrorRowsAsCSV}>
                   Save Errors as CSV
                 </Button>
@@ -868,7 +868,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             Note: The Grid is filtered by your selected Plot and Plot ID
           </Typography>
           <StyledDataGrid
-            sx={{ width: '100%' }}
+            sx={{width: '100%'}}
             rows={visibleRows}
             columns={columns}
             editMode='row'
@@ -900,11 +900,11 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         {!!snackbar && (
           <Snackbar
             open
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
             onClose={handleCloseSnackbar}
             autoHideDuration={6000}
           >
-            <Alert {...snackbar} onClose={handleCloseSnackbar} />
+            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
           </Snackbar>
         )}
         <ConfirmationDialog
@@ -924,7 +924,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
 // ConfirmationDialog component with TypeScript types
 const ConfirmationDialog: React.FC<ConfirmationDialogProps> = (props) => {
-  const { isOpen, onConfirm, onCancel, message } = props;
+  const {isOpen, onConfirm, onCancel, message} = props;
   return (
     <Dialog open={isOpen} onClose={onCancel}>
       <DialogTitle>Confirm Action</DialogTitle>

@@ -204,7 +204,7 @@ export default function UploadParent(props: UploadParentProps) {
           if (uploadForm === 'measurements' && field === 'date') {
             const regex = /(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
             const match = value.match(regex);
-  
+
             if (match) {
               let normalizedDate;
               // Check if the format is YYYY-MM-DD
@@ -213,7 +213,7 @@ export default function UploadParent(props: UploadParentProps) {
               } else { // Otherwise, assume DD-MM-YYYY
                 normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
               }
-  
+
               const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
               if (parsedDate.isValid()) {
                 return parsedDate.toDate();

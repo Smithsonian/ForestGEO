@@ -1,6 +1,14 @@
-import { setData } from '@/config/db';
-import { FileRowErrors, bitToBoolean, createEnhancedDispatch, formatDate, genericLoadContextReducer, genericLoadReducer, uploadValidFileAsBuffer } from '@/config/macros';
-import { ContainerClient } from '@azure/storage-blob';
+import {setData} from '@/config/db';
+import {
+  FileRowErrors,
+  bitToBoolean,
+  createEnhancedDispatch,
+  formatDate,
+  genericLoadContextReducer,
+  genericLoadReducer,
+  uploadValidFileAsBuffer
+} from '@/config/macros';
+import {ContainerClient} from '@azure/storage-blob';
 import '@testing-library/jest-dom';
 
 describe('macros', () => {
@@ -43,8 +51,8 @@ describe('macros', () => {
   describe('createEnhancedDispatch', () => {
     let mockDispatch: any;
     const actionType = 'TEST_ACTION';
-    const testData = { key: 'value' };
-    const nullData = { key: null };
+    const testData = {key: 'value'};
+    const nullData = {key: null};
 
     beforeEach(() => {
       mockDispatch = jest.fn();
@@ -53,7 +61,7 @@ describe('macros', () => {
     it('should dispatch the action with payload when payload is not null', async () => {
       const enhancedDispatch = createEnhancedDispatch(mockDispatch, actionType);
       await enhancedDispatch(testData);
-      expect(mockDispatch).toHaveBeenCalledWith({ type: actionType, payload: testData });
+      expect(mockDispatch).toHaveBeenCalledWith({type: actionType, payload: testData});
     });
 
     it('should save data to IndexedDB when payload is not null', async () => {
@@ -83,50 +91,50 @@ describe('macros', () => {
     it('should dispatch the action with null payload', async () => {
       const enhancedDispatch = createEnhancedDispatch(mockDispatch, actionType);
       await enhancedDispatch(nullData);
-      expect(mockDispatch).toHaveBeenCalledWith({ type: actionType, payload: nullData });
+      expect(mockDispatch).toHaveBeenCalledWith({type: actionType, payload: nullData});
     });
   });
   describe('genericLoadReducer', () => {
     const initialState = null;
     const mockPayload = {
-      coreMeasurementLoad: { data: 'coreMeasurement' },
-      attributeLoad: { data: 'attribute' },
+      coreMeasurementLoad: {data: 'coreMeasurement'},
+      attributeLoad: {data: 'attribute'},
       // Add more mock payloads as needed for testing
     };
 
     it('should return the payload for a matching action type', () => {
-      const action = { type: 'coreMeasurementLoad', payload: mockPayload.coreMeasurementLoad };
+      const action = {type: 'coreMeasurementLoad', payload: mockPayload.coreMeasurementLoad};
       const newState = genericLoadReducer(initialState, action);
       expect(newState).toEqual(mockPayload.coreMeasurementLoad);
     });
 
     it('should return the initial state when action type does not match', () => {
-      const action = { type: 'nonExistentLoad', payload: mockPayload };
+      const action = {type: 'nonExistentLoad', payload: mockPayload};
       const newState = genericLoadReducer(initialState, action);
       expect(newState).toEqual(initialState);
     });
 
     it('should return the initial state when action type is not in payload', () => {
-      const action = { type: 'coreMeasurementLoad', payload: {} };
+      const action = {type: 'coreMeasurementLoad', payload: {}};
       const newState = genericLoadReducer(initialState, action);
       expect(newState).toEqual(initialState);
     });
 
     it('should handle multiple action types correctly', () => {
-      const action = { type: 'attributeLoad', payload: mockPayload.attributeLoad };
+      const action = {type: 'attributeLoad', payload: mockPayload.attributeLoad};
       const newState = genericLoadReducer(initialState, action);
       expect(newState).toEqual(mockPayload.attributeLoad);
     });
 
     // Test for each action type mentioned in the switch case to ensure coverage
     it('should return the correct state for personnelLoad action type', () => {
-      const action = { type: 'personnelLoad', payload: mockPayload };
+      const action = {type: 'personnelLoad', payload: mockPayload};
       const newState = genericLoadReducer(initialState, action);
       expect(newState).toEqual(initialState); // Assuming mockPayload does not contain personnelLoad
     });
 
     it('should return null for an undefined action type', () => {
-      const action = { type: 'someValidString', payload: mockPayload };
+      const action = {type: 'someValidString', payload: mockPayload};
       const newState = genericLoadReducer(initialState, action);
       expect(newState).toEqual(initialState);
     });
@@ -141,7 +149,7 @@ describe('macros', () => {
     });
 
     describe('genericLoadReducer additional tests', () => {
-      const initialState = { some: 'state' };
+      const initialState = {some: 'state'};
 
       it('should update the state for a newMeasurementLoad action type', () => {
         const action = {
@@ -155,59 +163,61 @@ describe('macros', () => {
         };
 
         const newState = genericLoadReducer(initialState, action);
-        expect(newState).toEqual({ some: 'state' });
+        expect(newState).toEqual({some: 'state'});
       });
     });
   });
   describe('genericLoadContextReducer', () => {
     const initialState = null;
-    const listContext = [{ data: 'plot' }, { data: 'census' }, { data: 'quadrat' }, { data: 'site' }];
-    const validationFunction = (list: any[], item: { data: any; }) => list.some((listItem: { data: any; }) => listItem.data === item.data);
+    const listContext = [{data: 'plot'}, {data: 'census'}, {data: 'quadrat'}, {data: 'site'}];
+    const validationFunction = (list: any[], item: { data: any; }) => list.some((listItem: {
+      data: any;
+    }) => listItem.data === item.data);
 
     it('should return null for unrecognized action type', () => {
-      const action = { type: 'unknown', payload: { unknown: { data: 'newData' } } };
+      const action = {type: 'unknown', payload: {unknown: {data: 'newData'}}};
       const newState = genericLoadContextReducer(initialState, action, listContext);
       expect(newState).toBeNull();
     });
 
     it('should return current state if payload is null', () => {
-      const action = { type: 'plot', payload: {} };
+      const action = {type: 'plot', payload: {}};
       const newState = genericLoadContextReducer(initialState, action, listContext);
       expect(newState).toBe(initialState);
     });
 
     it('should return current state if action type is not a key in payload', () => {
-      const action = { type: 'plot', payload: { census: { data: 'newData' } } };
+      const action = {type: 'plot', payload: {census: {data: 'newData'}}};
       const newState = genericLoadContextReducer(initialState, action, listContext);
       expect(newState).toBe(initialState);
     });
 
     it('should return null if item is null', () => {
-      const action = { type: 'plot', payload: { plot: null } };
+      const action = {type: 'plot', payload: {plot: null}};
       const newState = genericLoadContextReducer(initialState, action, listContext);
       expect(newState).toBeNull();
     });
 
     it('should return current state if item does not pass validation', () => {
-      const action = { type: 'plot', payload: { plot: { data: 'nonexistent' } } };
+      const action = {type: 'plot', payload: {plot: {data: 'nonexistent'}}};
       const newState = genericLoadContextReducer(initialState, action, listContext, validationFunction);
       expect(newState).toBe(initialState);
     });
 
     it('should return item if it passes validation', () => {
-      const action = { type: 'plot', payload: { plot: { data: 'plot' } } };
+      const action = {type: 'plot', payload: {plot: {data: 'plot'}}};
       const newState = genericLoadContextReducer(initialState, action, listContext, validationFunction);
-      expect(newState).toEqual({ data: 'plot' });
+      expect(newState).toEqual({data: 'plot'});
     });
 
     it('should return item if it is in the list context without validation', () => {
-      const action = { type: 'census', payload: { census: { data: 'census' } } };
+      const action = {type: 'census', payload: {census: {data: 'census'}}};
       const newState = genericLoadContextReducer(initialState, action, listContext);
-      expect(newState).toEqual({ data: 'census' });
+      expect(newState).toEqual({data: 'census'});
     });
 
     it('should return current state if item is not in the list context and no validation is provided', () => {
-      const action = { type: 'census', payload: { census: { data: 'nonexistent' } } };
+      const action = {type: 'census', payload: {census: {data: 'nonexistent'}}};
       const newState = genericLoadContextReducer(initialState, action, listContext);
       expect(newState).toBe(initialState);
     });
@@ -218,7 +228,7 @@ describe('getContainerClient', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    process.env = { ...originalEnv };
+    process.env = {...originalEnv};
   });
 
   afterAll(() => {
@@ -227,14 +237,14 @@ describe('getContainerClient', () => {
 
   it('should throw an error if AZURE_STORAGE_CONNECTION_STRING is not set', async () => {
     process.env.AZURE_STORAGE_CONNECTION_STRING = '';
-    const { getContainerClient } = require('@/config/macros');
+    const {getContainerClient} = require('@/config/macros');
     await expect(getContainerClient('testContainer')).rejects.toThrow("process envs failed");
   });
 
   it('should log connection string and container name', async () => {
     console.log = jest.fn();
     process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
-    const { getContainerClient } = require('@/config/macros');
+    const {getContainerClient} = require('@/config/macros');
     await getContainerClient('testContainer');
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Connection String:'));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('container name: testContainer'));
@@ -247,7 +257,7 @@ describe('getContainerClient', () => {
         fromConnectionString: () => null,
       },
     }));
-    const { getContainerClient } = require('@/config/macros');
+    const {getContainerClient} = require('@/config/macros');
     process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
     await expect(getContainerClient('testContainer')).rejects.toThrow();
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('blob service client creation failed'));
@@ -265,7 +275,7 @@ describe('getContainerClient', () => {
         }),
       },
     }));
-    const { getContainerClient } = require('@/config/macros');
+    const {getContainerClient} = require('@/config/macros');
     process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
     await getContainerClient('testContainer');
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('blob service client created & connected'));
@@ -282,7 +292,7 @@ describe('getContainerClient', () => {
         }),
       },
     }));
-    const { getContainerClient } = require('@/config/macros');
+    const {getContainerClient} = require('@/config/macros');
     process.env.AZURE_STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=https;AccountName=testAccount;AccountKey=testKey;';
     const containerClient = await getContainerClient('testContainer');
     expect(containerClient).toBeDefined();
@@ -303,7 +313,7 @@ describe('uploadValidFileAsBuffer', () => {
 
   const user = "testUser";
   const formType = "testForm";
-  const fileRowErrors = [{ row: 1, error: "Sample error" }];
+  const fileRowErrors = [{row: 1, error: "Sample error"}];
 
   it('should upload a file without errors', async () => {
     const mockContainerClient = {
@@ -318,7 +328,7 @@ describe('uploadValidFileAsBuffer', () => {
       ContainerClient: jest.fn().mockImplementation(() => mockContainerClient)
     }));
 
-    const { uploadValidFileAsBuffer } = require('@/config/macros');
+    const {uploadValidFileAsBuffer} = require('@/config/macros');
 
     const mockFile = new File(["content"], "test.txt", {
       type: "text/plain",
@@ -345,7 +355,7 @@ describe('uploadValidFileAsBuffer', () => {
       ContainerClient: jest.fn().mockImplementation(() => mockContainerClient)
     }));
 
-    const { uploadValidFileAsBuffer } = require('@/config/macros');
+    const {uploadValidFileAsBuffer} = require('@/config/macros');
 
     const response = await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType);
     expect(response).toBeTruthy();
@@ -369,7 +379,7 @@ describe('uploadValidFileAsBuffer', () => {
       getBlockBlobClient: jest.fn().mockReturnValueOnce(mockBlockBlobClient)
     };
 
-    const { uploadValidFileAsBuffer } = require('@/config/macros');
+    const {uploadValidFileAsBuffer} = require('@/config/macros');
 
     const response = await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType);
     expect(response).toBeTruthy();
@@ -398,7 +408,7 @@ describe('uploadValidFileAsBuffer', () => {
       mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
 
       const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
-        { row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1 }
+        {row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1}
       ];
 
       await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, fileRowErrors);
@@ -415,7 +425,7 @@ describe('uploadValidFileAsBuffer', () => {
       mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
 
       const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
-        { row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1 }
+        {row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1}
       ];
 
       await uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, fileRowErrors);
@@ -432,7 +442,7 @@ describe('uploadValidFileAsBuffer', () => {
       mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
 
       const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
-        { row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1 }
+        {row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1}
       ];
 
       await expect(uploadValidFileAsBuffer(mockContainerClient, mockFile, user, formType, fileRowErrors)).rejects.toThrow('Upload failed');
@@ -498,7 +508,7 @@ describe('formatDate', () => {
       return {
         format: () => expectedDate,
         resolvedOptions: () => {
-          return { locale: 'fr-FR' };
+          return {locale: 'fr-FR'};
         },
         supportedLocalesOf: () => ['fr-FR']
       };
@@ -508,7 +518,7 @@ describe('formatDate', () => {
       return {
         format: () => 'mocked',
         resolvedOptions: () => {
-          return { locale: originalLocale };
+          return {locale: originalLocale};
         },
         supportedLocalesOf: () => [originalLocale]
       };
