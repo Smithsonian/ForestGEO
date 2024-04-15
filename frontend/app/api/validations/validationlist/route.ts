@@ -1,6 +1,6 @@
 import {getConn, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {NextRequest, NextResponse} from "next/server";
+import {NextResponse} from "next/server";
 
 type ValidationProcedure = {
   ProcedureName: string;

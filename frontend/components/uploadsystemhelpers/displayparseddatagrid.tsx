@@ -11,12 +11,7 @@ import {
   RequiredTableHeadersByFormType,
   TableHeadersByFormType
 } from '@/config/macros'
-import {
-  GridCellParams,
-  GridColDef,
-  GridRowModel,
-  GridRowsProp
-} from '@mui/x-data-grid'
+import {GridCellParams, GridColDef, GridRowModel, GridRowsProp} from '@mui/x-data-grid'
 import {StyledDataGrid} from '@/config/sqlmacros'
 
 export interface ValidationTableProps {

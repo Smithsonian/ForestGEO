@@ -20,18 +20,16 @@ import {getData} from "@/config/db";
 import {siteConfig} from "@/config/macros";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
-import {Box, CircularProgress} from "@mui/joy";
+import {Box} from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import {useLoading} from "@/app/contexts/loadingprovider";
-import {clearAllHashes, loadServerDataIntoIDB} from "@/config/updatecontextsfromidb";
+import {loadServerDataIntoIDB} from "@/config/updatecontextsfromidb";
 import {
-  useCensusContext,
-  useCensusDispatch, usePlotContext,
+  useCensusDispatch,
   usePlotDispatch,
   useQuadratDispatch,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import Typography from "@mui/joy/Typography";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {

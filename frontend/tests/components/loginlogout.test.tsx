@@ -1,6 +1,6 @@
 // LoginLogout.test.tsx
 import React from 'react';
-import {render, screen, fireEvent} from '@testing-library/react';
+import {fireEvent, render, screen} from '@testing-library/react';
 import '@testing-library/jest-dom';
 import {LoginLogout} from '@/components/loginlogout';
 import {signIn, signOut, useSession} from "next-auth/react";

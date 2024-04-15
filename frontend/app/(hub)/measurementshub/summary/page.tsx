@@ -4,11 +4,10 @@ import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import DataGridCommons from "@/components/datagridcommons";
 import {MeasurementsSummaryGridColumns} from "@/config/sqlmacros";
-import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
+import {Box, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
-import UploadParent from "@/components/uploadsystem/uploadparent";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function SummaryPage() {

@@ -1,9 +1,8 @@
 "use client";
 
-import {Box, Button, Grid} from "@mui/material";
+import {Box, Button} from "@mui/material";
 import {ReviewStates, UploadStartProps} from "@/config/macros";
 import {ListSubheader, Stack, Tooltip, Typography} from "@mui/joy";
-import SelectFormType from "@/components/uploadsystemhelpers/groupedformselection";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import React, {useEffect, useState} from "react";
 import Select from "@mui/joy/Select";

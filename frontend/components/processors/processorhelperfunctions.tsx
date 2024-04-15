@@ -4,8 +4,7 @@ import {
   getConn,
   InsertUpdateProcessingProps,
   runQuery,
-  SitesResult,
-  ValidationResponse
+  SitesResult
 } from "@/components/processors/processormacros";
 import {processCensus} from "@/components/processors/processcensus";
 import {bitToBoolean} from "@/config/macros";
