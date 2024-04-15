@@ -1,4 +1,4 @@
-import {openSidebar, closeSidebar, toggleSidebar} from '@/config/utils';
+import {closeSidebar, openSidebar, toggleSidebar} from '@/config/utils';
 import '@testing-library/jest-dom';
 
 describe('Sidebar functionality', () => {

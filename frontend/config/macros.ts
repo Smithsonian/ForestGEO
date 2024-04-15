@@ -20,8 +20,6 @@ import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CloudCircleIcon from '@mui/icons-material/CloudCircle';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import GrassIcon from '@mui/icons-material/Grass';
-import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
 
 export const FORMSEARCH_LIMIT: number = 3;
 

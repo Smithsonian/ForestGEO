@@ -5,7 +5,6 @@ import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
 import {useSiteContext} from "@/app/contexts/userselectionprovider";
 import {PersonnelRDS} from "@/config/sqlmacros";
-import {Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle} from '@mui/material';
 
 export interface PersonnelAutocompleteMultiSelectProps {
   initialValue: PersonnelRDS[];

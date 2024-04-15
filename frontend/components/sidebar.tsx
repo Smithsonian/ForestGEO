@@ -35,24 +35,18 @@ import {
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import {
-  useCensusListContext,
-  usePlotListContext,
-  useSiteListContext
-} from "@/app/contexts/listselectionprovider";
+import {useCensusListContext, usePlotListContext, useSiteListContext} from "@/app/contexts/listselectionprovider";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
 import {CensusRDS} from "@/config/sqlmacros";
 import {getData} from "@/config/db";
 import {useSession} from "next-auth/react";
-import {useLoading} from "@/app/contexts/loadingprovider";
 import Check from "@mui/icons-material/Check";
 import ListItemDecorator from "@mui/joy/ListItemDecorator";
 import {SlideToggle, TransitionComponent} from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import {CensusLogo, Logo, PlotLogo} from "@/components/icons";
-import {RainbowTypography} from '@/styles/rainbowtext'
+import {CensusLogo, PlotLogo} from "@/components/icons";
 import {RainbowIcon} from '@/styles/rainbowicon';
 
 export interface SimpleTogglerProps {
