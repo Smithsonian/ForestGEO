@@ -7,8 +7,7 @@ import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
 import {useSession} from "next-auth/react";
-import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
-import UploadParent from "@/components/uploadsystem/uploadparent";
+import {Box, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function SpeciesPage() {

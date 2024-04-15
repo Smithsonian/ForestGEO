@@ -1,4 +1,4 @@
-import {validateRowStructure, computeMutation} from '@/config/datagridhelpers';
+import {computeMutation, validateRowStructure} from '@/config/datagridhelpers';
 import '@testing-library/jest-dom';
 
 describe('datagridhelpers', () => {

@@ -1,5 +1,4 @@
 import {generateHash} from '@/config/crypto-actions';
-import SHA256 from 'crypto-js/sha256';
 import '@testing-library/jest-dom';
 
 describe('generateHash', () => {

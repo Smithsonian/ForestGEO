@@ -1,4 +1,4 @@
-import {getData, setData, clearAllIDBData, clearDataByKey} from '@/config/db';
+import {clearAllIDBData, clearDataByKey, getData, setData} from '@/config/db';
 import '@testing-library/jest-dom';
 
 describe('IndexedDB operations', () => {

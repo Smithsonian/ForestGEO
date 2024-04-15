@@ -2,13 +2,12 @@
 import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useCallback, useState} from "react";
-import {PersonnelGridColumns, PersonnelRDS, QuadratsGridColumns as BaseQuadratsGridColumns} from "@/config/sqlmacros";
+import {PersonnelRDS, QuadratsGridColumns as BaseQuadratsGridColumns} from "@/config/sqlmacros";
 import {usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
 import {PersonnelAutocompleteMultiSelect} from "@/components/forms/personnelautocompletemultiselect";
-import {Box, Button, Modal, ModalClose, ModalDialog, Typography} from "@mui/joy";
-import UploadParent from "@/components/uploadsystem/uploadparent";
+import {Box, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
