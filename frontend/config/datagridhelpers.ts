@@ -2,9 +2,9 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import {GridRowModel, GridToolbarProps} from '@mui/x-data-grid'
+import { GridRowModel, GridToolbarProps } from '@mui/x-data-grid'
 
-const coreMeasurementsFields = [
+export const coreMeasurementsFields = [
   'censusID',
   'plotID',
   'quadratID',
@@ -19,9 +19,9 @@ const coreMeasurementsFields = [
   'userDefinedFields'
 ]
 
-const attributesFields = ['code', 'description', 'status']
+export const attributesFields = ['code', 'description', 'status']
 
-const censusFields = [
+export const censusFields = [
   'plotID',
   'plotCensusNumber',
   'startDate',
@@ -29,9 +29,25 @@ const censusFields = [
   'description'
 ]
 
-const personnelFields = ['firstName', 'lastName', 'role']
+export const stemTreeDetailsFields = [
+  'stemTag',
+  'treeTag',
+  'speciesName',
+  'subSpeciesName',
+  'quadratName',
+  'plotName',
+  'locationName',
+  'countryName',
+  'quadratDimensionX',
+  'quadratDimensionY',
+  'stemQuadX',
+  'stemQuadY',
+  'stemDescription'
+]
 
-const quadratsFields = [
+export const personnelFields = ['firstName', 'lastName', 'role']
+
+export const quadratsFields = [
   'plotID',
   'censusID',
   'quadratName',
@@ -42,7 +58,7 @@ const quadratsFields = [
   'personnel'
 ]
 
-const speciesFields = [
+export const speciesFields = [
   'genusID',
   'currentTaxonFlag',
   'obsoleteTaxonFlag',
@@ -55,7 +71,7 @@ const speciesFields = [
   'referenceID'
 ]
 
-const subSpeciesFields = [
+export const subSpeciesFields = [
   'speciesID',
   'subSpeciesName',
   'subSpeciesCode',
@@ -65,7 +81,7 @@ const subSpeciesFields = [
   'infraSpecificLevel'
 ]
 
-const validationHistoryFields = [
+export const validationHistoryFields = [
   'validationRunID',
   'procedureName',
   'runDatetime',
@@ -91,81 +107,98 @@ interface Templates {
 
 const newRowTemplates: Templates = {
   attributes: {
-    id: {type: 'string'},
-    code: {type: 'string', initialValue: ''},
-    description: {type: 'string', initialValue: ''},
-    status: {type: 'string', initialValue: ''},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    code: { type: 'string', initialValue: '' },
+    description: { type: 'string', initialValue: '' },
+    status: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
   },
   census: {
-    id: {type: 'string'},
-    censusID: {type: 'number', initialValue: null}, // auto-incremented
-    plotID: {type: 'number', initialValue: 0},
-    plotCensusNumber: {type: 'number', initialValue: 0},
-    startDate: {type: 'date'}, // Special handling for dates
-    endDate: {type: 'date'}, // Special handling for dates
-    description: {type: 'string', initialValue: ''},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    censusID: { type: 'number', initialValue: null }, // auto-incremented
+    plotID: { type: 'number', initialValue: 0 },
+    plotCensusNumber: { type: 'number', initialValue: 0 },
+    startDate: { type: 'date' }, // Special handling for dates
+    endDate: { type: 'date' }, // Special handling for dates
+    description: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
   },
   personnel: {
-    id: {type: 'string'},
-    personnelID: {type: 'number', initialValue: null}, // null indicates auto-incremented
-    firstName: {type: 'string', initialValue: ''},
-    lastName: {type: 'string', initialValue: ''},
-    role: {type: 'string', initialValue: ''},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    personnelID: { type: 'number', initialValue: null }, // null indicates auto-incremented
+    firstName: { type: 'string', initialValue: '' },
+    lastName: { type: 'string', initialValue: '' },
+    role: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
   },
   quadrats: {
-    id: {type: 'string'},
-    quadratID: {type: 'number', initialValue: null}, // auto-incremented
-    plotID: {type: 'number', initialValue: 0},
-    quadratName: {type: 'string', initialValue: ''},
-    dimensionX: {type: 'number', initialValue: 0},
-    dimensionY: {type: 'number', initialValue: 0},
-    area: {type: 'number', initialValue: 0},
-    quadratShape: {type: 'string', initialValue: ''},
-    personnel: {type: 'array', initialValue: []},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    quadratID: { type: 'number', initialValue: null }, // auto-incremented
+    plotID: { type: 'number', initialValue: 0 },
+    quadratName: { type: 'string', initialValue: '' },
+    dimensionX: { type: 'number', initialValue: 0 },
+    dimensionY: { type: 'number', initialValue: 0 },
+    area: { type: 'number', initialValue: 0 },
+    quadratShape: { type: 'string', initialValue: '' },
+    personnel: { type: 'array', initialValue: [] },
+    isNew: { type: 'boolean', initialValue: true }
   },
   species: {
-    id: {type: 'string'},
-    speciesID: {type: 'number', initialValue: null},
-    genusID: {type: 'number', initialValue: 0},
-    currentTaxonFlag: {type: 'boolean', initialValue: false},
-    obsoleteTaxonFlag: {type: 'boolean', initialValue: false},
-    speciesName: {type: 'string', initialValue: ''},
-    speciesCode: {type: 'string', initialValue: ''},
-    idLevel: {type: 'string', initialValue: ''},
-    authority: {type: 'string', initialValue: ''},
-    fieldFamily: {type: 'string', initialValue: ''},
-    description: {type: 'string', initialValue: ''},
-    referenceID: {type: 'number', initialValue: 0},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    speciesID: { type: 'number', initialValue: null },
+    genusID: { type: 'number', initialValue: 0 },
+    currentTaxonFlag: { type: 'boolean', initialValue: false },
+    obsoleteTaxonFlag: { type: 'boolean', initialValue: false },
+    speciesName: { type: 'string', initialValue: '' },
+    speciesCode: { type: 'string', initialValue: '' },
+    idLevel: { type: 'string', initialValue: '' },
+    authority: { type: 'string', initialValue: '' },
+    fieldFamily: { type: 'string', initialValue: '' },
+    description: { type: 'string', initialValue: '' },
+    referenceID: { type: 'number', initialValue: 0 },
+    isNew: { type: 'boolean', initialValue: true }
   },
   subSpecies: {
-    id: {type: 'string'},
-    subSpeciesID: {type: 'number', initialValue: null},
-    subSpeciesName: {type: 'string', initialValue: ''},
-    subSpeciesCode: {type: 'string', initialValue: ''},
-    currentTaxonFlag: {type: 'boolean', initialValue: false},
-    obsoleteTaxonFlag: {type: 'boolean', initialValue: false},
-    authority: {type: 'string', initialValue: ''},
-    infraSpecificLevel: {type: 'string', initialValue: ''},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    subSpeciesID: { type: 'number', initialValue: null },
+    subSpeciesName: { type: 'string', initialValue: '' },
+    subSpeciesCode: { type: 'string', initialValue: '' },
+    currentTaxonFlag: { type: 'boolean', initialValue: false },
+    obsoleteTaxonFlag: { type: 'boolean', initialValue: false },
+    authority: { type: 'string', initialValue: '' },
+    infraSpecificLevel: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
   },
   validationHistory: {
-    id: {type: 'string'},
-    validationRunID: {type: 'number', initialValue: 0},
-    procedureName: {type: 'string', initialValue: ''},
-    runDatetime: {type: 'date'},
-    targetRowID: {type: 'number', initialValue: null},
-    validationOutcome: {type: 'string', initialValue: ''},
-    errorMessage: {type: 'string', initialValue: ''},
-    validationCriteria: {type: 'string', initialValue: ''},
-    measuredValue: {type: 'string', initialValue: ''},
-    expectedValueRange: {type: 'string', initialValue: ''},
-    additionalDetails: {type: 'string', initialValue: ''},
-    isNew: {type: 'boolean', initialValue: true}
+    id: { type: 'string' },
+    validationRunID: { type: 'number', initialValue: 0 },
+    procedureName: { type: 'string', initialValue: '' },
+    runDatetime: { type: 'date' },
+    targetRowID: { type: 'number', initialValue: null },
+    validationOutcome: { type: 'string', initialValue: '' },
+    errorMessage: { type: 'string', initialValue: '' },
+    validationCriteria: { type: 'string', initialValue: '' },
+    measuredValue: { type: 'string', initialValue: '' },
+    expectedValueRange: { type: 'string', initialValue: '' },
+    additionalDetails: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
+  },
+  stemTreeDetails: {
+    id: { type: 'string' },
+    stemTag: { type: 'string', initialValue: '' },
+    treeTag: { type: 'string', initialValue: '' },
+    speciesName: { type: 'string', initialValue: '' },
+    subSpeciesName: { type: 'string', initialValue: '' },
+    quadratName: { type: 'string', initialValue: '' },
+    plotName: { type: 'string', initialValue: '' },
+    locationName: { type: 'string', initialValue: '' },
+    countryName: { type: 'string', initialValue: '' },
+    quadratDimensionX: { type: 'number', initialValue: 0 },
+    quadratDimensionY: { type: 'number', initialValue: 0 },
+    stemQuadX: { type: 'number', initialValue: 0 },
+    stemQuadY: { type: 'number', initialValue: 0 },
+    stemDescription: { type: 'string', initialValue: '' },
+    isNew: { type: 'boolean', initialValue: true }
   }
 }
 
@@ -242,6 +275,7 @@ export const createProcessQuery: ProcessQueryFunction = (
   let baseQuery = `/api/`
   switch (gridType) {
     case 'coreMeasurements':
+    case 'stemTreeDetails':
       baseQuery += `${gridType.toLowerCase()}?schema=${siteSchema}`
       break
     case 'census':
@@ -285,6 +319,7 @@ export const createFetchQuery: FetchQueryFunction = (
     case 'species':
     case 'subSpecies':
     case 'validationHistory':
+    case 'stemTreeDetails':
       baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
       break
     default:
@@ -308,6 +343,8 @@ export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coreMeasurements':
       return 'coreMeasurementID'
+    case 'stemTreeDetails':
+      return 'stemID'
     case 'attributes':
       return 'code'
     case 'census':
@@ -339,6 +376,10 @@ export function computeMutation(
   switch (gridType) {
     case 'coreMeasurements':
       return coreMeasurementsFields.some(
+        field => newRow[field] !== oldRow[field]
+      )
+    case 'stemTreeDetails':
+      return stemTreeDetailsFields.some(
         field => newRow[field] !== oldRow[field]
       )
     case 'attributes':

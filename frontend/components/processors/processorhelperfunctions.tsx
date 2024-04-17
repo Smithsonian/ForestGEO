@@ -1,4 +1,4 @@
-import {PoolConnection} from "mysql2/promise";
+import mysql, { PoolConnection } from "mysql2/promise";
 import {
   fileMappings,
   getConn,
@@ -88,7 +88,10 @@ export async function processCode(
     // Prepare the query to insert code into CMAttributes
     const insertCMAttributeQuery = `
       INSERT INTO ${schema}.cmattributes (CoreMeasurementID, Code)
-      VALUES (?, ?);
+      VALUES (?, ?) as new_data
+      ON DUPLICATE KEY UPDATE 
+        CoreMeasurementID = new_data.CoreMeasurementID,
+        Code = new_data.Code;
     `;
 
     // Iterate over each coreMeasurementID
@@ -382,3 +385,29 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
   }
 }
 
+// helper functions for precise field changes
+/**
+ * Detects which fields have changed between two rows.
+ * @param newRow The updated row data.
+ * @param oldRow The original row data.
+ * @param fieldList List of fields to check for changes.
+ * @returns An array of fields that have changed.
+ */
+export function detectFieldChanges(newRow: any, oldRow: any, fieldList: string[]): string[] {
+  return fieldList.filter(field => newRow[field] !== oldRow[field]);
+}
+
+/**
+ * Generates SQL UPDATE queries based on the fields that have changed.
+ * @param schema The database schema name.
+ * @param table The table where the update needs to be made.
+ * @param changedFields The fields that have changed.
+ * @param newRow The updated row data.
+ * @param primaryKey The primary key field name of the table.
+ * @returns An array of SQL update statements.
+ */
+export function generateUpdateQueries(schema: string, table: string, changedFields: string[], newRow: any, primaryKey: string): string[] {
+  return changedFields.map(field => {
+    return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
+  });
+}

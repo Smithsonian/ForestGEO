@@ -2,7 +2,7 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
-import {AttributeGridColumns} from "@/config/sqlmacros";
+import {AttributeGridColumns, SubSpeciesGridColumns} from "@/config/sqlmacros";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
@@ -65,8 +65,8 @@ export default function SubSpeciesPage() {
 
   return (
     <DataGridCommons
-      gridType="attributes"
-      gridColumns={AttributeGridColumns}
+      gridType="subSpecies"
+      gridColumns={SubSpeciesGridColumns}
       rows={rows}
       setRows={setRows}
       rowCount={rowCount}

@@ -1,43 +1,36 @@
-'use client';
-import React, {useState} from "react";
-import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {AlertProps} from "@mui/material";
+"use client";
+import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { AlertProps } from "@mui/material";
+import React, { useState } from "react";
+import { PersonnelGridColumns, StemTreeDetailsGridColumns } from "@/config/sqlmacros";
+import { usePlotContext } from "@/app/contexts/userselectionprovider";
+import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
-import {MeasurementsSummaryGridColumns} from "@/config/sqlmacros";
-import {Box, Typography} from "@mui/joy";
-import {useSession} from "next-auth/react";
-import {usePlotContext} from "@/app/contexts/userselectionprovider";
-import {randomId} from "@mui/x-data-grid-generator";
+import { useSession } from "next-auth/react";
+import { Box, Typography } from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
-export default function SummaryPage() {
-  const {data: session} = useSession();
+export default function StemTreeDetailsPage() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      coreMeasurementID: 0,
-      plotName: '',
-      plotCensusNumber: 0,
-      censusStartDate: new Date(),
-      censusEndDate: new Date(),
-      quadratName: '',
-      treeTag: '',
+      stemID: 0,
       stemTag: '',
-      stemQuadX: 0,
-      stemQuadY: 0,
-      stemQuadZ: 0,
-      speciesName: '',
-      subSpeciesName: '',
-      genus: '',
-      family: '',
-      personnelName: '',
-      measurementDate: new Date(),
-      measuredDBH: 0.0,
-      measuredHOM: 0.0,
-      description: '',
-      attributes: '',
-    }
-  ];
+      treeID: 0,
+      treeTag: '',
+      speciesName: null,
+      subSpeciesName: null,
+      quadratName: null,
+      plotName: null,
+      locationName: null,
+      countryName: null,
+      quadratDimensionX: null,
+      quadratDimensionY: null,
+      stemQuadX: null,
+      stemQuadY: null,
+      stemDescription: null,
+    },
+  ]
   const [rows, setRows] = React.useState(initialRows);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
@@ -52,45 +45,43 @@ export default function SummaryPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const currentPlot = usePlotContext();
-  if (currentPlot) console.log(`current plot name: ${currentPlot.key}`);
-
+  let currentPlot = usePlotContext();
+  const { data: session } = useSession();
+  // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
-    // Define new row structure based on MeasurementsSummaryRDS type
+    // New row object
+    const nextStemID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.stemID, max), 0)
+      : 0) + 1;
+
     const newRow = {
       id: id,
-      coreMeasurementID: 0,
-      plotName: '',
-      plotCensusNumber: 0,
-      censusStartDate: new Date(),
-      censusEndDate: new Date(),
-      quadratName: '',
-      treeTag: '',
+      stemID: nextStemID,
       stemTag: '',
-      stemQuadX: 0,
-      stemQuadY: 0,
-      stemQuadZ: 0,
-      speciesName: '',
-      subSpeciesName: '',
-      genus: '',
-      family: '',
-      personnelName: '',
-      measurementDate: new Date(),
-      measuredDBH: 0.0,
-      measuredHOM: 0.0,
-      description: '',
-      attributes: '',
-      isNew: true,
+      treeID: 0,
+      treeTag: '',
+      speciesName: null,
+      subSpeciesName: null,
+      quadratName: null,
+      plotName: null,
+      locationName: null,
+      countryName: null,
+      quadratDimensionX: null,
+      quadratDimensionY: null,
+      stemQuadX: null,
+      stemQuadY: null,
+      stemDescription: null,
+      isNew: true
     };
+    // Add the new row to the state
     setRows(oldRows => [...oldRows, newRow]);
-    setRowModesModel(oldModel => ({...oldModel, [id]: {mode: GridRowModes.Edit}}));
+    // Set editing mode for the new row
+    setRowModesModel(oldModel => ({
+      ...oldModel,
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'stemTag' },
+    }));
   };
-
-  if (!currentPlot) {
-    return <>You must select a Plot to continue!</>;
-  }
-
   return (
     <>
       <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
@@ -123,8 +114,8 @@ export default function SummaryPage() {
 
       <DataGridCommons
         locked={true}
-        gridType="measurementsSummary"
-        gridColumns={MeasurementsSummaryGridColumns}
+        gridType="stemTreeDetails"
+        gridColumns={StemTreeDetailsGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

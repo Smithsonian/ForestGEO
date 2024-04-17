@@ -19,20 +19,23 @@ export default function LoginPage() {
   const [index, setIndex] = useState(0);
   const transitions = useTransition(index, {
     key: index,
-    from: {opacity: 0},
-    enter: {opacity: 0.5},
-    leave: {opacity: 0},
-    config: {duration: 5000},
+    from: { opacity: 0 },
+    enter: { opacity: 0.5 },
+    leave: { opacity: 0 },
+    config: { duration: 5000 },
     onRest: (_a, _b, item) => {
-      if (index == item) {
-        setIndex(state => (state + 1) % slides.length)
+      if (index === item) {
+        setIndex(state => (state + 1) % slides.length);
       }
     },
     exitBeforeEnter: true,
-  })
+  });
 
   useEffect(() => {
-    setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
+    const interval = setInterval(() => {
+      setIndex(state => (state + 1) % slides.length);
+    }, 5000);
+    return () => clearInterval(interval); // Clear the interval when the component unmounts or dependencies change
   }, []);
 
   if (status === "unauthenticated") {

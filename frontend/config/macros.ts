@@ -13,6 +13,7 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
+import BugReportSharp from '@mui/icons-material/BugReportSharp';
 import React, {Dispatch, SetStateAction} from "react";
 import {clearDataByKey, setData} from "@/config/db";
 import {CensusRDS, SitesRDS} from "@/config/sqlmacros";
@@ -20,6 +21,7 @@ import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import GridOnIcon from '@mui/icons-material/GridOn';
 import CloudCircleIcon from '@mui/icons-material/CloudCircle';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import HistoryEduIcon from "@mui/icons-material/HistoryEdu";
 
 export const FORMSEARCH_LIMIT: number = 3;
 
@@ -443,6 +445,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: VisibilityIcon
       },
+      {
+        label: "Stem and Tree Details",
+        href: "/stemtreedetails",
+        tip: '',
+        icon: HistoryEduIcon
+      },
       // {
       //   label: "Validation History",
       //   href: "/validationhistory",
@@ -492,6 +500,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         href: '/species',
         tip: '',
         icon: BugReportIcon,
+      },
+      {
+        label: 'Subspecies',
+        href: '/subspecies',
+        tip: '',
+        icon: BugReportSharp,
       }
     ]
   },
