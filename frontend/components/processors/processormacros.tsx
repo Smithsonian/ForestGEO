@@ -339,6 +339,24 @@ export interface ForestGEOMeasurementsSummaryResult {
   Attributes: any;
 }
 
+export interface StemTreeDetailsResult {
+  StemID: any;
+  StemTag: any;
+  TreeID: any;
+  TreeTag: any;
+  SpeciesName: any;
+  SubSpeciesName: any;
+  QuadratName: any;
+  PlotName: any;
+  LocationName: any;
+  CountryName: any;
+  QuadratDimensionX: any;
+  QuadratDimensionY: any;
+  StemQuadX: any;
+  StemQuadY: any;
+  StemDescription: any;
+}
+
 export interface CoreMeasurementsResult {
   CoreMeasurementID: any;
   CensusID: any;

@@ -5,7 +5,7 @@ import {DataGrid, GridColDef} from '@mui/x-data-grid';
 import {styled} from '@mui/material/styles';
 import moment from 'moment';
 
-export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
+export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
   border: 0,
   color:
     theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.85)',
@@ -29,12 +29,12 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   '& .MuiDataGrid-iconSeparator': {
     display: 'none',
   },
-  '& .MuiDataGrid-columnHeader, . MuiDataGrid-cell': {
+  '& .MuiDataGrid-columnHeader, & .MuiDataGrid-cell': { // Removed the space before '.MuiDataGrid-cell'
     borderRight: `1px solid ${
       theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'
     }`,
   },
-  '& .MuiDataGrid-columnsContainer, .MuiDataGrid-cell': {
+  '& .MuiDataGrid-columnsContainer, & .MuiDataGrid-cell': {
     borderBottom: `1px solid ${
       theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'
     }`,
@@ -53,6 +53,41 @@ export type SitesRDS = {
   siteName: string;
   schemaName: string;
 }
+
+export type StemTreeDetailsRDS = {
+  id: number;
+  stemID: number;
+  stemTag: string;
+  treeID: number;
+  treeTag: string;
+  speciesName: string | null;
+  subSpeciesName: string | null;
+  quadratName: string | null;
+  plotName: string | null;
+  locationName: string | null;
+  countryName: string | null;
+  quadratDimensionX: number | null;
+  quadratDimensionY: number | null;
+  stemQuadX: number | null;
+  stemQuadY: number | null;
+  stemDescription: string | null;
+}
+
+export const StemTreeDetailsGridColumns: GridColDef[] = [
+  {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subSpeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotName', headerName: 'Plot', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'locationName', headerName: 'Location', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'countryName', headerName: 'Country', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratDimensionX', headerName: 'QDimX', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratDimensionY', headerName: 'QDimY', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemQuadX', headerName: 'SQuadX', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemQuadY', headerName: 'SQuadY', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
+];
 
 
 export type MeasurementsSummaryRDS = {
@@ -79,7 +114,7 @@ export type MeasurementsSummaryRDS = {
   measuredHOM: number | null;
   description: string | null;
   attributes: string | null;
-  validationErrors: string[] | null;
+  // validationErrors: string[] | null;
 }
 
 export const MeasurementsSummaryGridColumns: GridColDef[] = [
@@ -694,3 +729,4 @@ export const ValidationChangelogGridColumns: GridColDef[] = [
   {field: 'expectedValueRange', headerName: 'Expected Range', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'additionalDetails', headerName: 'Details', headerClassName: 'header', flex: 1, align: 'left',},
 ]
+

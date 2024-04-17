@@ -136,6 +136,20 @@ interface ConfirmationDialogProps {
 }
 
 /**
+ * Function to determine if all entries in a column are null
+ */
+function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
+  return rows.every(row => row[field] === null || row[field] === undefined);
+}
+
+/**
+ * Function to filter out columns where all entries are null, except the actions column.
+ */
+function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
+  return columns.filter(col => col.field === 'actions' || !allValuesAreNull(rows, col.field));
+}
+
+/**
  * Renders common UI components for data grids.
  *
  * Handles state and logic for editing, saving, deleting rows, pagination,
@@ -358,27 +372,28 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setShowValidRows(event.target.checked)
   }
 
-  const handleAddNewRow = () => {
-    if (locked) return
-    console.log('handleAddNewRow triggered')
-    const newRowCount = rowCount + 1
-    const calculatedNewLastPage =
-      Math.ceil(newRowCount / paginationModel.pageSize) - 1
-    const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1
-    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1
-
-    setIsNewRowAdded(true)
-    setShouldAddRowAfterFetch(isNewPageNeeded)
-    setNewLastPage(calculatedNewLastPage) // update newLastPage state
-
+  const handleAddNewRow = async () => {
+    if (locked) return;
+    console.log('handleAddNewRow triggered');
+  
+    const newRowCount = rowCount + 1;
+    const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
+    const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
+    const isNewPageNeeded = newRowCount % paginationModel.pageSize === 1;
+  
+    setIsNewRowAdded(true);
+    setShouldAddRowAfterFetch(isNewPageNeeded);
+    setNewLastPage(calculatedNewLastPage); // Update newLastPage state
+  
     if (isNewPageNeeded) {
-      setPaginationModel({...paginationModel, page: calculatedNewLastPage})
+      await setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
+      addNewRowToGrid(); // Add the new row immediately after setting the page
     } else {
       // If no new page is needed, add the row immediately
-      setPaginationModel({...paginationModel, page: existingLastPage})
-      addNewRowToGrid()
+      setPaginationModel({ ...paginationModel, page: existingLastPage });
+      addNewRowToGrid();
     }
-  }
+  }  
 
   const handleRefresh = async () => {
     setRefresh(true)
@@ -517,7 +532,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             response = await fetch(fetchProcessQuery, {
               method: 'PATCH',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(newRow)
+              body: JSON.stringify({oldRow: oldRow, newRow: newRow})
             })
             responseJSON = await response.json()
             if (response.status > 299 || response.status < 200)
@@ -771,7 +786,10 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       return commonColumns // Return only the common columns when grid is locked
     }
     return [...commonColumns, getGridActionsColumn()] // Include actions column when grid is not locked
-  }, [modifiedColumns, locked])
+  }, [modifiedColumns, locked]);
+
+  // Use useMemo to dynamically filter out columns with all null values
+  const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
 
   // Function to check if any column in a row has an error
   const rowHasError = (rowId: GridRowId) => {
@@ -870,7 +888,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
           <StyledDataGrid
             sx={{width: '100%'}}
             rows={visibleRows}
-            columns={columns}
+            columns={filteredColumns}
             editMode='row'
             rowModesModel={rowModesModel}
             onRowModesModelChange={handleRowModesModelChange}
