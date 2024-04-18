@@ -1,9 +1,9 @@
 "use client";
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
-import React from 'react';
-import {keyframes} from '@emotion/react';
-import {Logo} from '@/components/icons';
+import React, { useEffect, useState } from 'react';
+import { keyframes } from '@emotion/react';
+import { Logo } from '@/components/icons';
 
 const generateForestColors = (): string[] => {
   const forestColors = [
@@ -29,20 +29,33 @@ const waveAnimation = keyframes`
   to { background-position: -200% 50%; }
 `;
 
-const RainbowIconWrapper = styled.div`
+interface RainbowIconWrapperProps {
+  animate: boolean;
+}
+
+const RainbowIconWrapper = styled.div<RainbowIconWrapperProps>`
   width: fit-content;
   height: fit-content;
   background: linear-gradient(90deg, ${generateForestColors().join(', ')});
   background-size: 300% 100%;
   filter: blur(0.2px);
-  animation: ${waveAnimation} 10s linear infinite;
-  mask: url(#logo-mask); // Apply the SVG mask
+  animation: ${({ animate }) => animate ? `${waveAnimation} 10s linear infinite` : 'none'};
+  mask: url(#logo-mask);
   -webkit-mask: url(#logo-mask);
 `;
 
 export const RainbowIcon: React.FC = () => {
+  const [animate, setAnimate] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAnimate(false);
+    }, 30000); // Stop the animation after 30 seconds
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
-    <RainbowIconWrapper>
+    <RainbowIconWrapper animate={animate}>
       <svg width="0" height="0">
         <mask id="logo-mask">
           <Logo fill="white"/> {/* Mask uses white to indicate visible areas */}
