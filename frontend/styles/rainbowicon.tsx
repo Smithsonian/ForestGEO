@@ -2,7 +2,7 @@
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
 import React, { useEffect, useState } from 'react';
-import { keyframes } from '@emotion/react';
+import { css, keyframes } from '@emotion/react';
 import { Logo } from '@/components/icons';
 
 const generateForestColors = (): string[] => {
@@ -39,7 +39,7 @@ const RainbowIconWrapper = styled.div<RainbowIconWrapperProps>`
   background: linear-gradient(90deg, ${generateForestColors().join(', ')});
   background-size: 300% 100%;
   filter: blur(0.2px);
-  animation: ${({ animate }) => animate ? `${waveAnimation} 10s linear infinite` : 'none'};
+  animation: ${({ animate }) => animate ? css`${waveAnimation} 10s linear infinite` : undefined};
   mask: url(#logo-mask);
   -webkit-mask: url(#logo-mask);
 `;

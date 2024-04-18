@@ -81,7 +81,6 @@ export default function AttributesPage() {
         setIsNewRowAdded={setIsNewRowAdded}
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-        currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
     </>

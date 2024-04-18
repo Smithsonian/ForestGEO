@@ -110,7 +110,6 @@ export default function PersonnelPage() {
         setIsNewRowAdded={setIsNewRowAdded}
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-        currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
     </>

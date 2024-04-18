@@ -162,7 +162,6 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
     valueGetter: (value: any) => {
       // Check if the date is present and valid
       if (!value || !moment(value).isValid()) return '';
-      console.log('measurements summary measurementDate value getter func params value: ', value);
       // Format the date
       return new Date(value).toDateString();
     },

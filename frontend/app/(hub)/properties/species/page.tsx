@@ -124,7 +124,6 @@ export default function SpeciesPage() {
         setIsNewRowAdded={setIsNewRowAdded}
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-        currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
     </>

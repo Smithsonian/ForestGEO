@@ -132,7 +132,6 @@ export default function StemTreeDetailsPage() {
         setIsNewRowAdded={setIsNewRowAdded}
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-        currentPlot={currentPlot}
         addNewRowToGrid={addNewRowToGrid}
       />
     </>

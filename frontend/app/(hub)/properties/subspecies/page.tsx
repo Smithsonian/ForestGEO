@@ -83,7 +83,6 @@ export default function SubSpeciesPage() {
       setIsNewRowAdded={setIsNewRowAdded}
       shouldAddRowAfterFetch={shouldAddRowAfterFetch}
       setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-      currentPlot={currentPlot}
       addNewRowToGrid={addNewRowToGrid}
     />
   );
