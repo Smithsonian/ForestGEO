@@ -2,14 +2,7 @@
 import React, {useEffect, useState} from 'react';
 import {
   Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
   LinearProgress,
-  TextField,
   Typography
 } from '@mui/material';
 import {ReviewStates, UploadValidationProps} from "@/config/macros";
@@ -31,12 +24,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [minMaxValues, setMinMaxValues] = useState<Record<string, { min?: number, max?: number }>>({});
 
-  const [promptOpen, setPromptOpen] = useState<boolean>(false);
-  const [currentPromptApi, setCurrentPromptApi] = useState<string>('');
-  const [tempMinMax, setTempMinMax] = useState<{ min: number | string, max: number | string }>({min: '', max: ''});
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
   const [useDefaultValues, setUseDefaultValues] = useState<boolean>(false);
-  const [defaultValuesDialogOpen, setDefaultValuesDialogOpen] = useState<boolean>(true);
   // Add new state for countdown timer
   const [countdown, setCountdown] = useState(5);
   const {setLoading} = useLoading();
@@ -44,7 +33,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const defaultMinMaxValues: Record<string, { min?: number, max?: number }> = {
     'ValidateScreenMeasuredDiameterMinMax': {min: undefined, max: undefined},
     'ValidateHOMUpperAndLowerBounds': {min: undefined, max: undefined},
-    // ... [other default values]
   };
   useEffect(() => {
     setLoading(true, 'Loading Validations...');
@@ -61,39 +49,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       .catch(error => console.error('Error fetching validation messages:', error));
   }, []);
 
-  const handleDefaultValuesSelection = (useDefaults: boolean) => {
-    setUseDefaultValues(useDefaults);
-    setDefaultValuesDialogOpen(false);
-
-    if (useDefaults) {
-      setMinMaxValues(defaultMinMaxValues);
-      showNextPrompt(0, false).catch(console.error);
-    } else {
-      promptForInput('ValidateScreenMeasuredDiameterMinMax');
-    }
-  };
-
-  const promptForInput = (api: string) => {
-    setCurrentPromptApi(api);
-    setPromptOpen(true);
-    setTempMinMax({min: '', max: ''}); // Reset input fields
-  };
-
-  const handlePromptClose = () => {
-    const newMinMax = {min: Number(tempMinMax.min), max: Number(tempMinMax.max)};
-
-    // Update minMaxValues for the current prompt
-    setMinMaxValues(prev => ({...prev, [currentPromptApi]: newMinMax}));
-    setPromptOpen(false);
-
-    if (currentPromptApi === 'ValidateScreenMeasuredDiameterMinMax') {
-      // Move to the HOM prompt next
-      promptForInput('ValidateHOMUpperAndLowerBounds');
-    } else if (currentPromptApi === 'ValidateHOMUpperAndLowerBounds') {
-      // Start validations after both prompts are done
-      showNextPrompt(0, false).catch(console.error);
-    }
-  };
 
   const showNextPrompt = async (index: number, foundError: boolean = false) => {
     if (index >= Object.keys(validationMessages).length) {
@@ -113,7 +68,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
 
   const performValidation = async (api: string): Promise<{ response: ValidationResponse, hasError: boolean }> => {
     let queryParams = `schema=${schema}&plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`;
-    if (!useDefaultValues && ['ValidateScreenMeasuredDiameterMinMax', 'ValidateHOMUpperAndLowerBounds'].includes(api)) {
+    if (['ValidateScreenMeasuredDiameterMinMax', 'ValidateHOMUpperAndLowerBounds'].includes(api)) {
       const values = minMaxValues[api] || defaultMinMaxValues[api];
       queryParams += `&minValue=${values.min}&maxValue=${values.max}`;
     }
@@ -142,57 +97,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     ));
   };
 
-  const renderPromptModal = () => {
-    return (
-      <Dialog open={promptOpen} onClose={handlePromptClose}>
-        <DialogTitle>Enter Min and Max Values</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Please enter the minimum and maximum values for {currentPromptApi}.
-          </DialogContentText>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Min Value"
-            type="number"
-            fullWidth
-            variant="outlined"
-            value={tempMinMax.min}
-            onChange={(e) => setTempMinMax({...tempMinMax, min: e.target.value})}
-          />
-          <TextField
-            margin="dense"
-            label="Max Value"
-            type="number"
-            fullWidth
-            variant="outlined"
-            value={tempMinMax.max}
-            onChange={(e) => setTempMinMax({...tempMinMax, max: e.target.value})}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button sx={{width: 'fit-content'}} onClick={handlePromptClose}>Submit</Button>
-        </DialogActions>
-      </Dialog>
-    );
-  };
 
-  const renderDefaultValuesDialog = () => {
-    return (
-      <Dialog open={defaultValuesDialogOpen} onClose={() => handleDefaultValuesSelection(false)}>
-        <DialogTitle>Validation Parameters</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Would you like to use default values for validation parameters or provide them manually?
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => handleDefaultValuesSelection(true)}>Use Default Values</Button>
-          <Button onClick={() => handleDefaultValuesSelection(false)}>Manual Input</Button>
-        </DialogActions>
-      </Dialog>
-    );
-  };
 
   // Effect for handling countdown and state transition
   useEffect(() => {
@@ -212,9 +117,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
     <>
       {Object.keys(validationMessages).length > 0 && (
         <Box sx={{width: '100%', p: 2, display: 'flex', flex: 1, flexDirection: 'column'}}>
-          {renderDefaultValuesDialog()}
-          {renderPromptModal()}
-
           {!isValidationComplete ? (
             <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
               <Typography variant="h6">Validating data...</Typography>

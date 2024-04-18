@@ -31,11 +31,9 @@ export default function LoginPage() {
     exitBeforeEnter: true,
   });
 
+  // feedback received -- endless loop will consume too many resources and needs to be removed. Single loop through all slides should suffice.
   useEffect(() => {
-    const interval = setInterval(() => {
-      setIndex(state => (state + 1) % slides.length);
-    }, 5000);
-    return () => clearInterval(interval); // Clear the interval when the component unmounts or dependencies change
+    setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
   }, []);
 
   if (status === "unauthenticated") {

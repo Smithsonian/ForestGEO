@@ -456,14 +456,6 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
               <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
               {/* Remaining Parts of Navigation Menu -- want this to be accessible from plot selection since not all links need census selection */}
-              <SlideToggle isOpen={!isCensusSelectionRequired}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', marginTop: 1 }}>
-                  <Typography level="body-lg" color='neutral'>Azure Storage Container:</Typography>
-                  <Typography level="body-md"
-                    color='primary'>{currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}</Typography>
-                  <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
-                </Box>
-              </SlideToggle>
               <Box
                 sx={{
                   minHeight: 0,
