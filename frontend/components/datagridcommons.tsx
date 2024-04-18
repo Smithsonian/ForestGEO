@@ -49,7 +49,7 @@ import {
 import { CMError, Plot } from "@/config/macros";
 import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 import { useSession } from "next-auth/react";
-import { useSiteContext } from "@/app/contexts/userselectionprovider";
+import { useCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { saveAs } from 'file-saver';
 
 interface EditToolbarCustomProps {
@@ -116,8 +116,6 @@ export interface DataGridCommonProps {
   setIsNewRowAdded: Dispatch<SetStateAction<boolean>>;
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
-  currentPlot: Plot | null;
-  currentCensus?: CensusRDS | null;
   addNewRowToGrid: () => void;
   locked?: boolean;
 }
@@ -177,8 +175,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setIsNewRowAdded,
     shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
-    currentPlot,
-    currentCensus,
     locked = false
   } = props
 
@@ -191,6 +187,9 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const [showValidRows, setShowValidRows] = useState<boolean>(true)
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false)
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
+
+  const currentPlot = usePlotContext();
+  const currentCensus = useCensusContext();
 
 
   const [pendingAction, setPendingAction] = useState<PendingAction>({
@@ -209,42 +208,86 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     });
 
   const extractErrorRows = () => {
-    if (gridType !== 'measurementsSummary') return;
+    if (gridType !== 'measurementsSummary' || errorRowsForExport.length > 0) return;
+
+    // Assuming fetchErrorRows is an async function that sets state with the fetched rows
+    fetchErrorRows().then(fetchedRows => {
+      setErrorRowsForExport(fetchedRows);
+    });
+  };
+
+  const fetchErrorRows = async () => {
+    // Simulate fetching data
     const errorRows = rows.filter(row => rowHasError(row.id));
-    setErrorRowsForExport(errorRows);
+    return errorRows;
+  };
+
+  // useEffect to trigger print when errorRowsForExport is updated and has items
+  useEffect(() => {
+    if (errorRowsForExport.length > 0) {
+      printErrorRows(); // Call print function directly if data is ready
+    }
+  }, [errorRowsForExport]); // Dependency on errorRowsForExport ensures re-evaluation when it changes
+
+
+  const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return [];
+    return error.ValidationErrorIDs.map(id => {
+      const index = error.ValidationErrorIDs.indexOf(id);
+      return error.Descriptions[index]; // Assumes that descriptions are stored in the CMError object
+    });
   };
 
   const saveErrorRowsAsCSV = () => {
     if (gridType !== 'measurementsSummary') return;
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += gridColumns.map(col => col.headerName).join(",") + "\r\n"; // Column headers
+    csvContent += gridColumns.map(col => col.headerName).concat("Validation Errors").join(",") + "\r\n"; // Add "Validation Errors" column header
+
     errorRowsForExport.forEach(row => {
       const rowValues = gridColumns.map(col => row[col.field] ?? '').join(",");
-      csvContent += rowValues + "\r\n";
+      const errorDescriptions = getRowErrorDescriptions(row.id).join("; "); // Function to retrieve error descriptions for a row
+      csvContent += `${rowValues},"${errorDescriptions}"\r\n`;
     });
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     saveAs(blob, `validation_errors_${currentPlot?.key}.csv`);
   };
 
+
   const printErrorRows = () => {
     if (gridType !== 'measurementsSummary') return;
+
+    if (errorRowsForExport.length === 0) {
+      extractErrorRows();
+      return; // Exit and let useEffect handle the re-triggering
+    }
+
     let printContent = "<html><head><style>";
     printContent += "table {width: 100%; border-collapse: collapse;}";
     printContent += "th, td {border: 1px solid black; padding: 8px; text-align: left;}";
     printContent += "</style></head><body>";
+    printContent += `<h5>Site: ${currentSite?.schemaName} | Plot: ${currentPlot?.key} | Census: ${currentCensus?.plotCensusNumber}</h5>`;
     printContent += "<table><thead><tr>";
 
     gridColumns.forEach(col => {
       printContent += `<th>${col.headerName}</th>`;
     });
+    printContent += "<th>Validation Errors</th>"; // Add error header
     printContent += "</tr></thead><tbody>";
 
     errorRowsForExport.forEach(row => {
       printContent += "<tr>";
       gridColumns.forEach(col => {
-        printContent += `<td>${row[col.field] ?? ''}</td>`;
+        console.log('column fields: ', col.field);
+        if (col.field === "measurementDate") {
+          printContent += `<td>${new Date(row[col.field]).toDateString() ?? ''}</td>`;
+        } else {
+          printContent += `<td>${row[col.field] ?? ''}</td>`;
+        }
       });
+      const errorDescriptions = getRowErrorDescriptions(row.id).join("; ");
+      printContent += `<td>${errorDescriptions}</td>`; // Print error descriptions
       printContent += "</tr>";
     });
 
@@ -257,15 +300,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       printWindow.print();
     }
   };
-
-  // UI Button to trigger export
-  const ExportErrorsButton = () => (
-    gridType === 'measurementsSummary' && (
-      <Button color="secondary" onClick={extractErrorRows}>
-        Export Errors
-      </Button>
-    )
-  );
 
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
@@ -864,23 +898,25 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
           {gridType === 'measurementsSummary' && (
-            <Stack direction={'row'}>
+            <Stack direction={'row'} justifyContent="space-between">
+              <Stack direction='row'>
+                <Typography>
+                  <Checkbox
+                    checked={showErrorRows}
+                    onChange={handleShowErrorRowsChange}
+                  />
+                  Show rows with errors: ({errorRowCount})
+                </Typography>
+                <Typography>
+                  <Checkbox
+                    checked={showValidRows}
+                    onChange={handleShowValidRowsChange}
+                  />
+                  Show rows without errors: ({rows.length - errorRowCount})
+                </Typography>
+              </Stack>
+
               <Box>
-                <Checkbox
-                  checked={showErrorRows}
-                  onChange={handleShowErrorRowsChange}
-                />
-                Show rows with errors: ({errorRowCount})
-              </Box>
-              <Box>
-                <Checkbox
-                  checked={showValidRows}
-                  onChange={handleShowValidRowsChange}
-                />
-                Show rows without errors: ({rows.length - errorRowCount})
-              </Box>
-              <Box>
-                <ExportErrorsButton />
                 <Button color="primary" onClick={saveErrorRowsAsCSV}>
                   Save Errors as CSV
                 </Button>

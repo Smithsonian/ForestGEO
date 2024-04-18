@@ -196,8 +196,6 @@ export default function CensusPage() {
         setIsNewRowAdded={setIsNewRowAdded}
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-        currentPlot={currentPlot}
-        currentCensus={currentCensus}
         addNewRowToGrid={addNewRowToGrid}
       />
     </>
