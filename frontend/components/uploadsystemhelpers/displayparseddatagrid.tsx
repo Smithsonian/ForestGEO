@@ -10,9 +10,9 @@ import {
   FileRow,
   RequiredTableHeadersByFormType,
   TableHeadersByFormType
-} from '@/config/macros'
+} from "@/config/macros/formdetails"
 import {GridCellParams, GridColDef, GridRowModel, GridRowsProp} from '@mui/x-data-grid'
-import {StyledDataGrid} from '@/config/sqlmacros'
+import {StyledDataGrid} from '@/config/styleddatagrid'
 
 export interface ValidationTableProps {
   /** An array of uploaded data. */

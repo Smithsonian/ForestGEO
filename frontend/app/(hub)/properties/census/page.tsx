@@ -2,7 +2,7 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useEffect, useState} from "react";
-import {CensusGridColumns} from "@/config/sqlmacros";
+import {CensusGridColumns} from '@/config/sqlrdsdefinitions/censusrds';
 import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";

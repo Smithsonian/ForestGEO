@@ -1,7 +1,10 @@
 "use client";
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Typography} from '@mui/material';
-import {FileCollectionRowSet, FileRow, formatDate, ReviewStates, UploadFireProps} from '@/config/macros';
+import {formatDate} from '@/config/macros';
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadFireProps} from "@/config/macros/uploadsystemmacros";
+import {FileCollectionRowSet, FileRow} from "@/config/macros/formdetails";
 import {Stack} from "@mui/joy";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";

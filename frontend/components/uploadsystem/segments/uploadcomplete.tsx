@@ -1,6 +1,6 @@
 "use client";
 
-import {UploadCompleteProps} from "@/config/macros";
+import {UploadCompleteProps} from "@/config/macros/uploadsystemmacros";
 import Typography from "@mui/joy/Typography";
 import {Box} from "@mui/joy";
 import {redirect} from "next/navigation";

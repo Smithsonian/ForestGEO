@@ -8,7 +8,7 @@ import ListDivider from '@mui/joy/ListDivider';
 import ListItem from '@mui/joy/ListItem';
 import Typography from '@mui/joy/Typography';
 import Check from '@mui/icons-material/Check';
-import {FormGroups, TableHeadersByFormType} from "@/config/macros";
+import {FormGroups, TableHeadersByFormType} from "@/config/macros/formdetails";
 
 interface SelectFormTypeProps {
   externalState: string;

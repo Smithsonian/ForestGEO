@@ -1,16 +1,16 @@
 "use client";
 import React, {createContext, Dispatch, useContext, useEffect, useReducer} from 'react';
 import {
-  Census,
   createEnhancedDispatch,
   EnhancedDispatch,
   genericLoadReducer,
-  LoadAction,
-  Plot,
-  Quadrat
-} from "@/config/macros";
+  LoadAction
+} from "@/config/macros/contextreducers";
+import {Census} from "@/config/sqlrdsdefinitions/censusrds";
+import {Quadrat} from "@/config/sqlrdsdefinitions/quadratrds";
+import {Plot} from "@/config/sqlrdsdefinitions/plotrds";
 import {getData} from "@/config/db";
-import {SitesRDS} from "@/config/sqlmacros";
+import {SitesRDS} from '@/config/sqlrdsdefinitions/sitesrds';
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const QuadratListContext = createContext<Quadrat[] | null>(null);

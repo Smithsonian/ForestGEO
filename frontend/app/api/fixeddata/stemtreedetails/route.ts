@@ -1,10 +1,9 @@
 // FIXED DATA PERSONNEL ROUTE HANDLERS
-import { NextRequest, NextResponse } from "next/server";
-import { ErrorMessages } from "@/config/macros";
-import { StemTreeDetailsRDS } from "@/config/sqlmacros";
-import { getConn, StemTreeDetailsResult, runQuery } from "@/components/processors/processormacros";
-import mysql, { PoolConnection } from "mysql2/promise";
-import { stemTreeDetailsFields, computeMutation } from "@/config/datagridhelpers";
+import {NextRequest, NextResponse} from "next/server";
+import {StemTreeDetailsRDS, StemTreeDetailsResult} from '@/config/sqlrdsdefinitions/stemtreerds';
+import {getConn, runQuery} from "@/components/processors/processormacros";
+import mysql, {PoolConnection} from "mysql2/promise";
+import {computeMutation, stemTreeDetailsFields} from "@/config/datagridhelpers";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{
   stemTreeDetails: StemTreeDetailsRDS[],
@@ -60,7 +59,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     }));
     console.log(stemTreeDetailRows);
 
-    return new NextResponse(JSON.stringify({ stemTreeDetails: stemTreeDetailRows, totalCount: totalRows }), { status: 200 });
+    return new NextResponse(JSON.stringify({
+      stemTreeDetails: stemTreeDetailRows,
+      totalCount: totalRows
+    }), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
     throw new Error('Failed to fetch personnel data');
@@ -107,12 +109,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
 
     await conn.commit();
-    return NextResponse.json({ message: "Updates successful" }, { status: 200 });
+    return NextResponse.json({message: "Updates successful"}, {status: 200});
   } catch (error: any) {
     if (conn) {
       await conn.rollback();
       console.error('Error in PATCH:', error);
-      return NextResponse.json({ message: "Update failed", details: error.message }, { status: 400 });
+      return NextResponse.json({message: "Update failed", details: error.message}, {status: 400});
     }
     throw error; // Re-throw the error if conn is null
   } finally {

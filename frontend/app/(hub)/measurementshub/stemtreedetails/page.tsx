@@ -1,13 +1,13 @@
 "use client";
-import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
-import { AlertProps } from "@mui/material";
-import React, { useState } from "react";
-import { PersonnelGridColumns, StemTreeDetailsGridColumns } from "@/config/sqlmacros";
-import { usePlotContext } from "@/app/contexts/userselectionprovider";
-import { randomId } from "@mui/x-data-grid-generator";
+import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {AlertProps} from "@mui/material";
+import React, {useState} from "react";
+import {StemTreeDetailsGridColumns} from '@/config/sqlrdsdefinitions/stemtreerds';
+import {usePlotContext} from "@/app/contexts/userselectionprovider";
+import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
-import { useSession } from "next-auth/react";
-import { Box, Typography } from "@mui/joy";
+import {useSession} from "next-auth/react";
+import {Box, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function StemTreeDetailsPage() {
@@ -46,7 +46,7 @@ export default function StemTreeDetailsPage() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   let currentPlot = usePlotContext();
-  const { data: session } = useSession();
+  const {data: session} = useSession();
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -79,7 +79,7 @@ export default function StemTreeDetailsPage() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'stemTag' },
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'stemTag'},
     }));
   };
   return (

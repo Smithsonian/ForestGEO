@@ -2,7 +2,7 @@
 import NextAuth, {AzureADProfile} from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import {getAllowedSchemas, getAllSchemas, verifyEmail} from "@/components/processors/processorhelperfunctions";
-import {SitesRDS} from "@/config/sqlmacros";
+import {SitesRDS} from '@/config/sqlrdsdefinitions/sitesrds';
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,

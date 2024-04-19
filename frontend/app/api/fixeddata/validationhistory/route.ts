@@ -1,5 +1,5 @@
 import {getConn, runQuery} from "@/components/processors/processormacros";
-import {ValidationChangelogRDS} from "@/config/sqlmacros";
+import {ValidationChangelogRDS} from '@/config/sqlrdsdefinitions/valchangelogrds';
 import {PoolConnection} from "mysql2/promise";
 import {NextRequest, NextResponse} from "next/server";
 
