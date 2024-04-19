@@ -19,10 +19,10 @@ export default function LoginPage() {
   const [index, setIndex] = useState(0);
   const transitions = useTransition(index, {
     key: index,
-    from: { opacity: 0 },
-    enter: { opacity: 0.5 },
-    leave: { opacity: 0 },
-    config: { duration: 5000 },
+    from: {opacity: 0},
+    enter: {opacity: 0.5},
+    leave: {opacity: 0},
+    config: {duration: 5000},
     onRest: (_a, _b, item) => {
       if (index === item) {
         setIndex(state => (state + 1) % slides.length);

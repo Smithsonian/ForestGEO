@@ -2,7 +2,8 @@
 import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useCallback, useState} from "react";
-import {PersonnelRDS, QuadratsGridColumns as BaseQuadratsGridColumns} from "@/config/sqlmacros";
+import {QuadratsGridColumns as BaseQuadratsGridColumns} from '@/config/sqlrdsdefinitions/quadratrds';
+import {PersonnelRDS} from '@/config/sqlrdsdefinitions/personnelrds';
 import {usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";

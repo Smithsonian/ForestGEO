@@ -1,7 +1,8 @@
 "use client";
 
 import React, {useCallback, useEffect, useRef, useState} from "react";
-import {ReviewStates, UploadFireAzureProps} from "@/config/macros";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadFireAzureProps} from "@/config/macros/uploadsystemmacros";
 import {FileWithPath} from "react-dropzone";
 import {Box, Typography} from "@mui/material";
 import {Stack} from "@mui/joy";

@@ -13,7 +13,11 @@ import {
   TableRow,
   Typography
 } from '@mui/material';
-import {CMError, FileRow, formatDate, ReviewStates, UploadValidationErrorDisplayProps} from '@/config/macros';
+import {formatDate} from '@/config/macros';
+import {CMError} from "@/config/macros/uploadsystemmacros";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadValidationErrorDisplayProps} from "@/config/macros/uploadsystemmacros";
+import {FileRow} from "@/config/macros/formdetails";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import {Button, CircularProgress} from '@mui/joy';
 

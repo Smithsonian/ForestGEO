@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {CMError} from "@/config/macros";
+import {CMError} from "@/config/macros/uploadsystemmacros";
 
 export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;

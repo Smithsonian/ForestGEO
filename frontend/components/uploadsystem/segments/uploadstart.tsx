@@ -1,7 +1,8 @@
 "use client";
 
 import {Box, Button} from "@mui/material";
-import {ReviewStates, UploadStartProps} from "@/config/macros";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadStartProps} from "@/config/macros/uploadsystemmacros";
 import {ListSubheader, Stack, Tooltip, Typography} from "@mui/joy";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import React, {useEffect, useState} from "react";

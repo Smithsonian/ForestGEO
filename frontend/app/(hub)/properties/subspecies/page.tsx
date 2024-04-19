@@ -2,7 +2,7 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
-import {AttributeGridColumns, SubSpeciesGridColumns} from "@/config/sqlmacros";
+import {SubSpeciesGridColumns} from '@/config/sqlrdsdefinitions/subspeciesrds';
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";

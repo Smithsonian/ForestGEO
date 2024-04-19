@@ -1,8 +1,8 @@
 // FIXED DATA SUBSPECIES  ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {bitToBoolean, ErrorMessages, HTTPResponses} from "@/config/macros";
-import {SubSpeciesRDS} from "@/config/sqlmacros";
-import {getConn, parseSubSpeciesRequestBody, runQuery, SubSpeciesResult} from "@/components/processors/processormacros";
+import {SubSpeciesRDS, SubSpeciesResult} from '@/config/sqlrdsdefinitions/subspeciesrds';
+import {getConn, parseSubSpeciesRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{

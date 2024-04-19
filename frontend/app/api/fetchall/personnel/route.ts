@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
-import {PersonnelRDS} from "@/config/sqlmacros";
+import {PersonnelRDS, PersonnelResult} from '@/config/sqlrdsdefinitions/personnelrds';
 import {PoolConnection} from "mysql2/promise";
-import {getConn, PersonnelResult, runQuery} from "@/components/processors/processormacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');

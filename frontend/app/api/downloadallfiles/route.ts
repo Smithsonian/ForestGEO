@@ -1,6 +1,6 @@
 // DOWNLOAD ALL FILES ROUTE HANDLER
 import {NextRequest, NextResponse} from "next/server";
-import {getContainerClient} from "@/config/macros";
+import {getContainerClient} from "@/config/macros/azurestorage";
 
 
 export async function GET(request: NextRequest, response: NextResponse) {

@@ -13,7 +13,8 @@ import {
   Tooltip,
   Typography
 } from "@mui/joy";
-import {TableHeadersByFormType, UploadParseFilesProps} from "@/config/macros";
+import {UploadParseFilesProps} from "@/config/macros/uploadsystemmacros";
+import {TableHeadersByFormType} from "@/config/macros/formdetails";
 import {Button, Grid} from "@mui/material";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
 import {FileList} from "@/components/uploadsystemhelpers/filelist";

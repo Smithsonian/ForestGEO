@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {AttributesRDS} from "@/config/sqlmacros";
+import {AttributesRDS} from '@/config/sqlrdsdefinitions/attributerds';
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
 

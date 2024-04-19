@@ -1,12 +1,6 @@
-import {
-  bitToBoolean,
-  createEnhancedDispatch,
-  FileRowErrors,
-  formatDate,
-  genericLoadContextReducer,
-  genericLoadReducer,
-  uploadValidFileAsBuffer
-} from '@/config/macros';
+import {bitToBoolean, formatDate} from '@/config/macros';
+import {FileRowErrors, uploadValidFileAsBuffer} from "@/config/macros/azurestorage";
+import {createEnhancedDispatch, genericLoadContextReducer, genericLoadReducer} from "@/config/macros/contextreducers";
 import {ContainerClient} from '@azure/storage-blob';
 import '@testing-library/jest-dom';
 

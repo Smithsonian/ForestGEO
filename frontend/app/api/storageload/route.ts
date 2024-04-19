@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getContainerClient, HTTPResponses, uploadValidFileAsBuffer} from "@/config/macros";
+import {HTTPResponses} from "@/config/macros";
+import {getContainerClient, uploadValidFileAsBuffer} from "@/config/macros/azurestorage";
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData();

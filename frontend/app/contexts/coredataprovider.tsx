@@ -1,18 +1,21 @@
 "use client";
 
 import React, {createContext, useContext, useEffect, useReducer} from "react";
-import {
-  AttributesRDS,
-  CensusRDS,
-  CoreMeasurementsRDS,
-  PersonnelRDS,
-  PlotRDS,
-  QuadratsRDS,
-  SpeciesRDS,
-  SubSpeciesRDS
-} from "@/config/sqlmacros";
+import {SubSpeciesRDS} from '@/config/sqlrdsdefinitions/subspeciesrds';
+import {SpeciesRDS} from '@/config/sqlrdsdefinitions/speciesrds';
+import {QuadratsRDS} from '@/config/sqlrdsdefinitions/quadratrds';
+import {PlotRDS} from '@/config/sqlrdsdefinitions/plotrds';
+import {PersonnelRDS} from '@/config/sqlrdsdefinitions/personnelrds';
+import {CoreMeasurementsRDS} from '@/config/sqlrdsdefinitions/coremeasurementsrds';
+import {CensusRDS} from '@/config/sqlrdsdefinitions/censusrds';
+import {AttributesRDS} from '@/config/sqlrdsdefinitions/attributerds';
 import {getData} from "@/config/db";
-import {createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction} from "@/config/macros";
+import {
+  createEnhancedDispatch,
+  EnhancedDispatch,
+  genericLoadReducer,
+  LoadAction
+} from "@/config/macros/contextreducers";
 
 export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | null>(null);
 export const AttributeLoadContext = createContext<AttributesRDS[] | null>(null);

@@ -5,7 +5,8 @@ import {
   LinearProgress,
   Typography
 } from '@mui/material';
-import {ReviewStates, UploadValidationProps} from "@/config/macros";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadValidationProps} from "@/config/macros/uploadsystemmacros";
 import {ValidationResponse} from "@/components/processors/processormacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {useLoading} from '@/app/contexts/loadingprovider';
@@ -96,7 +97,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
       </Box>
     ));
   };
-
 
 
   // Effect for handling countdown and state transition

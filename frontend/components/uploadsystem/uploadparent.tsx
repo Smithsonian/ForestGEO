@@ -1,15 +1,16 @@
 "use client";
 import React, {useEffect, useState} from "react";
+import {CMError} from "@/config/macros/uploadsystemmacros";
 import {
-  CMError,
+  ReviewProgress,
+  ReviewStates
+} from "@/config/macros/uploadsystemmacros";
+import {
   FileCollectionRowSet,
   FileRow,
   FileRowSet,
-  RequiredTableHeadersByFormType,
-  ReviewProgress,
-  ReviewStates,
-  TableHeadersByFormType
-} from "@/config/macros";
+  RequiredTableHeadersByFormType, TableHeadersByFormType
+} from "@/config/macros/formdetails";
 import {FileWithPath} from "react-dropzone";
 import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";

@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {getContainerClient} from "@/config/macros";
+import {getContainerClient} from "@/config/macros/azurestorage";
 
 export async function DELETE(request: NextRequest) {
   const containerName = request.nextUrl.searchParams.get('container');

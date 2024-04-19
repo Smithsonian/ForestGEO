@@ -17,7 +17,7 @@ import {
   useSiteListDispatch
 } from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
-import {siteConfig} from "@/config/macros";
+import {siteConfig} from "@/config/macros/siteconfigs";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
 import {Box} from "@mui/joy";

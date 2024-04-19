@@ -1,7 +1,10 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
-import {ForestGEOMeasurementsSummaryResult, getConn, runQuery} from "@/components/processors/processormacros";
-import {MeasurementsSummaryRDS} from "@/config/sqlmacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
+import {
+  ForestGEOMeasurementsSummaryResult,
+  MeasurementsSummaryRDS
+} from '@/config/sqlrdsdefinitions/measurementssummaryrds';
 
 interface ValidationErrorResult {
   CoreMeasurementID: number;
@@ -47,29 +50,29 @@ export async function GET(request: NextRequest): Promise<NextResponse<MSOutput>>
     // Run the paginated query
     const paginatedResults = await runQuery(conn, paginatedQuery, queryParams.map(param => param.toString()));
 
-     // Query to get the total count of rows
-     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
-     const totalRowsResult = await runQuery(conn, totalRowsQuery);
-     console.log(totalRowsResult);
-     const totalRows = totalRowsResult[0].totalRows;
-     
-  //   const coreMeasurementIDs = paginatedResults.map((row: ForestGEOMeasurementsSummaryResult) => row.CoreMeasurementID);
+    // Query to get the total count of rows
+    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    console.log(totalRowsResult);
+    const totalRows = totalRowsResult[0].totalRows;
 
-  //   // Fetch Validation States with descriptions
-  //   const validationQuery = `
-  //     SELECT cmv.CoreMeasurementID, GROUP_CONCAT(ve.ValidationErrorID SEPARATOR '; ') AS ValidationErrors
-  //     FROM ${schema}.cmverrors cmv
-  //     JOIN ${schema}.validationerrors ve ON cmv.ValidationErrorID = ve.ValidationErrorID
-  //     WHERE cmv.CoreMeasurementID IN (?)
-  //     GROUP BY cmv.CoreMeasurementID
-  // `;
-  //   const validationResults: ValidationErrorResult[] = await runQuery(conn, validationQuery, [coreMeasurementIDs.map((param: any) => param.toString())]);
+    //   const coreMeasurementIDs = paginatedResults.map((row: ForestGEOMeasurementsSummaryResult) => row.CoreMeasurementID);
 
-  //   // Map Validation States to CoreMeasurementIDs with descriptions as an array
-  //   const validationMap = validationResults.reduce<Record<number, string[]>>((acc, val) => {
-  //     acc[val.CoreMeasurementID] = val.ValidationErrors.split('; ');
-  //     return acc;
-  //   }, {});
+    //   // Fetch Validation States with descriptions
+    //   const validationQuery = `
+    //     SELECT cmv.CoreMeasurementID, GROUP_CONCAT(ve.ValidationErrorID SEPARATOR '; ') AS ValidationErrors
+    //     FROM ${schema}.cmverrors cmv
+    //     JOIN ${schema}.validationerrors ve ON cmv.ValidationErrorID = ve.ValidationErrorID
+    //     WHERE cmv.CoreMeasurementID IN (?)
+    //     GROUP BY cmv.CoreMeasurementID
+    // `;
+    //   const validationResults: ValidationErrorResult[] = await runQuery(conn, validationQuery, [coreMeasurementIDs.map((param: any) => param.toString())]);
+
+    //   // Map Validation States to CoreMeasurementIDs with descriptions as an array
+    //   const validationMap = validationResults.reduce<Record<number, string[]>>((acc, val) => {
+    //     acc[val.CoreMeasurementID] = val.ValidationErrors.split('; ');
+    //     return acc;
+    //   }, {});
 
     let measurementsSummaryRows: MeasurementsSummaryRDS[] = paginatedResults.map((row: ForestGEOMeasurementsSummaryResult, index: number) => ({
       id: index + 1,

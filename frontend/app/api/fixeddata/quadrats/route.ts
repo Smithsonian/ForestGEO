@@ -2,7 +2,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, parseQuadratsRequestBody, runQuery} from "@/components/processors/processormacros";
 import {ErrorMessages} from "@/config/macros";
-import {QuadratsRDS} from "@/config/sqlmacros";
+import {QuadratsRDS} from '@/config/sqlrdsdefinitions/quadratrds';
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{

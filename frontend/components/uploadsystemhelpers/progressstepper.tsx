@@ -1,7 +1,8 @@
 "use client";
 
 import React, {useEffect} from "react";
-import {ProgressStepperProps, ReviewProgress, ReviewStates} from "@/config/macros";
+import {ReviewProgress, ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {ProgressStepperProps} from "@/config/macros/uploadsystemmacros";
 import {Step, stepClasses, StepIndicator, stepIndicatorClasses, Stepper, Typography} from "@mui/joy";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownRounded";

@@ -1,7 +1,8 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {FileRow, FileRowSet, HTTPResponses} from "@/config/macros";
+import {HTTPResponses} from "@/config/macros";
+import {FileRow, FileRowSet} from "@/config/macros/formdetails";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
 
 export async function POST(request: NextRequest) {

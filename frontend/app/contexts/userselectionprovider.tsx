@@ -4,15 +4,15 @@ import {
   createEnhancedDispatch,
   EnhancedDispatch,
   genericLoadContextReducer,
-  LoadAction,
-  Plot,
-  Quadrat,
-  Site
-} from "@/config/macros";
+  LoadAction
+} from "@/config/macros/contextreducers";
+import {Site} from "@/config/sqlrdsdefinitions/sitesrds";
+import {Quadrat} from "@/config/sqlrdsdefinitions/quadratrds";
+import {Plot} from "@/config/sqlrdsdefinitions/plotrds";
 import {usePlotListContext, useQuadratListContext, useSiteListContext} from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
-import {CensusRDS} from "@/config/sqlmacros";
+import {CensusRDS} from '@/config/sqlrdsdefinitions/censusrds';
 
 export const PlotContext = createContext<Plot>(null);
 export const CensusContext = createContext<CensusRDS>(null);

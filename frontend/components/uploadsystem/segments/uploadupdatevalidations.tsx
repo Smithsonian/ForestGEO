@@ -1,7 +1,8 @@
 "use client";
 import React, {useEffect, useState} from "react";
 import {Box, Typography} from "@mui/material";
-import {ReviewStates, UploadUpdateValidationsProps} from "@/config/macros";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadUpdateValidationsProps} from "@/config/macros/uploadsystemmacros";
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const {

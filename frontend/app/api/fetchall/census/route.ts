@@ -1,8 +1,8 @@
 // FETCH ALL CENSUS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {CensusRDS} from "@/config/sqlmacros";
+import {CensusRDS, CensusResult} from '@/config/sqlrdsdefinitions/censusrds';
 import {PoolConnection} from "mysql2/promise";
-import {CensusResult, getConn, runQuery} from "@/components/processors/processormacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 import {HTTPResponses} from "@/config/macros";
 
 

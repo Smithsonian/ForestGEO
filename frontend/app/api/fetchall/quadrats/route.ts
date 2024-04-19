@@ -1,8 +1,8 @@
 // FETCH ALL QUADRATS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {QuadratsRDS} from "@/config/sqlmacros";
+import {QuadratsRDS, QuadratsResult} from '@/config/sqlrdsdefinitions/quadratrds';
 import {PoolConnection} from "mysql2/promise";
-import {getConn, QuadratsResult, runQuery} from "@/components/processors/processormacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<QuadratsRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
