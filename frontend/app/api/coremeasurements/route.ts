@@ -1,13 +1,8 @@
 // CORE MEASUREMENTS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {bitToBoolean, ErrorMessages} from "@/config/macros";
-import {CoreMeasurementsRDS} from "@/config/sqlmacros";
-import {
-  CoreMeasurementsResult,
-  getConn,
-  parseCoreMeasurementsRequestBody,
-  runQuery
-} from "@/components/processors/processormacros";
+import {CoreMeasurementsRDS, CoreMeasurementsResult} from '@/config/sqlrdsdefinitions/coremeasurementsrds';
+import {getConn, parseCoreMeasurementsRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 

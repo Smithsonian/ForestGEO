@@ -1,6 +1,9 @@
 "use client";
 import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
-import {fileColumns, Plot, tableHeaderSettings, UploadedFileData} from "@/config/macros";
+import {tableHeaderSettings} from "@/config/macros";
+import {fileColumns} from "@/config/macros/formdetails";
+import {UploadedFileData} from "@/config/macros/formdetails";
+import {Plot} from "@/config/sqlrdsdefinitions/plotrds";
 import {
   Button,
   Card,
@@ -19,7 +22,7 @@ import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
-import {CensusRDS} from "@/config/sqlmacros";
+import {CensusRDS} from '@/config/sqlrdsdefinitions/censusrds';
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders

@@ -1,7 +1,7 @@
 // FIXED DATA PERSONNEL ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages} from "@/config/macros";
-import {StemRDS} from "@/config/sqlmacros";
+import {StemRDS} from '@/config/sqlrdsdefinitions/stemrds';
 import {getConn, parseStemRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 

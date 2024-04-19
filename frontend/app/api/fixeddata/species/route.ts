@@ -1,8 +1,8 @@
 // FIXED DATA SPECIES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
-import {getConn, parseSpeciesRequestBody, runQuery, SpeciesResult} from "@/components/processors/processormacros";
+import {getConn, parseSpeciesRequestBody, runQuery} from "@/components/processors/processormacros";
+import {SpeciesRDS, SpeciesResult} from '@/config/sqlrdsdefinitions/speciesrds';
 import {bitToBoolean, ErrorMessages} from "@/config/macros";
-import {SpeciesRDS} from "@/config/sqlmacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ species: SpeciesRDS[], totalCount: number }>> {

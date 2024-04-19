@@ -31,7 +31,7 @@ import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/u
 import {useSession} from 'next-auth/react';
 import UploadValidation from "@/components/uploadsystem/segments/uploadvalidation";
 import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
-import {ReviewStates} from "@/config/macros";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {DialogContent, DialogTitle, Modal, ModalDialog} from '@mui/joy';
 
 interface EditToolbarCustomProps {

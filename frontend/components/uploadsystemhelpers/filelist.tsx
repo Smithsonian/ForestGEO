@@ -1,6 +1,6 @@
 "use client";
 import React from 'react';
-import {FileListProps} from "@/config/macros";
+import {FileListProps} from "@/config/macros/formdetails";
 
 import '@/styles/dropzone.css';
 import {Card, CardContent, CardHeader, Pagination} from "@mui/material";

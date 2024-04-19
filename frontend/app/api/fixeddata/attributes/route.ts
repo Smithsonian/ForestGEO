@@ -1,7 +1,7 @@
 // FIXED DATA ATTRIBUTES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
-import {AttributesRDS} from "@/config/sqlmacros";
+import {AttributesRDS} from '@/config/sqlrdsdefinitions/attributerds';
 import mysql, {PoolConnection} from "mysql2/promise";
 import {getConn, parseAttributeRequestBody, runQuery} from "@/components/processors/processormacros";
 

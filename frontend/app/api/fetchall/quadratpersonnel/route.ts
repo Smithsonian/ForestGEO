@@ -1,7 +1,7 @@
 import mysql, {PoolConnection} from "mysql2/promise";
 import {NextRequest, NextResponse} from "next/server";
-import {getConn, PersonnelResult, runQuery} from "@/components/processors/processormacros";
-import {PersonnelRDS} from "@/config/sqlmacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
+import {PersonnelRDS, PersonnelResult} from '@/config/sqlrdsdefinitions/personnelrds';
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[] | any>> {
   let conn: PoolConnection | null = null;

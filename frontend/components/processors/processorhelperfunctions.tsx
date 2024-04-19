@@ -1,14 +1,14 @@
-import mysql, { PoolConnection } from "mysql2/promise";
+import mysql, {PoolConnection} from "mysql2/promise";
 import {
   fileMappings,
   getConn,
   InsertUpdateProcessingProps,
-  runQuery,
-  SitesResult
+  runQuery
 } from "@/components/processors/processormacros";
+import {SitesResult} from '@/config/sqlrdsdefinitions/sitesrds';
 import {processCensus} from "@/components/processors/processcensus";
 import {bitToBoolean} from "@/config/macros";
-import {SitesRDS} from "@/config/sqlmacros";
+import {SitesRDS} from '@/config/sqlrdsdefinitions/sitesrds';
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,

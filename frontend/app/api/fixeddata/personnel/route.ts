@@ -1,8 +1,8 @@
 // FIXED DATA PERSONNEL ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages} from "@/config/macros";
-import {PersonnelRDS} from "@/config/sqlmacros";
-import {getConn, parsePersonnelRequestBody, PersonnelResult, runQuery} from "@/components/processors/processormacros";
+import {PersonnelRDS, PersonnelResult} from '@/config/sqlrdsdefinitions/personnelrds';
+import {getConn, parsePersonnelRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{

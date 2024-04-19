@@ -2,8 +2,9 @@
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
 import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
 import {clearDataByKey, getData, setData} from "@/config/db";
-import {Census, Plot, Quadrat} from "@/config/macros";
-import {CensusRDS, PlotRDS, QuadratsRDS} from "@/config/sqlmacros";
+import {Census, CensusRDS} from "./sqlrdsdefinitions/censusrds";
+import {Quadrat, QuadratsRDS} from "./sqlrdsdefinitions/quadratrds";
+import {Plot, PlotRDS} from "./sqlrdsdefinitions/plotrds";
 
 async function createAndUpdateQuadratList(quadratsRDSLoad: QuadratsRDS[]) {
   let quadratList: Quadrat[] = quadratsRDSLoad.map(quadratRDS => ({

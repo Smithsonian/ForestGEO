@@ -1,8 +1,8 @@
 // FIXED DATA CENSUS ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
-import {CensusRDS} from "@/config/sqlmacros";
-import {CensusResult, getConn, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
+import {CensusRDS, CensusResult} from '@/config/sqlrdsdefinitions/censusrds';
+import {getConn, parseCensusRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
 export async function GET(request: NextRequest): Promise<NextResponse<{ census: CensusRDS[], totalRows: number }>> {
