@@ -36,14 +36,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-.idea/*
-.vscode/*
+/.idea
+/.vscode
 /*.zip
 .github/workflows/new-file-upload-system_forestgeo-livesite.yml
-.fleet/*
-frontend/sampledata/*
-frontend/sqlscripting/*
-frontend/scripts/*
-frontend/sampledata/basic/census1.csv
-frontend/sampledata/basic/census2.csv
-frontend/sampledata/basic/census3.csv
+/.fleet
+/frontend/sampledata
+/frontend/scripts
+/frontend/sqlscripting
+
