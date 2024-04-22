@@ -42,3 +42,6 @@ yarn-error.log*
 .idea/*
 /.swc/
 /public/
+/.fleet
+/.vscode
+/.idea

@@ -1,12 +1,12 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type CoreMeasurementsRDS = {
   id: number;
   coreMeasurementID: number;
   censusID: number | null;
   plotID: number | null;
   quadratID: number | null;
+  subQuadratID: number | null;
   treeID: number | null;
   stemID: number | null;
   personnelID: number | null;
@@ -24,6 +24,7 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subQuadratID', headerName: 'SubQuadratID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left'},
@@ -49,6 +50,7 @@ export interface CoreMeasurementsResult {
   CensusID: any;
   PlotID: any;
   QuadratID: any;
+  SubQuadratID: any;
   TreeID: any;
   StemID: any;
   PersonnelID: any;

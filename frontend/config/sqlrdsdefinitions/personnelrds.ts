@@ -1,6 +1,4 @@
 import {GridColDef} from '@mui/x-data-grid';
-
-
 export interface PersonnelRDS {
   id: number;
   personnelID: number;

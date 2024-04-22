@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type TreeRDS = {
   id: number;
   treeID: number;
@@ -15,3 +14,10 @@ export const TreeGridColumns: GridColDef[] = [
   {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
 ];
+
+export interface TreeResult {
+  TreeID: any;
+  TreeTag: any;
+  SpeciesID: any;
+  SubSpeciesID: any;
+}

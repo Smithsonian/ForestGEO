@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type AttributesRDS = {
   id: number;
   code: string;
@@ -33,3 +32,9 @@ export const AttributeGridColumns: GridColDef[] = [
     valueOptions: AttributeStatusOptions,
   },
 ];
+
+export interface AttributesResult {
+  Code: any;
+  Description: any;
+  Status: any;
+}

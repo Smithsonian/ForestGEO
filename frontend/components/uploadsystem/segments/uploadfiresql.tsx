@@ -9,6 +9,7 @@ import {Stack} from "@mui/joy";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
+import { useCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 
 interface IDToRow {
   coreMeasurementID: number;
@@ -18,11 +19,13 @@ interface IDToRow {
 const UploadFireSQL: React.FC<UploadFireProps> =
   ({
      personnelRecording, acceptedFiles, unitOfMeasurement, parsedData,
-     uploadForm, setIsDataUnsaved, currentPlot, currentCensus,
-     schema, uploadCompleteMessage, setUploadCompleteMessage,
+     uploadForm, setIsDataUnsaved, schema, uploadCompleteMessage, setUploadCompleteMessage,
      setUploadError, setErrorComponent,
      setReviewState, setAllRowToCMID,
    }) => {
+    let currentPlot = usePlotContext();
+    let currentCensus = useCensusContext();
+    let currentQuadrat = useQuadratContext();
     const [loading, setLoading] = useState<boolean>(true);
     const [results, setResults] = useState<string[]>([]);
     const [totalOperations, setTotalOperations] = useState(0);
@@ -37,7 +40,15 @@ const UploadFireSQL: React.FC<UploadFireProps> =
       try {
         setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
         const response = await fetch(
-          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&${unitOfMeasurement !== '' ? `&uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
+          `/api/sqlload?
+          schema=${schema}&
+          formType=${uploadForm}&
+          fileName=${fileName}&
+          plot=${currentPlot?.id.toString().trim()}&
+          census=${currentCensus?.censusID.toString().trim()}&
+          quadrat=${currentQuadrat?.quadratID.toString().trim()}&
+          ${unitOfMeasurement !== '' ? `&
+          uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(fileData[fileName])

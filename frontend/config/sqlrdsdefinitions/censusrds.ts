@@ -1,5 +1,21 @@
-import {GridColDef} from '@mui/x-data-grid';
+import { GridColDef } from '@mui/x-data-grid';
 
+export interface Census {
+  plotID: number;
+  plotCensusNumber: number;
+  startDate: Date;
+  endDate: Date;
+  description: string;
+}
+
+export interface CensusResult {
+  CensusID: any;
+  PlotID: any;
+  PlotCensusNumber: any;
+  StartDate: any;
+  EndDate: any;
+  Description: any;
+}
 
 export type CensusRaw = {
   id: number;
@@ -68,23 +84,5 @@ export const CensusGridColumns: GridColDef[] = [
       } else return "null";
     }
   },
-  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true},
+  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true },
 ];
-
-export interface Census {
-  plotID: number;
-  plotCensusNumber: number;
-  startDate: Date;
-  endDate: Date;
-  description: string;
-}
-
-export interface CensusResult {
-  CensusID: any;
-  PlotID: any;
-  PlotCensusNumber: any;
-  StartDate: any;
-  EndDate: any;
-  Description: any;
-}
-

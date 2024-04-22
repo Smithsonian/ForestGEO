@@ -3,16 +3,18 @@ import React, {useEffect, useState} from "react";
 import {Box, Typography} from "@mui/material";
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadUpdateValidationsProps} from "@/config/macros/uploadsystemmacros";
+import { useCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const {
-    currentPlot, currentCensus, setReviewState, schema,
+    setReviewState, schema,
   } = props;
 
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
-  const [numValidations, setNumValidations] = useState(0);
   const [countdown, setCountdown] = useState(5);
   const [ellipsis, setEllipsis] = useState('');
+  let currentPlot = usePlotContext();
+  let currentCensus = useCensusContext();
 
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);

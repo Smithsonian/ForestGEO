@@ -1,7 +1,7 @@
 // FIXED DATA PERSONNEL ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages} from "@/config/macros";
-import {StemRDS} from '@/config/sqlrdsdefinitions/stemrds';
+import {StemRDS, StemResult} from '@/config/sqlrdsdefinitions/stemrds';
 import {getConn, parseStemRequestBody, runQuery} from "@/components/processors/processormacros";
 import mysql, {PoolConnection} from "mysql2/promise";
 
@@ -39,19 +39,15 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const stemRows: StemRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const stemRows: StemRDS[] = paginatedResults.map((row: StemResult, index: number) => ({
       id: index + 1,
       stemID: row.StemID,
       treeID: row.TreeID,
-      quadratID: row.QuadratID,
+      subQuadratID: row.SubQuadratID,
       stemNumber: row.StemNumber,
       stemTag: row.StemTag,
-      stemPlotX: row.StemPlotX,
-      stemPlotY: row.StemPlotY,
-      stemPlotZ: row.StemPlotZ,
-      stemQuadX: row.StemQuadX,
-      stemQuadY: row.StemQuadY,
-      stemQuadZ: row.StemQuadZ,
+      localX: row.LocalX,
+      localY: row.LocalY,
       moved: row.Moved,
       stemDescription: row.StemDescription
     }));

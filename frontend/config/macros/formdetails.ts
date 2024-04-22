@@ -17,7 +17,7 @@ export const TableHeadersByFormType: Record<string, { label: string; }[]> = {
   "personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
   "species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
   "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
-  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "quadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
+  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "subquadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
   "arcgis_xlsx": arcgisHeaders
 };
 

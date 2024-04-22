@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type FamilyRDS = {
   id: number;
   familyID: number;
@@ -13,3 +12,9 @@ export const FamilyGridColumns: GridColDef[] = [
   {field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
 ];
+
+export interface FamilyResult {
+  FamilyID: any;
+  Family: any;
+  ReferenceID: any;
+}

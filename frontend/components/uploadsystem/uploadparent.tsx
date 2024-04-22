@@ -377,8 +377,6 @@ export default function UploadParent(props: UploadParentProps) {
           parsedData={parsedData}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           schema={currentSite.schemaName}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
@@ -389,15 +387,11 @@ export default function UploadParent(props: UploadParentProps) {
       case ReviewStates.VALIDATE:
         return <UploadValidation
           setReviewState={setReviewState}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           schema={currentSite.schemaName}
         />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           schema={currentSite.schemaName}
         />;
       case ReviewStates.UPLOAD_AZURE:
@@ -406,8 +400,6 @@ export default function UploadParent(props: UploadParentProps) {
           uploadForm={uploadForm}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
           cmErrors={cmErrors}

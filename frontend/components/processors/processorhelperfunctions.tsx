@@ -149,26 +149,26 @@ export async function processStems(
   schema: string,
   stemTag: any,
   treeID: any,
-  quadratID: any,
-  stemQuadX: any,
-  stemQuadY: any
+  subQuadratID: any,
+  localX: any,
+  localY: any
 ): Promise<number | null> {
-  if (!stemTag || !treeID || !quadratID || !stemQuadX || !stemQuadY) throw new Error('process stems: 1 or more undefined parameters received');
+  if (!stemTag || !treeID || !subQuadratID || !localX || !localY) throw new Error('process stems: 1 or more undefined parameters received');
 
   try {
     // Prepare the query
     const query = `
-      INSERT INTO ${schema}.stems (TreeID, QuadratID, StemTag, StemQuadX, StemQuadY)
+      INSERT INTO ${schema}.stems (TreeID, SubQuadratID, StemTag, LocalX, LocalY)
       VALUES (?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         TreeID = VALUES(TreeID),
-        QuadratID = VALUES(QuadratID),
+        SubQuadratID = VALUES(SubQuadratID),
         StemTag = VALUES(StemTag),
-        StemQuadX = VALUES(StemQuadX),
-        StemQuadY = VALUES(StemQuadY);
+        LocalX = VALUES(LocalX),
+        LocalY = VALUES(LocalY);
     `;
     // Execute the query
-    const results = await runQuery(connection, query, [treeID, quadratID, stemTag, stemQuadX, stemQuadY]);
+    const results = await runQuery(connection, query, [treeID, subQuadratID, stemTag, localX, localY]);
     return results.insertId;
   } catch (error: any) {
     console.error('Error processing stems:', error.message);

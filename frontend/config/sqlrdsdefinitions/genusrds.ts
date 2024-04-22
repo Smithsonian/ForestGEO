@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type GenusRDS = {
   id: number;
   genusID: number;
@@ -17,3 +16,11 @@ export const GenusGridColumns: GridColDef[] = [
   {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'authority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left',},
 ];
+
+export interface GenusResult {
+  GenusID: any;
+  FamilyID: any;
+  Genus: any;
+  ReferenceID: any;
+  Authority: any;
+}

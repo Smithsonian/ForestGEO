@@ -57,6 +57,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
       censusID: row.CensusID,
       plotID: row.PlotID,
       quadratID: row.QuadratID,
+      subQuadratID: row.SubQuadratID,
       treeID: row.TreeID,
       stemID: row.StemID,
       personnelID: row.PersonnelID,

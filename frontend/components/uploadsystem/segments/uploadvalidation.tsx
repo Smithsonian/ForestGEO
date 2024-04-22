@@ -10,13 +10,13 @@ import {UploadValidationProps} from "@/config/macros/uploadsystemmacros";
 import {ValidationResponse} from "@/components/processors/processormacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {useLoading} from '@/app/contexts/loadingprovider';
+import { useCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 // Define the type for validation messages
 type ValidationMessages = {
   [key: string]: string;
 };
 const UploadValidation: React.FC<UploadValidationProps> = ({
-                                                             setReviewState,
-                                                             currentPlot, currentCensus, schema
+                                                             setReviewState, schema
                                                            }) => {
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResponse>>({});
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
@@ -25,11 +25,13 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [minMaxValues, setMinMaxValues] = useState<Record<string, { min?: number, max?: number }>>({});
 
+
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
-  const [useDefaultValues, setUseDefaultValues] = useState<boolean>(false);
   // Add new state for countdown timer
   const [countdown, setCountdown] = useState(5);
   const {setLoading} = useLoading();
+  let currentPlot = usePlotContext();
+  let currentCensus = useCensusContext();
 
   const defaultMinMaxValues: Record<string, { min?: number, max?: number }> = {
     'ValidateScreenMeasuredDiameterMinMax': {min: undefined, max: undefined},

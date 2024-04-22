@@ -66,8 +66,6 @@ export interface UploadReviewFilesProps {
 
 export interface UploadFireProps {
   // contexts
-  currentPlot: Plot;
-  currentCensus: CensusRDS;
   schema: string;
   // state vars
   uploadForm: string;
@@ -87,8 +85,6 @@ export interface UploadFireProps {
 
 export interface UploadFireAzureProps {
   // contexts
-  currentPlot: Plot;
-  currentCensus: CensusRDS;
   user: string;
   // state vars
   uploadForm: string;
@@ -104,8 +100,6 @@ export interface UploadFireAzureProps {
 
 export interface UploadValidationProps {
   // contexts
-  currentPlot: Plot;
-  currentCensus: CensusRDS;
   schema: string;
   // state setters
   setReviewState: React.Dispatch<React.SetStateAction<ReviewStates>>;
@@ -123,8 +117,6 @@ export interface UploadValidationErrorDisplayProps {
 
 export interface UploadUpdateValidationsProps {
   // contexts
-  currentPlot: Plot;
-  currentCensus: CensusRDS;
   schema: string;
   // state setters
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
