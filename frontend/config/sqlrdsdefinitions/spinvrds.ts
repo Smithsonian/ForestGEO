@@ -17,3 +17,11 @@ export const SpeciesInventoryGridColumns: GridColDef[] = [
   {field: 'speciesID', headerName: 'SpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'subSpeciesID', headerName: 'SubSpeciesID', headerClassName: 'header', flex: 1, align: 'left',},
 ];
+
+export interface SpeciesInventoryResult {
+  SpeciesInventoryID: any;
+  CensusID: any;
+  PlotID: any;
+  SpeciesID: any;
+  SubSpeciesID: any;
+}

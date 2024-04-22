@@ -1,7 +1,7 @@
 // FIXED DATA ATTRIBUTES ROUTE HANDLERS
 import {NextRequest, NextResponse} from "next/server";
 import {ErrorMessages, HTTPResponses} from "@/config/macros";
-import {AttributesRDS} from '@/config/sqlrdsdefinitions/attributerds';
+import {AttributesRDS, AttributesResult} from '@/config/sqlrdsdefinitions/attributerds';
 import mysql, {PoolConnection} from "mysql2/promise";
 import {getConn, parseAttributeRequestBody, runQuery} from "@/components/processors/processormacros";
 
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const attributeRows: AttributesRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const attributeRows: AttributesRDS[] = paginatedResults.map((row: AttributesResult, index: number) => ({
       id: index + 1,
       code: row.Code,
       description: row.Description,

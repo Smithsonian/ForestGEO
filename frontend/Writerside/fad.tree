@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE instance-profile
+        SYSTEM "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd">
+
+<instance-profile id="fad"
+                 name="ForestGEO Application Documentation"
+                 start-page="starter-topic.md">
+
+    <toc-element topic="starter-topic.md"/>
+    <toc-element topic="Database-Specifications.md">
+        <toc-element topic="CMVErrors.md"/>
+        <toc-element topic="ValidationErrors.md"/>
+        <toc-element topic="ValidationChangelog.md"/>
+        <toc-element topic="CMAttributes.md"/>
+        <toc-element topic="Coremeasurements.md">
+        </toc-element>
+        <toc-element topic="Stems.md"/>
+        <toc-element topic="Trees.md"/>
+        <toc-element topic="Subspecies.md"/>
+        <toc-element topic="Subquadrats.md"/>
+        <toc-element topic="CurrentObsolete.md"/>
+        <toc-element topic="Species.md"/>
+        <toc-element topic="Genus.md"/>
+        <toc-element topic="Family.md"/>
+        <toc-element topic="Reference.md"/>
+        <toc-element topic="QuadratPersonnel.md"/>
+        <toc-element topic="Quadrats.md"/>
+        <toc-element topic="Census.md"/>
+        <toc-element topic="Plots.md"/>
+        <toc-element topic="Personnel.md"/>
+        <toc-element topic="Attributes.md"/>
+    </toc-element>
+</instance-profile>

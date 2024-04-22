@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type SpeciesRDS = {
   id: number;
   speciesID: number;

@@ -1,5 +1,5 @@
-import {booleanToBit} from '@/config/macros';
-import {runQuery, SpecialProcessingProps,} from '@/components/processors/processormacros';
+import { booleanToBit } from '@/config/macros';
+import { runQuery, SpecialProcessingProps, } from '@/components/processors/processormacros';
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
@@ -11,16 +11,16 @@ import {
 import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
-  const {connection, rowData, schema, plotID, censusID, fullName, unitOfMeasurement} = props;
-  if (!plotID || !censusID || !fullName) throw new Error("Missing plotID, censusID, or full name");
+  const { connection, rowData, schema, plotID, censusID, quadratID, fullName, unitOfMeasurement } = props;
+  if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Missing plotID, censusID, or full name");
   try {
     /**
      *       "tag": "Trees.TreeTag",
      *       "stemtag": "Stems.StemTag",
      *       "spcode": "Species.SpeciesCode",
-     *       "quadrat": "Quadrats.QuadratName",
-     *       "lx": "Stems.StemQuadX",
-     *       "ly": "Stems.StemQuadY",
+     *       "subquadrat": "SubQuadrats.SQName",
+     *       "lx": "Stems.LocalX",
+     *       "ly": "Stems.LocalY",
      *       "dbh": "CoreMeasurements.MeasuredDBH",
      *       "codes": "Attributes.Code",
      *       "hom": "CoreMeasurement.MeasuredHOM",
@@ -40,17 +40,31 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     if (!speciesID) throw new Error(`Species with code ${rowData.spcode} does not exist.`);
     console.log(`speciesID: ${speciesID}`);
 
-    console.log('extracting quadrat ID by quadrat name');
-    const quadratID = await getColumnValueByColumnName(
+    const subQuadratID = await getColumnValueByColumnName(
       connection,
       schema,
-      'Quadrats',
-      'QuadratID',
-      'QuadratName',
-      rowData.quadrat
-    );
-    if (!quadratID) throw new Error(`Quadrat with name ${rowData.quadrat} does not exist.`);
-    console.log(`quadratID: ${quadratID}`);
+      'SubQuadrats',
+      'SQID',
+      'SQName',
+      rowData.subquadrat
+    )
+
+    const query = `
+    SELECT 
+      sq.SQName,
+      sq.QuadratID,
+      q.PlotID,
+      q.CensusID
+    FROM 
+        forestgeo_testing.subquadrats sq
+    JOIN 
+        forestgeo_testing.quadrats q ON sq.QuadratID = q.QuadratID
+    WHERE 
+        sq.SQName = ?
+        AND (? IS NULL OR q.PlotID = ?)
+        AND (? IS NULL OR q.CensusID = ?);`;
+    const sqResults = await runQuery(connection, query, [rowData.subquadrat, plotID, censusID]);
+    const quadratID = sqResults[0].QuadratID;
 
     console.log('attempting subspecies ID by speciesID');
     let subSpeciesID = null;
@@ -63,8 +77,8 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.log(`treeID: ${treeID}`);
 
     // Insert or update Stems
-    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly);
-    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, quadratID, rowData.lx, rowData.ly]}`)
+    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, rowData.subquadrat, rowData.lx, rowData.ly);
+    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, rowData.subquadrat, rowData.lx, rowData.ly]}`);
     console.log(`stemID: ${stemID}`);
 
     const personnelID = await getPersonnelIDByName(connection, schema, fullName);
@@ -92,7 +106,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const dbhResult = await runQuery(connection, measurementInsertQuery, [
       censusID,
       plotID,
-      quadratID,
+      subQuadratID,
       treeID,
       stemID,
       personnelID,
@@ -101,7 +115,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       rowData.dbh ?? null,
       rowData.hom ?? null,
       null,
-      JSON.stringify({units: unitOfMeasurement}) ?? null,
+      JSON.stringify({ units: unitOfMeasurement }) ?? null,
     ]);
 
     if (dbhResult.affectedRows <= 0) {

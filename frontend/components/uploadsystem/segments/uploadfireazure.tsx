@@ -8,10 +8,10 @@ import {Box, Typography} from "@mui/material";
 import {Stack} from "@mui/joy";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
+import { useCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
-                                                           acceptedFiles, uploadForm, setIsDataUnsaved,
-                                                           currentPlot, currentCensus, user, setUploadError,
+                                                           acceptedFiles, uploadForm, setIsDataUnsaved, user, setUploadError,
                                                            setErrorComponent, setReviewState,
                                                            allRowToCMID, cmErrors,
                                                          }) => {
@@ -23,6 +23,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const hasUploaded = useRef(false);
   const [countdown, setCountdown] = useState(5);
   const [startCountdown, setStartCountdown] = useState(false);
+
+  let currentPlot = usePlotContext();
+  let currentCensus = useCensusContext();
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors

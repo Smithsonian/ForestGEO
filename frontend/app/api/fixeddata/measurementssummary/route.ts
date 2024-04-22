@@ -56,38 +56,21 @@ export async function GET(request: NextRequest): Promise<NextResponse<MSOutput>>
     console.log(totalRowsResult);
     const totalRows = totalRowsResult[0].totalRows;
 
-    //   const coreMeasurementIDs = paginatedResults.map((row: ForestGEOMeasurementsSummaryResult) => row.CoreMeasurementID);
-
-    //   // Fetch Validation States with descriptions
-    //   const validationQuery = `
-    //     SELECT cmv.CoreMeasurementID, GROUP_CONCAT(ve.ValidationErrorID SEPARATOR '; ') AS ValidationErrors
-    //     FROM ${schema}.cmverrors cmv
-    //     JOIN ${schema}.validationerrors ve ON cmv.ValidationErrorID = ve.ValidationErrorID
-    //     WHERE cmv.CoreMeasurementID IN (?)
-    //     GROUP BY cmv.CoreMeasurementID
-    // `;
-    //   const validationResults: ValidationErrorResult[] = await runQuery(conn, validationQuery, [coreMeasurementIDs.map((param: any) => param.toString())]);
-
-    //   // Map Validation States to CoreMeasurementIDs with descriptions as an array
-    //   const validationMap = validationResults.reduce<Record<number, string[]>>((acc, val) => {
-    //     acc[val.CoreMeasurementID] = val.ValidationErrors.split('; ');
-    //     return acc;
-    //   }, {});
-
     let measurementsSummaryRows: MeasurementsSummaryRDS[] = paginatedResults.map((row: ForestGEOMeasurementsSummaryResult, index: number) => ({
       id: index + 1,
       coreMeasurementID: row.CoreMeasurementID,
+      quadratID: row.QuadratID,
       plotID: row.PlotID,
       plotName: row.PlotName,
       plotCensusNumber: row.PlotCensusNumber,
       censusStartDate: row.StartDate,
       censusEndDate: row.EndDate,
       quadratName: row.QuadratName,
+      subQuadratName: row.SubQuadratName,
       treeTag: row.TreeTag,
       stemTag: row.StemTag,
-      stemQuadX: row.StemQuadX,
-      stemQuadY: row.StemQuadY,
-      stemQuadZ: row.StemQuadZ,
+      stemLocalX: row.StemLocalX,
+      stemLocalY: row.StemLocalY,
       speciesName: row.SpeciesName,
       subSpeciesName: row.SubSpeciesName,
       genus: row.Genus,
@@ -98,7 +81,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<MSOutput>>
       measuredHOM: row.MeasuredHOM,
       description: row.Description,
       attributes: row.Attributes,
-      // validationErrors: validationMap[row.CoreMeasurementID] || []
     }));
 
     return new NextResponse(JSON.stringify({

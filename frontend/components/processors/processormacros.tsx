@@ -36,6 +36,7 @@ export interface SpecialProcessingProps {
   schema: string;
   plotID?: number;
   censusID?: number;
+  quadratID?: number;
   fullName?: string;
   unitOfMeasurement?: string;
 }
@@ -169,6 +170,7 @@ function transformRequestBody(requestBody: any) {
     CensusID: getValueOrDefault(requestBody.censusID),
     PlotID: getValueOrDefault(requestBody.plotID),
     QuadratID: getValueOrDefault(requestBody.quadratID),
+    SubQuadratID: getValueOrDefault(requestBody.subQuadratID),
     TreeID: getValueOrDefault(requestBody.treeID),
     StemID: getValueOrDefault(requestBody.stemID),
     PersonnelID: getValueOrDefault(requestBody.personnelID),
@@ -222,15 +224,11 @@ export async function parseStemRequestBody(request: NextRequest) {
   return {
     StemID: requestBody.stemID,
     TreeID: requestBody.treeID ?? null,
-    QuadratID: requestBody.quadratID ?? null,
+    SubQuadratID: requestBody.quadratID ?? null,
     StemNumber: requestBody.stemNumber ?? null,
     StemTag: requestBody.stemTag ?? null,
-    StemPlotX: requestBody.stemPlotX ?? null,
-    StemPlotY: requestBody.stemPlotY ?? null,
-    StemPlotZ: requestBody.stemPlotZ ?? null,
-    StemQuadX: requestBody.stemQuadX ?? null,
-    StemQuadY: requestBody.stemQuadY ?? null,
-    StemQuadZ: requestBody.stemQuadZ ?? null,
+    LocalX: requestBody.localX ?? null,
+    LocalY: requestBody.localY ?? null,
     Moved: requestBody.moved ?? null,
     StemDescription: requestBody.stemDescription ?? null,
   }

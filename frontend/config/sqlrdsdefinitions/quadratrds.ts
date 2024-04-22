@@ -1,7 +1,6 @@
 import {GridColDef} from '@mui/x-data-grid';
 import {PersonnelRDS} from './personnelrds';
 
-
 export type QuadratsRDS = {
   id: number;
   quadratID: number;
