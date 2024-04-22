@@ -27,3 +27,10 @@ export const ReferenceGridColumns: GridColDef[] = [
     }
   },
 ];
+
+export interface ReferenceResult {
+  ReferenceID: any;
+  PublicationTitle: any;
+  FullReference: any;
+  DateOfPublication: any;
+}

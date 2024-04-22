@@ -13,9 +13,6 @@ export type PlotRDS = {
   globalX: number | null;
   globalY: number | null;
   globalZ: number | null;
-  plotX: number | null;
-  plotY: number | null;
-  plotZ: number | null;
   plotShape: string | null;
   plotDescription: string | null;
 };
@@ -29,9 +26,6 @@ export const PlotGridColumns: GridColDef[] = [
   {field: 'globalX', headerName: 'GlobalX', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'globalY', headerName: 'GlobalY', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'globalZ', headerName: 'GlobalZ', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotX', headerName: 'PlotX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotY', headerName: 'PlotY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotZ', headerName: 'PlotZ', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotShape', headerName: 'PlotShape', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left',},
 ];// INTERFACES
@@ -55,9 +49,6 @@ export interface PlotsResult {
   GlobalX: any;
   GlobalY: any;
   GlobalZ: any;
-  PlotX: any;
-  PlotY: any;
-  PlotZ: any;
   PlotShape: any;
   PlotDescription: any;
 }

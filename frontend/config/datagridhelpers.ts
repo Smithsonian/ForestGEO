@@ -274,10 +274,10 @@ export const createProcessQuery: ProcessQueryFunction = (
 ) => {
   let baseQuery = `/api/`
   switch (gridType) {
-    case 'coreMeasurements':
     case 'stemTreeDetails':
       baseQuery += `${gridType.toLowerCase()}?schema=${siteSchema}`
       break
+    case 'coreMeasurements':
     case 'census':
     case 'quadrats':
     case 'attributes':
@@ -302,14 +302,8 @@ export const createFetchQuery: FetchQueryFunction = (
   let baseQuery = `/api/`
   switch (gridType) {
     case 'coreMeasurements':
-      baseQuery += `${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
-      baseQuery += plotID ? `&plotID=${plotID}` : ``
-      break
     case 'census':
     case 'quadrats':
-      baseQuery += `fixeddata/${gridType}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
-      baseQuery += plotID ? `&plotID=${plotID}` : ``
-      break
     case 'measurementsSummary':
       baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
       baseQuery += plotID ? `&plotID=${plotID}` : ``

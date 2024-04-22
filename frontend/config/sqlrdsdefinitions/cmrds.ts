@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type CMAttributesRDS = {
   id: number;
   cmaID: number;
@@ -14,6 +13,12 @@ export const CMAttributeGridColumns: GridColDef[] = [
   {field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1, align: 'left'},
 ];
 
+export interface CMAttributesResult {
+  CMAID: any;
+  CoreMeasurementID: any;
+  Code: any;
+}
+
 export type CMVErrorRDS = {
   id: number;
   cmvErrorID: number;
@@ -26,3 +31,9 @@ export const CMVErrorGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left'},
 ];
+
+export interface CMVErrorResult {
+  CMVErrorID: any;
+  CoreMeasurementID: any;
+  ValidationErrorID: any;
+}

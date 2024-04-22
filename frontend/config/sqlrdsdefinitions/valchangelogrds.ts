@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type ValidationChangelogRDS = {
   id: number;
   validationRunID: number;
@@ -26,3 +25,16 @@ export const ValidationChangelogGridColumns: GridColDef[] = [
   {field: 'expectedValueRange', headerName: 'Expected Range', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'additionalDetails', headerName: 'Details', headerClassName: 'header', flex: 1, align: 'left',},
 ];
+
+export interface ValidationChangelogResult {
+  ValidationRunID: any;
+  ProcedureName: any;
+  RunDateTime: any;
+  TargetRowID: any;
+  ValidationOutcome: any;
+  ErrorMessage: any;
+  ValidationCriteria: any;
+  MeasuredValue: any;
+  ExpectedValueRange: any;
+  AdditionalDetails: any;
+}

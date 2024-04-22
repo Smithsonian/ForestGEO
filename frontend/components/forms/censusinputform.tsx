@@ -425,8 +425,6 @@ const CensusInputForm = () => {
     case 'validation':
       content = (
         <UploadValidation
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           schema={currentSite?.schemaName ?? ''}
           setReviewState={setReviewState}/>
       );
@@ -434,8 +432,6 @@ const CensusInputForm = () => {
     case 'update':
       content = (
         <UploadUpdateValidations
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           schema={currentSite?.schemaName ?? ''}
           setReviewState={setReviewState}
         />
@@ -486,15 +482,11 @@ const CensusInputForm = () => {
           <DialogContent>
             {reviewState === ReviewStates.VALIDATE && (
               <UploadValidation
-                currentPlot={currentPlot}
-                currentCensus={currentCensus}
                 schema={currentSite?.schemaName ?? ''}
                 setReviewState={setReviewState}/>
             )}
             {reviewState === ReviewStates.UPDATE && (
               <UploadUpdateValidations
-                currentPlot={currentPlot}
-                currentCensus={currentCensus}
                 schema={currentSite?.schemaName ?? ''}
                 setReviewState={setReviewState}/>
             )}

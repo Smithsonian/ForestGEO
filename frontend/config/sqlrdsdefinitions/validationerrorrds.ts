@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
 
-
 export type ValidationErrorRDS = {
   id: number;
   validationErrorID: number;
@@ -17,3 +16,8 @@ export const ValidationErrorGridColumns: GridColDef[] = [
     align: 'left',
   },
 ];
+
+export interface ValidationErrorResult {
+  ValidationErrorID: any;
+  ValidationErrorDescription: any
+}

@@ -1,5 +1,5 @@
 import {getConn, runQuery} from "@/components/processors/processormacros";
-import {ValidationChangelogRDS} from '@/config/sqlrdsdefinitions/valchangelogrds';
+import {ValidationChangelogRDS, ValidationChangelogResult} from '@/config/sqlrdsdefinitions/valchangelogrds';
 import {PoolConnection} from "mysql2/promise";
 import {NextRequest, NextResponse} from "next/server";
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
-    const validationChangelogRows: ValidationChangelogRDS[] = paginatedResults.map((row: any, index: number) => ({
+    const validationChangelogRows: ValidationChangelogRDS[] = paginatedResults.map((row: ValidationChangelogResult, index: number) => ({
       validationRunID: row.ValidationRunID,
       procedureName: row.ProcedureName,
       runDateTime: row.RunDateTime,

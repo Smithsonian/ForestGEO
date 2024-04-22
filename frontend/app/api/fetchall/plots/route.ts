@@ -32,9 +32,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<PlotRDS[]>
       globalX: row.GlobalX,
       globalY: row.GlobalY,
       globalZ: row.GlobalZ,
-      plotX: row.PlotX,
-      plotY: row.PlotY,
-      plotZ: row.PlotZ,
       plotShape: row.PlotShape,
       plotDescription: row.PlotDescription,
     }));
