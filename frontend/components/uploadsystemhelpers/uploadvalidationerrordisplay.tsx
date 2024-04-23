@@ -201,7 +201,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
                               {description}
                             </TableCell>
                           </TableRow>
-                        )
+                        );
                       })}
                     </>
                   )}

@@ -25,7 +25,7 @@ export default function QuadratsPage() {
       quadratShape: '',
       personnel: [],
     },
-  ]
+  ];
   const [rows, setRows] = React.useState(initialRows);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
@@ -142,7 +142,7 @@ export default function QuadratsPage() {
         />
       ),
     }
-  ]
+  ];
 
   return (
     <>

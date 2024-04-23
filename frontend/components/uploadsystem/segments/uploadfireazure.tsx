@@ -148,6 +148,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       </Box>
     )}
   </>;
-}
+};
 
 export default UploadFireAzure;

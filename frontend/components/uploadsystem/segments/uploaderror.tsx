@@ -5,7 +5,7 @@ import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadErrorProps} from "@/config/macros/uploadsystemmacros";
 
 const UploadError = (props: Readonly<UploadErrorProps>) => {
-  const {error, component, acceptedFiles, setAcceptedFiles, setReviewState, handleReturnToStart, resetError} = props
+  const {error, component, acceptedFiles, setAcceptedFiles, setReviewState, handleReturnToStart, resetError} = props;
   const handleParseError = async () => {
     await resetError();
     await handleReturnToStart();
