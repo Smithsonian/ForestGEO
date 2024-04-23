@@ -398,7 +398,7 @@ describe('uploadValidFileAsBuffer', () => {
         exists: jest.fn().mockResolvedValue(true) // Changed to true to test existing file scenario
       };
       const mockContainerClient = new ContainerClient('https://example.com/container');
-      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient);
 
       const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
         {row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1}
@@ -415,7 +415,7 @@ describe('uploadValidFileAsBuffer', () => {
         exists: jest.fn().mockResolvedValue(true) // Simulating that the file already exists
       };
       const mockContainerClient = new ContainerClient('https://example.com/container');
-      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient);
 
       const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
         {row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1}
@@ -432,7 +432,7 @@ describe('uploadValidFileAsBuffer', () => {
         exists: jest.fn().mockResolvedValue(false)
       };
       const mockContainerClient = new ContainerClient('https://example.com/container');
-      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient);
 
       const fileRowErrors: { row: number, error: string, stemtag: string, tag: string, validationErrorID: number }[] = [
         {row: 1, error: 'Error message', stemtag: 'stemtag', tag: 'tag', validationErrorID: 1}
@@ -448,7 +448,7 @@ describe('uploadValidFileAsBuffer', () => {
         exists: jest.fn().mockResolvedValue(false)
       };
       const mockContainerClient = new ContainerClient('https://example.com/container');
-      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient)
+      mockContainerClient.getBlockBlobClient = jest.fn().mockReturnValueOnce(mockBlockBlobClient);
 
       const emptyFileRowErrors: FileRowErrors[] | undefined = [];
 
@@ -461,7 +461,7 @@ describe('uploadValidFileAsBuffer', () => {
         }
       });
     });
-  })
+  });
 });
 describe('formatDate', () => {
   it('should correctly format an ISO date string to a readable date', () => {

@@ -2,7 +2,7 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import {GridRowModel, GridToolbarProps} from '@mui/x-data-grid'
+import {GridRowModel, GridToolbarProps} from '@mui/x-data-grid';
 
 export const coreMeasurementsFields = [
   'censusID',
@@ -17,9 +17,9 @@ export const coreMeasurementsFields = [
   'measuredHOM',
   'description',
   'userDefinedFields'
-]
+];
 
-export const attributesFields = ['code', 'description', 'status']
+export const attributesFields = ['code', 'description', 'status'];
 
 export const censusFields = [
   'plotID',
@@ -27,7 +27,7 @@ export const censusFields = [
   'startDate',
   'endDate',
   'description'
-]
+];
 
 export const stemTreeDetailsFields = [
   'stemTag',
@@ -43,9 +43,9 @@ export const stemTreeDetailsFields = [
   'stemQuadX',
   'stemQuadY',
   'stemDescription'
-]
+];
 
-export const personnelFields = ['firstName', 'lastName', 'role']
+export const personnelFields = ['firstName', 'lastName', 'role'];
 
 export const quadratsFields = [
   'plotID',
@@ -56,7 +56,7 @@ export const quadratsFields = [
   'area',
   'quadratShape',
   'personnel'
-]
+];
 
 export const speciesFields = [
   'genusID',
@@ -69,7 +69,7 @@ export const speciesFields = [
   'fieldFamily',
   'description',
   'referenceID'
-]
+];
 
 export const subSpeciesFields = [
   'speciesID',
@@ -79,7 +79,7 @@ export const subSpeciesFields = [
   'obsoleteTaxonFlag',
   'authority',
   'infraSpecificLevel'
-]
+];
 
 export const validationHistoryFields = [
   'validationRunID',
@@ -92,7 +92,7 @@ export const validationHistoryFields = [
   'measuredValue',
   'expectedValueRange',
   'additionalDetails'
-]
+];
 
 interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown'
@@ -200,21 +200,21 @@ const newRowTemplates: Templates = {
     stemDescription: {type: 'string', initialValue: ''},
     isNew: {type: 'boolean', initialValue: true}
   }
-}
+};
 
 function getType(value: any): FieldTemplate['type'] {
   if (typeof value === 'number') {
-    return 'number'
+    return 'number';
   } else if (typeof value === 'string') {
-    return 'string'
+    return 'string';
   } else if (typeof value === 'boolean') {
-    return 'boolean'
+    return 'boolean';
   } else if (value instanceof Date) {
-    return 'date'
+    return 'date';
   } else if (Array.isArray(value)) {
-    return 'array'
+    return 'array';
   } else {
-    return 'unknown'
+    return 'unknown';
   }
 }
 
@@ -222,31 +222,31 @@ export function validateRowStructure(
   gridType: string,
   oldRow: GridRowModel
 ): boolean {
-  const template = newRowTemplates[gridType]
+  const template = newRowTemplates[gridType];
   if (!template) {
-    throw new Error('Invalid grid type submitted')
+    throw new Error('Invalid grid type submitted');
   }
 
-  const currentDate = new Date()
+  const currentDate = new Date();
 
   return Object.keys(template).every(key => {
-    const expected = template[key]
-    const value = oldRow[key]
+    const expected = template[key];
+    const value = oldRow[key];
 
     if (!(key in oldRow) || getType(value) !== expected.type) {
-      return false
+      return false;
     }
 
     if (expected.type === 'date' && value instanceof Date) {
-      return value.toDateString() === currentDate.toDateString()
+      return value.toDateString() === currentDate.toDateString();
     }
 
     if ('initialValue' in expected && expected.initialValue !== null) {
-      return value === expected.initialValue
+      return value === expected.initialValue;
     }
 
-    return true
-  })
+    return true;
+  });
 }
 
 export type FetchQueryFunction = (
@@ -272,26 +272,27 @@ export const createProcessQuery: ProcessQueryFunction = (
   siteSchema: string,
   gridType: string
 ) => {
-  let baseQuery = `/api/`
+  let baseQuery = `/api/`;
   switch (gridType) {
     case 'stemTreeDetails':
-      baseQuery += `${gridType.toLowerCase()}?schema=${siteSchema}`
-      break
+      baseQuery += `${gridType.toLowerCase()}?schema=${siteSchema}`;
+      break;
     case 'coreMeasurements':
     case 'census':
     case 'quadrats':
+    case 'subquadrats':
     case 'attributes':
     case 'personnel':
     case 'species':
     case 'subSpecies':
     case 'validationHistory':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}`
-      break
+      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}`;
+      break;
     default:
-      throw new Error('invalid gridtype selected')
+      throw new Error('invalid gridtype selected');
   }
-  return baseQuery
-}
+  return baseQuery;
+};
 export const createFetchQuery: FetchQueryFunction = (
   siteSchema: string,
   gridType,
@@ -299,68 +300,69 @@ export const createFetchQuery: FetchQueryFunction = (
   pageSize,
   plotID
 ) => {
-  let baseQuery = `/api/`
+  let baseQuery = `/api/`;
   switch (gridType) {
     case 'coreMeasurements':
     case 'census':
     case 'quadrats':
+    case 'subquadrats':
     case 'measurementsSummary':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
-      baseQuery += plotID ? `&plotID=${plotID}` : ``
-      break
+      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`;
+      baseQuery += plotID ? `&plotID=${plotID}` : ``;
+      break;
     case 'attributes':
     case 'personnel':
     case 'species':
     case 'subSpecies':
     case 'validationHistory':
     case 'stemTreeDetails':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`
-      break
+      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`;
+      break;
     default:
-      throw new Error('invalid gridtype selected')
+      throw new Error('invalid gridtype selected');
   }
-  return baseQuery
-}
+  return baseQuery;
+};
 
 export const createDeleteQuery: ProcessQueryFunction = (
   siteSchema: string,
   gridType: string,
   deletionID?: number | string
 ) => {
-  let gridID = getGridID(gridType)
-  let baseQuery = createProcessQuery(siteSchema, gridType)
-  baseQuery += `&${gridID}=${deletionID!.toString()}`
-  return baseQuery
-}
+  let gridID = getGridID(gridType);
+  let baseQuery = createProcessQuery(siteSchema, gridType);
+  baseQuery += `&${gridID}=${deletionID!.toString()}`;
+  return baseQuery;
+};
 
 export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coreMeasurements':
-      return 'coreMeasurementID'
+      return 'coreMeasurementID';
     case 'stemTreeDetails':
-      return 'stemID'
+      return 'stemID';
     case 'attributes':
-      return 'code'
+      return 'code';
     case 'census':
-      return 'censusID'
+      return 'censusID';
     case 'personnel':
-      return 'personnelID'
+      return 'personnelID';
     case 'quadrats':
-      return 'quadratID'
+      return 'quadratID';
     case 'species':
-      return 'speciesID'
+      return 'speciesID';
     case 'subSpecies':
-      return 'subSpeciesID'
+      return 'subSpeciesID';
     case 'validationHistory':
       return 'validationRunID';
     default:
-      return 'breakage'
+      return 'breakage';
   }
 }
 
 const comparePersonnelObjects = (obj1: any, obj2: any) => {
-  return Object.entries(obj1).some(([key, value]) => obj2[key] !== value)
-}
+  return Object.entries(obj1).some(([key, value]) => obj2[key] !== value);
+};
 
 export function computeMutation(
   gridType: string,
@@ -371,34 +373,34 @@ export function computeMutation(
     case 'coreMeasurements':
       return coreMeasurementsFields.some(
         field => newRow[field] !== oldRow[field]
-      )
+      );
     case 'stemTreeDetails':
       return stemTreeDetailsFields.some(
         field => newRow[field] !== oldRow[field]
-      )
+      );
     case 'attributes':
-      return attributesFields.some(field => newRow[field] !== oldRow[field])
+      return attributesFields.some(field => newRow[field] !== oldRow[field]);
     case 'census':
-      return censusFields.some(field => newRow[field] !== oldRow[field])
+      return censusFields.some(field => newRow[field] !== oldRow[field]);
     case 'personnel':
-      return personnelFields.some(field => newRow[field] !== oldRow[field])
+      return personnelFields.some(field => newRow[field] !== oldRow[field]);
     case 'quadrats':
       return quadratsFields.some(field => {
         if (field === 'personnel') {
-          console.log('old row personnel: ', oldRow[field])
-          console.log('new row personnel: ', newRow[field])
+          console.log('old row personnel: ', oldRow[field]);
+          console.log('new row personnel: ', newRow[field]);
           // Special handling for 'personnel' field, which is an array
-          return comparePersonnelObjects(newRow[field], oldRow[field])
+          return comparePersonnelObjects(newRow[field], oldRow[field]);
         }
-        return newRow[field] !== oldRow[field]
-      })
+        return newRow[field] !== oldRow[field];
+      });
     case 'species':
-      return speciesFields.some(field => newRow[field] !== oldRow[field])
+      return speciesFields.some(field => newRow[field] !== oldRow[field]);
     case 'subSpecies':
-      return subSpeciesFields.some(field => newRow[field] !== oldRow[field])
+      return subSpeciesFields.some(field => newRow[field] !== oldRow[field]);
     case 'validationHistory':
       return validationHistoryFields.some(field => newRow[field] !== oldRow[field]);
     default:
-      throw new Error('invalid grid type submitted')
+      throw new Error('invalid grid type submitted');
   }
 }

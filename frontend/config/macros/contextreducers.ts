@@ -43,6 +43,7 @@ export function genericLoadReducer<T>(state: T | null, action: LoadAction<T>): T
     case 'plotList':
     case 'censusList':
     case 'quadratList':
+    case 'subquadratList':
     case 'siteList':
       if (action.type !== null && action.payload && action.type in action.payload) {
         return action.payload[action.type] ?? state;
@@ -61,7 +62,7 @@ export function genericLoadContextReducer<T>(
   validationFunction?: (list: T[], item: T) => boolean
 ): T | null {
   // Check if the action type is one of the specified types
-  const isRecognizedActionType = ['plot', 'census', 'quadrat', 'site'].includes(action.type);
+  const isRecognizedActionType = ['plot', 'census', 'quadrat', 'site', 'subquadrat'].includes(action.type);
   if (!isRecognizedActionType) {
     return currentState;
   }

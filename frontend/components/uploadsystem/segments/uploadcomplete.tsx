@@ -41,7 +41,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       default:
         return redirect('/dashboard');
     }
-  }
+  };
   return (
     <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
       <Typography variant={"solid"} level={"h1"} color={"success"}>Upload Complete!</Typography>

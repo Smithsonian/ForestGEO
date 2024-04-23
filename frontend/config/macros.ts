@@ -4,7 +4,7 @@
  * This file defines types used throughout the upload system components to define props, state, contexts etc. It also defines some utility functions used in the upload flow.
  */
 import {FileRejection, FileWithPath} from "react-dropzone";
-import '@/styles/customtablesettings.css'
+import '@/styles/customtablesettings.css';
 
 
 export type ValidationErrorID = number;
@@ -31,7 +31,7 @@ export enum ErrorMessages {
 export const tableHeaderSettings = {
   fontWeight: 'bold',
   fontSize: 16,
-}
+};
 
 export interface DropzonePureProps {
   /** Is someone dragging file(s) onto the dropzone? */

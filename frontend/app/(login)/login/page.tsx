@@ -12,7 +12,7 @@ const slides = [
   'background-2.jpg',
   'background-3.jpg',
   'background-4.jpg',
-]
+];
 
 export default function LoginPage() {
   const {data: _session, status} = useSession();

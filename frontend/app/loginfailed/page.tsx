@@ -6,5 +6,5 @@ export default function LoginFailedPage() {
     <Suspense>
       <LoginFailed/>
     </Suspense>
-  )
+  );
 }

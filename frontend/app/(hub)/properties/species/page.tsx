@@ -27,7 +27,7 @@ export default function SpeciesPage() {
       description: '',
       referenceID: 0,
     },
-  ]
+  ];
   const [rows, setRows] = React.useState(initialRows);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});

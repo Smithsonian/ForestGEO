@@ -165,7 +165,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   }, [errorMessage]);
 
   if (!isLoaded || !fileRows) {
-    return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>
+    return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>;
   } else {
     let sortedFileData: UploadedFileData[] = fileRows;
     if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date ? b.date : '').getTime() - new Date(a.date ? a.date : '').getTime());

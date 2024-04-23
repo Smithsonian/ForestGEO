@@ -123,7 +123,7 @@ export default function UploadParent(props: UploadParentProps) {
     setDataViewActive(1);
     setAcceptedFiles([]);
     setParsedData({});
-    setErrors({})
+    setErrors({});
     setErrorRows({});
     setUploadForm('');
     setPersonnelRecording('');
@@ -403,7 +403,7 @@ export default function UploadParent(props: UploadParentProps) {
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
           cmErrors={cmErrors}
-          user={session?.user?.name!} allRowToCMID={allRowToCMID}/>
+          user={session?.user?.name!} allRowToCMID={allRowToCMID}/>;
       case ReviewStates.COMPLETE:
         return <UploadComplete setIsUploadModalOpen={setIsUploadModalOpen} uploadForm={uploadForm}/>;
       default:
@@ -419,7 +419,7 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
     }
-  }
+  };
   return (
     <>
       {(currentCensus && currentPlot) && (
