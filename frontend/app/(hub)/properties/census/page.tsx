@@ -11,7 +11,7 @@ import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
 import {useLoading} from "@/app/contexts/loadingprovider";
-import {DatePicker} from '@mui/x-date-pickers'
+import {DatePicker} from '@mui/x-date-pickers';
 import moment from "moment";
 
 
@@ -26,7 +26,7 @@ export default function CensusPage() {
       endDate: new Date(),
       description: ''
     },
-  ]
+  ];
   const [rows, setRows] = React.useState(initialRows);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});

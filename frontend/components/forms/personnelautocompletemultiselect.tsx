@@ -33,7 +33,7 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
       })
       .catch((error) => {
         console.error('Error fetching data:', error);
-      })
+      });
   };
   const handleConfirm = () => {
     onChange(tempSelectedPersonnel);

@@ -12,7 +12,7 @@ import FinalizeSelectionsButton from "../../client/finalizeselectionsbutton";
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { Quadrat } from "@/config/sqlrdsdefinitions/quadratrds";
 import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
-import { useQuadratContext, useQuadratDispatch } from "@/app/contexts/userselectionprovider";
+import { usePlotContext, useQuadratContext, useQuadratDispatch } from "@/app/contexts/userselectionprovider";
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const {
@@ -24,8 +24,12 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const [finish, setFinish] = useState<boolean>(false);
   let quadratListContext = useQuadratListContext();
   let currentQuadrat = useQuadratContext();
-  const [quadrat, setQuadrat] = useState<Quadrat>(currentQuadrat);
+  let currentPlot = usePlotContext();
+  console.log('current quadrat: ', currentQuadrat);
+  const [quadrat, setQuadrat] = useState<Quadrat>(null);
+  const [quadratList, setQuadratList] = useState<Quadrat[] | null>([]);
   const quadratDispatch = useQuadratDispatch();
+  const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(false);
   const handleChange = (
     _event: React.SyntheticEvent | null,
     newValue: string | null,
@@ -41,9 +45,18 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
       setUnitOfMeasurement('');
     } else if (personnelRecording !== '') {
       setPersonnelRecording('');
+    } else if (isQuadratConfirmed) {
+      setIsQuadratConfirmed(false);
     }
     setFinish(false);
   };
+  
+  useEffect(() => {
+    if (currentPlot !== null) {
+      // ensure that selectable list is restricted by selected plot
+      setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || null);
+    }
+  }, []);
 
   useEffect(() => {
     if (finish) setReviewState(ReviewStates.UPLOAD_FILES);
@@ -56,11 +69,16 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     }
   };
 
+  const handleConfirmQuadrat = async () => {
+    await handleQuadratSelection(quadrat);
+    setIsQuadratConfirmed(true);
+  };
+
   const allSelectionsMade = uploadForm !== '' &&
     (uploadForm !== 'measurements' ||
-      (personnelRecording !== '' && unitOfMeasurement !== '' || currentQuadrat?.quadratName !== null));
+      (personnelRecording !== '' && unitOfMeasurement !== '' && isQuadratConfirmed));
 
-  const showBackButton = personnelRecording !== '' || unitOfMeasurement !== '' || currentQuadrat?.quadratName !== null;
+  const showBackButton = personnelRecording !== '' || unitOfMeasurement !== '' || isQuadratConfirmed;
 
   const renderQuadratValue = (option: SelectOption<string> | null) => {
     if (!option) {
@@ -148,8 +166,8 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             </Select>
           </>
         )}
-        {(uploadForm === "measurements" && personnelRecording !== '' && unitOfMeasurement !== '' && currentQuadrat?.quadratName === null) && (
-          <Stack direction={"column"} spacing={2}>
+        {(uploadForm === "measurements" && personnelRecording !== '' && unitOfMeasurement !== '' && !isQuadratConfirmed) && (
+          <Stack direction={"column"} spacing={2} marginBottom={2}>
             <Typography level={"title-sm"}>Select Quadrat:</Typography>
             <Select
               placeholder="Select a Quadrat"
@@ -160,12 +178,12 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               renderValue={renderQuadratValue}
               onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
                 // Find the corresponding Plot object using newValue
-                const selectedQuadrat = quadratListContext?.find(quadrat => quadrat?.quadratName === newValue) || null;
+                const selectedQuadrat = quadratList?.find(quadrat => quadrat?.quadratName === newValue) || null;
                 setQuadrat(selectedQuadrat);
               }}
             >
               <Option value={""}>None</Option>
-              {quadratListContext?.map((item) => (
+              {quadratList?.map((item) => (
                 <Option value={item?.quadratName} key={item?.quadratName}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                     <Typography level="body-lg">{item?.quadratName}</Typography>
@@ -173,19 +191,16 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 </Option>
               ))}
             </Select>
-            <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
-              await handleQuadratSelection(quadrat);
-            }}>
-              Submit
-            </Button>
+            <Button onClick={handleConfirmQuadrat} size="sm" color="primary">Confirm</Button>
           </Stack>
         )}
-        {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement !== '' && currentQuadrat?.quadratName !== null && !finish && (
+        {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement !== '' && currentQuadrat !== null && !finish && (
           <>
-            <Typography sx={{ mb: 2 }}>You have selected:</Typography>
+            <Typography sx={{ mb: 2, mt: 2 }}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
+            <Typography>Quadrat: {quadrat?.quadratName}</Typography>
             <Typography>Personnel: {personnelRecording}</Typography>
-            <Typography>Units of measurement: {unitOfMeasurement}</Typography>
+            <Typography sx={{mb: 2}}>Units of measurement: {unitOfMeasurement}</Typography>
           </>
         )}
         <FinalizeSelectionsButton

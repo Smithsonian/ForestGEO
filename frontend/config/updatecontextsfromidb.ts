@@ -1,10 +1,11 @@
 // useUpdateContextsFromIDB.ts
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
-import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSubquadratListDispatch} from "@/app/contexts/listselectionprovider";
 import {clearDataByKey, getData, setData} from "@/config/db";
 import {Census, CensusRDS} from "./sqlrdsdefinitions/censusrds";
 import {Quadrat, QuadratsRDS} from "./sqlrdsdefinitions/quadratrds";
 import {Plot, PlotRDS} from "./sqlrdsdefinitions/plotrds";
+import { Subquadrat } from "./sqlrdsdefinitions/subquadratrds";
 
 async function createAndUpdateQuadratList(quadratsRDSLoad: QuadratsRDS[]) {
   let quadratList: Quadrat[] = quadratsRDSLoad.map(quadratRDS => ({
@@ -113,6 +114,12 @@ async function updateCensusIDB(schema: string) {
   await createAndUpdateCensusList(censusRDSLoad);
 }
 
+async function updateSubquadratsIDB(schema: string) {
+  const hashEndpoint = `/api/hash/subquadrats?schema=${schema}`;
+  const dataEndpoint = `/api/fetchall/subquadrats?schema=${schema}`;
+  await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'subquadratsHash', 'subquadratList'); // don't need to do additional processing so can send directly to IDB and exit
+}
+
 export async function loadServerDataIntoIDB(dataType: string, schema: string) {
   switch (dataType) {
     case 'quadrats':
@@ -121,6 +128,8 @@ export async function loadServerDataIntoIDB(dataType: string, schema: string) {
       return await updatePlotsIDB(schema);
     case 'census':
       return await updateCensusIDB(schema);
+    case 'subquadrats':
+      return await updateSubquadratsIDB(schema);
     default:
       throw new Error('incorrect data type provided to loadServerDataIntoIDB, verify');
   }
@@ -138,10 +147,12 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
   const plotsListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
+  const subquadratListDispatch = useSubquadratListDispatch();
 
   const updateQuadratsContext = async () => {
     // IDB load stored separately: QUADRATS
     await loadServerDataIntoIDB('quadrats', schema);
+    await loadServerDataIntoIDB('subquadrats', schema);
     // Check if quadratsLoad is available in IndexedDB
     const quadratsLoadData: QuadratsRDS[] = await getData('quadratsLoad');
     if (!quadratsLoadData || quadratsLoadData.length === 0) throw new Error('quadratsLoad data failed');
@@ -150,6 +161,10 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
     let quadratList: Quadrat[] = await getData('quadratList');
     if (!quadratList || quadratList.length === 0) throw new Error('quadratsList data failed');
     if (quadratListDispatch) await quadratListDispatch({quadratList: quadratList});
+    // gonna roll subquadrats upload into this function too, don't need to customize that far
+    let subquadratList: Subquadrat[] = await getData('subquadratList');
+    if (!subquadratList || subquadratList.length === 0) throw new Error('subquadratList data failed');
+    if (subquadratListDispatch) await subquadratListDispatch({subquadratList: subquadratList});
   };
 
   const updateCensusContext = async () => {
@@ -161,7 +176,7 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
     const censusListData: Census[] = await getData('censusList');
     if (!censusListData || censusListData.length === 0) throw new Error('censusList data failed');
     if (censusListDispatch) await censusListDispatch({censusList: censusListData});
-  }
+  };
 
   const updatePlotsContext = async () => {
     // IDB load stored separately: PLOTS
@@ -174,7 +189,7 @@ const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
     const plotListData: Plot[] = await getData('plotList');
     if (!plotListData || plotListData.length === 0) throw new Error('plotList data failed');
     if (plotsListDispatch) await plotsListDispatch({plotList: plotListData});
-  }
+  };
 
   return {updateQuadratsContext, updateCensusContext, updatePlotsContext};
 };

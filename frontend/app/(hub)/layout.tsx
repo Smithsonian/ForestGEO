@@ -14,7 +14,8 @@ import {
   useCensusListDispatch,
   usePlotListDispatch,
   useQuadratListDispatch,
-  useSiteListDispatch
+  useSiteListDispatch,
+  useSubquadratListDispatch
 } from "@/app/contexts/listselectionprovider";
 import {getData} from "@/config/db";
 import {siteConfig} from "@/config/macros/siteconfigs";
@@ -65,6 +66,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
   const siteListDispatch = useSiteListDispatch();
+  const subquadratListDispatch = useSubquadratListDispatch();
   // plot & census & quadrat selection dispatches to reset plot/census when census changes
   const censusDispatch = useCensusDispatch();
   const plotDispatch = usePlotDispatch();
@@ -151,17 +153,23 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         };
 
         // Function to load and dispatch Plots data
-        const loadPlotsQuadratsData = async () => {
+        const loadPlotsQuadratsSubquadratsData = async () => {
           // load quadrats
           await loadServerDataIntoIDB('quadrats', currentSite.schemaName);
 
           const quadratsData = await getData('quadratsLoad');
-          const quadratsList = await getData('quadratList');
+          const quadratList = await getData('quadratList');
 
-          if (!quadratsData || !quadratsList) return false;
+          if (!quadratsData || !quadratList) return false;
           quadratsLoadDispatch && await quadratsLoadDispatch({quadratsLoad: quadratsData});
-          quadratListDispatch && await quadratListDispatch({quadratList: quadratsList});
+          quadratListDispatch && await quadratListDispatch({quadratList: quadratList});
 
+          // load subquadrats
+          await loadServerDataIntoIDB('subquadrats', currentSite.schemaName);
+
+          const subquadratList = await getData('subquadratList');
+          if (!subquadratList) return false;
+          subquadratListDispatch && subquadratListDispatch({subquadratList: subquadratList});
           // load plots
           await loadServerDataIntoIDB('plots', currentSite.schemaName);
           const plotsData = await getData('plotsLoad');
@@ -174,7 +182,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         };
 
         // Parallelize data loading
-        await Promise.all([loadPlotsQuadratsData(), loadCensusData()]);
+        await Promise.all([loadPlotsQuadratsSubquadratsData(), loadCensusData()]);
       } catch (error: any) {
         console.error('Error loading server data:', error.message);
         throw new Error(error);

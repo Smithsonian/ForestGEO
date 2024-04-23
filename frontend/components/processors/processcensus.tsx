@@ -47,7 +47,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       'SQID',
       'SQName',
       rowData.subquadrat
-    )
+    );
 
     const query = `
     SELECT 

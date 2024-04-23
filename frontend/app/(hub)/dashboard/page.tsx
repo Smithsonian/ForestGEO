@@ -24,7 +24,7 @@ export default function DashboardPage() {
     "options, the status column should be left blank.";
   const quadratNote = "NOTE: The x and y coordinates (“startx” and “starty”) refer to the distance in meters between\n" +
     "the quadrat under question and lowest, left-most corner of the entire plot (or\n" +
-    "wherever your plot origin, or 0,0 coordinates are)."
+    "wherever your plot origin, or 0,0 coordinates are).";
   const censusNote1 = "NOTE: Each of the multiple stems should be included in these files. You may indicate in the codes\n" +
     "field which one is the main stem (if the tree has only one stem, you do not have to include the main\n" +
     "stem code). The rest of the information should be repeated for each multiple stem. Make sure that\n" +

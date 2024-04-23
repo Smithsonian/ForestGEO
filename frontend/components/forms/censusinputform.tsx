@@ -309,16 +309,16 @@ const CensusInputForm = () => {
   };
   const handlePersonnelChange = (id: number | string, newValue: string) => {
     setRows(rows.map((row) => (row.id === id ? {...row, personnel: newValue} : row)));
-  }
+  };
   const handleTreeTagChange = (id: number | string, newValue: string) => {
     setRows(rows.map((row) => (row.id === id ? {...row, treeTag: newValue} : row)));
-  }
+  };
   const handleStemTagChange = (id: number | string, newValue: string) => {
     setRows(rows.map((row) => (row.id === id ? {...row, stemTag: newValue} : row)));
-  }
+  };
   const handleSpeciesCodeChange = (id: number | string, newValue: string) => {
     setRows(rows.map((row) => (row.id === id ? {...row, speciesCode: newValue} : row)));
-  }
+  };
   const handleCodesChange = (id: GridRowId, newCodes: string[]) => {
     setRows(rows.map((row) => (row.id === id ? {...row, codes: newCodes} : row)));
   };

@@ -4,6 +4,7 @@ import {Button, IconButton, Modal, ModalDialog} from "@mui/joy";
 import CloseIcon from "@mui/icons-material/Close";
 import {Dispatch, SetStateAction, useState} from "react";
 import UploadParent from "../uploadsystem/uploadparent";
+import { useQuadratContext, useQuadratDispatch } from "@/app/contexts/userselectionprovider";
 
 interface UPMProps {
   setRefresh: Dispatch<SetStateAction<boolean>>;
@@ -13,6 +14,8 @@ interface UPMProps {
 export default function UploadParentModal(props: UPMProps) {
   const {setRefresh, formType} = props;
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  let currentQuadrat = useQuadratContext();
+  let quadratDispatch = useQuadratDispatch();
 
   const handleOpenUploadModal = (): void => {
     setIsUploadModalOpen(true);
@@ -20,6 +23,7 @@ export default function UploadParentModal(props: UPMProps) {
 
   const handleCloseUploadModal = (): void => {
     setIsUploadModalOpen(false);
+if (currentQuadrat !== null) quadratDispatch && quadratDispatch({quadrat: null});
     setRefresh(true); // Trigger refresh of DataGrid
   };
   return (

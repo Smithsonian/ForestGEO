@@ -1,14 +1,15 @@
 'use client';
-import React, {useState} from "react";
+import React, {useEffect, useState} from "react";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import DataGridCommons from "@/components/datagridcommons";
 import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/measurementssummaryrds';
 import {Box, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
-import {usePlotContext} from "@/app/contexts/userselectionprovider";
+import {usePlotContext, useQuadratContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
+import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
 
 export default function SummaryPage() {
   const {data: session} = useSession();
@@ -53,7 +54,14 @@ export default function SummaryPage() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const currentPlot = usePlotContext();
-  if (currentPlot) console.log(`current plot name: ${currentPlot.key}`);
+  // let quadratListContext = useQuadratListContext();
+
+  // useEffect(() => {
+  //   if (currentPlot) {
+
+  //   }
+  // }, [currentPlot])
+  
 
   const addNewRowToGrid = () => {
     const id = randomId();

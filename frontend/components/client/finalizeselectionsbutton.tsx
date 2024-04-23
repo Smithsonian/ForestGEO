@@ -35,6 +35,6 @@ const FinalizeSelectionsButton: React.FC<FinalizeSelectionsButtonProps> = ({onFi
       </Button>
     </Grow>
   );
-}
+};
 
 export default FinalizeSelectionsButton;

@@ -30,7 +30,7 @@ export default function StemTreeDetailsPage() {
       stemQuadY: null,
       stemDescription: null,
     },
-  ]
+  ];
   const [rows, setRows] = React.useState(initialRows);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});

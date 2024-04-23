@@ -113,7 +113,7 @@ const sqlConfig: PoolOptions = {
   port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
   database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
   ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
-}
+};
 export const poolMonitor = new PoolMonitor(sqlConfig);
 // const pool = mysql.createPool(sqlConfig);
 
@@ -216,7 +216,7 @@ export async function parseCensusRequestBody(request: NextRequest) {
     StartDate: requestBody.startDate ? new Date(requestBody.startDate) : null,
     EndDate: requestBody.endDate ? new Date(requestBody.endDate) : null,
     Description: requestBody.description ?? null,
-  }
+  };
 }
 
 export async function parseStemRequestBody(request: NextRequest) {
@@ -231,7 +231,7 @@ export async function parseStemRequestBody(request: NextRequest) {
     LocalY: requestBody.localY ?? null,
     Moved: requestBody.moved ?? null,
     StemDescription: requestBody.stemDescription ?? null,
-  }
+  };
 }
 
 export async function parsePersonnelRequestBody(request: NextRequest) {
@@ -256,6 +256,18 @@ export async function parseQuadratsRequestBody(request: NextRequest) {
     Area: requestBody.area,
     QuadratShape: requestBody.quadratShape,
     Personnel: requestBody.personnel
+  };
+}
+
+export async function parseSubquadratsRequestBody(request: NextRequest) {
+  const requestBody = await request.json();
+  return {
+    SQID: requestBody.subquadratID,
+    SQName: requestBody.subquadratName,
+    QuadratID: requestBody.quadratID,
+    Xindex: requestBody.xIndex,
+    Yindex: requestBody.yIndex,
+    SQindex: requestBody.sqIndex
   };
 }
 

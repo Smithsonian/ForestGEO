@@ -25,11 +25,13 @@ describe('SimpleToggler', () => {
     expect(screen.queryByTestId('child')).toBeNull();
   });
 
-  it('renders the toggle button', () => {
-    render(<SimpleToggler isOpen={false} renderToggle={mockRenderToggle} children={undefined}/>);
-    const toggleButton = screen.getByText('Toggle');
-    expect(toggleButton).toBeInTheDocument();
-  });
+it('renders the toggle button', () => {
+render(<SimpleToggler isOpen={false} renderToggle={mockRenderToggle}>
+<div>Toggle</div>
+</SimpleToggler>);
+const toggleButton = screen.getByText('Toggle');
+expect(toggleButton).toBeInTheDocument();
+});
 
   it('applies correct styles when open', () => {
     render(

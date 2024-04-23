@@ -17,6 +17,7 @@ export const TableHeadersByFormType: Record<string, { label: string; }[]> = {
   "personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
   "species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
   "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
+  "subquadrats": [{label: "subquadrat"}, {label: "quadrat"}, {label: "xindex"}, {label: "yindex"}, {label: "orderindex"}],
   "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "subquadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "codes"}, {label: "hom"}, {label: "date"}],
   "arcgis_xlsx": arcgisHeaders
 };
@@ -26,6 +27,7 @@ export const RequiredTableHeadersByFormType: Record<string, { label: string; }[]
   "personnel": [],
   "species": [],
   "quadrats": [],
+  "subquadrats": [],
   "measurements": [],
   "arcgis_xlsx": []
 };
@@ -34,6 +36,7 @@ export const DBInputForms: string[] = [
   "personnel",
   "species",
   "quadrats",
+  "subquadrats",
   "measurements"
 ];
 export const FormGroups: Record<string, string[]> = {
