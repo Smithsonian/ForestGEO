@@ -12,7 +12,7 @@ import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
   const { connection, rowData, schema, plotID, censusID, quadratID, fullName, unitOfMeasurement } = props;
-  if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Missing plotID, censusID, or full name");
+  if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Process Census: Missing plotID, censusID, quadratID or full name");
   try {
     /**
      *       "tag": "Trees.TreeTag",
@@ -40,30 +40,10 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     if (!speciesID) throw new Error(`Species with code ${rowData.spcode} does not exist.`);
     console.log(`speciesID: ${speciesID}`);
 
-    const subQuadratID = await getColumnValueByColumnName(
-      connection,
-      schema,
-      'SubQuadrats',
-      'SQID',
-      'SQName',
-      rowData.subquadrat
-    );
-
-    const query = `
-    SELECT 
-      sq.SQName,
-      sq.QuadratID,
-      q.PlotID,
-      q.CensusID
-    FROM 
-        forestgeo_testing.subquadrats sq
-    JOIN 
-        forestgeo_testing.quadrats q ON sq.QuadratID = q.QuadratID
-    WHERE 
-        sq.SQName = ?
-        AND (? IS NULL OR q.PlotID = ?)
-        AND (? IS NULL OR q.CensusID = ?);`;
-    const sqResults = await runQuery(connection, query, [rowData.subquadrat, plotID, censusID]);
+    const query = `SELECT sq.SQID, sq.QuadratID FROM ${schema}.subquadrats sq JOIN ${schema}.quadrats q ON sq.QuadratID = q.QuadratID WHERE (sq.SQName = ? AND q.PlotID = ?);`;
+    const sqResults = await runQuery(connection, query, [rowData.subquadrat, plotID]);
+    console.log(sqResults);
+    const subquadratID = sqResults[0].SQID;
     const quadratID = sqResults[0].QuadratID;
 
     console.log('attempting subspecies ID by speciesID');
@@ -77,36 +57,24 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.log(`treeID: ${treeID}`);
 
     // Insert or update Stems
-    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, rowData.subquadrat, rowData.lx, rowData.ly);
-    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, rowData.subquadrat, rowData.lx, rowData.ly]}`);
+    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly);
+    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly]}`);
     console.log(`stemID: ${stemID}`);
 
     const personnelID = await getPersonnelIDByName(connection, schema, fullName);
     if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
     console.log(`personnelID: ${personnelID}`);
 
-    // date parsing is not needed -- date is being parsed as part of file intake??
-    // // Enhanced date handling
-    // const parseDate = (dateString: string): Date | null => {
-    //   // Define an array of date formats to try
-    //   const formats = ['MM-DD-YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD', 'YYYY-DD-MM'];
-    //   for (const format of formats) {
-    //     if (moment(dateString, format, true).isValid()) {
-    //       return moment(dateString, format).toDate();
-    //     }
-    //   }
-    //   return null; // Return null if none of the formats match
-    // };
-
     const measurementInsertQuery = `
     INSERT INTO ${schema}.coremeasurements
-    (CensusID, PlotID, QuadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    (CensusID, PlotID, QuadratID, SubquadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
     const dbhResult = await runQuery(connection, measurementInsertQuery, [
       censusID,
       plotID,
-      subQuadratID,
+      quadratID,
+      subquadratID,
       treeID,
       stemID,
       personnelID,

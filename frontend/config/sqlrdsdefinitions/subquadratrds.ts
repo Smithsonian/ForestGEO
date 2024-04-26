@@ -14,8 +14,8 @@ export type SubQuadratRDS = {
 export type Subquadrat = SubQuadratRDS | null;
 
 export const SubQuadratGridColumns: GridColDef[] = [
-  {field: 'sqID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'sqName', headerName: 'Name', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'id', headerName: '#', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'subquadratName', headerName: 'Name', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'quadratID', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'xIndex', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'yIndex', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left',},
