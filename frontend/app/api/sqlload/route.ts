@@ -25,6 +25,10 @@ export async function POST(request: NextRequest) {
   let censusIDParam = request.nextUrl.searchParams.get("census");
   if (!censusIDParam) throw new Error('no census id provided!');
   let censusID = parseInt(censusIDParam.trim());
+  // quadrat ID
+  let quadratIDParam = request.nextUrl.searchParams.get("quadrat");
+  if (!quadratIDParam) throw new Error("no quadrat ID provided");
+  let quadratID = parseInt(quadratIDParam.trim());
   // full name
   let fullName = request.nextUrl.searchParams.get("user");
   if (!fullName) throw new Error('no full name provided!');
@@ -86,6 +90,7 @@ export async function POST(request: NextRequest) {
         rowData: row,
         plotID,
         censusID,
+        quadratID,
         fullName,
         unitOfMeasurement
       };

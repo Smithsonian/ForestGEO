@@ -56,6 +56,7 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
   //   }
   // },
   {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'subQuadratName', headerName: 'Subquadrat', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'treeTag', headerName: 'Tag', headerClassName: 'header', flex: 1, align: 'left',},
   {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left',},
   // {field: 'stemLocalX', headerName: 'Stem X', headerClassName: 'header', flex: 1, align: 'left',},

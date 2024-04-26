@@ -139,7 +139,7 @@ interface ConfirmationDialogProps {
  * Function to determine if all entries in a column are null
  */
 function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.every(row => row[field] === null || row[field] === undefined);
+  return rows.length > 0 && rows.every(row => row[field] === null || row[field] === undefined);
 }
 
 /**

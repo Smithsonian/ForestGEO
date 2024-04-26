@@ -112,7 +112,7 @@ const sqlConfig: PoolOptions = {
   host: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
   port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
   database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
-  ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
+  // ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
 };
 export const poolMonitor = new PoolMonitor(sqlConfig);
 // const pool = mysql.createPool(sqlConfig);

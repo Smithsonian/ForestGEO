@@ -47,6 +47,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
         // Set initial progress after fetching validation messages
         const initialProgress = Object.keys(data).reduce((acc, api) => ({...acc, [api]: 0}), {});
         setValidationProgress(initialProgress);
+        showNextPrompt(0).catch(console.error);
       })
       .then(() => setLoading(false))
       .catch(error => console.error('Error fetching validation messages:', error));

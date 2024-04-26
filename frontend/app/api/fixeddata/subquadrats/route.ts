@@ -4,6 +4,7 @@ import { SubQuadratRDS, SubQuadratResult } from "@/config/sqlrdsdefinitions/subq
 import { PoolConnection, format } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
 
+// accepts 4 search parameters --> page (req), pageSize (req), plotID (req), quadratID (opt)
 export async function GET(request: NextRequest): Promise<NextResponse<{
   subquadrats: SubQuadratRDS[],
   totalCount: number
@@ -14,26 +15,23 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
   const page = parseInt(request.nextUrl.searchParams.get('page')!, 10);
   const pageSize = parseInt(request.nextUrl.searchParams.get('pageSize')!, 10);
   const plotID = parseInt(request.nextUrl.searchParams.get('plotID')!, 10);
-  if (isNaN(page) || isNaN(pageSize) || isNaN(plotID)) {
-    throw new Error('Invalid page, pageSize, or plotID parameter');
+  let quadratIDParam = request.nextUrl.searchParams.get('quadratID');
+  if (isNaN(page) || isNaN(pageSize)) {
+    throw new Error('Invalid page or pageSize');
   }
 
   try {
     conn = await getConn();
     const startRow = page * pageSize;
-
-    let paginatedQuery = `
-      SELECT SQL_CALC_FOUND_ROWS *
-      FROM ${schema}.subquadrats
-      WHERE QuadratID IN (
-          SELECT QuadratID
-          FROM ${schema}.quadrats
-          WHERE PlotID = ${plotID}
-      )
-      LIMIT ?, ?;`;
-    const queryParams = [plotID, startRow, pageSize];
-
-    const paginatedResults = await runQuery(conn, paginatedQuery, queryParams.map(param => param.toString().trim()));
+    let paginatedQuery = '';
+    if (quadratIDParam !== 'undefined' && quadratIDParam !== null) {
+      let quadratID = parseInt(quadratIDParam, 10);
+      paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.subquadrats WHERE QuadratID = ${quadratID} LIMIT ?, ?`;
+    } else {
+      paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.subquadrats WHERE QuadratID IN (SELECT QuadratID FROM ${schema}.quadrats WHERE PlotID = ${plotID}) LIMIT ?, ?`;
+    }
+    let queryParams = [startRow, pageSize];
+    const paginatedResults = await runQuery(conn, paginatedQuery, queryParams.map(param => param.toString()));
 
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
