@@ -40,15 +40,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
       try {
         setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
         const response = await fetch(
-          `/api/sqlload?
-          schema=${schema}&
-          formType=${uploadForm}&
-          fileName=${fileName}&
-          plot=${currentPlot?.id.toString().trim()}&
-          census=${currentCensus?.censusID.toString().trim()}&
-          quadrat=${currentQuadrat?.quadratID.toString().trim()}&
-          ${unitOfMeasurement !== '' ? `&
-          uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
+          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID.toString().trim()}&${unitOfMeasurement !== '' ? `&uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(fileData[fileName])
@@ -131,6 +123,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
         case "personnel":
         case "species":
         case "quadrats":
+        case "subquadrats":
           setUploadCompleteMessage("Upload complete! Moving to Azure upload stage...");
           break;
         case "measurements":

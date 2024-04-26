@@ -53,11 +53,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
       countryName: row.CountryName,
       quadratDimensionX: row.QuadratDimensionX,
       quadratDimensionY: row.QuadratDimensionY,
-      stemQuadX: parseFloat(row.StemQuadX.toFixed(2)),
-      stemQuadY: parseFloat(row.StemQuadY.toFixed(2)),
+      stemQuadX: parseFloat(row.StemQuadX),
+      stemQuadY: parseFloat(row.StemQuadY),
       stemDescription: row.StemDescription
     }));
-    console.log(stemTreeDetailRows);
 
     return new NextResponse(JSON.stringify({
       stemTreeDetails: stemTreeDetailRows,
@@ -65,7 +64,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<{
     }), {status: 200});
   } catch (error) {
     console.error('Error in GET:', error);
-    throw new Error('Failed to fetch personnel data');
+    throw new Error('Failed to fetch stemtreedetails data');
   } finally {
     if (conn) conn.release();
   }
