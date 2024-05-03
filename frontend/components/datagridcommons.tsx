@@ -43,7 +43,7 @@ import {
   computeMutation,
   createDeleteQuery,
   createFetchQuery,
-  createProcessQuery,
+  createPostPatchQuery,
   getGridID,
   validateRowStructure,
 } from "@/config/datagridhelpers";
@@ -354,14 +354,12 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
-    console.log('delete confirm');
-    console.log('gridType: ', gridType);
     let gridID = getGridID(gridType);
-    console.log('gridID: ', gridID);
     const deletionID = rows.find(row => row.id == id)![gridID];
     const deleteQuery = createDeleteQuery(
       currentSite?.schemaName ?? '',
       gridType,
+      gridID,
       deletionID
     );
     const response = await fetch(deleteQuery, {
@@ -442,8 +440,9 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         gridType,
         paginationModel.page,
         paginationModel.pageSize,
-        currentPlot?.id,
-        currentQuadrat?.quadratID
+        currentPlot?.id ?? 0,
+        currentCensus?.censusID ?? 0,
+        currentQuadrat?.quadratID ?? 0
       );
       const response = await fetch(query, {
         method: 'GET'
@@ -471,8 +470,9 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       gridType,
       pageToFetch,
       paginationModel.pageSize,
-      currentPlot?.id,
-      currentQuadrat?.quadratID
+      currentPlot?.id ?? 0,
+      currentCensus?.censusID ?? 0,
+      currentQuadrat?.quadratID ?? 0
     );
     try {
       const response = await fetch(paginatedQuery, { method: 'GET' });
@@ -544,9 +544,10 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       const isNewRow = validateRowStructure(gridType, oldRow);
 
       const gridID = getGridID(gridType);
-      const fetchProcessQuery = createProcessQuery(
+      const fetchProcessQuery = createPostPatchQuery(
         currentSite?.schemaName ?? '',
-        gridType
+        gridType,
+        gridID
       );
 
       if (newRow[gridID] === '') {
@@ -560,7 +561,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({oldRow: oldRow, newRow: newRow})
+            body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
           });
           responseJSON = await response.json();
           if (response.status > 299 || response.status < 200)
