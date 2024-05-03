@@ -3,7 +3,6 @@ import { runQuery, SpecialProcessingProps, } from '@/components/processors/proce
 import {
   getColumnValueByColumnName,
   getPersonnelIDByName,
-  getSubSpeciesID,
   processCode,
   processStems,
   processTrees
@@ -11,7 +10,7 @@ import {
 import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
-  const { connection, rowData, schema, plotID, censusID, quadratID, fullName, unitOfMeasurement } = props;
+  const { connection, rowData, schema, plotID, censusID, quadratID, fullName } = props;
   if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Process Census: Missing plotID, censusID, quadratID or full name");
   try {
     /**
@@ -46,13 +45,10 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const subquadratID = sqResults[0].SQID;
     const quadratID = sqResults[0].QuadratID;
 
-    console.log('attempting subspecies ID by speciesID');
-    let subSpeciesID = null;
-    if (speciesID) subSpeciesID = await getSubSpeciesID(connection, schema, parseInt(speciesID));
-    if (!subSpeciesID) console.log('no subspeciesID found');
+    // subspecies table has been deprecated!
 
     // Insert or update Trees with SpeciesID and SubSpeciesID
-    const treeID = await processTrees(connection, schema, rowData.tag, speciesID, subSpeciesID ?? null);
+    const treeID = await processTrees(connection, schema, rowData.tag, speciesID);
     if (treeID === null) throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
     console.log(`treeID: ${treeID}`);
 
@@ -83,7 +79,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       rowData.dbh ?? null,
       rowData.hom ?? null,
       null,
-      JSON.stringify({ units: unitOfMeasurement }) ?? null,
+      null,
     ]);
 
     if (dbhResult.affectedRows <= 0) {

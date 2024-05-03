@@ -6,12 +6,12 @@ import {
   genericLoadReducer,
   LoadAction
 } from "@/config/macros/contextreducers";
-import { Census } from "@/config/sqlrdsdefinitions/censusrds";
-import { Quadrat } from "@/config/sqlrdsdefinitions/quadratrds";
-import { Plot } from "@/config/sqlrdsdefinitions/plotrds";
-import { Subquadrat } from '@/config/sqlrdsdefinitions/subquadratrds';
+import { Census } from "@/config/sqlrdsdefinitions/tables/censusrds";
+import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { Subquadrat } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
 import { getData } from "@/config/db";
-import { SitesRDS } from '@/config/sqlrdsdefinitions/sitesrds';
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 
 export const PlotListContext = createContext<Plot[] | null>(null);
 export const CensusListContext = createContext<Census[] | null>(null);

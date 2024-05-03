@@ -4,7 +4,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
 import {useSiteContext} from "@/app/contexts/userselectionprovider";
-import {PersonnelRDS} from '@/config/sqlrdsdefinitions/personnelrds';
+import {PersonnelRDS} from '@/config/sqlrdsdefinitions/tables/personnelrds';
 
 export interface PersonnelAutocompleteMultiSelectProps {
   initialValue: PersonnelRDS[];

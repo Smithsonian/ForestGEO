@@ -1,16 +1,19 @@
 "use client";
-import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {AlertProps} from "@mui/material";
-import React, {useCallback, useState} from "react";
-import {QuadratsGridColumns as BaseQuadratsGridColumns} from '@/config/sqlrdsdefinitions/quadratrds';
-import {PersonnelRDS} from '@/config/sqlrdsdefinitions/personnelrds';
-import {usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
-import {randomId} from "@mui/x-data-grid-generator";
+import { GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { AlertProps } from "@mui/material";
+import React, { useCallback, useEffect, useState } from "react";
+import { QuadratsGridColumns as BaseQuadratsGridColumns, Quadrat } from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import { PersonnelRDS } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { usePlotContext, useQuadratContext, useQuadratDispatch, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
-import {PersonnelAutocompleteMultiSelect} from "@/components/forms/personnelautocompletemultiselect";
-import {Box, Typography} from "@mui/joy";
-import {useSession} from "next-auth/react";
+import { PersonnelAutocompleteMultiSelect } from "@/components/forms/personnelautocompletemultiselect";
+import { Box, Button, IconButton, Modal, ModalDialog, Stack, Typography } from "@mui/joy";
+import { useSession } from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
+import { useSubquadratListContext } from "@/app/contexts/listselectionprovider";
+import CloseIcon from "@mui/icons-material/Close";
+import SubquadratsDataGrid from "@/components/client/sqdatagrid";
 
 export default function QuadratsPage() {
   const initialRows: GridRowsProp = [
@@ -40,18 +43,24 @@ export default function QuadratsPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const {data: session} = useSession();
-  const handleOpenUploadModal = (): void => {
-    setIsUploadModalOpen(true);
-  };
+  const { data: session } = useSession();
+  const [isSubquadratDialogOpen, setIsSubquadratDialogOpen] = useState(false);
 
-  const handleCloseUploadModal = (): void => {
-    setIsUploadModalOpen(false);
-    setRefresh(true); // Trigger refresh of DataGrid
-  };
   let currentSite = useSiteContext();
   let currentPlot = usePlotContext();
+  let subquadratList = useSubquadratListContext();
+  let quadratDispatch = useQuadratDispatch();
+
+  const handleSelectQuadrat = useCallback((quadratID: number | null) => {
+    // we want to select a quadrat contextually when using this grid FOR subquadrats selection
+    // however, this information should not be retained, as the user might select a different quadrat or change quadrat information
+    // thus, we add the `| null` to the function and ensure that the context is properly reset when the user is done making changes or cancels their changes.
+    if (quadratID === null) quadratDispatch && quadratDispatch({ quadrat: null }).catch(console.error); // dispatches are asynchronous
+    else {
+      const selectedQuadrat = rows.find(row => row.quadratID === quadratID) as Quadrat; // GridValidRowModel needs to be cast to Quadrat
+      if (selectedQuadrat && quadratDispatch) quadratDispatch({ quadrat: selectedQuadrat }).catch(console.error);
+    }
+  }, [rows, quadratDispatch]);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -75,14 +84,14 @@ export default function QuadratsPage() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratName' },
     }));
   };
 
   const updatePersonnelInRows = useCallback((id: GridRowId, newPersonnel: PersonnelRDS[]) => {
     setRows(rows => rows.map(row =>
       row.id === id
-        ? {...row, personnel: newPersonnel.map(person => ({...person}))}
+        ? { ...row, personnel: newPersonnel.map(person => ({ ...person })) }
         : row
     ));
   }, []);
@@ -98,7 +107,7 @@ export default function QuadratsPage() {
       // Check if quadratID is valid and not equal to the initial row's quadratID
       if (quadratId === undefined || quadratId === initialRows[0].quadratID) {
         console.error("Invalid quadratID, personnel update skipped.");
-        setSnackbar({children: "Personnel update skipped due to invalid quadratID.", severity: 'error'});
+        setSnackbar({ children: "Personnel update skipped due to invalid quadratID.", severity: 'error' });
         return;
       }
 
@@ -112,7 +121,7 @@ export default function QuadratsPage() {
         });
 
         if (!response.ok) {
-          setSnackbar({children: `Personnel updates failed!`, severity: 'error'});
+          setSnackbar({ children: `Personnel updates failed!`, severity: 'error' });
           throw new Error('Failed to update personnel');
         }
 
@@ -120,7 +129,7 @@ export default function QuadratsPage() {
         const responseData = await response.json();
         updatePersonnelInRows(rowId, selectedPersonnel);
         setRefresh(true);
-        setSnackbar({children: `${responseData.message}`, severity: 'success'});
+        setSnackbar({ children: `${responseData.message}`, severity: 'success' });
       } catch (error) {
         console.error("Error updating personnel:", error);
       }
@@ -130,23 +139,42 @@ export default function QuadratsPage() {
 
 
   const quadratsGridColumns: GridColDef[] = [...BaseQuadratsGridColumns,
-    {
-      field: 'personnel',
-      headerName: 'Personnel',
-      flex: 1,
-      renderCell: (params) => (
-        <PersonnelAutocompleteMultiSelect
-          initialValue={params.row.personnel}
-          onChange={(newPersonnel) => handlePersonnelChange(params.id, newPersonnel)}
-          locked={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
-        />
-      ),
-    }
+  {
+    field: 'personnel',
+    headerName: 'Personnel',
+    flex: 1,
+    renderCell: (params) => (
+      <PersonnelAutocompleteMultiSelect
+        initialValue={params.row.personnel}
+        onChange={(newPersonnel) => handlePersonnelChange(params.id, newPersonnel)}
+        locked={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
+      />
+    ),
+  },
+  {
+    field: 'subquadrats',
+    headerName: 'Subquadrats',
+    flex: 1,
+    renderCell: (params) => (
+      <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Button
+          fullWidth
+          onClick={() => setIsSubquadratDialogOpen(true)}
+          disabled={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
+          size="md"
+        >
+          <Typography>
+              [ {subquadratList ? subquadratList.filter(subquadrat => subquadrat?.quadratID === params.row.quadratID).map(sq => sq?.subquadratName).join(', ') : ''} ]
+            </Typography>
+        </Button>
+      </Box>
+    ),
+  }
   ];
 
   return (
     <>
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -156,25 +184,46 @@ export default function QuadratsPage() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{flexGrow: 1}}>
+          <Box sx={{ flexGrow: 1 }}>
             {session?.user.isAdmin && (
-              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
+              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}
-            <Typography level={"title-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"title-md"} sx={{ color: "#ffa726" }}>
               Note: This is a locked view and will not allow modification.
             </Typography>
-            <Typography level={"body-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"body-md"} sx={{ color: "#ffa726" }}>
               Please use this view as a way to confirm changes made to measurements.
             </Typography>
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="quadrats" setRefresh={setRefresh}/>
+          <UploadParentModal formType="quadrats" setRefresh={setRefresh} />
         </Box>
       </Box>
-
+      <Modal
+        open={isSubquadratDialogOpen}
+        onClose={() => {
+        }}
+        aria-labelledby="upload-dialog-title"
+        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <ModalDialog
+          size="lg"
+          sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
+          role="alertdialog"
+        >
+          <IconButton
+            aria-label="close"
+            onClick={() => setIsSubquadratDialogOpen(false)}
+            sx={{ position: 'absolute', top: 8, right: 8 }}
+          >
+            <CloseIcon />
+          </IconButton>
+          <SubquadratsDataGrid />
+        </ModalDialog>
+      </Modal>
       <DataGridCommons
         gridType="quadrats"
         gridColumns={quadratsGridColumns}
@@ -195,6 +244,7 @@ export default function QuadratsPage() {
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
+        handleSelectQuadrat={handleSelectQuadrat}
       />
     </>
   );

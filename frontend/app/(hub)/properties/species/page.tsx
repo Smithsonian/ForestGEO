@@ -2,7 +2,7 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
-import {SpeciesGridColumns} from '@/config/sqlrdsdefinitions/speciesrds';
+import {SpeciesGridColumns} from '@/config/sqlrdsdefinitions/tables/speciesrds';
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
@@ -15,12 +15,10 @@ export default function SpeciesPage() {
     {
       id: 0,
       speciesID: 0,
-      speciesName: '',
       speciesCode: '',
-      defaultDBHMin: 0,
+      speciesName: '',
+      subSpeciesName: '',
       defaultDBHMax: 0,
-      defaultHOMMin: 0,
-      defaultHOMMax: 0,
       idLevel: '',
       authority: '',
       fieldFamily: '',
@@ -54,17 +52,16 @@ export default function SpeciesPage() {
 
     const newRow = {
       id: id,
+      speciesCode: '',
       speciesID: nextSpeciesID,
       speciesName: '',
-      speciesCode: '',
-      defaultDBHMin: 0,
+      subSpeciesName: '',
       defaultDBHMax: 0,
-      defaultHOMMin: 0,
-      defaultHOMMax: 0,
       idLevel: '',
       authority: '',
       fieldFamily: '',
       description: '',
+      isNew: true,
     };
     // Add the new row to the state
     setRows(oldRows => [...oldRows, newRow]);

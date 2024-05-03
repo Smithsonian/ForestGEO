@@ -2,7 +2,7 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useEffect, useState} from "react";
-import {CensusGridColumns} from '@/config/sqlrdsdefinitions/censusrds';
+import {CensusGridColumns} from '@/config/sqlrdsdefinitions/tables/censusrds';
 import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
@@ -51,7 +51,7 @@ export default function CensusPage() {
 
   if (!session) redirect('/');
   const {updateQuadratsContext, updateCensusContext, updatePlotsContext} =
-    UpdateContextsFromIDB({email: session.user.email ?? '', schema: currentSite?.schemaName ?? ''});
+    UpdateContextsFromIDB({schema: currentSite?.schemaName ?? ''});
 
   // Function to validate the end date
   const validateEndDate = (censusId: number, chosenEndDate: Date | null): boolean => {

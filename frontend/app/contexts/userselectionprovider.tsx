@@ -6,14 +6,14 @@ import {
   genericLoadContextReducer,
   LoadAction
 } from "@/config/macros/contextreducers";
-import { Site } from "@/config/sqlrdsdefinitions/sitesrds";
-import { Quadrat } from "@/config/sqlrdsdefinitions/quadratrds";
-import { Plot } from "@/config/sqlrdsdefinitions/plotrds";
+import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
 import { usePlotListContext, useQuadratListContext, useSiteListContext, useSubquadratListContext } from "@/app/contexts/listselectionprovider";
 import { getData } from "@/config/db";
 import { useCensusLoadContext } from "@/app/contexts/coredataprovider";
-import { CensusRDS } from '@/config/sqlrdsdefinitions/censusrds';
-import { Subquadrat } from "@/config/sqlrdsdefinitions/subquadratrds";
+import { CensusRDS } from '@/config/sqlrdsdefinitions/tables/censusrds';
+import { Subquadrat } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 
 export const PlotContext = createContext<Plot>(null);
 export const CensusContext = createContext<CensusRDS>(null);

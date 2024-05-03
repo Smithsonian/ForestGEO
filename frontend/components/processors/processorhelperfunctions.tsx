@@ -5,10 +5,41 @@ import {
   InsertUpdateProcessingProps,
   runQuery
 } from "@/components/processors/processormacros";
-import {SitesResult} from '@/config/sqlrdsdefinitions/sitesrds';
+import {SitesResult} from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import {processCensus} from "@/components/processors/processcensus";
 import {bitToBoolean} from "@/config/macros";
-import {SitesRDS} from '@/config/sqlrdsdefinitions/sitesrds';
+import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import MapperFactory from "@/config/datamapper";
+import { GridValidRowModel } from "@mui/x-data-grid";
+
+export async function selectOrInsertFamily(connection: PoolConnection, schema: string, rowFamilyName: any,): Promise<number | undefined> {
+  let query = `SELECT FamilyID FROM ${schema}.family WHERE Family = ?`;
+  let familyResults = await runQuery(connection, query, [rowFamilyName]);
+  let familyID: number | undefined = undefined;
+  if (familyResults.length === 0) {
+    let insertResults = await runQuery(connection, `INSERT INTO ${schema}.family (Family) VALUES (?)`, [rowFamilyName]);
+    familyID = insertResults.insertId;
+  } else {
+    familyID = familyResults[0].FamilyID;
+  }
+
+  return familyID;
+}
+
+export async function selectOrInsertGenus(connection: PoolConnection, schema: string, rowGenusName: any, familyID?: number): Promise<number | undefined> {
+  let genusResults = await runQuery(connection, `SELECT GenusID FROM ${schema}.genus WHERE Genus = ?`, [rowGenusName]);
+  let genusID: number | undefined = genusResults.length > 0 ? genusResults[0].GenusID : undefined;
+  if (!genusID) {
+    if (familyID) {
+      let insertGenusResults = await runQuery(connection, `INSERT INTO ${schema}.genus (FamilyID, Genus) VALUES (?, ?)`, [familyID, rowGenusName]);
+      genusID = insertGenusResults.insertId;
+    } else {
+      let insertGenusResults = await runQuery(connection, `INSERT INTO ${schema}.genus ( Genus) VALUES (?)`, [rowGenusName]);
+      genusID = insertGenusResults.insertId;
+    }
+  }
+  return genusID;
+}
 
 export async function getColumnValueByColumnName<T>(
   connection: PoolConnection,
@@ -17,7 +48,7 @@ export async function getColumnValueByColumnName<T>(
   columnNameToExtract: string,
   columnNameToSearch: string,
   columnValueToSearch: T
-): Promise<T | null> {
+): Promise<T | undefined> {
   if (!columnNameToExtract || !columnNameToSearch || !columnValueToSearch) throw new Error('accidentally handed undefined value in parameter');
 
   try {
@@ -32,40 +63,10 @@ export async function getColumnValueByColumnName<T>(
     if (result.length > 0) {
       return result[0][columnNameToExtract] as T;
     } else {
-      return null;
+      return undefined;
     }
   } catch (error: any) {
     console.error(`Error retrieving ${columnNameToExtract} from ${tableName}:`, error.message);
-    throw error;
-  }
-}
-
-export async function getSubSpeciesID(
-  connection: PoolConnection,
-  schema: string,
-  speciesID: number
-): Promise<number | null> {
-  if (!speciesID) throw new Error('received undefined species ID in getSubSpeciesID');
-
-  try {
-    // MySQL query with placeholder for speciesID
-    const query = `
-      SELECT SubSpeciesID
-      FROM ${schema}.subspecies
-      WHERE SpeciesID = ?
-    `;
-
-    // Execute the query with speciesID as the placeholder value
-    const rows = await runQuery(connection, query, [speciesID]);
-
-    // Check if any rows are returned and return the SubSpeciesID
-    if (rows.length > 0) {
-      return rows[0].SubSpeciesID as number;
-    } else {
-      return null;
-    }
-  } catch (error: any) {
-    console.error(`Error retrieving SubSpeciesID: ${error.message}`);
     throw error;
   }
 }
@@ -117,7 +118,6 @@ export async function processTrees(
   schema: string,
   treeTag: any,
   speciesID: any,
-  subSpeciesID: any
 ): Promise<number | null> {
   if (!treeTag || !speciesID) throw new Error('undefined treetag or speciesid passed to processTrees');
 
@@ -128,14 +128,12 @@ export async function processTrees(
     VALUES (?, ?, ?) AS new_data
     ON DUPLICATE KEY UPDATE 
       SpeciesID = new_data.SpeciesID, 
-      SubSpeciesID = new_data.SubSpeciesID;
   `;
 
     // Execute the query
     const upsertTreesResult = await runQuery(connection, query, [
       treeTag,
       speciesID,
-      subSpeciesID ?? null
     ]);
     return upsertTreesResult.insertId;
   } catch (error: any) {
@@ -302,7 +300,6 @@ export async function runValidationProcedure(
   }
 }
 
-
 export async function verifyEmail(email: string): Promise<{ emailVerified: boolean, isAdmin: boolean }> {
   const connection: PoolConnection | null = await getConn();
   try {
@@ -335,11 +332,8 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     const sitesParams: any[] | undefined = [];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    return sitesResults.map((row: SitesResult) => ({
-      siteID: row.SiteID,
-      siteName: row.SiteName,
-      schemaName: row.SchemaName,
-    }));
+    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('Sites');
+    return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
   } finally {
@@ -373,11 +367,8 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     const sitesParams = [userID];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    return sitesResults.map((row: SitesResult) => ({
-      siteID: row.SiteID,
-      siteName: row.SiteName,
-      schemaName: row.SchemaName,
-    }));
+    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('Sites');
+    return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
   } finally {
@@ -411,3 +402,81 @@ export function generateUpdateQueries(schema: string, table: string, changedFiel
     return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
   });
 }
+
+
+
+export const stemDimensionsViewFields = [
+  // trees
+  'treeTag', // slice (0, 1)
+  // stems
+  'stemTag', // slice (1, 5)
+  'stemLocalX',
+  'stemLocalY',
+  'stemUnits',
+  // subquadrats // slice (5, 12)
+  'subquadratName',
+  'subquadratDimensionX',
+  'subquadratDimensionY',
+  'subquadratX',
+  'subquadratY',
+  'subquadratUnits',
+  'subquadratOrderPosition',
+  // quadrats // slice (12, 16)
+  'quadratName',
+  'quadratDimensionX',
+  'quadratDimensionY',
+  'quadratUnits',
+  // plots // slice (16, )
+  'plotName',
+  'locationName',
+  'countryName',
+  'plotDimensionX',
+  'plotDimensionY',
+  'plotGlobalX',
+  'plotGlobalY',
+  'plotGlobalZ',
+  'plotUnits',
+];
+
+export const allTaxonomiesFields = [
+  // family
+  'family',
+  // genus
+  'genus',
+  'genusAuthority',
+  // species
+  'speciesCode',
+  'speciesName',
+  'subspeciesName',
+  'speciesAuthority',
+  'currentTaxonFlag',
+  'obsoleteTaxonFlag',
+  'fieldFamily',
+  'speciesDescription',
+  // reference
+  'publicationTitle',
+  'fullReference',
+  'dateOfPublication',
+  'citation'
+];
+export const stemTaxonomiesViewFields = [
+  // trees
+  'treeTag',
+  // stems
+  'stemTag',
+  // family
+  'family',
+  // genus
+  'genus',
+  'genusAuthority',
+  // species
+  'speciesCode',
+  'speciesName',
+  'subspeciesName',
+  'currentTaxonFlag',
+  'obsoleteTaxonFlag',
+  'speciesAuthority',
+  'subspeciesAuthority',
+  'speciesIDLevel',
+  'speciesFieldFamily'
+];

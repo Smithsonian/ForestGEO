@@ -6,7 +6,7 @@ import React, {useState} from "react";
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
-import {AttributeGridColumns} from '@/config/sqlrdsdefinitions/attributerds';
+import {AttributeGridColumns} from '@/config/sqlrdsdefinitions/tables/attributerds';
 import {Box, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";

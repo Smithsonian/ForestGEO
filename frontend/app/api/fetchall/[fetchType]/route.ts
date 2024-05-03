@@ -1,9 +1,10 @@
 import { getConn, runQuery } from "@/components/processors/processormacros";
+import MapperFactory, { IDataMapper } from "@/config/datamapper";
 import { HTTPResponses } from "@/config/macros";
-import { CensusRDS, CensusResult } from "@/config/sqlrdsdefinitions/censusrds";
-import { PlotRDS, PlotsResult } from "@/config/sqlrdsdefinitions/plotrds";
-import { QuadratsRDS, QuadratsResult } from "@/config/sqlrdsdefinitions/quadratrds";
-import { SubQuadratRDS, SubQuadratResult } from "@/config/sqlrdsdefinitions/subquadratrds";
+import { CensusRDS, CensusResult } from "@/config/sqlrdsdefinitions/tables/censusrds";
+import { PlotRDS, PlotsResult } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { QuadratsRDS, QuadratsResult } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { SubQuadratRDS as SubquadratRDS, SubQuadratResult as SubquadratResult } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 import { PoolConnection } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -20,61 +21,24 @@ export async function GET(request: NextRequest, { params }: { params: { fetchTyp
     const results = await runQuery(conn, `SELECT * FROM ${schema}.${fetchType}`);
     if (!results) return new NextResponse(null, { status: 500 });
 
+    let mapper: IDataMapper<any, any>;
     switch (fetchType) {
       case 'census':
         // Map the results to CensusRDS structure
-        const censusRows: CensusRDS[] = results.map((row: CensusResult, index: any) => ({
-          id: index + 1,
-          censusID: row.CensusID,
-          plotID: row.PlotID,
-          plotCensusNumber: row.PlotCensusNumber,
-          startDate: row.StartDate,
-          endDate: row.EndDate,
-          description: row.Description,
-          // ... other fields as needed
-        }));
+        mapper = MapperFactory.getMapper<CensusResult, CensusRDS>('Census');
+        const censusRows = mapper.mapData(results);
         return new NextResponse(JSON.stringify(censusRows), { status: HTTPResponses.OK });
       case 'plots':
-        const plotRows: PlotRDS[] = results.map((row: PlotsResult, index: number) => ({
-          id: index + 1,
-          plotID: row.PlotID,
-          plotName: row.PlotName,
-          locationName: row.LocationName,
-          countryName: row.CountryName,
-          dimensionX: row.DimensionX,
-          dimensionY: row.DimensionY,
-          area: row.Area,
-          globalX: row.GlobalX,
-          globalY: row.GlobalY,
-          globalZ: row.GlobalZ,
-          plotShape: row.PlotShape,
-          plotDescription: row.PlotDescription,
-        }));
-
+        mapper = MapperFactory.getMapper<PlotsResult, PlotRDS>('Plots');
+        const plotRows = mapper.mapData(results);
         return new NextResponse(JSON.stringify(plotRows), { status: 200 });
       case 'quadrats':
-        const quadratRows: QuadratsRDS[] = results.map((row: QuadratsResult, index: number) => ({
-          id: index + 1,
-          quadratID: row.QuadratID,
-          plotID: row.PlotID,
-          censusID: row.CensusID,
-          quadratName: row.QuadratName,
-          dimensionX: row.DimensionX,
-          dimensionY: row.DimensionY,
-          area: row.Area,
-          quadratShape: row.QuadratShape
-        }));
+        mapper = MapperFactory.getMapper<QuadratsResult, QuadratsRDS>('Quadrats');
+        const quadratRows = mapper.mapData(results);
         return new NextResponse(JSON.stringify(quadratRows), { status: 200 });
       case 'subquadrats':
-        const subquadratRows: SubQuadratRDS[] = results.map((row: SubQuadratResult, index: number) => ({
-          id: index + 1,
-          subquadratID: row.SQID,
-          subquadratName: row.SQName,
-          quadratID: row.QuadratID,
-          xIndex: row.Xindex,
-          yIndex: row.Yindex,
-          sqIndex: row.SQindex
-        }));
+        mapper = MapperFactory.getMapper<SubquadratResult, SubquadratRDS>('Subquadrats');
+        const subquadratRows = mapper.mapData(results);
         return new NextResponse(JSON.stringify(subquadratRows), { status: 200 });
       default:
         return new NextResponse(null, { status: 500 });

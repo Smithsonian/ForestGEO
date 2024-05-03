@@ -1,8 +1,8 @@
 "use client";
 
-import {Button, IconButton, Modal, ModalDialog} from "@mui/joy";
+import { Button, IconButton, Modal, ModalDialog } from "@mui/joy";
 import CloseIcon from "@mui/icons-material/Close";
-import {Dispatch, SetStateAction, useState} from "react";
+import { Dispatch, SetStateAction, useState } from "react";
 import UploadParent from "../uploadsystem/uploadparent";
 import { useQuadratContext, useQuadratDispatch } from "@/app/contexts/userselectionprovider";
 
@@ -12,10 +12,8 @@ interface UPMProps {
 }
 
 export default function UploadParentModal(props: UPMProps) {
-  const {setRefresh, formType} = props;
+  const { setRefresh, formType } = props;
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  let currentQuadrat = useQuadratContext();
-  let quadratDispatch = useQuadratDispatch();
 
   const handleOpenUploadModal = (): void => {
     setIsUploadModalOpen(true);
@@ -23,7 +21,6 @@ export default function UploadParentModal(props: UPMProps) {
 
   const handleCloseUploadModal = (): void => {
     setIsUploadModalOpen(false);
-if (currentQuadrat !== null) quadratDispatch && quadratDispatch({quadrat: null});
     setRefresh(true); // Trigger refresh of DataGrid
   };
   return (
@@ -35,22 +32,22 @@ if (currentQuadrat !== null) quadratDispatch && quadratDispatch({quadrat: null})
         onClose={() => {
         }}
         aria-labelledby="upload-dialog-title"
-        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
+        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
         <ModalDialog
           size="lg"
-          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
+          sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
           role="alertdialog"
         >
           <IconButton
             aria-label="close"
             onClick={handleCloseUploadModal}
-            sx={{position: 'absolute', top: 8, right: 8}}
+            sx={{ position: 'absolute', top: 8, right: 8 }}
           >
-            <CloseIcon/>
+            <CloseIcon />
           </IconButton>
           <UploadParent setIsUploadModalOpen={setIsUploadModalOpen} onReset={handleCloseUploadModal}
-                        overrideUploadForm={formType}/>
+            overrideUploadForm={formType} />
         </ModalDialog>
       </Modal>
     </>

@@ -1,5 +1,5 @@
 import 'next-auth';
-import {SitesRDS} from '@/config/sqlrdsdefinitions/sitesrds';
+import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import {Profile} from "next-auth";
 
 declare module 'next-auth' {

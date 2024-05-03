@@ -10,7 +10,7 @@ import List from "@mui/joy/List";
 import Option from '@mui/joy/Option';
 import FinalizeSelectionsButton from "../../client/finalizeselectionsbutton";
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Quadrat } from "@/config/sqlrdsdefinitions/quadratrds";
+import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
 import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
 import { usePlotContext, useQuadratContext, useQuadratDispatch } from "@/app/contexts/userselectionprovider";
 
@@ -156,12 +156,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
                 <Option value={"m"}>Meters (m)</Option>
                 <Option value={"cm"}>Centimeters (cm)</Option>
                 <Option value={"mm"}>Millimeters (mm)</Option>
-
-                <ListSubheader>Imperial Units</ListSubheader>
-                <Option value={"in"}>Inches (in)</Option>
-                <Option value={"ft"}>Feet (ft)</Option>
-                <Option value={"yd"}>Yards (yd)</Option>
-                <Option value={"mi"}>Miles (mi)</Option>
               </List>
             </Select>
           </>

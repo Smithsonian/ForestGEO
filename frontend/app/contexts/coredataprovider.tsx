@@ -1,15 +1,14 @@
 "use client";
 
-import React, {createContext, useContext, useEffect, useReducer} from "react";
-import {SubSpeciesRDS} from '@/config/sqlrdsdefinitions/subspeciesrds';
-import {SpeciesRDS} from '@/config/sqlrdsdefinitions/speciesrds';
-import {QuadratsRDS} from '@/config/sqlrdsdefinitions/quadratrds';
-import {PlotRDS} from '@/config/sqlrdsdefinitions/plotrds';
-import {PersonnelRDS} from '@/config/sqlrdsdefinitions/personnelrds';
-import {CoreMeasurementsRDS} from '@/config/sqlrdsdefinitions/coremeasurementsrds';
-import {CensusRDS} from '@/config/sqlrdsdefinitions/censusrds';
-import {AttributesRDS} from '@/config/sqlrdsdefinitions/attributerds';
-import {getData} from "@/config/db";
+import React, { createContext, useContext, useEffect, useReducer } from "react";
+import { SpeciesRDS } from '@/config/sqlrdsdefinitions/tables/speciesrds';
+import { QuadratsRDS } from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import { PlotRDS } from '@/config/sqlrdsdefinitions/tables/plotrds';
+import { PersonnelRDS } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
+import { CensusRDS } from '@/config/sqlrdsdefinitions/tables/censusrds';
+import { AttributesRDS } from '@/config/sqlrdsdefinitions/tables/attributerds';
+import { getData } from "@/config/db";
 import {
   createEnhancedDispatch,
   EnhancedDispatch,
@@ -23,7 +22,6 @@ export const CensusLoadContext = createContext<CensusRDS[] | null>(null);
 export const PersonnelLoadContext = createContext<PersonnelRDS[] | null>(null);
 export const QuadratsLoadContext = createContext<QuadratsRDS[] | null>(null);
 export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
-export const SubSpeciesLoadContext = createContext<SubSpeciesRDS[] | null>(null);
 export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
 export const CoreMeasurementLoadDispatchContext = createContext<EnhancedDispatch<CoreMeasurementsRDS[]> | null>(null);
 export const AttributeLoadDispatchContext = createContext<EnhancedDispatch<AttributesRDS[]> | null>(null);
@@ -31,10 +29,9 @@ export const CensusLoadDispatchContext = createContext<EnhancedDispatch<CensusRD
 export const PersonnelLoadDispatchContext = createContext<EnhancedDispatch<PersonnelRDS[]> | null>(null);
 export const QuadratsLoadDispatchContext = createContext<EnhancedDispatch<QuadratsRDS[]> | null>(null);
 export const SpeciesLoadDispatchContext = createContext<EnhancedDispatch<SpeciesRDS[]> | null>(null);
-export const SubSpeciesLoadDispatchContext = createContext<EnhancedDispatch<SubSpeciesRDS[]> | null>(null);
 export const PlotsLoadDispatchContext = createContext<EnhancedDispatch<PlotRDS[]> | null>(null);
 
-export function CoreDataProvider({children}: Readonly<{ children: React.ReactNode }>) {
+export function CoreDataProvider({ children }: Readonly<{ children: React.ReactNode }>) {
 
   const [coreMeasurementLoad, coreMeasurementLoadDispatch] =
     useReducer<React.Reducer<CoreMeasurementsRDS[] | null, LoadAction<CoreMeasurementsRDS[]>>>(genericLoadReducer, []);
@@ -54,9 +51,6 @@ export function CoreDataProvider({children}: Readonly<{ children: React.ReactNod
   const [speciesLoad, speciesLoadDispatch] =
     useReducer<React.Reducer<SpeciesRDS[] | null, LoadAction<SpeciesRDS[]>>>(genericLoadReducer, []);
 
-  const [subSpeciesLoad, subSpeciesLoadDispatch] =
-    useReducer<React.Reducer<SubSpeciesRDS[] | null, LoadAction<SubSpeciesRDS[]>>>(genericLoadReducer, []);
-
   const [plotsLoad, plotsLoadDispatch] =
     useReducer<React.Reducer<PlotRDS[] | null, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
 
@@ -66,34 +60,30 @@ export function CoreDataProvider({children}: Readonly<{ children: React.ReactNod
   const enhancedPersonnelLoadDispatch = createEnhancedDispatch(personnelLoadDispatch, 'personnelLoad');
   const enhancedQuadratsLoadDispatch = createEnhancedDispatch(quadratsLoadDispatch, 'quadratsLoad');
   const enhancedSpeciesLoadDispatch = createEnhancedDispatch(speciesLoadDispatch, 'speciesLoad');
-  const enhancedSubSpeciesLoadDispatch = createEnhancedDispatch(subSpeciesLoadDispatch, 'subSpeciesLoad');
   const enhancedPlotsLoadDispatch = createEnhancedDispatch(plotsLoadDispatch, 'plotsLoad');
 
   useEffect(() => {
     const fetchData = async () => {
       const coreMeasurementLoad = await getData('coreMeasurementLoad');
-      coreMeasurementLoadDispatch({type: 'coreMeasurementLoad', payload: coreMeasurementLoad});
+      coreMeasurementLoadDispatch({ type: 'coreMeasurementLoad', payload: coreMeasurementLoad });
 
       const attributeLoad = await getData('attributeLoad');
-      attributeLoadDispatch({type: 'attributeLoad', payload: attributeLoad});
+      attributeLoadDispatch({ type: 'attributeLoad', payload: attributeLoad });
 
       const censusLoad = await getData('censusLoad');
-      censusLoadDispatch({type: 'censusLoad', payload: censusLoad});
+      censusLoadDispatch({ type: 'censusLoad', payload: censusLoad });
 
       const personnelLoad = await getData('personnelLoad');
-      personnelLoadDispatch({type: 'personnelLoad', payload: personnelLoad});
+      personnelLoadDispatch({ type: 'personnelLoad', payload: personnelLoad });
 
       const quadratsLoad = await getData('quadratsLoad');
-      quadratsLoadDispatch({type: 'quadratsLoad', payload: quadratsLoad});
+      quadratsLoadDispatch({ type: 'quadratsLoad', payload: quadratsLoad });
 
       const speciesLoad = await getData('speciesLoad');
-      speciesLoadDispatch({type: 'speciesLoad', payload: speciesLoad});
-
-      const subSpeciesLoad = await getData('subSpeciesLoad');
-      subSpeciesLoadDispatch({type: 'subSpeciesLoad', payload: subSpeciesLoad});
+      speciesLoadDispatch({ type: 'speciesLoad', payload: speciesLoad });
 
       const plotsLoad = await getData('plotsLoad');
-      plotsLoadDispatch({type: 'plotsLoad', payload: plotsLoad});
+      plotsLoadDispatch({ type: 'plotsLoad', payload: plotsLoad });
     };
 
     fetchData().catch(console.error);
@@ -112,15 +102,11 @@ export function CoreDataProvider({children}: Readonly<{ children: React.ReactNod
                       <QuadratsLoadDispatchContext.Provider value={enhancedQuadratsLoadDispatch}>
                         <SpeciesLoadContext.Provider value={speciesLoad}>
                           <SpeciesLoadDispatchContext.Provider value={enhancedSpeciesLoadDispatch}>
-                            <SubSpeciesLoadContext.Provider value={subSpeciesLoad}>
-                              <SubSpeciesLoadDispatchContext.Provider value={enhancedSubSpeciesLoadDispatch}>
-                                <PlotsLoadContext.Provider value={plotsLoad}>
-                                  <PlotsLoadDispatchContext.Provider value={enhancedPlotsLoadDispatch}>
-                                    {children}
-                                  </PlotsLoadDispatchContext.Provider>
-                                </PlotsLoadContext.Provider>
-                              </SubSpeciesLoadDispatchContext.Provider>
-                            </SubSpeciesLoadContext.Provider>
+                            <PlotsLoadContext.Provider value={plotsLoad}>
+                              <PlotsLoadDispatchContext.Provider value={enhancedPlotsLoadDispatch}>
+                                {children}
+                              </PlotsLoadDispatchContext.Provider>
+                            </PlotsLoadContext.Provider>
                           </SpeciesLoadDispatchContext.Provider>
                         </SpeciesLoadContext.Provider>
                       </QuadratsLoadDispatchContext.Provider>
@@ -182,14 +168,6 @@ export function useSpeciesLoadContext() {
 
 export function useSpeciesLoadDispatch() {
   return useContext(SpeciesLoadDispatchContext);
-}
-
-export function useSubSpeciesLoadContext() {
-  return useContext(SubSpeciesLoadContext);
-}
-
-export function useSubSpeciesLoadDispatch() {
-  return useContext(SubSpeciesLoadDispatchContext);
 }
 
 export function usePlotsLoadContext() {

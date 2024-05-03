@@ -3,7 +3,7 @@ import React, {useEffect, useState} from "react";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import DataGridCommons from "@/components/datagridcommons";
-import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/measurementssummaryrds';
+import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {Box, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import {usePlotContext, useQuadratContext} from "@/app/contexts/userselectionprovider";

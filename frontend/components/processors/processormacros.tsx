@@ -8,6 +8,8 @@ import {NextRequest} from "next/server";
 import {processQuadrats} from "@/components/processors/processquadrats";
 import {processCensus} from "@/components/processors/processcensus";
 import {PoolMonitor} from "@/config/poolmonitor";
+import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
+import { GridValidRowModel } from '@mui/x-data-grid';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
@@ -191,8 +193,8 @@ export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
   return transformRequestBody(requestBody);
 }
 
-export async function parseAttributeRequestBody(request: NextRequest, parseType: string) {
-  const requestBody = await request.json();
+export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   switch (parseType) {
     case 'POST':
     case 'PATCH': {
@@ -208,7 +210,7 @@ export async function parseAttributeRequestBody(request: NextRequest, parseType:
 }
 
 export async function parseCensusRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   return {
     CensusID: requestBody.censusID,
     PlotID: requestBody.plotID ?? null,
@@ -220,7 +222,7 @@ export async function parseCensusRequestBody(request: NextRequest) {
 }
 
 export async function parseStemRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   return {
     StemID: requestBody.stemID,
     TreeID: requestBody.treeID ?? null,
@@ -235,7 +237,7 @@ export async function parseStemRequestBody(request: NextRequest) {
 }
 
 export async function parsePersonnelRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   return {
     PersonnelID: requestBody.personnelID,
     FirstName: requestBody.firstName ?? null,
@@ -245,7 +247,7 @@ export async function parsePersonnelRequestBody(request: NextRequest) {
 }
 
 export async function parseQuadratsRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   return {
     QuadratID: requestBody.quadratID,
     PlotID: requestBody.plotID,
@@ -260,7 +262,7 @@ export async function parseQuadratsRequestBody(request: NextRequest) {
 }
 
 export async function parseSubquadratsRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   return {
     SQID: requestBody.subquadratID,
     SQName: requestBody.subquadratName,
@@ -272,7 +274,7 @@ export async function parseSubquadratsRequestBody(request: NextRequest) {
 }
 
 export async function parseSpeciesRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   return {
     SpeciesID: requestBody.speciesID,
     GenusID: requestBody.genusID ?? null,
@@ -285,20 +287,6 @@ export async function parseSpeciesRequestBody(request: NextRequest) {
     FieldFamily: requestBody.fieldFamily ?? null,
     Description: requestBody.description ?? null,
     ReferenceID: requestBody.referenceID ?? null,
-  };
-}
-
-export async function parseSubSpeciesRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    SubSpeciesID: requestBody.subSpeciesID,
-    SpeciesID: requestBody.speciesID ?? null,
-    SubSpeciesName: requestBody.subSpeciesName ?? null,
-    SubSpeciesCode: requestBody.subSpeciesCode ?? null,
-    CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
-    ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
-    Authority: requestBody.authority ?? null,
-    InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
   };
 }
 
@@ -325,3 +313,46 @@ export type UpdateValidationResponse = {
   rowsValidated: any;
 }
 
+export interface QueryConfig {
+  schema: string;
+  table: string;
+  joins?: {
+    table: string;
+    alias: string;
+    on: string;
+  }[];
+  conditionals?: string;
+  pagination: {
+    page: number;
+    pageSize: number;
+  };
+  extraParams?: any[];
+}
+
+export function buildPaginatedQuery(config: QueryConfig): { query: string, params: any[] } {
+  const { schema, table, joins, conditionals, pagination, extraParams } = config;
+  const { page, pageSize } = pagination;
+  const startRow = page * pageSize;
+  let queryParams = extraParams || [];
+
+  // Establish an alias for the primary table for consistency in joins and selections
+  const tableAlias = table[0].toLowerCase();  // Simple default alias based on first letter of table name
+
+  // Build the base query with possible joins
+  let query = `SELECT SQL_CALC_FOUND_ROWS ${tableAlias}.* FROM ${schema}.${table} AS ${tableAlias}`;
+  if (joins) {
+    joins.forEach(join => {
+      query += ` LEFT JOIN ${schema}.${join.table} AS ${join.alias} ON ${join.on}`;
+    });
+  }
+
+  if (conditionals) {
+    query += ` WHERE ${conditionals}`;
+  }
+
+  // Add LIMIT clause
+  query += ` LIMIT ?, ?`;
+  queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
+
+  return { query, params: queryParams };
+}
