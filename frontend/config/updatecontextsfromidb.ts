@@ -2,10 +2,10 @@
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
 import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSubquadratListDispatch} from "@/app/contexts/listselectionprovider";
 import {clearDataByKey, getData, setData} from "@/config/db";
-import {Census, CensusRDS} from "./sqlrdsdefinitions/censusrds";
-import {Quadrat, QuadratsRDS} from "./sqlrdsdefinitions/quadratrds";
-import {Plot, PlotRDS} from "./sqlrdsdefinitions/plotrds";
-import { Subquadrat } from "./sqlrdsdefinitions/subquadratrds";
+import {Census, CensusRDS} from "./sqlrdsdefinitions/tables/censusrds";
+import {Quadrat, QuadratsRDS} from "./sqlrdsdefinitions/tables/quadratrds";
+import {Plot, PlotRDS} from "./sqlrdsdefinitions/tables/plotrds";
+import { Subquadrat } from "./sqlrdsdefinitions/tables/subquadratrds";
 
 async function createAndUpdateQuadratList(quadratsRDSLoad: QuadratsRDS[]) {
   let quadratList: Quadrat[] = quadratsRDSLoad.map(quadratRDS => ({
@@ -53,11 +53,6 @@ async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]) {
   await setData('censusList', censusList);
 }
 
-async function fetchHash(endpoint: string) {
-  const response = await fetch(endpoint, {method: 'GET'});
-  if (!response.ok) throw new Error(`Failed to fetch hash from ${endpoint}`);
-  return await response.json();
-}
 
 async function fetchData(endpoint: string) {
   const response = await fetch(endpoint, {method: 'GET'});
@@ -136,11 +131,10 @@ export async function loadServerDataIntoIDB(dataType: string, schema: string) {
 }
 
 interface UpdateContextsIDBProps {
-  email: string;
   schema: string;
 }
 
-const UpdateContextsFromIDB = ({email, schema}: UpdateContextsIDBProps) => {
+const UpdateContextsFromIDB = ({schema}: UpdateContextsIDBProps) => {
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();

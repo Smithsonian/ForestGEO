@@ -343,6 +343,7 @@ export default function UploadParent(props: UploadParentProps) {
           handleReplaceFile={handleReplaceFile}/>;
       case ReviewStates.REVIEW:
         return <UploadReviewFiles
+          unitOfMeasurement={unitOfMeasurement}
           acceptedFiles={acceptedFiles}
           setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}

@@ -13,8 +13,8 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import {LoginLogout} from "@/components/loginlogout";
 import {siteConfigNav} from "@/config/macros/siteconfigs";
 import {SiteConfigProps} from "@/config/macros/siteconfigs";
-import {Site} from "@/config/sqlrdsdefinitions/sitesrds";
-import {Plot} from "@/config/sqlrdsdefinitions/plotrds";
+import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -40,7 +40,7 @@ import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import {useCensusListContext, usePlotListContext, useSiteListContext} from "@/app/contexts/listselectionprovider";
 import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
-import {CensusRDS} from '@/config/sqlrdsdefinitions/censusrds';
+import {CensusRDS} from '@/config/sqlrdsdefinitions/tables/censusrds';
 import {getData} from "@/config/db";
 import {useSession} from "next-auth/react";
 import Check from "@mui/icons-material/Check";

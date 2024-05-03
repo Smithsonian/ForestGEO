@@ -9,9 +9,6 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
-import BugReportSharp from '@mui/icons-material/BugReport';
-import LoupeIcon from '@mui/icons-material/Loupe';
-import PestControlIcon from '@mui/icons-material/PestControl';
 
 export type SiteConfigProps = {
   label: string;
@@ -100,24 +97,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: WidgetsIcon,
       },
-      // {
-      //   label: 'Subquadrats',
-      //   href: '/subquadrats',
-      //   tip: '',
-      //   icon: LoupeIcon,
-      // },
       {
         label: 'Species',
         href: '/species',
         tip: '',
         icon: BugReportIcon,
       },
-      {
-        label: 'Subspecies',
-        href: '/subspecies',
-        tip: '',
-        icon: PestControlIcon,
-      }
     ]
   },
   // {
