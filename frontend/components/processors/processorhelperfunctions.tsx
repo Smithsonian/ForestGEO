@@ -1,14 +1,14 @@
-import mysql, {PoolConnection} from "mysql2/promise";
+import mysql, { PoolConnection } from "mysql2/promise";
 import {
   fileMappings,
   getConn,
   InsertUpdateProcessingProps,
   runQuery
 } from "@/components/processors/processormacros";
-import {SitesResult} from '@/config/sqlrdsdefinitions/tables/sitesrds';
-import {processCensus} from "@/components/processors/processcensus";
-import {bitToBoolean} from "@/config/macros";
-import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { processCensus } from "@/components/processors/processcensus";
+import { bitToBoolean } from "@/config/macros";
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import MapperFactory from "@/config/datamapper";
 import { GridValidRowModel } from "@mui/x-data-grid";
 
@@ -207,19 +207,19 @@ export async function getPersonnelIDByName(
 }
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | null> {
-  const {formType, schema, ...subProps} = props;
-  const {connection, rowData} = subProps;
+  const { formType, schema, ...subProps } = props;
+  const { connection, rowData } = subProps;
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   console.log('INSERT OR UPDATE: schema & mapping found');
   if (formType === 'measurements') {
-    return await processCensus({...subProps, schema});
+    return await processCensus({ ...subProps, schema });
   } else {
     if (mapping.specialProcessing) {
       console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
-      await mapping.specialProcessing({...subProps, schema});
+      await mapping.specialProcessing({ ...subProps, schema });
     } else {
       console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
       const columns = Object.keys(mapping.columnMappings);
@@ -287,7 +287,7 @@ export async function runValidationProcedure(
       totalRows: validationSummary.TotalRows,
       failedRows: validationSummary.FailedRows,
       message: validationSummary.Message,
-      ...(failedValidationIds.length > 0 && {failedCoreMeasurementIDs: failedValidationIds})
+      ...(failedValidationIds.length > 0 && { failedCoreMeasurementIDs: failedValidationIds })
     };
 
     await conn.commit();
@@ -312,7 +312,7 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
     // isAdmin is determined based on the IsAdmin field if email is verified
     const isAdmin = emailVerified && bitToBoolean(results[0]?.IsAdmin);
 
-    return {emailVerified, isAdmin};
+    return { emailVerified, isAdmin };
   } catch (error: any) {
     console.error('Error verifying email in database: ', error);
     throw error;
@@ -332,7 +332,7 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     const sitesParams: any[] | undefined = [];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('Sites');
+    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('sites');
     return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
@@ -367,7 +367,7 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     const sitesParams = [userID];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('Sites');
+    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('sites');
     return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
@@ -402,8 +402,65 @@ export function generateUpdateQueries(schema: string, table: string, changedFiel
     return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
   });
 }
+type FieldList = string[];
 
+interface UpdateQueryConfig {
+  slices: {
+      [key: string]: {
+          range: [number, number];
+          primaryKey: string;
+      }
+  };
+  fieldList: FieldList;
+}
 
+export function generateUpdateOperations(schema: string, newRow: any, oldRow: any, config: UpdateQueryConfig): string[] {
+  const { fieldList, slices } = config;
+  const changedFields = detectFieldChanges(newRow, oldRow, fieldList);
+
+  const generateQueriesFromSlice = (type: keyof typeof slices): string[] => {
+      const sliceConfig = slices[type];
+      if (!sliceConfig) {
+          return []; // Safety check in case of an undefined slice
+      }
+      const { range, primaryKey } = sliceConfig;
+      const fieldsInSlice = fieldList.slice(range[0], range[1]);
+      const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
+      return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
+  };
+
+  return Object.keys(slices).reduce((acc, typeKey) => {
+      const type = typeKey as keyof typeof slices; // Assert the correct type explicitly
+      const queries = generateQueriesFromSlice(type);
+      return [...acc, ...queries];
+  }, [] as string[]).filter(query => query.length > 0);
+};
+
+/**
+ * Generates SQL INSERT operations for each configured slice of the newRow.
+ * @param schema The database schema name.
+ * @param newRow The new row data.
+ * @param config Configuration specifying how fields are grouped into slices and their respective tables.
+ * @returns An array of SQL insert statements for each slice.
+ */
+export function generateInsertOperations(schema: string, newRow: any, config: UpdateQueryConfig): string[] {
+  const { fieldList, slices } = config;
+
+  const generateQueriesFromSlice = (type: keyof typeof slices): string => {
+      const sliceConfig = slices[type];
+      if (!sliceConfig) {
+          return ''; // Safety check in case of an undefined slice
+      }
+      const { range } = sliceConfig;
+      const fieldsInSlice = fieldList.slice(range[0], range[1]);
+      return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
+  };
+
+  return Object.keys(slices).map(typeKey => {
+      const type = typeKey as keyof typeof slices;
+      return generateQueriesFromSlice(type);
+  }).filter(query => query.length > 0);
+}
 
 export const stemDimensionsViewFields = [
   // trees
@@ -480,3 +537,53 @@ export const stemTaxonomiesViewFields = [
   'speciesIDLevel',
   'speciesFieldFamily'
 ];
+
+export const StemDimensionsViewQueryConfig: UpdateQueryConfig = {
+  fieldList: stemDimensionsViewFields,
+  slices: {
+      trees: { range: [0, 1], primaryKey: 'TreeID' },
+      stems: { range: [1, 5], primaryKey: 'StemID' },
+      subquadrats: { range: [5, 12], primaryKey: 'SubquadratID' },
+      quadrats: { range: [12, 16], primaryKey: 'QuadratID' },
+      plots: { range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID' },
+  }
+};
+
+export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
+  fieldList: allTaxonomiesFields,
+  slices: {
+    family: {range: [0, 1], primaryKey: 'FamilyID'},
+    genus: {range: [1, 3], primaryKey: 'GenusID'},
+    species: {range: [3, 11], primaryKey: 'SpeciesID'},
+    reference: {range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID'},
+  }
+};
+export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
+  fieldList: stemTaxonomiesViewFields,
+  slices: {
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 2], primaryKey: 'StemID'},
+    family: {range: [2, 3], primaryKey: 'FamilyID'},
+    genus: {range: [3, 5], primaryKey: 'GenusID'},
+    species: {range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID'},
+  }
+};
+
+/**
+ * Generates a single SQL INSERT query for each subset of fields in a newRow.
+ * @param schema The database schema name.
+ * @param table The table where the insert needs to be made.
+ * @param fields The fields to include in the insert.
+ * @param newRow The new row data to be inserted.
+ * @returns A SQL insert statement.
+ */
+export function generateInsertQuery(schema: string, table: string, fields: string[], newRow: any): string {
+  // Create an object containing only the fields in this slice
+  const dataToInsert = fields.reduce((obj, field) => {
+    obj[field] = newRow[field];
+    return obj;
+  }, {} as Record<string, any>);
+
+  // Use mysql.format to safely construct the query
+  return mysql.format(`INSERT INTO ?? SET ?`, [`${schema}.${table}`, dataToInsert]);
+}

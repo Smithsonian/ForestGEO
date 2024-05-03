@@ -98,7 +98,6 @@ export const SpeciesGridColumns: GridColDef[] = [
   { field: 'obsoleteTaxonFlag', headerName: 'Obsolete?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
   { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'subSpeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'defaultDBHMax', headerName: 'Max DBH Limit', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
   { field: 'idLevel', headerName: 'IDLevel', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'speciesAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'subspeciesAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },

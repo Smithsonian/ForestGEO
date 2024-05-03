@@ -41,9 +41,9 @@ export class GenusMapper implements IDataMapper<GenusResult, GenusRDS> {
 }
 
 export const GenusGridColumns: GridColDef[] = [
-  { field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'genusAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', },
+  { field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  { field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  { field: 'genusAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', editable: true},
 ];

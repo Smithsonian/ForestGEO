@@ -243,7 +243,7 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
 
   return (
     <>
-      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} />
+      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setCoreDataLoaded={setCoreDataLoaded} />
       <Header />
       <Box
         component="main"

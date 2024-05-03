@@ -74,14 +74,21 @@ export type FetchQueryFunction = (
   gridType: string,
   page: number,
   pageSize: number,
-  plotID?: number,
-  quadratID?: number
-) => string
-export type ProcessQueryFunction = (
+  plotID: number,
+  censusID: number,
+  quadratID: number
+) => string;
+export type ProcessPostPatchQueryFunction = (
   siteSchema: string,
-  gridType: string,
-  deletionID?: number | string
-) => string
+  dataType: string,
+  gridID: string,
+) => string;
+export type ProcessDeletionQueryFunction = (
+  siteSchema: string,
+  dataType: string,
+  gridID: string,
+  deletionID: number | string
+) => string;
 
 export interface EditToolbarProps extends GridToolbarProps {
   locked?: boolean
@@ -89,28 +96,8 @@ export interface EditToolbarProps extends GridToolbarProps {
   handleRefresh: () => Promise<void>
 }
 
-export const createProcessQuery: ProcessQueryFunction = (
-  siteSchema: string,
-  gridType: string
-) => {
-  let baseQuery = `/api/`;
-  switch (gridType) {
-    case 'stemDimensions':
-    case 'stemTaxonomies':
-    case 'allTaxonomies':
-    case 'coreMeasurements':
-    case 'census':
-    case 'quadrats':
-    case 'subquadrats':
-    case 'attributes':
-    case 'personnel':
-    case 'species':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}`;
-      break;
-    default:
-      throw new Error('invalid gridtype selected');
-  }
-  return baseQuery;
+export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
+  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;
 };
 export const createFetchQuery: FetchQueryFunction = (
   siteSchema: string,
@@ -118,43 +105,19 @@ export const createFetchQuery: FetchQueryFunction = (
   page,
   pageSize,
   plotID,
+  censusID,
   quadratID?: number
 ) => {
-  let baseQuery = `/api/`;
-  switch (gridType) {
-    case 'coreMeasurements':
-    case 'census':
-    case 'quadrats':
-    case 'measurementsSummary':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`;
-      baseQuery += plotID ? `&plotID=${plotID}` : ``;
-      break;
-    case 'subquadrats':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`;
-      baseQuery += plotID ? `&plotID=${plotID}` : ``;
-      baseQuery += quadratID ? `&quadratID=${quadratID}` : ``;
-      break;
-    case 'attributes':
-    case 'personnel':
-    case 'species':
-    case 'stemDimensions':
-      baseQuery += `fixeddata/${gridType.toLowerCase()}?schema=${siteSchema}&page=${page}&pageSize=${pageSize}`;
-      break;
-    default:
-      throw new Error('invalid gridtype selected');
-  }
-  return baseQuery;
+  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${censusID}` + `${quadratID ? `/${quadratID}` : ``}`;
 };
 
-export const createDeleteQuery: ProcessQueryFunction = (
+export const createDeleteQuery: ProcessDeletionQueryFunction = (
   siteSchema: string,
   gridType: string,
-  deletionID?: number | string
+  deletionID: number | string
 ) => {
   let gridID = getGridID(gridType);
-  let baseQuery = createProcessQuery(siteSchema, gridType);
-  baseQuery += `&${gridID}=${deletionID!.toString()}`;
-  return baseQuery;
+  return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
 
 export function getGridID(gridType: string): string {

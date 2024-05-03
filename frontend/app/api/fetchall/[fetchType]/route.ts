@@ -22,27 +22,9 @@ export async function GET(request: NextRequest, { params }: { params: { fetchTyp
     if (!results) return new NextResponse(null, { status: 500 });
 
     let mapper: IDataMapper<any, any>;
-    switch (fetchType) {
-      case 'census':
-        // Map the results to CensusRDS structure
-        mapper = MapperFactory.getMapper<CensusResult, CensusRDS>('Census');
-        const censusRows = mapper.mapData(results);
-        return new NextResponse(JSON.stringify(censusRows), { status: HTTPResponses.OK });
-      case 'plots':
-        mapper = MapperFactory.getMapper<PlotsResult, PlotRDS>('Plots');
-        const plotRows = mapper.mapData(results);
-        return new NextResponse(JSON.stringify(plotRows), { status: 200 });
-      case 'quadrats':
-        mapper = MapperFactory.getMapper<QuadratsResult, QuadratsRDS>('Quadrats');
-        const quadratRows = mapper.mapData(results);
-        return new NextResponse(JSON.stringify(quadratRows), { status: 200 });
-      case 'subquadrats':
-        mapper = MapperFactory.getMapper<SubquadratResult, SubquadratRDS>('Subquadrats');
-        const subquadratRows = mapper.mapData(results);
-        return new NextResponse(JSON.stringify(subquadratRows), { status: 200 });
-      default:
-        return new NextResponse(null, { status: 500 });
-    }
+    mapper = MapperFactory.getMapper<any, any>(fetchType);
+    const rows = mapper.mapData(results);
+    return new NextResponse(JSON.stringify(rows), {status: HTTPResponses.OK});
   } catch (error) {
     console.error('Error:', error);
     throw new Error("Call failed");

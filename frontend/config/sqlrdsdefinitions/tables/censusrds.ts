@@ -72,16 +72,8 @@ export const CensusGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
-    editable: true
+    editable: false
   },
-  // {
-  //   field: 'plotID',
-  //   headerName: 'PlotID',
-  //   headerClassName: 'header',
-  //   flex: 1,
-  //   align: 'left',
-  //   editable: true
-  // },
   {
     field: 'plotCensusNumber',
     headerName: 'PlotCensusNumber',
@@ -89,7 +81,7 @@ export const CensusGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
-    editable: true
+    editable: false
   },
   {
     field: 'startDate',

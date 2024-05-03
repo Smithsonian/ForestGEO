@@ -33,7 +33,7 @@ export class FamilyMapper implements IDataMapper<FamilyResult, FamilyRDS> {
 }
 
 export const FamilyGridColumns: GridColDef[] = [
-  { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', },
+  { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
 ];
