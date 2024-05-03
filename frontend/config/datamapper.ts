@@ -37,36 +37,36 @@ class MapperFactory {
   static getMapper<T, U>(type: string): IDataMapper<T, U> {
     switch (type) {
       // tables
-      case 'CoreMeasurements':
+      case 'coremeasurements':
         return new CoreMeasurementsMapper() as any;
-      case 'ValidationHistory':
+      case 'validationhistory':
         return new ValidationHistoryMapper() as any;
-      case 'Sites':
+      case 'sites':
         return new SitesMapper() as any;
-      case 'Plots':
+      case 'plots':
         return new PlotsMapper() as any;
-      case 'Attributes':
+      case 'attributes':
         return new AttributesMapper() as any;
-      case 'Census':
+      case 'census':
         return new CensusMapper() as any;
-      case 'Personnel':
+      case 'personnel':
         return new PersonnelMapper() as any;
-      case 'Quadrats':
+      case 'quadrats':
         return new QuadratsMapper() as any;
-      case 'Species':
+      case 'species':
         return new SpeciesMapper() as any;
-      case 'Stems':
+      case 'stems':
         return new StemsMapper() as any;
-      case 'Subquadrats':
+      case 'subquadrats':
         return new SubquadratsMapper() as any;
       // views:
-      case 'AllTaxonomiesView':
+      case 'alltaxonomiesview':
         return new AllTaxonomyViewMapper() as any;
-      case 'StemDimensionsView':
+      case 'stemdimensionsview':
         return new StemDimensionsMapper() as any;
-      case 'StemTaxonomiesView':
+      case 'stemtaxonomiesview':
         return new StemTaxonomiesMapper() as any;
-      case 'MeasurementsSummaryView':
+      case 'measurementssummaryview':
         return new MeasurementsSummaryMapper() as any;
       default:
         throw new Error('Mapper not found for type: ' + type);

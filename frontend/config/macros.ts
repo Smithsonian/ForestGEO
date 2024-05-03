@@ -97,3 +97,5 @@ export function formatDate(isoDateString: string): string {
   };
   return new Date(isoDateString).toLocaleDateString(undefined, options);
 }
+
+export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];

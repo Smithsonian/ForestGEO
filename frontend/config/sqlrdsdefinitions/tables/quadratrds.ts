@@ -1,6 +1,7 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { PersonnelRDS } from './personnelrds';
 import MapperFactory, { IDataMapper } from "../../datamapper";
+import { unitSelectionOptions } from '@/config/macros';
 
 export type QuadratsRDS = {
   id: number;
@@ -49,7 +50,7 @@ export class QuadratsMapper implements IDataMapper<any, QuadratsRDS> {
       Area: quadrat.area,
       Unit: quadrat.unit,
       QuadratShape: quadrat.quadratShape,
-      personnel: JSON.stringify(quadrat.personnel)
+      Personnel: JSON.stringify(quadrat.personnel)
     }));
   }
 
@@ -94,7 +95,7 @@ export const quadratsFields = [
 
 
 export const QuadratsGridColumns: GridColDef[] = [
-  { field: 'quadratID', headerName: 'ID', headerClassName: 'header', maxWidth: 75, align: 'left', },
+  { field: 'quadratID', headerName: 'ID', headerClassName: 'header', maxWidth: 75, align: 'left', editable: false },
   // {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
   // {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
   {
@@ -104,6 +105,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     flex: 1,
     maxWidth: 140,
     align: 'left',
+    type: 'string',
     editable: true
   },
   {
@@ -113,6 +115,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     flex: 1,
     maxWidth: 125,
     align: 'left',
+    type: 'number',
     editable: true
   },
   {
@@ -122,9 +125,12 @@ export const QuadratsGridColumns: GridColDef[] = [
     flex: 1,
     maxWidth: 125,
     align: 'left',
+    type: 'number',
     editable: true
   },
-  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', editable: true },
+  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', type: 'number', editable: true },
+  { field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', type: 'singleSelect', 
+  valueOptions: unitSelectionOptions, editable: true },
   {
     field: 'quadratShape',
     headerName: 'Shape',
@@ -132,6 +138,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     flex: 1,
     maxWidth: 125,
     align: 'left',
+    type: 'string',
     editable: true
   },
 ];

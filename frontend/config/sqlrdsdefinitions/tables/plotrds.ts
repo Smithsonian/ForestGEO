@@ -1,5 +1,6 @@
 import {GridColDef} from '@mui/x-data-grid';
 import { IDataMapper } from '../../datamapper';
+import { unitSelectionOptions } from '@/config/macros';
 
 
 export type PlotRDS = {
@@ -82,15 +83,17 @@ export class PlotsMapper implements IDataMapper<PlotsResult, PlotRDS> {
 }
 
 export const PlotGridColumns: GridColDef[] = [
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotName', headerName: 'PlotName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'locationName', headerName: 'LocationName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'countryName', headerName: 'CountryName', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'globalX', headerName: 'GlobalX', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'globalY', headerName: 'GlobalY', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'globalZ', headerName: 'GlobalZ', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'unit', headerName: 'Units', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotShape', headerName: 'PlotShape', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'plotName', headerName: 'PlotName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'locationName', headerName: 'LocationName', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true},
+  {field: 'countryName', headerName: 'CountryName', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true},
+  {field: 'dimensionX', headerName: 'DimX', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'dimensionY', headerName: 'DimY', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'globalX', headerName: 'GlobalX', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'globalY', headerName: 'GlobalY', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'globalZ', headerName: 'GlobalZ', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'unit', headerName: 'Units', headerClassName: 'header', flex: 1, align: 'left', type: 'singleSelect', valueOptions: unitSelectionOptions},
+  {field: 'plotShape', headerName: 'PlotShape', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true},
+  {field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true},
 ];
