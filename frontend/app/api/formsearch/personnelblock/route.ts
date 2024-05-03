@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
-import {PersonnelRDS, PersonnelResult} from '@/config/sqlrdsdefinitions/personnelrds';
+import {PersonnelRDS, PersonnelResult} from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import {FORMSEARCH_LIMIT} from "@/config/macros/azurestorage";
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[]>> {
