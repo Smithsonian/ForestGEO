@@ -45,7 +45,8 @@ export default function LoginPage() {
             style={{
               ...style,
               backgroundImage: `url(${slides[i]})`,
-            }}/>
+            }}
+            data-testid={`${slides[i]}`}/>
         ))}
         <UnauthenticatedSidebar/>
       </Box>

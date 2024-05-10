@@ -40,7 +40,9 @@ export interface SpecialProcessingProps {
   censusID?: number;
   quadratID?: number;
   fullName?: string;
-  unitOfMeasurement?: string;
+  dbhUnit?: string;
+  homUnit?: string;
+  coordUnit?: string;
 }
 
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {

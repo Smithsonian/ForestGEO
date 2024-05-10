@@ -3,9 +3,13 @@ import {NextRequest, NextResponse} from "next/server";
 import {getContainerClient} from "@/config/macros/azurestorage";
 
 
-export async function GET(request: NextRequest, response: NextResponse) {
-  const plot = request.nextUrl.searchParams.get('plot')!.trim();
-  const census = request.nextUrl.searchParams.get('census')!.trim();
+export async function GET(request: NextRequest) {
+  const plot = request.nextUrl.searchParams.get('plot');
+  const census = request.nextUrl.searchParams.get('census');
+
+  if (!plot || !census) {
+    return new NextResponse('Both plot and census parameters are required', {status: 400});
+  }
   const blobData: any = [];
   const containerClient = await getContainerClient(`${plot}-${census}`);
   if (!containerClient) {

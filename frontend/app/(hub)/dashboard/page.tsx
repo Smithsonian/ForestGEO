@@ -15,7 +15,8 @@ import {
 import WarningIcon from '@mui/icons-material/Warning';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import {CensusLogo, PlotLogo} from "@/components/icons";
+import { CensusLogo, PlotLogo } from "@/components/icons";
+import { useSession } from "next-auth/react";
 
 export default function DashboardPage() {
 
@@ -33,26 +34,27 @@ export default function DashboardPage() {
     "measured from that census. The dataset for subsequent censuses should contain all live stems from\n" +
     "the previous census. Dead or lost stems should have the appropriate codes to indicate their absence\n" +
     "in subsequent censuses.";
+  const { data: session } = useSession();
   return (
-    <Box sx={{display: 'flex', flexGrow: 1, width: '85%', flexDirection: 'column', marginBottom: 5}}>
-      <Typography level={"body-lg"} sx={{paddingBottom: '1em'}}>Please use this guide to navigate through this
+    <Box sx={{ display: 'flex', flexGrow: 1, width: '85%', flexDirection: 'column', marginBottom: 5 }}>
+      <Typography level={"body-lg"} sx={{ paddingBottom: '1em' }}>Please use this guide to navigate through this
         app&apos;s key features
         and functionalities.</Typography>
       <Typography level="h3">Understanding the Sidebar</Typography>
-      <Typography level="body-lg" sx={{paddingBottom: '1em'}}>
+      <Typography level="body-lg" sx={{ paddingBottom: '1em' }}>
         The sidebar is intended to provide you with quick and easy access to the different features this app provides.
         <Tooltip title="Please note that some features are still in progress and may not be usable at this time.">
           <IconButton>
-            <WarningIcon fontSize="small"/>
+            <WarningIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       </Typography>
-      <AccordionGroup sx={{paddingBottom: '2em'}}>
+      <AccordionGroup sx={{ paddingBottom: '2em' }}>
         <Accordion>
           <AccordionSummary>
-            <Box sx={{alignItems: 'center', flexDirection: 'row', display: 'flex'}}>
+            <Box sx={{ alignItems: 'center', flexDirection: 'row', display: 'flex' }}>
               <Avatar color={"primary"}>
-                <TravelExploreIcon/>
+                <TravelExploreIcon />
               </Avatar>
               <Typography level={"title-lg"}>Required Selections to Use the App -
                 Site</Typography>
@@ -62,14 +64,14 @@ export default function DashboardPage() {
             <Typography level={"body-lg"}>
               Now that you have logged in, you will see the sidebar is currently empty, with the exception of a
               clickable
-              button saying &quot;Select Site&quot;<br/>
+              button saying &quot;Select Site&quot;<br />
               In order to fully access the website, you must select the site you are currently working in.
               <Tooltip color={"warning"} title={"Please contact an administrator if you cannot access the site\n" +
                 "          you are working on."}>
                 <IconButton>
-                  <WarningIcon fontSize={"small"}/>
+                  <WarningIcon fontSize={"small"} />
                 </IconButton>
-              </Tooltip><br/>
+              </Tooltip><br />
               Once you have selected a site, you should see a second menu option slide out to enable you to select a
               plot.
             </Typography>
@@ -77,9 +79,9 @@ export default function DashboardPage() {
         </Accordion>
         <Accordion>
           <AccordionSummary>
-            <Box sx={{alignItems: 'center', flexDirection: 'row', display: 'flex'}}>
+            <Box sx={{ alignItems: 'center', flexDirection: 'row', display: 'flex' }}>
               <Avatar color={"primary"}>
-                <PlotLogo/>
+                <PlotLogo />
               </Avatar>
               <Typography level={"title-lg"}>Required Selections to Use the App -
                 Plot</Typography>
@@ -88,22 +90,51 @@ export default function DashboardPage() {
           <AccordionDetails>
             <Typography level={"body-lg"}>
               Following the same format as the Site, clicking on the Select Plot link will open a dialog box to allow
-              you to select a plot -- <br/> please note that the list of selectable plots will be restricted by access,
+              you to select a plot -- <br /> please note that the list of selectable plots will be restricted by access,
               so you will only be able to see plots you have been added to.
               <Tooltip color={"warning"} title={"Please contact an administrator if you cannot access the plot\n" +
                 "          you are working on."}>
                 <IconButton>
-                  <WarningIcon fontSize={"small"}/>
+                  <WarningIcon fontSize={"small"} />
                 </IconButton>
               </Tooltip>
             </Typography>
+            {session?.user.isAdmin && (
+              <>
+                <Typography level="title-md">
+                  Plot Creation
+                </Typography>
+                <Typography level="body-lg">
+                  If you cannot see your plot or you are attempting to create a new plot, please use the Add New Plot button to
+                  open the plot creation interface. <br />
+                  Please ensure that you correctly input the global coordinates corresponding to your plot, as well as the correct
+                  dimensions. The Area field will automatically update as you input coordinates. Please ensure that you correctly
+                  select the respective units when defining your plot boundaries and dimensions.
+                </Typography>
+                <Typography level="title-md">
+                  Plot Editing
+                </Typography>
+                <Typography level="body-lg">
+                  If your plot&apos;s information does not seem correct or if you need to change any of your plot&apos;s details, please use the Edit
+                  button when in the Select menu dropdown to open the plot editing interface. Once complete, press the Submit button to save
+                  your changes. This will trigger a manual refresh of the site&apos;s core data.
+                </Typography>
+                <Typography level="title-md">
+                  Plot Deletion
+                </Typography>
+                <Typography level="body-lg">
+                  If, for any reason, you need to remove a plot, use the Delete button when in the Select menu dropdown. This action cannot be undone.
+                  NOTE: while this will remove the plot from data storage, this will NOT delete other plot-associated information.
+                </Typography>
+              </>
+            )}
           </AccordionDetails>
         </Accordion>
         <Accordion>
           <AccordionSummary>
-            <Box sx={{alignItems: 'center', flexDirection: 'row', display: 'flex'}}>
+            <Box sx={{ alignItems: 'center', flexDirection: 'row', display: 'flex' }}>
               <Avatar color={"primary"}>
-                <CensusLogo/>
+                <CensusLogo />
               </Avatar>
               <Typography level={"title-lg"}>Required Selections to Use the App -
                 Census</Typography>
@@ -112,29 +143,29 @@ export default function DashboardPage() {
           <AccordionDetails>
             <Typography level={"body-lg"}>
               Similarly, clicking on the Select Census link will open a dialog box to allow you to select the census you
-              would like to update.<br/>
+              would like to update.<br />
               Please note that available census will be organized by ongoing
-              census <span style={{fontWeight: 'bold'}}>first</span>, and historical censuses will be organized by
-              chronological descending order. <br/>
+              census <span style={{ fontWeight: 'bold' }}>first</span>, and historical censuses will be organized by
+              chronological descending order. <br />
               Unlike the Site and Plot selections, Census selections are not restricted by access, so you should be able
               to select any available censuses.
             </Typography>
           </AccordionDetails>
         </Accordion>
       </AccordionGroup>
-      <Typography level="h3" sx={{paddingBottom: '1em'}}>Navigating Through the Website</Typography>
-      <AccordionGroup sx={{paddingBottom: '2em'}}>
+      <Typography level="h3" sx={{ paddingBottom: '1em' }}>Navigating Through the Website</Typography>
+      <AccordionGroup sx={{ paddingBottom: '2em' }}>
         <Accordion>
           <AccordionSummary>
-            <Typography level={"title-lg"} sx={{paddingBottom: '1em'}}>Measurements Hub</Typography>
+            <Typography level={"title-lg"} sx={{ paddingBottom: '1em' }}>Measurements Hub</Typography>
           </AccordionSummary>
           <AccordionDetails>
             <Typography level={"body-lg"}>
-              The Measurements Hub is intended to replace the main data view of CTFSWeb. <br/>
+              The Measurements Hub is intended to replace the main data view of CTFSWeb. <br />
               It contains a table view of the given site/plot/census&apos;s recorded measurements, utilizing a dedicated
               measurement summary view that provides detailed information about the measurements recorded in that
               period, along with a set of filtering buttons to allow you to choose if you want to exclude rows with
-              validation errors or rows without.<br/>
+              validation errors or rows without.<br />
               As you upload new files using the <b>Upload</b> button present on the right side of the Measurements Hub
               page, please keep the following in mind regarding file input parameters and required headers:
             </Typography>
@@ -142,15 +173,15 @@ export default function DashboardPage() {
               <ListItem nested>
                 <ListItem>
                   The tree data from each census must be in a separate file (i.e. one census, one file; three censuses,
-                  three files). All files must have columns listed below, but they can be in any order.<br/>
+                  three files). All files must have columns listed below, but they can be in any order.<br />
                   <Tooltip size={"lg"} color={"warning"} title={censusNote1}>
                     <IconButton>
-                      <WarningIcon fontSize={"small"}/>
+                      <WarningIcon fontSize={"small"} />
                     </IconButton>
                   </Tooltip>
                   <Tooltip size={"lg"} color={"danger"} title={censusNote2}>
                     <IconButton>
-                      <WarningIcon fontSize={"small"}/>
+                      <WarningIcon fontSize={"small"} />
                     </IconButton>
                   </Tooltip>
                 </ListItem>
@@ -167,30 +198,30 @@ export default function DashboardPage() {
                   <ListItem>
                     <b>dbh</b>: the diameter of the tree.
                     <Tooltip size={"lg"} color={"warning"}
-                             title={"NOTE: If there is no diameter measurement because the tree is missing, dead, or a resprout,\n" +
-                               "please put “NULL”"}>
+                      title={"NOTE: If there is no diameter measurement because the tree is missing, dead, or a resprout,\n" +
+                        "please put “NULL”"}>
                       <IconButton>
-                        <WarningIcon fontSize={"small"}/>
+                        <WarningIcon fontSize={"small"} />
                       </IconButton>
                     </Tooltip>
                   </ListItem>
                   <ListItem>
                     <b>codes</b>: tree or measurement codes (as designated in codes.txt)
                     <Tooltip size={"lg"} color={"warning"}
-                             title={"NOTE: If there is more than one code, they should be delimited with semicolons. This allows\n" +
-                               "for codes with more than one letter. The codes field may be left blank if there are no\n" +
-                               "codes."}>
+                      title={"NOTE: If there is more than one code, they should be delimited with semicolons. This allows\n" +
+                        "for codes with more than one letter. The codes field may be left blank if there are no\n" +
+                        "codes."}>
                       <IconButton>
-                        <WarningIcon fontSize={"small"}/>
+                        <WarningIcon fontSize={"small"} />
                       </IconButton>
                     </Tooltip>
                   </ListItem>
                   <ListItem>
                     <b>hom</b>: height (in meters) where the diameter was measured, if different from 1.3 meters.
                     <Tooltip size={"lg"} color={"warning"}
-                             title={"NOTE: If the height of measurement was 1.3 meters, you may leave this field blank. "}>
+                      title={"NOTE: If the height of measurement was 1.3 meters, you may leave this field blank. "}>
                       <IconButton>
-                        <WarningIcon fontSize={"small"}/>
+                        <WarningIcon fontSize={"small"} />
                       </IconButton>
                     </Tooltip>
                   </ListItem>
@@ -204,14 +235,14 @@ export default function DashboardPage() {
         </Accordion>
         <Accordion>
           <AccordionSummary>
-            <Typography level={"title-lg"} sx={{paddingBottom: '1em'}}>Measurement Properties Hub</Typography>
+            <Typography level={"title-lg"} sx={{ paddingBottom: '1em' }}>Measurement Properties Hub</Typography>
           </AccordionSummary>
           <AccordionDetails>
             <Typography level={"body-lg"} component={"div"}>
               The <b>Measurement Properties Hub</b> expands to allow you to modify the different moving parts of a
               census that you would originally modify through CTFSWeb.
-              <AccordionGroup sx={{paddingTop: '1em'}}>
-                <Accordion sx={{paddingBottom: '1em'}}>
+              <AccordionGroup sx={{ paddingTop: '1em' }}>
+                <Accordion sx={{ paddingBottom: '1em' }}>
                   <AccordionSummary>
                     <Typography level={"title-lg"}>Attributes</Typography>
                   </AccordionSummary>
@@ -233,7 +264,7 @@ export default function DashboardPage() {
                           condition of the stem which it describes:
                           <Tooltip size={"lg"} color={"warning"} title={attributeNote}>
                             <IconButton>
-                              <WarningIcon fontSize={"small"}/>
+                              <WarningIcon fontSize={"small"} />
                             </IconButton>
                           </Tooltip>
                         </ListItem>
@@ -295,7 +326,7 @@ export default function DashboardPage() {
                         <b>starty</b>: the y coordinate of the lower left corner of the quadrat, e.g. 40
                         <Tooltip size="lg" color={"warning"} title={quadratNote}>
                           <IconButton>
-                            <WarningIcon fontSize={"small"}/>
+                            <WarningIcon fontSize={"small"} />
                           </IconButton>
                         </Tooltip>
                       </ListItem>
@@ -381,14 +412,14 @@ export default function DashboardPage() {
             <Typography level={"body-lg"}>
               This form is available as a backstop to census file upload, in case it does not work for any reason or
               your file is corrupted. This form will enable you to submit census information in the same format as the
-              census.txt form provided by CTFSWeb. <br/>
+              census.txt form provided by CTFSWeb. <br />
               Please take advantage of the autocompletion functionality the form provides in order to more efficiently
               add information.
             </Typography>
             <Tooltip color={"warning"} title={"Note: The census form relies on successful input of fixed data (" +
               "attributes, personnel, quadrats, species)."}>
               <IconButton>
-                <WarningIcon fontSize={"small"}/>
+                <WarningIcon fontSize={"small"} />
               </IconButton>
             </Tooltip>
           </AccordionDetails>

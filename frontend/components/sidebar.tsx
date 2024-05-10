@@ -40,23 +40,28 @@ import {
   ListSubheader,
   Grid,
   Textarea,
+  IconButton,
+  FormHelperText,
 } from "@mui/joy";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import { useCensusListContext, usePlotListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
-import { useCensusLoadContext } from "@/app/contexts/coredataprovider";
-import { CensusRDS } from '@/config/sqlrdsdefinitions/tables/censusrds';
+import { useCensusLoadContext, usePlotsLoadContext } from "@/app/contexts/coredataprovider";
+import { Census, CensusRDS, CensusRaw } from '@/config/sqlrdsdefinitions/tables/censusrds';
 import { getData } from "@/config/db";
 import { useSession } from "next-auth/react";
-import Check from "@mui/icons-material/Check";
-import ListItemDecorator from "@mui/joy/ListItemDecorator";
 import { SlideToggle, TransitionComponent } from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import { CensusLogo, PlotLogo } from "@/components/icons";
+import { CensusLogo, DeleteIcon, EditIcon, PlotLogo } from "@/components/icons";
 import { RainbowIcon } from '@/styles/rainbowicon';
+import { DatePicker } from '@mui/x-date-pickers';
+import dayjs from 'dayjs';
+import StopIcon from '@mui/icons-material/Stop';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -117,7 +122,7 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
 interface SidebarProps {
   siteListLoaded: boolean
   coreDataLoaded: boolean;
-  setCoreDataLoaded: Dispatch<SetStateAction<boolean>>;
+  setManualReset: Dispatch<SetStateAction<boolean>>;
 }
 
 export default function Sidebar(props: SidebarProps) {
@@ -132,6 +137,7 @@ export default function Sidebar(props: SidebarProps) {
   let censusListContext = useCensusListContext();
   let censusLoadContext = useCensusLoadContext();
   let siteListContext = useSiteListContext();
+  let plotsLoadContext = usePlotsLoadContext();
 
   const [plot, setPlot] = useState<Plot>(currentPlot);
   const initialPlot: PlotRDS = {
@@ -150,13 +156,24 @@ export default function Sidebar(props: SidebarProps) {
     plotShape: '',
     plotDescription: ''
   };
+  const initialCensus: CensusRDS = {
+    id: 0,
+    censusID: 0,
+    startDate: null,
+    endDate: null,
+    description: '',
+    plotCensusNumber: 0,
+    plotID: currentPlot?.id ?? 0,
+  };
   const [newPlotRDS, setNewPlotRDS] = useState<PlotRDS>(initialPlot);
+  const [newCensusRDS, setNewCensusRDS] = useState<CensusRDS>(initialCensus);
   const [census, setCensus] = useState<CensusRDS>(currentCensus);
   const [site, setSite] = useState<Site>(currentSite);
   const [openPlotSelectionModal, setOpenPlotSelectionModal] = useState(false);
   const [openCensusSelectionModal, setOpenCensusSelectionModal] = useState(false);
   const [openSiteSelectionModal, setOpenSiteSelectionModal] = useState(false);
-  const [showPlotAddForm, setShowPlotAddForm] = useState(false);
+  const [showPlotModForm, setShowPlotModForm] = useState(false);
+  const [showCensusModForm, setShowCensusModForm] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
@@ -165,7 +182,6 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(false);
   const [formsToggle, setFormsToggle] = useState(false);
 
-  const [showResumeDialog, setShowResumeDialog] = useState<boolean>(false);
   const [storedPlot, setStoredPlot] = useState<Plot>(null);
   const [storedCensus, setStoredCensus] = useState<CensusRDS>(null);
   const [storedSite, setStoredSite] = useState<Site>(null);
@@ -175,25 +191,44 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
   const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
 
+  const { coreDataLoaded, setManualReset, siteListLoaded } = props;
 
-  const { coreDataLoaded, setCoreDataLoaded, siteListLoaded } = props;
-
+  const [plotModalMode, setPlotModalMode] = useState<'add' | 'edit'>('add');
+  const [censusModalMode, setCensusModalMode] = useState<'add' | 'edit'>('add');
+  const [plotMarkedForDeletion, setPlotMarkedForDeletion] = useState<PlotRDS>(initialPlot);
+  const [openPlotDeletionConfirmDialog, setOpenPlotDeletionConfirmDialog] = useState(false);
+  const [openCensusOpenCloseModal, setOpenCensusOpenCloseModal] = useState(false);
+  const [censusMarkedForUpdate, setCensusMarkedForUpdate] = useState<CensusRDS>(null);
+  const [censusMFUType, setCensusMFUType] = useState<'open' | 'close'>('open');
   const getSortedCensusData = () => {
-    const ongoingCensus = censusListContext?.filter(c => c.endDate === null);
-    const historicalCensuses = censusListContext?.filter(c => c.endDate !== null)
-      .sort((a, b) => {
-        // Convert startDate to Date objects if they are not already
-        const dateA = new Date(a.startDate);
-        const dateB = new Date(b.startDate);
+    // Ensure censusListContext is defined before processing
+    if (!censusListContext || !Array.isArray(censusListContext)) {
+      console.error('Invalid census data. Please check the data source.');
+      return []; // Return an empty array or appropriate fallback
+    }
 
-        return (dateB.getTime() ?? 0) - (dateA.getTime() ?? 0);
-      });
+    // Separate the ongoing census (those with `endDate` equal to `null`)
+    const sortedCensusList = censusListContext.filter(c => c.endDate === null);
+    // Filter out completed (historical) censuses
+    const historicalCensuses = censusListContext.filter(c => c.endDate !== null);
 
-    return { ongoingCensus, historicalCensuses };
+    // Sort the historical censuses chronologically by `startDate`
+    const sortedHistoricalCensuses = historicalCensuses.sort((a, b) => {
+      // Convert `startDate` to Date objects if not already
+      const dateA = new Date(a.startDate);
+      const dateB = new Date(b.startDate);
+
+      // Compare by time value (earliest first)
+      return dateA.getTime() - dateB.getTime();
+    });
+
+    // Combine the ongoing census at the top and the sorted historical censuses after
+    return [...sortedCensusList, ...sortedHistoricalCensuses];
   };
 
-  const { ongoingCensus, historicalCensuses } = getSortedCensusData();
+  const sortedCensusList = getSortedCensusData();
 
+  const { setLoading } = useLoading();
   useEffect(() => {
     if (siteListLoaded && session) {
       getData('site').then((savedSite: Site) => setStoredSite(savedSite)).catch(console.error);
@@ -211,7 +246,6 @@ export default function Sidebar(props: SidebarProps) {
       } else {
         handleSiteSelection(null).catch(console.error);
       }
-      // setShowResumeDialog(true);
     }
   }, [storedSite, storedPlot, storedCensus, siteListLoaded]);
 
@@ -236,31 +270,175 @@ export default function Sidebar(props: SidebarProps) {
     }
   };
 
-  const togglePlotForm = () => {
-    setShowPlotAddForm(!showPlotAddForm);
+  // Function to calculate the area based on dimensionX and dimensionY
+  const calculateArea = (dimensionX: number, dimensionY: number): number => {
+    return dimensionX * dimensionY;
   };
 
-  const handleInputChange = (prop: keyof PlotRDS, value: string | number) => {
-    setNewPlotRDS(prev => ({
-      ...prev,
-      [prop]: value
-    }));
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === '-' || e.key === 'e') {
+      e.preventDefault();
+    }
   };
 
-  const handleSubmitNewPlot = async () => {
-    let response = await fetch(`/api/fixeddata/plots/${currentSite?.schemaName}/plotID`, {
-      method: 'POST',
+  // Handle changes in input and update the area when dimension changes
+  // value has been clamped to ensure negative numbers are not inserted
+  const handlePlotInputChange = (prop: keyof PlotRDS, value: string | number) => {
+    if (typeof value === 'number') {
+      // Clamp the value to ensure it's positive
+      value = Math.max(value, 0);
+      setNewPlotRDS(prev => {
+        const updated = { ...prev, [prop]: value };
+        // Automatically calculate and update the area if dimensions change
+        if ((prop === 'dimensionX' || prop === 'dimensionY') && typeof value === 'number') {
+          updated.area = calculateArea(
+            prop === 'dimensionX' ? value : prev.dimensionX!,
+            prop === 'dimensionY' ? value : prev.dimensionY!
+          );
+        }
+        return updated;
+      });
+    } else {
+      setNewPlotRDS(prev => ({
+        ...prev,
+        [prop]: value
+      }));
+    }
+  };
+
+
+  const handleCensusInputChange = (prop: keyof CensusRaw, value: any) => {
+    setNewCensusRDS(prev => {
+      let updatedValue = value;
+
+      // Ensure that the starting date is before the ending date
+      if (prop === 'startDate') {
+        updatedValue = value !== null ? value : prev![prop];
+        if (dayjs(updatedValue).isAfter(dayjs(prev?.endDate))) {
+          // Automatically adjust end date if needed
+          updatedValue = prev?.endDate;
+        }
+      }
+
+      // Ensure that the ending date is after the starting date
+      if (prop === 'endDate') {
+        updatedValue = value !== null ? value : prev![prop];
+        if (dayjs(updatedValue).isBefore(dayjs(prev?.startDate))) {
+          // Automatically adjust start date if needed
+          updatedValue = prev?.startDate;
+        }
+      }
+
+      return {
+        ...prev!,
+        [prop]: updatedValue
+      };
+    });
+  };
+
+  // When adding a new plot
+  const openAddPlotModal = () => {
+    setNewPlotRDS(initialPlot); // Reset form or set to defaults
+    setPlotModalMode('add');
+    setShowPlotModForm(true);
+  };
+
+  const openEditPlotModal = (plot: Plot) => {
+    let searchedPlot = plotsLoadContext?.find(item => item.plotID === plot?.id);
+    if (!searchedPlot) throw new Error("could not find plotRDS object from plot");
+    setNewPlotRDS(searchedPlot);
+    setPlotModalMode('edit');
+    setShowPlotModForm(true);
+  };
+
+  const handleSubmitPlot = async () => {
+    const url = `/api/fixeddata/plots/${currentSite?.schemaName}/plotID`;
+    const method = plotModalMode === 'add' ? 'POST' : 'PATCH';
+
+    let response = await fetch(url, {
+      method: method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ oldRow: undefined, newRow: newPlotRDS })
     });
-    let responseJSON = await response.json();
-    if (response.status > 299 || response.status < 200)
-      throw new Error(responseJSON.message || 'Insertion failed');
-    setOpenPlotSelectionModal(false);
-    setShowPlotAddForm(false);
-    setNewPlotRDS(initialPlot);
-    setCoreDataLoaded(false);
-  }
+
+    if (response.ok) {
+      setManualReset(true); // Reload data
+      setOpenPlotSelectionModal(false); // Close modal
+      setShowPlotModForm(false); // Reset the form state
+      setNewPlotRDS(initialPlot); // Clear the form
+    } else {
+      alert('Failed to process the plot. Please try again.');
+    }
+  };
+
+  const handleDeletePlot = async (plot: PlotRDS) => {
+    const response = await fetch(`/api/fixeddata/plots/${currentSite?.schemaName}/plotID`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldRow: undefined, newRow: plot })
+    });
+    if (response.ok) {
+      setManualReset(true);  // Reload data to reflect deletion
+      setOpenPlotSelectionModal(false);  // Close the plot selection modal
+    } else {
+      alert('Failed to delete the plot. Please try again.');
+    }
+  };
+
+  const openAddCensusModal = () => {
+    setNewCensusRDS(initialCensus);
+    setCensusModalMode('add');
+    setShowCensusModForm(true);
+  };
+
+  const openEditCensusModal = (tempCensus: Census) => {
+    const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === tempCensus?.plotCensusNumber)
+      .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
+    // Update the context with the most recent census
+    const mostRecentCensusRDS = filteredCensus?.[0] ?? null;
+    setNewCensusRDS(mostRecentCensusRDS);
+  };
+
+  const handleSubmitCensus = async () => {
+    if (newCensusRDS?.plotID === 0) {
+      alert('Please ensure the plotID is correctly set and not zero.');
+      return;
+    }
+    let response;
+    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
+    if (censusModalMode === 'add') {
+      // Find the highest plotCensusNumber for the current plot in the loaded context
+      const plotCensuses = censusLoadContext?.filter(census => census?.plotID === currentPlot?.id) || [];
+      let highestPlotCensusNumber = plotCensuses.reduce(
+        (max, census) => (census?.plotCensusNumber! > max ? census?.plotCensusNumber! : max),
+        0
+      );
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          oldRow: undefined, newRow: {
+            ...newCensusRDS,
+            plotCensusNumber: ++highestPlotCensusNumber,
+          }
+        })
+      });
+    } else {
+      response = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow: undefined, newRow: newCensusRDS })
+      });
+    }
+    if (response.ok) {
+      setOpenCensusSelectionModal(false);
+      setShowCensusModForm(false);
+      setNewCensusRDS(initialCensus);
+      setManualReset(true);
+    } else {
+      alert('Failed to process the census. Please try again');
+    }
+  };
 
   // Handle plot selection
   const handlePlotSelection = async (selectedPlot: Plot | null) => {
@@ -313,6 +491,260 @@ export default function Sidebar(props: SidebarProps) {
 
     // Return JSX
     return selectedPlot ? <Typography>{`Plot: ${selectedPlot?.key}`}</Typography> : <Typography>No Plot</Typography>;
+  };
+
+  const renderPlotForm = () => {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <DialogTitle>{plotModalMode === 'add' ? 'Add New Plot' : 'Edit Plot'}</DialogTitle>
+        <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <Grid container spacing={2} sx={{ flexGrow: 1 }}>
+            {/* Left Column: Plot and Location Information */}
+            <Grid xs={4}>
+              <Grid container spacing={2} sx={{ flex: 1 }} direction={"column"}>
+                <Grid xs={4}>
+                  <FormControl required sx={{ marginBottom: '8px', width: '100%' }}>
+                    <FormLabel>Plot Name</FormLabel>
+                    <Input
+                      type="text"
+                      value={newPlotRDS.plotName!}
+                      onChange={(e) => handlePlotInputChange('plotName', e.target.value)}
+                    />
+                  </FormControl>
+                </Grid>
+                <Grid xs={4}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
+                    <FormLabel>Location Name</FormLabel>
+                    <Input
+                      type="text"
+                      value={newPlotRDS.locationName!}
+                      onChange={(e) => handlePlotInputChange('locationName', e.target.value)}
+                    />
+                  </FormControl>
+                </Grid>
+                <Grid xs={4}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
+                    <FormLabel>Country Name</FormLabel>
+                    <Input
+                      type="text"
+                      value={newPlotRDS.countryName!}
+                      onChange={(e) => handlePlotInputChange('countryName', e.target.value)}
+                    />
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Grid>
+
+            {/* Middle Column: Dimensions and Coordinates */}
+            <Grid xs={4}>
+              <Grid container spacing={2} sx={{ flexGrow: 1 }}>
+                <Grid xs={6}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }} error={newPlotRDS.dimensionX! <= 0}>
+                    <FormLabel>Dimension X</FormLabel>
+                    <Input
+                      type="number"
+                      value={newPlotRDS.dimensionX!}
+                      onKeyDown={handleKeyDown}
+                      onChange={(e) => handlePlotInputChange('dimensionX', Number(e.target.value))}
+                    />
+                    {newPlotRDS.dimensionX! <= 0 && (
+                      <FormHelperText>Value must be greater than 0!</FormHelperText>
+                    )}
+                  </FormControl>
+                </Grid>
+                <Grid xs={6}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }} error={newPlotRDS.dimensionY! <= 0}>
+                    <FormLabel>Dimension Y</FormLabel>
+                    <Input
+                      type="number"
+                      value={newPlotRDS.dimensionY!}
+                      onKeyDown={handleKeyDown}
+                      onChange={(e) => handlePlotInputChange('dimensionY', Number(e.target.value))}
+                    />
+                    {newPlotRDS.dimensionY! <= 0 && (
+                      <FormHelperText>Value must be greater than 0!</FormHelperText>
+                    )}
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Grid>
+
+            {/* Right Column: Other Fields */}
+            <Grid xs={4}>
+              <Grid container spacing={2} sx={{ flexGrow: 1 }}>
+                <Grid xs={4}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
+                    <FormLabel>Unit</FormLabel>
+                    <Select
+                      value={newPlotRDS.unit!}
+                      onChange={(_event: React.SyntheticEvent | null,
+                        newValue: string | null,) => handlePlotInputChange('unit', newValue ?? '')}
+                      defaultValue={'m'}
+                      placeholder="Select unit"
+                      sx={{ minWidth: '200px' }}
+                    >
+                      <List>
+                        <ListSubheader>Metric Units</ListSubheader>
+                        <Option value="km">Kilometers (km)</Option>
+                        <Option value="m">Meters (m)</Option>
+                        <Option value="cm">Centimeters (cm)</Option>
+                        <Option value="mm">Millimeters (mm)</Option>
+                      </List>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid xs={4}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
+                    <FormLabel>Plot Shape</FormLabel>
+                    <Input
+                      type="text"
+                      value={newPlotRDS.plotShape!}
+                      onChange={(e) => handlePlotInputChange('plotShape', e.target.value)}
+                    />
+                  </FormControl>
+                </Grid>
+                <Grid xs={4}>
+                  <FormControl sx={{ width: '100%' }}>
+                    <FormLabel>Area</FormLabel>
+                    <Input type="text" disabled value={newPlotRDS.area!} />
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Grid>
+          </Grid>
+          <Stack direction={"row"}>
+            <FormControl sx={{ marginRight: '8px', width: '100%' }} error={newPlotRDS.globalX! <= 0}>
+              <FormLabel>Global X</FormLabel>
+              <Input
+                type="number"
+                value={newPlotRDS.globalX!}
+                onKeyDown={handleKeyDown}
+                onChange={(e) => handlePlotInputChange('globalX', Number(e.target.value))}
+              />
+              {newPlotRDS.globalX! <= 0 && (
+                <FormHelperText>Value must be greater than 0!</FormHelperText>
+              )}
+            </FormControl>
+            <FormControl sx={{ marginRight: '8px', width: '100%' }} error={newPlotRDS.globalY! <= 0}>
+              <FormLabel>Global Y</FormLabel>
+              <Input
+                type="number"
+                value={newPlotRDS.globalY!}
+                onKeyDown={handleKeyDown}
+                onChange={(e) => handlePlotInputChange('globalY', Number(e.target.value))}
+              />
+              {newPlotRDS.globalY! <= 0 && (
+                <FormHelperText>Value must be greater than 0!</FormHelperText>
+              )}
+            </FormControl>
+            <FormControl sx={{ marginRight: '8px', width: '100%' }} error={newPlotRDS.globalZ! <= 0}>
+              <FormLabel>Global Z</FormLabel>
+              <Input
+                type="number"
+                value={newPlotRDS.globalZ!}
+                onKeyDown={handleKeyDown}
+                onChange={(e) => handlePlotInputChange('globalZ', Number(e.target.value))}
+              />
+              {newPlotRDS.globalZ! <= 0 && (
+                <FormHelperText>Value must be greater than 0!</FormHelperText>
+              )}
+            </FormControl>
+          </Stack>
+          <Divider orientation='horizontal' sx={{ marginTop: 1 }} />
+          {/* Plot Description */}
+          <FormControl sx={{ marginTop: '16px', width: '100%' }}>
+            <FormLabel>Plot Description</FormLabel>
+            <Textarea
+              name="soft"
+              minRows={4}
+              value={newPlotRDS.plotDescription!}
+              onChange={(e) => handlePlotInputChange('plotDescription', e.target.value)}
+            />
+          </FormControl>
+        </form>
+      </Box>
+    );
+  };
+
+
+  const renderCensusForm = () => {
+    const isPlotIDValid = newCensusRDS?.plotID !== 0;
+    const isEndDatePresent = !!newCensusRDS?.endDate;
+    const isEndDateAfterStartDate = newCensusRDS?.startDate && newCensusRDS?.endDate
+      ? dayjs(newCensusRDS.endDate).isAfter(dayjs(newCensusRDS.startDate))
+      : true;
+
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <DialogTitle sx={{ marginBottom: 2 }}>Add New Census</DialogTitle>
+        <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <Grid container spacing={1.5} sx={{ flexGrow: 1 }}>
+            <Grid xs={6}>
+              <Grid container spacing={1} direction="column" justifyContent="flex-start" alignItems="center">
+                <Grid xs={6} sx={{ mb: 0.5 }}>
+                  <FormControl required>
+                    <FormLabel>Starting Date</FormLabel>
+                    <DatePicker
+                      label="Choose a starting Date"
+                      value={dayjs(newCensusRDS?.startDate)}
+                      onChange={(newValue) => handleCensusInputChange('startDate', newValue?.toDate())}
+                      shouldDisableDate={(date) => dayjs(date).isAfter(dayjs(newCensusRDS?.endDate))}
+                    />
+                  </FormControl>
+                </Grid>
+                <Grid xs={6} sx={{ mb: 0.5 }}>
+                  <FormControl>
+                    <FormLabel>Description</FormLabel>
+                    <Input
+                      type="text"
+                      value={newCensusRDS?.description!}
+                      onChange={(e) => handleCensusInputChange('description', e.target.value)}
+                    />
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Grid>
+            <Grid xs={6}>
+              <Grid container spacing={1} direction="column" justifyContent="flex-start" alignItems="center">
+                <Grid xs={6} sx={{ mb: 0.5 }}>
+                  <FormControl error={!isEndDateAfterStartDate}>
+                    <FormLabel>Ending Date</FormLabel>
+                    <DatePicker
+                      label="Choose an ending Date (optional)"
+                      value={newCensusRDS?.endDate ? dayjs(newCensusRDS.endDate) : null}
+                      onChange={(newValue) => handleCensusInputChange('endDate', newValue?.toDate())}
+                      shouldDisableDate={(date) => dayjs(date).isBefore(dayjs(newCensusRDS?.startDate))}
+                    />
+                    {!isEndDateAfterStartDate && (
+                      <FormHelperText>
+                        Error: Ending date must be after the starting date.
+                      </FormHelperText>
+                    )}
+                    {!isEndDatePresent && isEndDateAfterStartDate && (
+                      <FormHelperText>
+                        Warning: You are creating an &quot;open&quot; census (no end date specified).
+                      </FormHelperText>
+                    )}
+                  </FormControl>
+                </Grid>
+                <Grid xs={6} sx={{ mb: 0.5 }}>
+                  <FormControl error={!isPlotIDValid}>
+                    <FormLabel>PlotID</FormLabel>
+                    <Input
+                      disabled
+                      type="number"
+                      value={currentPlot?.id}
+                      error={!isPlotIDValid}
+                    />
+                    {!isPlotIDValid && <FormHelperText>Error: Plot ID cannot be zero</FormHelperText>}
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Grid>
+          </Grid>
+        </form>
+      </Box>
+    );
   };
 
   type ToggleObject = {
@@ -606,19 +1038,6 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
           <LoginLogout />
         </Box>
-        <Modal open={showResumeDialog} onClose={() => setShowResumeDialog(false)}>
-          <ModalDialog>
-            <DialogTitle>Resume Previous Session?</DialogTitle>
-            <Divider />
-            <DialogContent>
-              <Typography>Would you like to continue with the last Site you chose?</Typography>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleResumeSession}>Resume</Button>
-              <Button onClick={() => setShowResumeDialog(false)}>Start New Session</Button>
-            </DialogActions>
-          </ModalDialog>
-        </Modal>
         <Modal open={openSiteSelectionModal} onClose={() => {
           setSite(currentSite);
           setOpenSiteSelectionModal(false);
@@ -661,7 +1080,7 @@ export default function Sidebar(props: SidebarProps) {
         </Modal>
         <Modal open={openPlotSelectionModal} onClose={() => {
           setPlot(currentPlot);
-          setShowPlotAddForm(false);  // Reset the form display state when closing the modal
+          setShowPlotModForm(false);  // Reset the form display state when closing the modal
           setOpenPlotSelectionModal(false);
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
@@ -672,178 +1091,8 @@ export default function Sidebar(props: SidebarProps) {
             <Divider />
             <DialogContent sx={{ width: 750 }}>
               <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
-                {showPlotAddForm ? (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                    {/* Replace this with the actual form components you use to add a plot */}
-                    <Typography level="body-md" sx={{ mb: 2 }}>Add New Plot</Typography>
-                    <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <Grid container spacing={1.5} sx={{ flexGrow: 1 }}>
-                        <Grid xs={4}>
-                          <Grid container spacing={1} direction={"column"} justifyContent={"flex-start"} alignItems={"center"}>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl required>
-                                <FormLabel>
-                                  Plot Name
-                                </FormLabel>
-                                <Input
-                                  type="text"
-                                  value={newPlotRDS.plotName!}
-                                  onChange={(e) => handleInputChange('plotName', e.target.value)} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Location Name
-                                </FormLabel>
-                                <Input
-                                  type="text"
-                                  value={newPlotRDS.locationName!}
-                                  onChange={(e) => handleInputChange('locationName', e.target.value)} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Country Name
-                                </FormLabel>
-                                <Input
-                                  type="text"
-                                  value={newPlotRDS.countryName!}
-                                  onChange={(e) => handleInputChange('countryName', e.target.value)} />
-
-                              </FormControl>
-                            </Grid>
-                          </Grid>
-                        </Grid>
-                        <Grid xs={4}>
-                          <Grid container spacing={1} direction={"column"} justifyContent={"flex-start"} alignItems={"center"}>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Dimension X
-                                </FormLabel>
-                                <Input
-                                  type="number"
-                                  value={newPlotRDS.dimensionX!}
-                                  onChange={(e) => handleInputChange('dimensionX', Number(e.target.value))} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Global X
-                                </FormLabel>
-                                <Input
-                                  type="number"
-                                  value={newPlotRDS.globalX!}
-                                  onChange={(e) => handleInputChange('globalX', Number(e.target.value))} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Global Y
-                                </FormLabel>
-                                <Input
-                                  type="number"
-                                  value={newPlotRDS.globalY!}
-                                  onChange={(e) => handleInputChange('globalY', Number(e.target.value))} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Global Z
-                                </FormLabel>
-                                <Input
-                                  type="number"
-                                  value={newPlotRDS.globalZ!}
-                                  onChange={(e) => handleInputChange('globalZ', Number(e.target.value))} />
-                              </FormControl>
-                            </Grid>
-                          </Grid>
-                        </Grid>
-                        <Grid xs={4}>
-                          <Grid container spacing={1} direction={"column"} justifyContent={"flex-start"} alignItems={"center"}>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Dimension Y
-                                </FormLabel>
-                                <Input
-                                  type="number"
-                                  value={newPlotRDS.dimensionY!}
-                                  onChange={(e) => handleInputChange('dimensionY', Number(e.target.value))} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Area
-                                </FormLabel>
-                                <Input
-                                  type="number"
-                                  value={newPlotRDS.area!}
-                                  onChange={(e) => handleInputChange('area', Number(e.target.value))} />
-
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Unit
-                                </FormLabel>
-                                <Select
-                                  value={newPlotRDS.unit!}
-                                  onChange={(_event: React.SyntheticEvent | null,
-                                    newValue: string | null,) => handleInputChange('unit', newValue!)}
-                                  placeholder="Select unit"
-                                  sx={{ minWidth: '200px' }}
-                                >
-                                  <List>
-                                    <ListSubheader>Metric Units</ListSubheader>
-                                    <Option value={"km"}>Kilometers (km)</Option>
-                                    <Option value={"m"}>Meters (m)</Option>
-                                    <Option value={"cm"}>Centimeters (cm)</Option>
-                                    <Option value={"mm"}>Millimeters (mm)</Option>
-                                  </List>
-                                </Select>
-                              </FormControl>
-                            </Grid>
-                            <Grid xs={3} sx={{ mb: 0.5 }}>
-                              <FormControl>
-                                <FormLabel>
-                                  Plot Shape
-                                </FormLabel>
-                                <Input
-                                  type="text"
-                                  value={newPlotRDS.plotShape!}
-                                  onChange={(e) => handleInputChange('plotShape', e.target.value)} />
-                              </FormControl>
-                            </Grid>
-                          </Grid>
-                        </Grid>
-                      </Grid>
-                      <FormControl>
-                        <FormLabel>
-                          Plot Description
-                        </FormLabel>
-                        <Textarea
-                          name="soft"
-                          minRows={4}
-                          value={newPlotRDS.plotDescription!}
-                          onChange={(e) => handleInputChange('plotDescription', e.target.value)} />
-
-                      </FormControl>
-                    </form>
-                  </Box>
+                {showPlotModForm ? (
+                  <>{renderPlotForm()}</>
                 ) : (
                   <Stack direction={"column"} spacing={2}>
                     <Typography level={"title-sm"}>Select Plot:</Typography>
@@ -863,19 +1112,41 @@ export default function Sidebar(props: SidebarProps) {
                       <Option value={""}>None</Option>
                       {plotListContext?.map((item) => (
                         <Option value={item?.key} key={item?.key}>
-                          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                            <Typography level="body-lg">{item?.key}</Typography>
-                            <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                              Quadrats: {item?.num}
-                            </Typography>
-                            <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                              ID: {item?.id}
-                            </Typography>
+                          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                              <Typography level="body-lg">{item?.key}</Typography>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
+                                Quadrats: {item?.num}
+                              </Typography>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
+                                ID: {item?.id}
+                              </Typography>
+                            </Box>
+                            <Box>
+                              <IconButton sx={{ ml: "auto" }} onClick={(e) => {
+                                e.stopPropagation();
+                                openEditPlotModal(item);
+                              }}>
+                                <EditIcon />
+                                Edit
+                              </IconButton>
+                              <IconButton sx={{ ml: "auto" }} onClick={(e) => {
+                                e.stopPropagation(); // Prevents triggering the select's onChange
+                                let searchedPlot = plotsLoadContext?.find(internal => internal.plotID === item?.id);
+                                console.log(plotsLoadContext);
+                                if (!searchedPlot) throw new Error("could not find plotRDS object from plot");
+                                setPlotMarkedForDeletion(searchedPlot);
+                                setOpenPlotDeletionConfirmDialog(true);
+                              }}>
+                                <DeleteIcon />
+                                Delete
+                              </IconButton>
+                            </Box>
                           </Box>
                         </Option>
                       ))}
                     </Select>
-                    <Button color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }} onClick={togglePlotForm}>
+                    <Button color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }} onClick={openAddPlotModal}>
                       Add New Plot
                     </Button>
                   </Stack>
@@ -883,12 +1154,12 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </DialogContent>
             <DialogActions>
-              {!showPlotAddForm ? (
+              {!showPlotModForm ? (
                 <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                     setPlot(currentPlot);
                     setOpenPlotSelectionModal(false);
-                    setShowPlotAddForm(false);
+                    setShowPlotModForm(false);
                     if (plot) setIsPlotSelectionRequired(false);
                     else setIsPlotSelectionRequired(true);
                   }}>
@@ -897,7 +1168,7 @@ export default function Sidebar(props: SidebarProps) {
                   <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
                     await handlePlotSelection(plot);
                     setOpenPlotSelectionModal(false);
-                    setShowPlotAddForm(false);
+                    setShowPlotModForm(false);
                     if (plot) setIsPlotSelectionRequired(false);
                     else setIsPlotSelectionRequired(true);
                   }}>
@@ -907,10 +1178,10 @@ export default function Sidebar(props: SidebarProps) {
               ) : (
                 <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
                   <Button variant="outlined" onClick={() => {
-                    togglePlotForm();
+                    setShowPlotModForm(false);
                     setNewPlotRDS(initialPlot);
                   }}>Cancel</Button>
-                  <Button variant='soft' onClick={handleSubmitNewPlot}>Submit New Plot</Button>
+                  <Button onClick={handleSubmitPlot}>{plotModalMode === 'add' ? 'Add Plot' : 'Save Changes'}</Button>
                 </Stack>
               )}
             </DialogActions>
@@ -928,86 +1199,250 @@ export default function Sidebar(props: SidebarProps) {
             <Divider />
             <DialogContent sx={{ width: 750 }}>
               <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
-                <Stack direction={"column"} spacing={2}>
-                  <Typography level={"title-sm"}>Select Census:</Typography>
-                  <Select
-                    placeholder="Select a Census"
-                    name="None"
-                    required
-                    autoFocus
-                    size={"md"}
-                    renderValue={renderCensusValue}
-                    onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
-                      if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(null);
-                      else {
-                        // Convert the selected string to a number
-                        const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
-                        // Filter and sort logic
-                        const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === selectedPlotCensusNumber)
-                          .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
-                        // Update the context with the most recent census
-                        const mostRecentCensusRDS = filteredCensus?.[0] ?? null;
-                        setCensus(mostRecentCensusRDS);
-                      }
-                    }}
-                  >
-                    <List>
-                      <Option value={""}>None</Option>
-                      <Divider orientation={"horizontal"} />
-                      {ongoingCensus && ongoingCensus.length > 0 && (
-                        ongoingCensus.map((item) => (
-                          <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                              <Typography level="body-lg">Census: {item.plotCensusNumber}</Typography>
-                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                                {`Started: ${new Date(item.startDate).toDateString()}`}
-                              </Typography>
-                            </Box>
-                          </Option>
-                        ))
-                      )}
-                      <Divider orientation={"horizontal"} />
-                      {historicalCensuses && historicalCensuses.length > 0 && (
-                        historicalCensuses.map((item) => (
-                          <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                              <Typography level="body-lg">Census {item.plotCensusNumber}</Typography>
-                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                                {`Started: ${new Date(item.startDate).toDateString()}`}
-                              </Typography>
-                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                                {item.endDate && `Ended: ${new Date(item.endDate).toDateString()}`}
-                              </Typography>
-                            </Box>
-                            <ListItemDecorator sx={{ opacity: 0 }}>
-                              <Check />
-                            </ListItemDecorator>
-                          </Option>
-                        ))
-                      )}
-                      <Divider orientation={"horizontal"} />
-                    </List>
-                  </Select>
-                </Stack>
+                {showCensusModForm ? (
+                  <>{renderCensusForm()}</>
+                ) : (
+                  <Stack direction={"column"} spacing={2}>
+                    <Typography level={"title-sm"}>Select Census:</Typography>
+                    <Select
+                      placeholder="Select a Census"
+                      name="None"
+                      required
+                      autoFocus
+                      size={"md"}
+                      renderValue={renderCensusValue}
+                      onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+                        if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(null);
+                        else {
+                          // Convert the selected string to a number
+                          const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
+                          // Filter and sort logic
+                          const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === selectedPlotCensusNumber)
+                            .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
+                          // Update the context with the most recent census
+                          const mostRecentCensusRDS = filteredCensus?.[0] ?? null;
+                          setCensus(mostRecentCensusRDS);
+                        }
+                      }}
+                    >
+                      <List>
+                        <Option value={""}>None</Option>
+                        <Divider orientation={"horizontal"} />
+                        {sortedCensusList && sortedCensusList.length > 0 && (
+                          sortedCensusList.map((item) => (
+                            <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
+                              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                                  <Typography level="body-lg">Census: {item.plotCensusNumber}</Typography>
+                                  <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
+                                    {`Started: ${new Date(item.startDate).toDateString()}`}
+                                  </Typography>
+                                  {item.endDate && (
+                                    <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
+                                      {`Ended: ${new Date(item.endDate).toDateString()}`}
+                                    </Typography>
+                                  )}
+                                </Box>
+                                <Box>
+                                  <IconButton sx={{ ml: "auto" }} onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Filter and sort logic
+                                    const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === item.plotCensusNumber)
+                                      .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
+                                    // Update the context with the most recent census
+                                    const mostRecentCensusRDS = filteredCensus?.[0] ?? null;
+                                    setCensusMarkedForUpdate(mostRecentCensusRDS);
+                                    setCensusMFUType(item.endDate ? 'open' : 'close');
+                                    setOpenCensusOpenCloseModal(true);
+                                  }}>
+                                    {item.endDate ? (
+                                      <>
+                                        <PlayArrowIcon />
+                                        Reopen Census
+                                      </>
+                                    ) : (
+                                      <>
+                                        <StopIcon />
+                                        Close Census
+                                      </>
+                                    )}
+                                  </IconButton>
+                                  <IconButton sx={{ ml: "auto" }} onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditCensusModal(item);
+                                  }}>
+                                    <EditIcon />
+                                    Edit
+                                  </IconButton>
+                                  <IconButton sx={{ ml: "auto" }} onClick={(e) => {
+                                    e.stopPropagation(); // Prevents triggering the select's onChange
+                                    alert('Censuses cannot be deleted!');
+                                  }}>
+                                    <DeleteIcon />
+                                    Delete
+                                  </IconButton>
+                                </Box>
+                              </Box>
+                            </Option>
+                          ))
+                        )}
+                      </List>
+                    </Select>
+                    <Button color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }} onClick={openAddCensusModal}>
+                      Add New Census
+                    </Button>
+                  </Stack>
+                )}
               </Box>
             </DialogContent>
             <DialogActions>
+              {!showCensusModForm ? (
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
+                    setCensus(currentCensus);
+                    if (census) setIsCensusSelectionRequired(false);
+                    else setIsCensusSelectionRequired(true);
+                    setOpenCensusSelectionModal(false);
+                  }}>
+                    Cancel
+                  </Button>
+                  <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
+                    await handleCensusSelection(census);
+                    setOpenCensusSelectionModal(false);
+                    if (census) setIsCensusSelectionRequired(false);
+                    else setIsCensusSelectionRequired(true);
+                  }}>
+                    Submit
+                  </Button>
+                </Stack>
+              ) : (
+                <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
+                  <Button variant="outlined" onClick={() => {
+                    setShowCensusModForm(false);
+                    setNewCensusRDS(initialCensus);
+                  }}>Cancel</Button>
+                  <Button onClick={handleSubmitCensus}>{censusModalMode === 'add' ? 'Add Census' : 'Save Changes'}</Button>
+                </Stack>
+              )}
+            </DialogActions>
+          </ModalDialog>
+        </Modal>
+        <Modal open={openPlotDeletionConfirmDialog} onClose={() => { }}>
+          <ModalDialog variant="outlined" role="alertdialog">
+            <DialogTitle>
+              <Typography level='h3' color='danger'>Are you sure you want to delete this plot?</Typography>
+            </DialogTitle>
+            <DialogContent>
+              <Typography level='body-lg' color='warning'>You are attempting to delete the following plot:</Typography>
+              <Typography level='body-md'>Plot: {plotMarkedForDeletion?.plotName}</Typography>
+              <Typography level='body-md'>Location: {plotMarkedForDeletion?.locationName}, {plotMarkedForDeletion?.countryName}</Typography>
+              <Typography level='body-md'>Dimensions and Coordinates: {plotMarkedForDeletion?.dimensionX}x{plotMarkedForDeletion?.dimensionY},
+                ({plotMarkedForDeletion?.globalX + ', ' + plotMarkedForDeletion?.globalY + ', ' + plotMarkedForDeletion?.globalZ})</Typography>
+              <Divider orientation='horizontal' sx={{ marginY: 2 }} />
+              <Typography level='body-lg' color='danger'>This action cannot be undone. Please click the Confirm button to continue
+                , or the Cancel button to return to the Plot Selection Menu</Typography>
+            </DialogContent>
+            <DialogActions>
               <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
-                  setCensus(currentCensus);
-                  if (census) setIsCensusSelectionRequired(false);
-                  else setIsCensusSelectionRequired(true);
+                <Button size={"sm"} color={"warning"} variant="soft" onClick={() => {
+                  setOpenPlotDeletionConfirmDialog(false);
+                  setPlotMarkedForDeletion(initialPlot);
                 }}>
                   Cancel
                 </Button>
-                <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
-                  await handleCensusSelection(census);
-                  setOpenCensusSelectionModal(false);
-                  if (census) setIsCensusSelectionRequired(false);
-                  else setIsCensusSelectionRequired(true);
+                <Button size={"sm"} variant={"soft"} color="danger" onClick={async () => {
+                  setOpenPlotDeletionConfirmDialog(false);
+                  setOpenPlotSelectionModal(false);
+                  if (plotMarkedForDeletion === initialPlot) throw new Error("Plot marked for deletion is null for some reason?");
+                  await handleDeletePlot(plotMarkedForDeletion);
                 }}>
-                  Submit
+                  Confirm, Delete this Plot
                 </Button>
+              </Stack>
+            </DialogActions>
+          </ModalDialog>
+        </Modal>
+        <Modal open={openCensusOpenCloseModal} onClose={() => { }}>
+          <ModalDialog variant='outlined' role='alertdialog'>
+            <DialogTitle>
+              <Typography component={'div'} level='h3' color='danger'>Are you sure you want to {censusMFUType} this census?</Typography>
+            </DialogTitle>
+            <DialogContent>
+              <Typography level='body-lg' color='warning'>You are attempting to {censusMFUType} the following census:</Typography>
+              <Typography level='body-md'>Census: {censusMarkedForUpdate?.plotCensusNumber}</Typography>
+              <Typography level='body-md'>Starting: {dayjs(censusMarkedForUpdate?.startDate).toString()}</Typography>
+              {censusMFUType === 'open' && (
+                <Typography level='body-md'>Ending: {dayjs(censusMarkedForUpdate?.startDate).toString()}</Typography>
+              )}
+              {censusMFUType === 'close' && (
+                <DatePicker
+                  label="Choose an ending date"
+                  value={censusMarkedForUpdate?.endDate ? dayjs(censusMarkedForUpdate.endDate) : null}
+                  onChange={(newValue) => {
+                    setCensusMarkedForUpdate(prev => {
+                      return {
+                        ...prev!,
+                        plotID: currentPlot?.id ?? 0,
+                        endDate: newValue ? newValue.toDate() : null
+                      };
+                    });
+                  }}
+                  shouldDisableDate={(date) => dayjs(date).isBefore(dayjs(censusMarkedForUpdate?.startDate))}
+                />
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
+                <Button variant="outlined" onClick={() => {
+                  setOpenCensusOpenCloseModal(false);
+                  setCensusMarkedForUpdate(null);
+                  setNewCensusRDS(initialCensus);
+                }}>Cancel</Button>
+                <Button onClick={async () => {
+                  // this seems like a weird route, but it seemed easier to reroute the update request through the existing handleSubmitCensus function
+                  // instead of copy-pasting most of it into its own dedicated function.
+                  // newCensusRDS is cleared at the end of execution, so the only thing left to do otherwise is close this modal and clear censusMarkedForUpdate.
+                  if (censusMFUType === 'open') {
+                    // Prepare the new state locally without setting it immediately
+                    const updatedCensusMarkedForUpdate = {
+                      ...censusMarkedForUpdate!,
+                      plotID: currentPlot?.id ?? 0,
+                      endDate: null
+                    };
+
+                    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
+                    let response = await fetch(url, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ oldRow: undefined, newRow: updatedCensusMarkedForUpdate })
+                    });
+                    if (response.ok) {
+                      setOpenCensusOpenCloseModal(false);
+                      setOpenCensusSelectionModal(false);
+                      setCensusMarkedForUpdate(null);
+                      setManualReset(true);
+                    } else {
+                      alert('Failed to process the census. Please try again');
+                    }
+                  } else {
+                    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
+                    let response = await fetch(url, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ oldRow: undefined, newRow: censusMarkedForUpdate })
+                    });
+                    if (response.ok) {
+                      setOpenCensusOpenCloseModal(false);
+                      setOpenCensusSelectionModal(false);
+                      setCensusMarkedForUpdate(null);
+                      setManualReset(true);
+                    } else {
+                      alert('Failed to process the census. Please try again');
+                    }
+                    setCensusMarkedForUpdate(null);
+                    setOpenCensusOpenCloseModal(false);
+                  }
+                }}>{censusMFUType === 'open' ? 'Reopen' : 'Close'} Census</Button>
               </Stack>
             </DialogActions>
           </ModalDialog>
