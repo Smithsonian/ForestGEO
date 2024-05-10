@@ -18,7 +18,7 @@ interface IDToRow {
 
 const UploadFireSQL: React.FC<UploadFireProps> =
   ({
-     personnelRecording, acceptedFiles, unitOfMeasurement, parsedData,
+     personnelRecording, acceptedFiles, dbhUnit, homUnit, coordUnit, parsedData,
      uploadForm, setIsDataUnsaved, schema, uploadCompleteMessage, setUploadCompleteMessage,
      setUploadError, setErrorComponent,
      setReviewState, setAllRowToCMID,
@@ -40,7 +40,7 @@ const UploadFireSQL: React.FC<UploadFireProps> =
       try {
         setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
         const response = await fetch(
-          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID.toString().trim()}&${unitOfMeasurement !== '' ? `&uom=${unitOfMeasurement.trim()}&` : ''}user=${personnelRecording}`, {
+          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.id.toString().trim()}&census=${currentCensus?.censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID.toString().trim()}&dbhUnit=${dbhUnit}&homUnit=${homUnit}&coordUnit=${coordUnit}&user=${personnelRecording}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(fileData[fileName])

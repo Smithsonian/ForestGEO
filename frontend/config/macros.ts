@@ -17,6 +17,7 @@ export enum HTTPResponses {
   SERVICE_UNAVAILABLE = 503,
   SQL_CONNECTION_FAILURE = 408, // Custom code, example
   INVALID_REQUEST = 400,
+  PRECONDITION_VALIDATION_FAILURE = 412,
   NOT_FOUND, // Custom code, example
 }
 

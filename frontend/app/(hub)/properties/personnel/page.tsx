@@ -7,7 +7,7 @@ import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
 import {useSession} from "next-auth/react";
-import {Box, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function PersonnelPage() {
@@ -34,6 +34,7 @@ export default function PersonnelPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
   // Function to fetch paginated data
@@ -87,10 +88,15 @@ export default function PersonnelPage() {
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="personnel" setRefresh={setRefresh}/>
+          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+
         </Box>
       </Box>
 
+      <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
+        setIsUploadModalOpen(false);
+        setRefresh(true);
+      }} formType={'personnel'}/>
       <DataGridCommons
         gridType="personnel"
         gridColumns={PersonnelGridColumns}

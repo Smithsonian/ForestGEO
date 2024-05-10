@@ -7,7 +7,7 @@ import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
 import {AttributeGridColumns} from '@/config/sqlrdsdefinitions/tables/attributerds';
-import {Box, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
@@ -24,17 +24,18 @@ export default function AttributesPage() {
   const [paginationModel, setPaginationModel] = useState({page: 0, pageSize: 10});
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const currentPlot = usePlotContext();
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
 
   const addNewRowToGrid = () => {
     const id = randomId();
     const newRow = {id, code: '', description: '', status: '', isNew: true};
-    setRows(oldRows => [...oldRows, newRow]);
+    setRows(oldRows => [...oldRows ?? [], newRow]);
     setRowModesModel(oldModel => ({
       ...oldModel,
       [id]: {mode: 'edit', fieldToFocus: 'code'},
     }));
+    console.log('attributes addnewrowtogrid triggered');
   };
 
   return (
@@ -57,10 +58,16 @@ export default function AttributesPage() {
             )}
           </Box>
 
+
           {/* Upload Button */}
-          <UploadParentModal formType="attributes" setRefresh={setRefresh}/>
+          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
         </Box>
       </Box>
+
+      <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
+        setIsUploadModalOpen(false);
+        setRefresh(true);
+      }} formType={"attributes"}/>
 
       <DataGridCommons
         gridType="attributes"

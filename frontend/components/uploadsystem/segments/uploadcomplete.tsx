@@ -8,7 +8,7 @@ import React, {useEffect, useState} from "react";
 import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const {uploadForm, setIsUploadModalOpen} = props;
+  const {uploadForm, handleCloseUploadModal} = props;
   const [countdown, setCountdown] = useState(5);
 
   // Effect for handling countdown and state transition
@@ -19,10 +19,10 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
       // Use 'window.setTimeout' and type assertion to treat the return as a number
     } else if (countdown === 0) {
-      setIsUploadModalOpen(false);
+      handleCloseUploadModal();
     }
     return () => clearTimeout(timer); // Clear timeout using the timer variable
-  }, [countdown, setIsUploadModalOpen]);
+  }, [countdown, handleCloseUploadModal]);
 
   const redirectLink = () => {
     switch (uploadForm) {

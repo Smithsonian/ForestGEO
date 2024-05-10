@@ -43,8 +43,6 @@ export class SubquadratsMapper implements IDataMapper<SubQuadratResult, SubQuadr
       Unit: item.unit,
       Ordering: item.ordering
     }));
-
-
   }
   mapData(results: SubQuadratResult[], indexOffset: number = 1): SubQuadratRDS[] {
     return results.map((item, index) => ({

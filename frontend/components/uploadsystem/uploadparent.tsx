@@ -44,20 +44,22 @@ export interface DetailedCMIDRow extends CMIDRow {
 }
 
 interface UploadParentProps {
-  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  onReset: () => void;
+  onReset: () => void; // closes the modal
   overrideUploadForm?: string;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const {setIsUploadModalOpen, onReset, overrideUploadForm} = props;
+  const {onReset, overrideUploadForm} = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
     // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState("");
   const [personnelRecording, setPersonnelRecording] = useState('');
-  const [unitOfMeasurement, setUnitOfMeasurement] = useState('');
+  const [coordUnit, setCoordUnit] = useState('');
+  const [dbhUnit, setDBHUnit] = useState('');
+  const [homUnit, setHOMUnit] = useState('');
+
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
   // dropped file storage
@@ -78,7 +80,6 @@ export default function UploadParent(props: UploadParentProps) {
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const [refreshFileList, setRefreshFileList] = useState(false);
   const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
   const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   let currentPlot = usePlotContext();
@@ -326,8 +327,12 @@ export default function UploadParent(props: UploadParentProps) {
           setReviewState={setReviewState}
           personnelRecording={personnelRecording}
           setPersonnelRecording={setPersonnelRecording}
-          unitOfMeasurement={unitOfMeasurement}
-          setUnitOfMeasurement={setUnitOfMeasurement}
+          dbhUnit={dbhUnit}
+          setDBHUnit={setDBHUnit}
+          homUnit={homUnit}
+          setHOMUnit={setHOMUnit}
+          coordUnit={coordUnit}
+          setCoordUnit={setCoordUnit}
         />;
       case ReviewStates.UPLOAD_FILES:
         return <UploadParseFiles
@@ -343,7 +348,9 @@ export default function UploadParent(props: UploadParentProps) {
           handleReplaceFile={handleReplaceFile}/>;
       case ReviewStates.REVIEW:
         return <UploadReviewFiles
-          unitOfMeasurement={unitOfMeasurement}
+          dbhUnit={dbhUnit}
+          homUnit={homUnit}
+          coordUnit={coordUnit}
           acceptedFiles={acceptedFiles}
           setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}
@@ -374,7 +381,9 @@ export default function UploadParent(props: UploadParentProps) {
           personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
           uploadForm={uploadForm}
-          unitOfMeasurement={unitOfMeasurement}
+          dbhUnit={dbhUnit}
+          homUnit={homUnit}
+          coordUnit={coordUnit}
           parsedData={parsedData}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
@@ -406,7 +415,7 @@ export default function UploadParent(props: UploadParentProps) {
           cmErrors={cmErrors}
           user={session?.user?.name!} allRowToCMID={allRowToCMID}/>;
       case ReviewStates.COMPLETE:
-        return <UploadComplete setIsUploadModalOpen={setIsUploadModalOpen} uploadForm={uploadForm}/>;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm}/>;
       default:
         return (
           <UploadError

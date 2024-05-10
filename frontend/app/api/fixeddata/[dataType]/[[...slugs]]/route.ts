@@ -1,11 +1,6 @@
 // dynamic structuring attempt
 // dataType will be the table or view name reference to be placed as part of the request
-// slugs is a catchall that will vary depending on the type of request placed:
-// GET --> schema, page, pagesize, plotID, censusID, quadratID
-// POST --> schema
-// PATCH --> schema
-// DELETE --> schema, deletionID
-import { AllTaxonomiesViewQueryConfig, StemDimensionsViewQueryConfig, StemTaxonomiesViewQueryConfig, detectFieldChanges, generateUpdateOperations } from "@/components/processors/processorhelperfunctions";
+// slugs is a catchall that will vary depending on the type of request placed
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import MapperFactory from "@/config/datamapper";
 import { PoolConnection, format } from "mysql2/promise";
@@ -75,14 +70,15 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
         `;
         break;
     }
-    console.log(paginatedQuery);
+    console.log('paginatedQuery: ', paginatedQuery);
     const paginatedResults = await runQuery(conn, paginatedQuery, queryParams);
-
+    console.log('unmapped results: ', paginatedResults);
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const rows = mapper.mapData(paginatedResults);
+    console.log('mapped results: ', rows);
     return new NextResponse(JSON.stringify({ output: rows, totalCount: totalRows }), { status: 200 });
   } catch (error: any) {
     if (conn) await conn.rollback();
@@ -92,7 +88,7 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
   }
 }
 
-// required dynamic parameters: dataType (fixed), schema, gridID value
+// required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
 // Key note --> the gridID string parameter needs to correspond to the data type ..Result type, not the ...RDS type! (first letter needs to be capitalized!)
 // json body-provided oldRow, newRow --> oldRow object is removed
 export async function POST(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
@@ -104,6 +100,8 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     conn = await getConn();
     await conn.beginTransaction();
     const { newRow } = await request.json();
+    if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
+    console.log('POST newRow: ', newRow);
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const newRowData = mapper.demapData([newRow])[0];
     let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
@@ -121,7 +119,8 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         }
       }
     } else if (params.dataType === 'attributes') {
-      await runQuery(conn, 'INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+      const insertAttributeQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+      await runQuery(conn, insertAttributeQuery);
     } else {
       console.log(newRowData);
       delete newRowData[demappedGridID];
@@ -138,6 +137,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   }
 }
 
+// slugs: schema, gridID
 export async function PATCH(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
@@ -147,21 +147,50 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    const { oldRow, newRow } = await request.json();
+    const { newRow } = await request.json();
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
-      console.log('PATCH: newRowData: ', newRowData);
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
-      console.log('gridID: ',demappedGridID, ' grid ID key: ', gridIDKey);
-      const updateQuery = format(`UPDATE ?? SET ? WHERE ? = ?`, [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]);
-      console.log('update query: ', updateQuery);
+      const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]);
+      console.log(updateQuery);
       await runQuery(conn, updateQuery);
       await conn.commit();
-      return NextResponse.json({ message: "Update successful" }, { status: 200 });
     }
+    return NextResponse.json({ message: "Update successful" }, { status: 200 });
   } catch (error: any) {
     await conn?.rollback();
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+// slugs: schema, gridID
+// body: full data row, only need first item from it this time though
+export async function DELETE(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
+  if (!params.slugs) throw new Error("slugs not provided");
+  const [schema, gridID] = params.slugs;
+  if (!schema || !gridID) throw new Error("no schema or gridID provided");
+  let conn: PoolConnection | null = null;
+  let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  try {
+    conn = await getConn();
+    await conn.beginTransaction();
+    const { newRow } = await request.json();
+    console.log('delete newrow: ', newRow);
+    if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)){
+      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
+      const deleteRowData = mapper.demapData([newRow])[0];
+      const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
+      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+      await runQuery(conn, deleteQuery);
+      await conn.commit();
+      return NextResponse.json({ message: "Delete successful" }, { status: 200 });
+    }
+    return NextResponse.json({ message: "Delete successful" }, { status: 200 });
+  } catch (error: any) {
+    await conn?.rollback();
+    throw error;
   } finally {
     if (conn) conn.release();
   }

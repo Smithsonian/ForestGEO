@@ -1,5 +1,5 @@
 // db.ts
-import {DBSchema, IDBPDatabase, openDB} from 'idb';
+import { openDB, IDBPDatabase, DBSchema } from 'idb';
 
 interface MyDB extends DBSchema {
   MyStore: {
@@ -11,14 +11,34 @@ interface MyDB extends DBSchema {
 const dbName = 'MyDatabase';
 const storeName = 'MyStore';
 
+// Function to dynamically get or upgrade the database
 async function getDb(): Promise<IDBPDatabase<MyDB>> {
-  return openDB<MyDB>(dbName, 1, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains(storeName)) {
-        db.createObjectStore(storeName);
-      }
-    },
-  });
+  // Open the database to check the current version
+  let db;
+  try {
+    db = await openDB<MyDB>(dbName);
+    const currentVersion = db.version;
+    db.close();
+
+    // Re-open the database with the current version if no upgrade is needed
+    return openDB<MyDB>(dbName, currentVersion, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains(storeName)) {
+          db.createObjectStore(storeName);
+        }
+      },
+    });
+  } catch (err) {
+    if (db) db.close();
+    // If db doesn't exist or other errors, attempt to open with version 1 or create if necessary
+    return openDB<MyDB>(dbName, 1, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains(storeName)) {
+          db.createObjectStore(storeName);
+        }
+      },
+    });
+  }
 }
 
 export async function getData(key: string): Promise<any> {
@@ -27,25 +47,26 @@ export async function getData(key: string): Promise<any> {
 }
 
 export async function setData(key: string, val: any): Promise<void> {
-  if (val) {
-    const db = await getDb();
-    const tx = db.transaction(storeName, 'readwrite');
-    await tx.objectStore(storeName).put(val, key);
-    await tx.done;
-  }
+  const db = await getDb();
+  const tx = db.transaction(storeName, 'readwrite');
+  await tx.objectStore(storeName).put(val, key);
+  await tx.done;
 }
 
-export async function clearAllIDBData() {
+export async function clearAllIDBData(): Promise<void> {
   const db = await getDb();
-  const storeNames = Array.from(db.objectStoreNames);
-
-  const transaction = db.transaction(storeNames, 'readwrite');
-  storeNames.forEach(storeName => {
-    transaction.objectStore(storeName).clear();
-  });
-
-  await transaction.done;
+  const currentVersion = db.version;
   db.close();
+
+  const newDb = await openDB<MyDB>(dbName, currentVersion + 1, {
+    upgrade(db) {
+      if (db.objectStoreNames.contains(storeName)) {
+        db.deleteObjectStore(storeName);
+      }
+      db.createObjectStore(storeName);
+    },
+  });
+  newDb.close();
 }
 
 export async function clearDataByKey(key: string): Promise<void> {

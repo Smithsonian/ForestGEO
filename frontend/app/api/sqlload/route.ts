@@ -38,9 +38,15 @@ export async function POST(request: NextRequest) {
   if (!formType) throw new Error('no formType provided!');
   formType = formType.trim();
   // unit of measurement
-  let unitOfMeasurement = request.nextUrl.searchParams.get('uom');
-  if (!unitOfMeasurement) throw new Error('no unitOfMeasurement provided!');
-  unitOfMeasurement = unitOfMeasurement.trim();
+  let dbhUnit = request.nextUrl.searchParams.get('dbhUnit');
+  if (!dbhUnit) throw new Error('no DBH unitOfMeasurement provided!');
+  dbhUnit = dbhUnit.trim();
+  let homUnit = request.nextUrl.searchParams.get('homUnit');
+  if (!homUnit) throw new Error('no HOM unitOfMeasurement provided!');
+  dbhUnit = dbhUnit.trim();
+  let coordUnit = request.nextUrl.searchParams.get('coordUnit');
+  if (!coordUnit) throw new Error('no Coordinate unitOfMeasurement provided!');
+  dbhUnit = dbhUnit.trim();
 
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
@@ -92,7 +98,9 @@ export async function POST(request: NextRequest) {
         censusID,
         quadratID,
         fullName,
-        unitOfMeasurement
+        dbhUnit: dbhUnit,
+        homUnit: homUnit,
+        coordUnit: coordUnit,
       };
       const coreMeasurementID = await insertOrUpdate(props);
       if (formType === 'measurements' && coreMeasurementID) {

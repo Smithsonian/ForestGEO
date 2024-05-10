@@ -10,7 +10,7 @@ import {
 import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
-  const { connection, rowData, schema, plotID, censusID, quadratID, fullName } = props;
+  const { connection, rowData, schema, plotID, censusID, quadratID, fullName, dbhUnit, homUnit, coordUnit } = props;
   if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Process Census: Missing plotID, censusID, quadratID or full name");
   try {
     /**
@@ -24,6 +24,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
      *       "codes": "Attributes.Code",
      *       "hom": "CoreMeasurement.MeasuredHOM",
      *       "date": "CoreMeasurement.MeasurementDate",
+     *       "dbhUnit", "homUnit", "coordUnit"
      */
     await connection.beginTransaction();
     // Foreign key checks and error handling for species, quadrat, and plot
@@ -53,8 +54,8 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.log(`treeID: ${treeID}`);
 
     // Insert or update Stems
-    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly);
-    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly]}`);
+    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly, coordUnit);
+    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly, coordUnit]}`);
     console.log(`stemID: ${stemID}`);
 
     const personnelID = await getPersonnelIDByName(connection, schema, fullName);
@@ -63,7 +64,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     const measurementInsertQuery = `
     INSERT INTO ${schema}.coremeasurements
-    (CensusID, PlotID, QuadratID, SubquadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, UserDefinedFields)
+    (CensusID, PlotID, QuadratID, SubquadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, DBHUnit, MeasuredHOM, HOMUnit, Description, UserDefinedFields)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
     const dbhResult = await runQuery(connection, measurementInsertQuery, [
@@ -77,7 +78,9 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       booleanToBit(false), // isValidated is false by default
       moment(rowData.date).format('YYYY-MM-DD'),
       rowData.dbh ?? null,
+      dbhUnit,
       rowData.hom ?? null,
+      homUnit,
       null,
       null,
     ]);

@@ -1,15 +1,18 @@
-import {NextRequest, NextResponse} from "next/server";
-import {getConn, runQuery} from "@/components/processors/processormacros";
-import {PoolConnection} from "mysql2/promise";
-import {CMError} from "@/config/macros/uploadsystemmacros";
+import { NextRequest, NextResponse } from "next/server";
+import { getConn, runQuery } from "@/components/processors/processormacros";
+import { PoolConnection } from "mysql2/promise";
+import { CMError } from "@/config/macros/uploadsystemmacros";
 
 export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('no schema variable provided!');
+  if (!schema) throw new Error('No schema variable provided!');
+
   try {
     conn = await getConn();
-    const query = `
+
+    // Query to fetch existing validation errors
+    const validationErrorsQuery = `
       SELECT 
           cm.CoreMeasurementID AS CoreMeasurementID, 
           GROUP_CONCAT(ve.ValidationErrorID) AS ValidationErrorIDs,
@@ -21,22 +24,50 @@ export async function GET(request: NextRequest) {
       JOIN 
           ${schema}.validationerrors AS ve ON cve.ValidationErrorID = ve.ValidationErrorID
       GROUP BY 
-          cm.CoreMeasurementID;`;
-    // Utilize the runQuery helper function
-    const rows = await runQuery(conn, query);
+          cm.CoreMeasurementID;
+    `;
+    const validationErrorsRows = await runQuery(conn, validationErrorsQuery);
 
-    const parsedRows: CMError[] = rows.map((row: any) => ({
+    const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
       CoreMeasurementID: row.CoreMeasurementID,
       ValidationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
       Descriptions: row.Descriptions.split(',')
     }));
-    return new NextResponse(JSON.stringify(parsedRows), {
-      status: 200, headers: {
+
+    // Query to fetch coremeasurements pending validation (no errors)
+    const pendingValidationQuery = `
+      SELECT 
+        cm.CoreMeasurementID,
+        cm.CensusID,
+        cm.PlotID,
+        cm.QuadratID,
+        cm.SubQuadratID,
+        cm.TreeID,
+        cm.StemID,
+        cm.PersonnelID,
+        cm.MeasurementDate,
+        cm.MeasuredDBH,
+        cm.DBHUnit,
+        cm.MeasuredHOM,
+        cm.HOMUnit,
+        cm.Description
+      FROM 
+        ${schema}.coremeasurements AS cm
+      LEFT JOIN 
+        ${schema}.cmverrors AS cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
+      WHERE 
+        cm.IsValidated = b'0' AND cme.CMErrorID IS NULL;
+    `;
+    const pendingValidationRows = await runQuery(conn, pendingValidationQuery);
+
+    return new NextResponse(JSON.stringify({failed: parsedValidationErrors, pending: pendingValidationRows}), {
+      status: 200,
+      headers: {
         'Content-Type': 'application/json'
       }
     });
   } catch (error: any) {
-    return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
+    return new NextResponse(JSON.stringify({ error: error.message }), { status: 500 });
   } finally {
     if (conn) conn.release();
   }

@@ -74,7 +74,7 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
         StemID: Number(item.stemID),
         PersonnelID: Number(item.personnelID),
         IsValidated: booleanToBit(item.isValidated!),
-        MeasurementDate: new Date(item.measurementDate!),
+        MeasurementDate: item.measurementDate ? parseDate(item.measurementDate) : null,
         MeasuredDBH: Number(item.measuredDBH),
         DBHUnit: String(item.dbhUnit),
         MeasuredHOM: Number(item.measuredHOM),
