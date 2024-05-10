@@ -25,7 +25,7 @@ import CircularProgress from "@mui/joy/CircularProgress";
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
     uploadForm, acceptedFiles, setReviewState, expectedHeaders,
-    parsedData, setParsedData, errorRows, setErrorRows, unitOfMeasurement,
+    parsedData, setParsedData, errorRows, setErrorRows, dbhUnit, homUnit, coordUnit,
     confirmationDialogOpen, errors, setErrors, dataViewActive, setDataViewActive,
     currentFileHeaders, setUploadError, setErrorComponent, handleChange, areHeadersValid,
     handleApproval, handleCancel, handleConfirm, handleRemoveFile, handleReplaceFile
@@ -116,6 +116,10 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     ) : (
                       <Typography>No file selected or file has no headers.</Typography>
                     )}
+                    <Typography>Selected Units:</Typography>
+                    <Typography>DBH: {dbhUnit}</Typography>
+                    <Typography>HOM: {homUnit}</Typography>
+                    <Typography>Coordinates: {coordUnit}</Typography>
                   </Box>
                   <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive}
                     setDataViewActive={setDataViewActive} />

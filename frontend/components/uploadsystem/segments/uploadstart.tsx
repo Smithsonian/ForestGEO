@@ -1,25 +1,27 @@
 "use client";
 
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadStartProps } from "@/config/macros/uploadsystemmacros";
-import { Box, Button, ListSubheader, Stack, Tooltip, Typography } from "@mui/joy";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadStartProps} from "@/config/macros/uploadsystemmacros";
+import {Box, Button, ListSubheader, Stack, Tooltip, Typography} from "@mui/joy";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
-import React, { useEffect, useState } from "react";
-import Select, { SelectOption } from "@mui/joy/Select";
+import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
+import Select, {SelectOption} from "@mui/joy/Select";
 import List from "@mui/joy/List";
 import Option from '@mui/joy/Option';
 import FinalizeSelectionsButton from "../../client/finalizeselectionsbutton";
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
-import { usePlotContext, useQuadratContext, useQuadratDispatch } from "@/app/contexts/userselectionprovider";
+import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
+import {usePlotContext, useQuadratContext, useQuadratDispatch} from "@/app/contexts/userselectionprovider";
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const {
     uploadForm, personnelRecording,
     setPersonnelRecording,
     setReviewState,
-    unitOfMeasurement, setUnitOfMeasurement
+    dbhUnit, setDBHUnit,
+    homUnit, setHOMUnit,
+    coordUnit, setCoordUnit
   } = props;
   const [finish, setFinish] = useState<boolean>(false);
   let quadratListContext = useQuadratListContext();
@@ -32,17 +34,20 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(false);
   const handleChange = (
     _event: React.SyntheticEvent | null,
+    dispatcher: Dispatch<SetStateAction<string>>,
     newValue: string | null,
   ) => {
     if (newValue) {
-      setUnitOfMeasurement(newValue);
+      dispatcher(newValue);
     }
   };
 
   // Single function to handle "Back" action
   const handleBack = () => {
-    if (unitOfMeasurement !== '') {
-      setUnitOfMeasurement('');
+    if (dbhUnit !== '' || homUnit !== '' || coordUnit !== '') {
+      setCoordUnit('');
+      setDBHUnit('');
+      setHOMUnit('');
     } else if (personnelRecording !== '') {
       setPersonnelRecording('');
     } else if (isQuadratConfirmed) {
@@ -50,7 +55,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     }
     setFinish(false);
   };
-  
+
   useEffect(() => {
     if (currentPlot !== null) {
       // ensure that selectable list is restricted by selected plot
@@ -65,7 +70,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const handleQuadratSelection = async (selectedQuadrat: Quadrat | null) => {
     setQuadrat(selectedQuadrat);
     if (quadratDispatch) {
-      await quadratDispatch({ quadrat: selectedQuadrat });
+      await quadratDispatch({quadrat: selectedQuadrat});
     }
   };
 
@@ -76,9 +81,9 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
 
   const allSelectionsMade = uploadForm !== '' &&
     (uploadForm !== 'measurements' ||
-      (personnelRecording !== '' && unitOfMeasurement !== '' && isQuadratConfirmed));
+      (personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && isQuadratConfirmed));
 
-  const showBackButton = personnelRecording !== '' || unitOfMeasurement !== '' || isQuadratConfirmed;
+  const showBackButton = personnelRecording !== '' || (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') || isQuadratConfirmed;
 
   const renderQuadratValue = (option: SelectOption<string> | null) => {
     if (!option) {
@@ -90,18 +95,19 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     const selectedQuadrat = quadratListContext?.find(c => c?.quadratName === selectedValue);
 
     // Return JSX
-    return selectedQuadrat ? <Typography>{`Quadrat: ${selectedQuadrat?.quadratName}`}</Typography> : <Typography>No Quadrat</Typography>;
+    return selectedQuadrat ? <Typography>{`Quadrat: ${selectedQuadrat?.quadratName}`}</Typography> :
+      <Typography>No Quadrat</Typography>;
   };
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center' }}>
-      <Stack direction={"column"} sx={{ width: 'fit-content' }}>
+    <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+      <Stack direction={"column"} sx={{width: 'fit-content'}}>
         {showBackButton && (
           <Tooltip title="Go back to the previous step">
             <Button
               onClick={handleBack}
               variant="outlined"
-              startDecorator={<ArrowBackIcon />}
+              startDecorator={<ArrowBackIcon/>}
               sx={{
                 width: 'fit-content',
                 mb: 2,
@@ -120,14 +126,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         {/* Form Type Selection */}
         {uploadForm !== '' && uploadForm !== 'measurements' && !finish && (
           <>
-            <Typography sx={{ mb: 2 }}>You have selected:</Typography>
+            <Typography sx={{mb: 2}}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
           </>
         )}
         {/* Personnel Recording Selection */}
         {uploadForm === 'measurements' && personnelRecording === '' && (
           <>
-            <Typography sx={{ mb: 2 }}>
+            <Typography sx={{mb: 2}}>
               Who recorded this data?
             </Typography>
             <AutocompleteFixedData
@@ -139,28 +145,76 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         )}
 
         {/* Unit of Measurement Selection for measurements */}
-        {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement === '' && (
+        {uploadForm === 'measurements' && personnelRecording !== '' && (dbhUnit === '' || homUnit === '' || coordUnit === '') && (
           <>
-            <Typography sx={{ mb: 2 }}>
-              Select the unit of measurement:
-            </Typography>
-            <Select
-              value={unitOfMeasurement}
-              onChange={handleChange}
-              placeholder="Select unit"
-              sx={{ minWidth: '200px' }}
-            >
-              <List>
-                <ListSubheader>Metric Units</ListSubheader>
-                <Option value={"km"}>Kilometers (km)</Option>
-                <Option value={"m"}>Meters (m)</Option>
-                <Option value={"cm"}>Centimeters (cm)</Option>
-                <Option value={"mm"}>Millimeters (mm)</Option>
-              </List>
-            </Select>
+            <Stack direction={'row'} spacing={2}>
+              <Box>
+                <Typography sx={{mb: 2}}>
+                  Select the DBH unit of measurement:
+                </Typography>
+                <Select
+                  value={dbhUnit}
+                  defaultValue={'cm'}
+                  onChange={(event: React.SyntheticEvent | null,
+                             newValue: string | null,) => handleChange(event, setDBHUnit, newValue ?? '')}
+                  placeholder="Select unit"
+                  sx={{minWidth: '200px'}}
+                >
+                  <List>
+                    <ListSubheader>Metric Units</ListSubheader>
+                    <Option value={"km"}>Kilometers (km)</Option>
+                    <Option value={"m"}>Meters (m)</Option>
+                    <Option value={"cm"}>Centimeters (cm)</Option>
+                    <Option value={"mm"}>Millimeters (mm)</Option>
+                  </List>
+                </Select>
+                <Box>
+                  <Typography sx={{mb: 2}}>
+                    Select the HOM unit of measurement:
+                  </Typography>
+                  <Select
+                    value={homUnit}
+                    defaultValue={'m'}
+                    onChange={(event: React.SyntheticEvent | null,
+                               newValue: string | null,) => handleChange(event, setHOMUnit, newValue ?? '')}
+                    placeholder="Select unit"
+                    sx={{minWidth: '200px'}}
+                  >
+                    <List>
+                      <ListSubheader>Metric Units</ListSubheader>
+                      <Option value={"km"}>Kilometers (km)</Option>
+                      <Option value={"m"}>Meters (m)</Option>
+                      <Option value={"cm"}>Centimeters (cm)</Option>
+                      <Option value={"mm"}>Millimeters (mm)</Option>
+                    </List>
+                  </Select>
+                </Box>
+                <Box>
+                  <Typography sx={{mb: 2}}>
+                    Select the Coordinate unit of measurement:
+                  </Typography>
+                  <Select
+                    value={coordUnit}
+                    defaultValue={'m'}
+                    onChange={(event: React.SyntheticEvent | null,
+                               newValue: string | null,) => handleChange(event, setCoordUnit, newValue ?? '')}
+                    placeholder="Select unit"
+                    sx={{minWidth: '200px'}}
+                  >
+                    <List>
+                      <ListSubheader>Metric Units</ListSubheader>
+                      <Option value={"km"}>Kilometers (km)</Option>
+                      <Option value={"m"}>Meters (m)</Option>
+                      <Option value={"cm"}>Centimeters (cm)</Option>
+                      <Option value={"mm"}>Millimeters (mm)</Option>
+                    </List>
+                  </Select>
+                </Box>
+              </Box>
+            </Stack>
           </>
         )}
-        {(uploadForm === "measurements" && personnelRecording !== '' && unitOfMeasurement !== '' && !isQuadratConfirmed) && (
+        {(uploadForm === "measurements" && personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && !isQuadratConfirmed) && (
           <Stack direction={"column"} spacing={2} marginBottom={2}>
             <Typography level={"title-sm"}>Select Quadrat:</Typography>
             <Select
@@ -179,7 +233,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
               <Option value={""}>None</Option>
               {quadratList?.map((item) => (
                 <Option value={item?.quadratName} key={item?.quadratName}>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
                     <Typography level="body-lg">{item?.quadratName}</Typography>
                   </Box>
                 </Option>
@@ -188,13 +242,23 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             <Button onClick={handleConfirmQuadrat} size="sm" color="primary">Confirm</Button>
           </Stack>
         )}
-        {uploadForm === 'measurements' && personnelRecording !== '' && unitOfMeasurement !== '' && currentQuadrat !== null && !finish && (
+        {uploadForm === 'measurements' && personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && currentQuadrat !== null && !finish && (
           <>
-            <Typography sx={{ mb: 2, mt: 2 }}>You have selected:</Typography>
+            <Typography sx={{mb: 2, mt: 2}}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
             <Typography>Quadrat: {quadrat?.quadratName}</Typography>
             <Typography>Personnel: {personnelRecording}</Typography>
-            <Typography sx={{mb: 2}}>Units of measurement: {unitOfMeasurement}</Typography>
+            <Stack direction={'row'}>
+              <Typography sx={{mx: 2}}>DBH units of measurement: {dbhUnit}</Typography>
+              <Typography sx={{mx: 2}}>HOM units of measurement: {homUnit}</Typography>
+              <Typography sx={{mx: 2}}>Coordinate units of measurement: {coordUnit}</Typography>
+            </Stack>
+          </>
+        )}
+        {['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes(uploadForm) && personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && currentQuadrat !== null && !finish && (
+          <>
+            <Typography sx={{mb: 2, mt: 2}}>You have selected:</Typography>
+            <Typography>Form: {uploadForm}</Typography>
           </>
         )}
         <FinalizeSelectionsButton

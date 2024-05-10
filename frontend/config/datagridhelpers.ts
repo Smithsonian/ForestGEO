@@ -122,10 +122,11 @@ export const createDeleteQuery: ProcessDeletionQueryFunction = (
 
 export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
-    case 'coreMeasurements':
+    case 'coremeasurements':
+    case 'measurementssummaryview':
       return 'coreMeasurementID';
-    case 'stemDimensions':
-    case 'stemTaxonomies':
+    case 'stemdimensionsview':
+    case 'stemtaxonomiesview':
       return 'stemID';
     case 'attributes':
       return 'code';
@@ -137,7 +138,7 @@ export function getGridID(gridType: string): string {
       return 'quadratID';
     case 'subquadrats':
       return 'subquadratID';
-    case 'allTaxonomies':
+    case 'alltaxonomiesview':
     case 'species':
       return 'speciesID';
     default:
@@ -155,7 +156,7 @@ export function computeMutation(
   oldRow: GridRowModel
 ) {
   switch (gridType) {
-    case 'coreMeasurements':
+    case 'coremeasurements':
       return coreMeasurementsFields.some(field => newRow[field] !== oldRow[field]);
     case 'attributes':
       return attributesFields.some(field => newRow[field] !== oldRow[field]);
@@ -176,11 +177,11 @@ export function computeMutation(
     case 'species':
       return speciesFields.some(field => newRow[field] !== oldRow[field]);
     // views
-    case 'stemDimensionsView':
+    case 'stemdimensionsview':
       return stemDimensionsViewFields.some(field => newRow[field] !== oldRow[field]);
-    case 'stemTaxonomiesView':
+    case 'stemtaxonomiesview':
       return stemTaxonomiesViewFields.some(field => newRow[field] !== oldRow[field]);
-    case 'allTaxonomiesView':
+    case 'alltaxonomiesview':
       return allTaxonomiesFields.some(field => newRow[field] !== oldRow[field]);
     default:
       throw new Error('invalid grid type submitted');

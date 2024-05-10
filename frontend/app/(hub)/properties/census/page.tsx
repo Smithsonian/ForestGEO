@@ -12,7 +12,7 @@ import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
 import {useLoading} from "@/app/contexts/loadingprovider";
 import {DatePicker} from '@mui/x-date-pickers';
-import moment from "moment";
+import dayjs from "dayjs";
 
 
 export default function CensusPage() {
@@ -172,9 +172,9 @@ export default function CensusPage() {
       </Button>
       {openCensusId !== null && (
         <DatePicker
-          value={endDate ? moment(endDate) : moment()}
+          value={endDate ? dayjs(endDate) : dayjs()}
           onChange={(date) => setEndDate(date ? date.toDate() : null)}
-          defaultValue={moment()}
+          defaultValue={dayjs()}
         />
       )}
       <DataGridCommons

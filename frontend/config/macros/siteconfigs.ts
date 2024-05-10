@@ -9,6 +9,9 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import BugReportIcon from '@mui/icons-material/BugReport';
+import SchemaIcon from '@mui/icons-material/Schema';
+import PlaceIcon from '@mui/icons-material/Place';
+import FilterIcon from '@mui/icons-material/Filter';
 
 export type SiteConfigProps = {
   label: string;
@@ -48,10 +51,16 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: VisibilityIcon
       },
       {
-        label: "Stem and Tree Details",
-        href: "/stemtreedetails",
+        label: "View Taxonomies",
+        href: "/stemtaxonomies",
         tip: '',
-        icon: HistoryEduIcon
+        icon: FilterIcon
+      },
+      {
+        label: "View Dimensions",
+        href: "/stemdimensions",
+        tip: '',
+        icon: PlaceIcon
       },
       // {
       //   label: "Validation History",
@@ -66,6 +75,20 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: CloudCircleIcon,
       },
     ],
+  },
+  {
+    label: "Manual Input Forms (CTFSWeb)",
+    href: "/forms",
+    tip: 'forms from ctfsweb',
+    icon: SettingsSuggestIcon,
+    expanded: [
+      {
+        label: 'Census Form',
+        href: '/census',
+        tip: '',
+        icon: DescriptionIcon,
+      },
+    ]
   },
   {
     label: "Measurement Properties Hub",
@@ -103,21 +126,13 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: BugReportIcon,
       },
+      {
+        label: "View All Taxonomies",
+        href: "/alltaxonomies",
+        tip: '',
+        icon: SchemaIcon
+      },
     ]
   },
-  // {
-  //   label: "Manual Input Forms (CTFSWeb)",
-  //   href: "/forms",
-  //   tip: 'forms from ctfsweb',
-  //   icon: SettingsSuggestIcon,
-  //   expanded: [
-  //     {
-  //       label: 'Census Form',
-  //       href: '/census',
-  //       tip: '',
-  //       icon: DescriptionIcon,
-  //     },
-  //   ]
-  // },
 ];
 

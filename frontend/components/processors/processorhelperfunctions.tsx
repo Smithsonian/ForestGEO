@@ -10,7 +10,7 @@ import { processCensus } from "@/components/processors/processcensus";
 import { bitToBoolean } from "@/config/macros";
 import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import MapperFactory from "@/config/datamapper";
-import { GridValidRowModel } from "@mui/x-data-grid";
+import { StemRDS, StemResult } from "@/config/sqlrdsdefinitions/tables/stemrds";
 
 export async function selectOrInsertFamily(connection: PoolConnection, schema: string, rowFamilyName: any,): Promise<number | undefined> {
   let query = `SELECT FamilyID FROM ${schema}.family WHERE Family = ?`;
@@ -124,8 +124,8 @@ export async function processTrees(
   try {
     // Prepare the query with the new alias method
     const query = `
-    INSERT INTO ${schema}.trees (TreeTag, SpeciesID, SubSpeciesID)
-    VALUES (?, ?, ?) AS new_data
+    INSERT INTO ${schema}.trees (TreeTag, SpeciesID)
+    VALUES (?, ?) AS new_data
     ON DUPLICATE KEY UPDATE 
       SpeciesID = new_data.SpeciesID, 
   `;
@@ -149,25 +149,43 @@ export async function processStems(
   treeID: any,
   subQuadratID: any,
   localX: any,
-  localY: any
+  localY: any,
+  unit: any
 ): Promise<number | null> {
-  if (!stemTag || !treeID || !subQuadratID || !localX || !localY) throw new Error('process stems: 1 or more undefined parameters received');
+  if (!stemTag || !treeID || !subQuadratID || !localX || !localY || !unit) {
+    throw new Error('process stems: 1 or more undefined parameters received');
+  }
 
   try {
     // Prepare the query
-    const query = `
-      INSERT INTO ${schema}.stems (TreeID, SubQuadratID, StemTag, LocalX, LocalY)
-      VALUES (?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        TreeID = VALUES(TreeID),
-        SubQuadratID = VALUES(SubQuadratID),
-        StemTag = VALUES(StemTag),
-        LocalX = VALUES(LocalX),
-        LocalY = VALUES(LocalY);
-    `;
-    // Execute the query
-    const results = await runQuery(connection, query, [treeID, subQuadratID, stemTag, localX, localY]);
-    return results.insertId;
+    const checkQuery = `SELECT * FROM ${schema}.stems WHERE TreeID = ? AND SubquadratID = ? AND StemTag = ?`;
+
+    const countResults = await runQuery(connection, checkQuery, [treeID, subQuadratID, stemTag]);
+    const mapper = MapperFactory.getMapper<StemResult, StemRDS>('stems');
+
+    if (countResults.length > 0) {
+      // Existing stem found, update it
+      const rows = mapper.mapData(countResults);
+      if (rows.length > 1) {
+        throw new Error("multiple unique stem signatures detected, indicating a breakage in system. Please contact an administrator.");
+      }
+
+      let otherStem = rows[0];
+      let moved = false;
+      if (otherStem.localX !== localX || otherStem.localY !== localY) {
+        moved = true;
+      }
+      const updateQuery = `UPDATE ${schema}.stems SET TreeID = ?, SubquadratID = ?, StemTag = ?, LocalX = ?, LocalY = ?, Unit = ?, Moved = ? WHERE StemID = ?`;
+
+      await runQuery(connection, updateQuery, [treeID, subQuadratID, stemTag, localX, localY, unit, moved, otherStem.stemID]);
+      return otherStem.stemID;
+    } else {
+      // New stem, insert it
+      const insertQuery = `INSERT INTO ${schema}.stems (TreeID, SubquadratID, StemTag, LocalX, LocalY, Unit, Moved) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+      const results = await runQuery(connection, insertQuery, [treeID, subQuadratID, stemTag, localX, localY, unit, false]);
+      return results.insertId;
+    }
   } catch (error: any) {
     console.error('Error processing stems:', error.message);
     throw error;
@@ -266,7 +284,7 @@ export async function runValidationProcedure(
   const minDBH = min;
   const maxDBH = max;
 
-  if (procedureName === "ValidateScreenMeasuredDiameterMinMax" || procedureName === "ValidateHOMUpperAndLowerBounds") {
+  if (procedureName === "ValidateScreenMeasuredDiameterMinMax" || procedureName === "ValidateHOMUpperAndLowerBounds") { // validation procedures have been updated to use new species limits tables
     query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
     parameters = [censusID, plotID, minDBH, maxDBH];
   } else {
@@ -406,10 +424,10 @@ type FieldList = string[];
 
 interface UpdateQueryConfig {
   slices: {
-      [key: string]: {
-          range: [number, number];
-          primaryKey: string;
-      }
+    [key: string]: {
+      range: [number, number];
+      primaryKey: string;
+    }
   };
   fieldList: FieldList;
 }
@@ -419,20 +437,20 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
   const changedFields = detectFieldChanges(newRow, oldRow, fieldList);
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string[] => {
-      const sliceConfig = slices[type];
-      if (!sliceConfig) {
-          return []; // Safety check in case of an undefined slice
-      }
-      const { range, primaryKey } = sliceConfig;
-      const fieldsInSlice = fieldList.slice(range[0], range[1]);
-      const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
-      return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
+    const sliceConfig = slices[type];
+    if (!sliceConfig) {
+      return []; // Safety check in case of an undefined slice
+    }
+    const { range, primaryKey } = sliceConfig;
+    const fieldsInSlice = fieldList.slice(range[0], range[1]);
+    const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
+    return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
   };
 
   return Object.keys(slices).reduce((acc, typeKey) => {
-      const type = typeKey as keyof typeof slices; // Assert the correct type explicitly
-      const queries = generateQueriesFromSlice(type);
-      return [...acc, ...queries];
+    const type = typeKey as keyof typeof slices; // Assert the correct type explicitly
+    const queries = generateQueriesFromSlice(type);
+    return [...acc, ...queries];
   }, [] as string[]).filter(query => query.length > 0);
 };
 
@@ -447,18 +465,18 @@ export function generateInsertOperations(schema: string, newRow: any, config: Up
   const { fieldList, slices } = config;
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string => {
-      const sliceConfig = slices[type];
-      if (!sliceConfig) {
-          return ''; // Safety check in case of an undefined slice
-      }
-      const { range } = sliceConfig;
-      const fieldsInSlice = fieldList.slice(range[0], range[1]);
-      return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
+    const sliceConfig = slices[type];
+    if (!sliceConfig) {
+      return ''; // Safety check in case of an undefined slice
+    }
+    const { range } = sliceConfig;
+    const fieldsInSlice = fieldList.slice(range[0], range[1]);
+    return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
   };
 
   return Object.keys(slices).map(typeKey => {
-      const type = typeKey as keyof typeof slices;
-      return generateQueriesFromSlice(type);
+    const type = typeKey as keyof typeof slices;
+    return generateQueriesFromSlice(type);
   }).filter(query => query.length > 0);
 }
 
@@ -541,31 +559,31 @@ export const stemTaxonomiesViewFields = [
 export const StemDimensionsViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemDimensionsViewFields,
   slices: {
-      trees: { range: [0, 1], primaryKey: 'TreeID' },
-      stems: { range: [1, 5], primaryKey: 'StemID' },
-      subquadrats: { range: [5, 12], primaryKey: 'SubquadratID' },
-      quadrats: { range: [12, 16], primaryKey: 'QuadratID' },
-      plots: { range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID' },
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 5], primaryKey: 'StemID' },
+    subquadrats: { range: [5, 12], primaryKey: 'SubquadratID' },
+    quadrats: { range: [12, 16], primaryKey: 'QuadratID' },
+    plots: { range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID' },
   }
 };
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
-    family: {range: [0, 1], primaryKey: 'FamilyID'},
-    genus: {range: [1, 3], primaryKey: 'GenusID'},
-    species: {range: [3, 11], primaryKey: 'SpeciesID'},
-    reference: {range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID'},
+    family: { range: [0, 1], primaryKey: 'FamilyID' },
+    genus: { range: [1, 3], primaryKey: 'GenusID' },
+    species: { range: [3, 11], primaryKey: 'SpeciesID' },
+    reference: { range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID' },
   }
 };
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
     trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemID'},
-    family: {range: [2, 3], primaryKey: 'FamilyID'},
-    genus: {range: [3, 5], primaryKey: 'GenusID'},
-    species: {range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID'},
+    stems: { range: [1, 2], primaryKey: 'StemID' },
+    family: { range: [2, 3], primaryKey: 'FamilyID' },
+    genus: { range: [3, 5], primaryKey: 'GenusID' },
+    species: { range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID' },
   }
 };
 

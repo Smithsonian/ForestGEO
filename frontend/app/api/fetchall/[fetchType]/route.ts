@@ -1,10 +1,6 @@
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import MapperFactory, { IDataMapper } from "@/config/datamapper";
 import { HTTPResponses } from "@/config/macros";
-import { CensusRDS, CensusResult } from "@/config/sqlrdsdefinitions/tables/censusrds";
-import { PlotRDS, PlotsResult } from "@/config/sqlrdsdefinitions/tables/plotrds";
-import { QuadratsRDS, QuadratsResult } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import { SubQuadratRDS as SubquadratRDS, SubQuadratResult as SubquadratResult } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 import { PoolConnection } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
 

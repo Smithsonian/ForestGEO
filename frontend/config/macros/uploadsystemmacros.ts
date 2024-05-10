@@ -9,13 +9,17 @@ export interface UploadStartProps {
   // state vars
   uploadForm: string;
   personnelRecording: string;
-  unitOfMeasurement: string;
+  dbhUnit: string;
+  homUnit: string;
+  coordUnit: string;
   // state setters
   setUploadForm: Dispatch<SetStateAction<string>>;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  setUnitOfMeasurement: Dispatch<SetStateAction<string>>;
+  setDBHUnit: Dispatch<SetStateAction<string>>;
+  setHOMUnit: Dispatch<SetStateAction<string>>;
+  setCoordUnit: Dispatch<SetStateAction<string>>;
 }
 
 export interface UploadParseFilesProps {
@@ -36,7 +40,9 @@ export interface UploadParseFilesProps {
 
 export interface UploadReviewFilesProps {
   // state vars
-  unitOfMeasurement: string;
+  dbhUnit: string;
+  homUnit: string;
+  coordUnit: string;
   uploadForm: string;
   acceptedFiles: FileWithPath[];
   expectedHeaders: string[];
@@ -71,7 +77,9 @@ export interface UploadFireProps {
   // state vars
   uploadForm: string;
   personnelRecording: string;
-  unitOfMeasurement: string;
+  dbhUnit: string;
+  homUnit: string;
+  coordUnit: string;
   acceptedFiles: FileWithPath[];
   parsedData: FileCollectionRowSet;
   uploadCompleteMessage: string;
@@ -127,7 +135,7 @@ export interface UploadCompleteProps {
   // state vars
   uploadForm: string;
   // state setters
-  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  handleCloseUploadModal: () => void;
 }
 
 export interface ProgressStepperProps {
@@ -182,4 +190,3 @@ export interface CMError {
   ValidationErrorIDs: number[];
   Descriptions: string[];
 }
-

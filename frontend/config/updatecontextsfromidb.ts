@@ -29,29 +29,44 @@ async function createAndUpdatePlotList(plotRDSLoad: PlotRDS[], quadratsRDSLoad: 
 // Helper function to create and update Census list
 async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]) {
   let uniqueCensusMap = new Map();
-  censusRDSLoad.forEach(censusRDS => {
+
+  censusRDSLoad.forEach((censusRDS) => {
     const plotCensusNumber = censusRDS?.plotCensusNumber || 0;
     let existingCensus = uniqueCensusMap.get(plotCensusNumber);
+
     if (!existingCensus) {
+      // Initialize the new census entry with properly handled date conversions
       uniqueCensusMap.set(plotCensusNumber, {
         plotID: censusRDS?.plotID || 0,
         plotCensusNumber,
-        startDate: censusRDS?.startDate || new Date(),
-        endDate: censusRDS?.endDate || null,  // Handle null endDate
+        startDate: censusRDS?.startDate ? new Date(censusRDS.startDate) : null,
+        endDate: censusRDS?.endDate ? new Date(censusRDS.endDate) : null,
         description: censusRDS?.description || ''
       });
     } else {
-      existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate || 0).getTime()));
+      // Safely update the start date if it exists
+      if (censusRDS?.startDate) {
+        const newStartDate = new Date(censusRDS.startDate);
+        existingCensus.startDate = existingCensus.startDate
+          ? new Date(Math.min(existingCensus.startDate.getTime(), newStartDate.getTime()))
+          : newStartDate;
+      }
+
+      // Safely update the end date if it exists
       if (censusRDS?.endDate) {
+        const newEndDate = new Date(censusRDS.endDate);
         existingCensus.endDate = existingCensus.endDate
-          ? new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS.endDate).getTime()))
-          : new Date(censusRDS.endDate);  // Update endDate only if it's not null
+          ? new Date(Math.max(existingCensus.endDate.getTime(), newEndDate.getTime()))
+          : newEndDate;
       }
     }
   });
+
+  // Convert map to array and save data
   let censusList: Census[] = Array.from(uniqueCensusMap.values());
   await setData('censusList', censusList);
 }
+
 
 
 async function fetchData(endpoint: string) {

@@ -7,7 +7,7 @@ import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagridcommons";
 import {useSession} from "next-auth/react";
-import {Box, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function SpeciesPage() {
@@ -40,6 +40,7 @@ export default function SpeciesPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
   let currentPlot = usePlotContext();
 
@@ -98,9 +99,14 @@ export default function SpeciesPage() {
           </Box>
 
           {/* Upload Button */}
-          <UploadParentModal formType="species" setRefresh={setRefresh}/>
+          <Button onClick={() => setIsUploadModalOpen(true)} color={'primary'}>Upload</Button>
         </Box>
       </Box>
+
+      <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
+                           setIsUploadModalOpen(false);
+                           setRefresh(true);
+                         }} formType={'species'} />
 
       <DataGridCommons
         gridType="species"

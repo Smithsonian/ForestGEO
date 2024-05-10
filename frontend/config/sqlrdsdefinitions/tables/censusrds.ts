@@ -48,8 +48,8 @@ export class CensusMapper implements IDataMapper<CensusResult, CensusRDS> {
       CensusID: Number(item?.censusID),
       PlotID: Number(item?.plotID),
       PlotCensusNumber: Number(item?.plotCensusNumber),
-      StartDate:  new Date(item?.startDate!),
-      EndDate: new Date(item?.endDate!),
+      StartDate:  item?.startDate ? parseDate(item?.startDate) : null,
+      EndDate: item?.endDate ? parseDate(item?.endDate) : null,
       Description: String(item?.description)
     }));
   }
@@ -111,5 +111,5 @@ export const CensusGridColumns: GridColDef[] = [
       } else return "null";
     }
   },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, editable: true },
+  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, type: 'string', editable: true },
 ];

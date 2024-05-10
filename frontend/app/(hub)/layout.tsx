@@ -17,7 +17,7 @@ import {
   useSiteListDispatch,
   useSubquadratListDispatch
 } from "@/app/contexts/listselectionprovider";
-import { getData } from "@/config/db";
+import { clearAllIDBData, getData } from "@/config/db";
 import { siteConfig } from "@/config/macros/siteconfigs";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
@@ -82,6 +82,7 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
   const [coreDataLoaded, setCoreDataLoaded] = useState(false);
+  const [manualReset, setManualReset] = useState(false);
 
   // Helper function to manage loading operations count
   const delay = (ms: number | undefined) => new Promise(resolve => setTimeout(resolve, ms));
@@ -89,9 +90,8 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
 
   useEffect(() => {
     const updateCensusList = async () => {
-      // Fetch the updated list of censuses. Replace the below line with your actual data fetching logic.
       if (!censusLoadContext) return;
-
+  
       let uniqueCensusMap = new Map();
       censusLoadContext.forEach(censusRDS => {
         const plotCensusNumber = censusRDS?.plotCensusNumber || 0;
@@ -100,25 +100,26 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
           uniqueCensusMap.set(plotCensusNumber, {
             plotID: censusRDS?.plotID || 0,
             plotCensusNumber,
-            startDate: censusRDS?.startDate || null, // need to handle null start date too
-            endDate: censusRDS?.endDate || null,  // Handle null endDate
+            startDate: censusRDS?.startDate ? new Date(censusRDS.startDate) : null,
+            endDate: censusRDS?.endDate ? new Date(censusRDS.endDate) : null,
             description: censusRDS?.description || ''
           });
         } else {
           if (censusRDS?.startDate) {
-            existingCensus.startDate = existingCensus.startDate
-              ? new Date(Math.max(existingCensus.startDate.getTime(), new Date(censusRDS.startDate).getTime()))
-              : new Date(censusRDS.startDate);  // Update startDate only if it's not null
+            let newStartDate = new Date(censusRDS.startDate);
+            existingCensus.startDate = existingCensus.startDate 
+              ? new Date(Math.min(existingCensus.startDate.getTime(), newStartDate.getTime()))
+              : newStartDate;
           }
-          existingCensus.startDate = new Date(Math.min(existingCensus.startDate.getTime(), new Date(censusRDS?.startDate || 0).getTime()));
           if (censusRDS?.endDate) {
+            let newEndDate = new Date(censusRDS.endDate);
             existingCensus.endDate = existingCensus.endDate
-              ? new Date(Math.max(existingCensus.endDate.getTime(), new Date(censusRDS.endDate).getTime()))
-              : new Date(censusRDS.endDate);  // Update endDate only if it's not null
+              ? new Date(Math.max(existingCensus.endDate.getTime(), newEndDate.getTime()))
+              : newEndDate;
           }
         }
       });
-
+  
       // Check if the census list actually needs to be updated
       const newCensusList = Array.from(uniqueCensusMap.values());
       if (JSON.stringify(censusListContext) !== JSON.stringify(newCensusList)) {
@@ -128,9 +129,9 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
         }
       }
     };
-
+  
     updateCensusList().catch(console.error);
-  }, [censusLoadDispatch]);
+  }, [censusLoadContext, censusListContext, censusListDispatch]);  
 
   const fetchAndUpdateCoreData = useCallback(async () => {
     setLoading(true, "Loading Core Data...");
@@ -241,9 +242,23 @@ export default function HubLayout({ children, }: Readonly<{ children: React.Reac
     }
   }, [siteListLoaded, currentSite, coreDataLoaded, fetchAndUpdateCoreData]);
 
+  useEffect(() => {
+    if (manualReset) {
+      setLoading(true, "Manual refresh beginning...");
+      clearAllIDBData().catch(console.error);
+      setCoreDataLoaded(false);
+      setSiteListLoaded(false);
+      if (quadratDispatch) quadratDispatch({ quadrat: null }).catch(console.error);
+      if (censusDispatch) censusDispatch({ census: null }).catch(console.error);
+      if (plotDispatch) plotDispatch({ plot: null }).catch(console.error);
+      setManualReset(false);
+      setLoading(false);
+    }
+  }, [manualReset]);
+
   return (
     <>
-      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setCoreDataLoaded={setCoreDataLoaded} />
+      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
       <Header />
       <Box
         component="main"
