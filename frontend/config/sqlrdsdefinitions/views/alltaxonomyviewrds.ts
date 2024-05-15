@@ -1,7 +1,7 @@
-import { GridColDef, GridValidRowModel } from "@mui/x-data-grid";
-import { IDataMapper, parseDate } from "../../datamapper";
-import { bitToBoolean } from "@/config/macros";
-import { detectFieldChanges, generateUpdateQueries } from "@/components/processors/processorhelperfunctions";
+import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+import {IDataMapper, parseDate} from "../../datamapper";
+import {bitToBoolean} from "@/config/macros";
+import {detectFieldChanges, generateUpdateQueries} from "@/components/processors/processorhelperfunctions";
 
 export type AllTaxonomyViewRDS = {
   id: number;
@@ -77,6 +77,7 @@ export class AllTaxonomyViewMapper implements IDataMapper<AllTaxonomyViewResult,
       Citation: item.citation
     }));
   }
+
   mapData(results: AllTaxonomyViewResult[], indexOffset: number = 1): AllTaxonomyViewRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
@@ -103,17 +104,106 @@ export class AllTaxonomyViewMapper implements IDataMapper<AllTaxonomyViewResult,
     }));
   }
 }
+
 export const AllTaxonomyViewGridColumns: GridColDef[] = [
-  { field: 'speciesID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: false },
-  { field: 'speciesCode', headerName: 'SpCode', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'subspeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'genusAuthority', headerName: 'Genus Authority', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'speciesAuthority', headerName: 'Species Authority', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'publicationTitle', headerName: 'Publication', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'dateOfPublication', headerName: 'Publish Date', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'citation', headerName: 'Citation', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
+  {
+    field: 'speciesID',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'speciesCode',
+    headerName: 'SpCode',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'family',
+    headerName: 'Family',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genus',
+    headerName: 'Genus',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesName',
+    headerName: 'Species',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesName',
+    headerName: 'Subspecies',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusAuthority',
+    headerName: 'Genus Authority',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesAuthority',
+    headerName: 'Species Authority',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'publicationTitle',
+    headerName: 'Publication',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'dateOfPublication',
+    headerName: 'Publish Date',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'citation',
+    headerName: 'Citation',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
 ];
 

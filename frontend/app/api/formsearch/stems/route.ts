@@ -5,7 +5,7 @@ import {FORMSEARCH_LIMIT} from "@/config/macros/azurestorage";
 
 export async function GET(request: NextRequest): Promise<NextResponse<string[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('no schema provided!');
+  if ((!schema || schema === 'undefined')) throw new Error('no schema provided!');
   const partialStemTag = request.nextUrl.searchParams.get('searchfor')!;
   let conn: PoolConnection | null;
   conn = await getConn();

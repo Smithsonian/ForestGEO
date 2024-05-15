@@ -47,7 +47,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
   const schema = request.nextUrl.searchParams.get('schema');
   const quadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!, 10);
-  if (!schema || isNaN(quadratID)) throw new Error('Missing required parameters');
+  if ((!schema || schema === 'undefined') || isNaN(quadratID)) throw new Error('Missing required parameters');
 
   try {
     const updatedPersonnelIDs: number[] = await request.json();

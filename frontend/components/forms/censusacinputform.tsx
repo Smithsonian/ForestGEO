@@ -33,7 +33,7 @@ import UploadValidation from "@/components/uploadsystem/segments/uploadvalidatio
 import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {DialogContent, DialogTitle, Modal, ModalDialog} from '@mui/joy';
-import { unitSelectionOptions } from '@/config/macros';
+import {unitSelectionOptions} from '@/config/macros';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -80,7 +80,7 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
   );
 }
 
-const CensusInputForm = () => {
+const CensusAutocompleteInputForm = () => {
   /**
    *       "tag": "Trees.TreeTag",
    *       "stemtag": "Stems.StemTag",
@@ -187,7 +187,16 @@ const CensusInputForm = () => {
       flex: 1,
       align: 'right'
     },
-    {field: 'dbhUnit', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+    {
+      field: 'dbhUnit',
+      headerName: '<- Unit',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true,
+      type: 'singleSelect',
+      valueOptions: unitSelectionOptions,
+    },
     {
       field: 'hom',
       headerName: 'HOM',
@@ -198,7 +207,16 @@ const CensusInputForm = () => {
       flex: 1,
       align: 'right'
     },
-    {field: 'homUnit', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+    {
+      field: 'homUnit',
+      headerName: '<- Unit',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true,
+      type: 'singleSelect',
+      valueOptions: unitSelectionOptions,
+    },
     {
       field: 'codes',
       headerName: 'Codes',
@@ -474,4 +492,4 @@ const CensusInputForm = () => {
   );
 };
 
-export default CensusInputForm;
+export default CensusAutocompleteInputForm;

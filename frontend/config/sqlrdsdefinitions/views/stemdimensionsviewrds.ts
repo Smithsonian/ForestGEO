@@ -1,5 +1,5 @@
-import { GridColDef, GridValidRowModel } from '@mui/x-data-grid';
-import { IDataMapper, parseDate } from "../../datamapper";
+import {GridColDef, GridValidRowModel} from '@mui/x-data-grid';
+import {IDataMapper, parseDate} from "../../datamapper";
 
 export type StemDimensionsViewRDS = {
   id: number;
@@ -115,6 +115,7 @@ export class StemDimensionsMapper implements IDataMapper<StemDimensionsViewResul
       PlotUnits: item.plotUnits
     }));
   }
+
   mapData(results: StemDimensionsViewResult[], indexOffset: number = 1): StemDimensionsViewRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
@@ -157,16 +158,16 @@ export class StemDimensionsMapper implements IDataMapper<StemDimensionsViewResul
 }
 
 export const StemDimensionsGridColumns: GridColDef[] = [
-  { field: 'stemID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'plotName', headerName: 'Plot', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'locationName', headerName: 'Location', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'countryName', headerName: 'Country', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'quadratDimensionX', headerName: 'QDimX', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'quadratDimensionY', headerName: 'QDimY', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'stemQuadX', headerName: 'SQuadX', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'stemQuadY', headerName: 'SQuadY', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'stemDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left' },
+  {field: 'stemID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotName', headerName: 'Plot', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'locationName', headerName: 'Location', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'countryName', headerName: 'Country', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratDimensionX', headerName: 'QDimX', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratDimensionY', headerName: 'QDimY', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemQuadX', headerName: 'SQuadX', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemQuadY', headerName: 'SQuadY', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
 ];

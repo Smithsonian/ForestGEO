@@ -8,7 +8,7 @@ import {HTTPResponses} from "@/config/macros";
 export async function GET(_request: NextRequest, {params}: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs || !params.dataType) throw new Error("missing slugs");
   const [schema, plotID, censusID] = params.slugs;
-  if (!schema || !plotID || !censusID || (params.slugs.length > 3 || params.slugs.length < 3)) throw new Error("incorrect slugs provided");
+  if ((!schema || schema === 'undefined') || (!plotID || plotID === 'undefined') || (!censusID || censusID === 'undefined') || (params.slugs.length > 3 || params.slugs.length < 3)) throw new Error("incorrect slugs provided");
   let connection: PoolConnection | null = null;
   try {
     connection = await getConn();

@@ -116,7 +116,7 @@ export default function StemTreeDetailsPage() {
 
       <DataGridCommons
         locked={true}
-        gridType="stemTreeDetails"
+        gridType="stemdimensionsview"
         gridColumns={StemDimensionsGridColumns}
         rows={rows}
         setRows={setRows}

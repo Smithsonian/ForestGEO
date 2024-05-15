@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest, { params }: { params: { fetchType: string } }) {
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error("Schema selection was not provided to API endpoint");
+  if (!schema || schema === 'undefined') throw new Error("Schema selection was not provided to API endpoint");
   const fetchType = params.fetchType;
 
   let conn: PoolConnection | null = null;

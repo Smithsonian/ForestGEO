@@ -1,6 +1,7 @@
-import { GridColDef } from "@mui/x-data-grid";
+import {GridColDef} from "@mui/x-data-grid";
 import moment from "moment";
-import { IDataMapper, parseDate } from "../../datamapper";
+import {IDataMapper, parseDate} from "../../datamapper";
+import { unitSelectionOptions } from "@/config/macros";
 
 export interface MeasurementsSummaryResult {
   CoreMeasurementID: any;
@@ -13,6 +14,8 @@ export interface MeasurementsSummaryResult {
   QuadratName: any;
   SubquadratID: any;
   SubquadratName: any;
+  SpeciesID: any;
+  SpeciesCode: any;
   TreeID: any;
   TreeTag: any;
   StemID: any;
@@ -43,6 +46,8 @@ export type MeasurementsSummaryRDS = {
   quadratName: string | null;
   subquadratID: number | null;
   subquadratName: string | null;
+  speciesID: number | null;
+  speciesCode: string | null;
   treeID: number | null;
   treeTag: string | null;
   stemID: number | null;
@@ -74,6 +79,8 @@ export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummar
       QuadratName: item.quadratName,
       SubquadratID: item.subquadratID,
       SubquadratName: item.subquadratName,
+      SpeciesID: item.speciesID,
+      SpeciesCode: item.speciesCode,
       TreeID: item.treeID,
       TreeTag: item.treeTag,
       StemID: item.stemID,
@@ -92,6 +99,7 @@ export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummar
       Attributes: item.attributes
     }));
   }
+
   mapData(results: MeasurementsSummaryResult[], indexOffset: number = 1): MeasurementsSummaryRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
@@ -105,6 +113,8 @@ export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummar
       quadratName: String(item.QuadratName),
       subquadratID: Number(item.SubquadratID),
       subquadratName: String(item.SubquadratName),
+      speciesID: Number(item.SpeciesID),
+      speciesCode: String(item.SpeciesCode),
       treeID: Number(item.TreeID),
       treeTag: String(item.TreeTag),
       stemID: Number(item.StemID),
@@ -126,14 +136,22 @@ export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummar
 }
 
 export const MeasurementsSummaryGridColumns: GridColDef[] = [
-  { field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'subquadratName', headerName: 'Subquadrat', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'treeTag', headerName: 'Tag', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'stemLocalX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'stemLocalY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', },
+  {field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left'},
+  {
+    field: 'subquadratName',
+    headerName: 'Subquadrat',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {field: 'speciesCode', headerName: 'SpCode', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'treeTag', headerName: 'Tag', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'stemLocalX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'stemLocalY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'stemUnits', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+  {field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true},
   {
     field: 'measurementDate', headerName: 'Date', headerClassName: 'header', flex: 1,
     valueGetter: (value: any) => {
@@ -142,9 +160,12 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
       // Format the date
       return new Date(value).toDateString();
     },
+    editable: true
   },
-  { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', },
+  {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'dbhUnits', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+  {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'homUnits', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true},
 ];

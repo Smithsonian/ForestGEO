@@ -1,7 +1,8 @@
 "use client";
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
+  GridCellParams,
   GridColDef,
   GridEventListener,
   GridRowEditStopReasons,
@@ -9,15 +10,18 @@ import {
   GridRowModel,
   GridRowModes,
   GridRowModesModel,
+  GridRowParams,
   GridRowsProp,
   GridToolbarContainer,
   GridToolbarProps,
+  GridValidRowModel,
   ToolbarPropsOverrides
 } from '@mui/x-data-grid';
 import {
   Alert,
   AlertProps,
   Button,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
@@ -42,6 +46,9 @@ import {
   getGridID,
   validateRowStructure,
 } from "@/config/datagridhelpers";
+import { CMError } from "@/config/macros/uploadsystemmacros";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
 import { useSession } from "next-auth/react";
 import {
   useCensusContext,
@@ -49,9 +56,9 @@ import {
   useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
+import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
 import { RefreshFixedDataFlags, useRefreshFixedData } from '@/app/contexts/refreshfixeddataprovider';
-import UpdateContextsFromIDB from '@/config/updatecontextsfromidb';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -60,6 +67,25 @@ interface EditToolbarCustomProps {
 }
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
+
+const errorMapping: { [key: string]: string[] } = {
+  '1': ["attributes"],
+  '2': ["measuredDBH"],
+  '3': ["measuredHOM"],
+  '4': ["treeTag", "stemTag"],
+  '5': ["treeTag", "stemTag", "quadratName"],
+  '6': ["stemQuadX", "stemQuadY"],
+  '7': ["speciesName"],
+  '8': ["measurementDate"],
+  '9': ["treeTag", "stemTag", "plotCensusNumber"],
+  '10': ["treeTag", "stemTag", "plotCensusNumber"],
+  '11': ["quadratName"],
+  '12': ["speciesName"],
+  '13': ["measuredDBH"],
+  '14': ["measuredDBH"],
+  '15': ["treeTag"],
+  '16': ["quadratName"],
+};
 
 export function EditToolbar(props: EditToolbarProps) {
   const { handleAddNewRow, handleRefresh, locked = false } = props;
@@ -78,8 +104,7 @@ export function EditToolbar(props: EditToolbarProps) {
   );
 }
 
-export interface DataGridCommonProps {
-  gridType: string;
+export interface MeasurementSummaryGridProps {
   gridColumns: GridColDef[];
   rows: GridRowsProp;
   setRows: Dispatch<SetStateAction<GridRowsProp>>;
@@ -91,8 +116,8 @@ export interface DataGridCommonProps {
   setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, "children" | "severity"> | null>>;
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
-  paginationModel: { pageSize: number, page: number };
-  setPaginationModel: Dispatch<SetStateAction<{ pageSize: number, page: number }>>;
+  paginationModel: { pageSize: number; page: number };
+  setPaginationModel: Dispatch<SetStateAction<{ pageSize: number; page: number }>>;
   isNewRowAdded: boolean;
   setIsNewRowAdded: Dispatch<SetStateAction<boolean>>;
   shouldAddRowAfterFetch: boolean;
@@ -126,21 +151,19 @@ function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
  * Function to filter out columns where all entries are null, except the actions column.
  */
 function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || !allValuesAreNull(rows, col.field));
+  return columns.filter(col => col.field === 'actions' || col.field === 'subquadrats' || !allValuesAreNull(rows, col.field));
 }
 
 /**
- * Renders common UI components for data grids.
+ * Renders custom UI components for measurement summary view.
  *
  * Handles state and logic for editing, saving, deleting rows, pagination,
- * validation errors and more. Renders a DataGrid component with customized
- * columns and cell renderers.
+ * validation errors, printing, exporting, and more.
  */
-export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
+export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummaryGridProps>) {
   const {
     addNewRowToGrid,
     gridColumns,
-    gridType,
     rows = [],
     setRows,
     rowCount,
@@ -162,7 +185,11 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
+  const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
+  const [showValidRows, setShowValidRows] = useState<boolean>(true);
+  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
+  const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
 
   const currentPlot = usePlotContext();
   const currentCensus = useCensusContext();
@@ -170,15 +197,102 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
 
   const { triggerRefresh } = useRefreshFixedData();
 
-  const [pendingAction, setPendingAction] = useState<PendingAction>({
-    actionType: '',
-    actionId: null
-  });
+  const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
 
   const { data: session } = useSession();
   const currentSite = useSiteContext();
 
-  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } = UpdateContextsFromIDB({ schema: currentSite?.schemaName ?? '' });
+  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } =
+    UpdateContextsFromIDB({
+      schema: currentSite?.schemaName ?? ''
+    });
+
+  const extractErrorRows = () => {
+    if (errorRowsForExport.length > 0) return;
+
+    fetchErrorRows().then(fetchedRows => {
+      setErrorRowsForExport(fetchedRows);
+    });
+  };
+
+  const fetchErrorRows = async () => {
+    if (!rows || rows.length === 0) return [];
+    const errorRows = rows.filter(row => rowHasError(row.id));
+    return errorRows;
+  };
+
+  useEffect(() => {
+    if (errorRowsForExport && errorRowsForExport.length > 0) {
+      printErrorRows();
+    }
+  }, [errorRowsForExport]);
+
+  const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return [];
+    return error.ValidationErrorIDs.map(id => {
+      const index = error.ValidationErrorIDs.indexOf(id);
+      return error.Descriptions[index]; // Assumes that descriptions are stored in the CMError object
+    });
+  };
+
+  const saveErrorRowsAsCSV = () => {
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += gridColumns.map(col => col.headerName).concat("Validation Errors").join(",") + "\r\n"; // Add "Validation Errors" column header
+
+    errorRowsForExport.forEach(row => {
+      const rowValues = gridColumns.map(col => row[col.field] ?? '').join(",");
+      const errorDescriptions = getRowErrorDescriptions(row.id).join("; "); // Function to retrieve error descriptions for a row
+      csvContent += `${rowValues},"${errorDescriptions}"\r\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    saveAs(blob, `validation_errors_${currentPlot?.key}.csv`);
+  };
+
+  const printErrorRows = () => {
+    if (!errorRowsForExport || errorRowsForExport.length === 0) {
+      extractErrorRows();
+      return;
+    }
+
+    let printContent = "<html><head><style>";
+    printContent += "table {width: 100%; border-collapse: collapse;}";
+    printContent += "th, td {border: 1px solid black; padding: 8px; text-align: left;}";
+    printContent += "</style></head><body>";
+    printContent += `<h5>Site: ${currentSite?.schemaName} | Plot: ${currentPlot?.key} | Census: ${currentCensus?.plotCensusNumber}</h5>`;
+    printContent += "<table><thead><tr>";
+
+    gridColumns.forEach(col => {
+      printContent += `<th>${col.headerName}</th>`;
+    });
+    printContent += "<th>Validation Errors</th>"; // Add error header
+    printContent += "</tr></thead><tbody>";
+
+    errorRowsForExport.forEach(row => {
+      printContent += "<tr>";
+      gridColumns.forEach(col => {
+        console.log('column fields: ', col.field);
+        if (col.field === "measurementDate") {
+          printContent += `<td>${new Date(row[col.field]).toDateString() ?? ''}</td>`;
+        } else {
+          printContent += `<td>${row[col.field] ?? ''}</td>`;
+        }
+      });
+      const errorDescriptions = getRowErrorDescriptions(row.id).join("; ");
+      printContent += `<td>${errorDescriptions}</td>`; // Print error descriptions
+      printContent += "</tr>";
+    });
+
+    printContent += "</tbody></table></body></html>";
+
+    const printWindow = window.open('', '', 'height=600,width=800');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  };
 
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
@@ -227,13 +341,13 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
 
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
-    let gridID = getGridID(gridType);
-    const deletionID = rows.find(row => row.id == id)![gridID];
+    let gridID = getGridID('measurementssummaryview');
+    const deletionID = rows.find(row => row.id == id)?.[gridID];
     const deleteQuery = createDeleteQuery(
       currentSite?.schemaName ?? '',
-      gridType,
+      'measurementssummaryview',
       gridID,
-      deletionID
+      deletionID,
     );
     const response = await fetch(deleteQuery, {
       method: 'DELETE',
@@ -259,18 +373,19 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
 
   const handleDeleteClick = (id: GridRowId) => () => {
     if (locked) return;
-    if (gridType === 'census') {
-      const rowToDelete = rows.find(row => row.id === id);
-      if (
-        currentCensus &&
-        rowToDelete &&
-        rowToDelete.censusID === currentCensus.censusID
-      ) {
-        alert('Cannot delete the currently selected census.');
-        return;
-      }
-    }
     openConfirmationDialog('delete', id);
+  };
+
+  const handleShowErrorRowsChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    setShowErrorRows(event.target.checked);
+  };
+
+  const handleShowValidRowsChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    setShowValidRows(event.target.checked);
   };
 
   const handleAddNewRow = async () => {
@@ -306,7 +421,7 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
     console.log('fetchPaginatedData triggered');
     let paginatedQuery = createFetchQuery(
       currentSite?.schemaName ?? '',
-      gridType,
+      'measurementssummaryview',
       pageToFetch,
       paginationModel.pageSize,
       currentPlot?.id ?? 0,
@@ -353,47 +468,77 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
     }
   }, [refresh, setRefresh]);
 
-  const processRowUpdate = useCallback(async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
-    const isNewRow = validateRowStructure(gridType, oldRow);
-    const gridID = getGridID(gridType);
-    const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', gridType, gridID);
+  const processRowUpdate = React.useCallback(
+    async (
+      newRow: GridRowModel,
+      oldRow: GridRowModel
+    ): Promise<GridRowModel> => {
+      console.log(
+        'Processing row update. Old row:',
+        oldRow,
+        '; New row:',
+        newRow
+      );
 
-    if (newRow[gridID] === '') {
-      throw new Error(`Primary key ${gridID} cannot be empty!`);
-    }
-    
-    try {
-      let response, responseJSON;
-      if (isNewRow) {
-        response = await fetch(fetchProcessQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-        });
-      } else {
-        response = await fetch(fetchProcessQuery, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-        });
+      const isNewRow = validateRowStructure('measurementssummaryview', oldRow);
+
+      const gridID = getGridID('measurementssummaryview');
+      const fetchProcessQuery = createPostPatchQuery(
+        currentSite?.schemaName ?? '',
+        'measurementssummaryview',
+        gridID
+      );
+
+      if (newRow[gridID] === '') {
+        throw new Error(`Primary key ${gridID} cannot be empty!`);
       }
-      responseJSON = await response.json();
-      if (!response.ok) {
-        setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
-        return Promise.reject(responseJSON.row); // Return the problematic row
+
+      try {
+        let response, responseJSON;
+        if (isNewRow) {
+          response = await fetch(fetchProcessQuery, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+          });
+          responseJSON = await response.json();
+          if (response.status > 299 || response.status < 200)
+            throw new Error(responseJSON.message || 'Insertion failed');
+          setSnackbar({ children: `New row added!`, severity: 'success' });
+        } else {
+          const mutation = computeMutation('measurementssummaryview', newRow, oldRow);
+          if (mutation) {
+            response = await fetch(fetchProcessQuery, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+            });
+            responseJSON = await response.json();
+            if (response.status > 299 || response.status < 200)
+              throw new Error(responseJSON.message || 'Update failed');
+            setSnackbar({ children: `Row updated!`, severity: 'success' });
+          }
+        }
+        if (['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes('measurementssummaryview')) triggerRefresh(['measurementssummaryview' as keyof RefreshFixedDataFlags]);
+        if (oldRow.isNew) {
+          setIsNewRowAdded(false);
+          setShouldAddRowAfterFetch(false);
+          await fetchPaginatedData(paginationModel.page);
+        }
+
+        return newRow;
+      } catch (error: any) {
+        setSnackbar({ children: error.message, severity: 'error' });
+        throw error;
       }
-      setSnackbar({ children: isNewRow ? 'New row added!' : 'Row updated!', severity: 'success' });
-      if (isNewRow) {
-        setIsNewRowAdded(false);
-        setShouldAddRowAfterFetch(false);
-        await fetchPaginatedData(paginationModel.page);
-      }
-      return newRow;
-    } catch (error: any) {
-      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
-      return Promise.reject(newRow);
-    }
-  }, [setSnackbar, setIsNewRowAdded, fetchPaginatedData, paginationModel.page, gridType]);
+    },
+    [
+      setSnackbar,
+      setIsNewRowAdded,
+      fetchPaginatedData,
+      paginationModel.page
+    ]
+  );
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
@@ -488,15 +633,156 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
     };
   }
 
+  const fetchValidationErrors = async () => {
+    try {
+      const response = await fetch(
+        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`
+      );
+      const errors: CMError[] = await response.json();
+
+      const errorMap = errors.reduce<Record<number, CMError>>((acc, error) => {
+        acc[error.CoreMeasurementID] = error;
+        return acc;
+      }, {});
+
+      setValidationErrors(errorMap);
+    } catch (error) {
+      console.error('Error fetching validation errors:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchValidationErrors()
+      .catch(console.error)
+      .then(() => setRefresh(false));
+  }, [refresh]);
+
+  const cellHasError = (colField: string, rowId: GridRowId) => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return false;
+    const errorFields = error.ValidationErrorIDs.flatMap(
+      id => errorMapping[id.toString()] || []
+    );
+    return errorFields.includes(colField);
+  };
+
+  const getCellErrorMessages = (colField: string, rowId: GridRowId) => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return '';
+
+    return error.ValidationErrorIDs.filter(id =>
+      errorMapping[id.toString()]?.includes(colField)
+    )
+      .map(id => {
+        const index = error.ValidationErrorIDs.indexOf(id);
+        return error.Descriptions[index];
+      })
+      .join('; ');
+  };
+
+  const modifiedColumns = gridColumns.map(column => {
+    if (column.field !== 'measurementssummaryview') {
+      return column;
+    }
+    return {
+      ...column,
+      renderCell: (params: GridCellParams) => {
+        const cellValue =
+          params.value !== undefined ? params.value?.toString() : '';
+        const cellError = cellHasError(column.field, params.id)
+          ? getCellErrorMessages(column.field, params.id)
+          : '';
+        return (
+          <Box
+            sx={{
+              display: 'flex',
+              flex: 1,
+              flexDirection: 'column',
+              marginY: 1.5
+            }}
+          >
+            {cellError ? (
+              <>
+                <Typography
+                  sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}
+                >
+                  {cellValue}
+                </Typography>
+                <Typography
+                  color={'danger'}
+                  variant={'solid'}
+                  sx={{
+                    color: 'error.main',
+                    fontSize: '0.75rem',
+                    mt: 1,
+                    whiteSpace: 'normal',
+                    lineHeight: 'normal'
+                  }}
+                >
+                  {cellError}
+                </Typography>
+              </>
+            ) : (
+              <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+                {cellValue}
+              </Typography>
+            )}
+          </Box>
+        );
+      }
+    };
+  });
+
   const columns = useMemo(() => {
-    const commonColumns = gridColumns;
+    const commonColumns = modifiedColumns;
     if (locked) {
       return commonColumns;
     }
     return [...commonColumns, getGridActionsColumn()];
-  }, [gridColumns, locked]);
+  }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
+
+  const rowHasError = (rowId: GridRowId) => {
+    if (!rows || rows.length === 0) return false;
+    return gridColumns.some(column => cellHasError(column.field, rowId));
+  };
+
+  const visibleRows = useMemo(() => {
+    if (showErrorRows && showValidRows) {
+      console.log('Showing all rows, including those with errors.');
+      return rows;
+    } else if (showValidRows && !showErrorRows) {
+      console.log('Filtering out rows with errors.');
+      return rows.filter(row => !rowHasError(row.id));
+    } else if (!showValidRows && showErrorRows) {
+      return rows.filter(row => rowHasError(row.id));
+    } else {
+      return [];
+    }
+  }, [rows, showErrorRows, showValidRows, gridColumns]);
+
+  const errorRowCount = useMemo(() => {
+    return rows.filter(row => rowHasError(row.id)).length;
+  }, [rows, gridColumns]);
+
+  useEffect(() => {
+    if (errorRowCount > 0) {
+      setSnackbar({
+        children: `${errorRowCount} row(s) with validation errors detected.`,
+        severity: 'warning'
+      });
+    }
+  }, [errorRowCount]);
+
+  const getRowClassName = (params: GridRowParams) => {
+    if (!params.row.isValidated) {
+      if (rowHasError(params.id)) return 'error-row';
+      else return 'pending-validation';
+    } else {
+      return 'validated';
+    }
+  };
 
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
@@ -514,24 +800,45 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
         }}
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
+          <Stack direction={'row'} justifyContent="space-between">
+            <Stack direction='row'>
+              <Typography>
+                <Checkbox
+                  checked={showErrorRows}
+                  onChange={handleShowErrorRowsChange}
+                />
+                Show rows with errors: ({errorRowCount})
+              </Typography>
+              <Typography>
+                <Checkbox
+                  checked={showValidRows}
+                  onChange={handleShowValidRowsChange}
+                />
+                Show rows without errors: ({rows.length - errorRowCount})
+              </Typography>
+            </Stack>
+
+            <Box>
+              <Button color="primary" onClick={saveErrorRowsAsCSV}>
+                Save Errors as CSV
+              </Button>
+              <Button color="primary" onClick={printErrorRows}>
+                Print Errors
+              </Button>
+            </Box>
+          </Stack>
           <Typography level={'title-lg'}>
             Note: The Grid is filtered by your selected Plot and Plot ID
           </Typography>
           <StyledDataGrid
             sx={{ width: '100%' }}
-            rows={rows}
+            rows={visibleRows}
             columns={filteredColumns}
             editMode='row'
             rowModesModel={rowModesModel}
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
             processRowUpdate={processRowUpdate}
-            onCellKeyDown={(params, event) => {
-              if (event.key === 'Enter') {
-                event.defaultMuiPrevented = true;
-                openConfirmationDialog('save', params.id);
-              }
-            }}
             loading={refresh}
             paginationMode='server'
             onPaginationModelChange={setPaginationModel}
@@ -550,6 +857,7 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
             }}
             autoHeight
             getRowHeight={() => 'auto'}
+            getRowClassName={getRowClassName}
           />
         </Box>
         {!!snackbar && (
