@@ -1,19 +1,24 @@
 "use client";
-import React, { createContext, useContext, useEffect, useReducer } from "react";
+import React, {createContext, useContext, useEffect, useReducer} from "react";
 import {
   createEnhancedDispatch,
   EnhancedDispatch,
   genericLoadContextReducer,
   LoadAction
 } from "@/config/macros/contextreducers";
-import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
-import { usePlotListContext, useQuadratListContext, useSiteListContext, useSubquadratListContext } from "@/app/contexts/listselectionprovider";
-import { getData } from "@/config/db";
-import { useCensusLoadContext } from "@/app/contexts/coredataprovider";
-import { CensusRDS } from '@/config/sqlrdsdefinitions/tables/censusrds';
-import { Subquadrat } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
+import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
+import {
+  usePlotListContext,
+  useQuadratListContext,
+  useSiteListContext,
+  useSubquadratListContext
+} from "@/app/contexts/listselectionprovider";
+import {getData} from "@/config/db";
+import {useCensusLoadContext} from "@/app/contexts/coredataprovider";
+import {CensusRDS} from '@/config/sqlrdsdefinitions/tables/censusrds';
+import {Subquadrat} from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 
 export const PlotContext = createContext<Plot>(null);
 export const CensusContext = createContext<CensusRDS>(null);
@@ -26,7 +31,7 @@ export const QuadratDispatchContext = createContext<EnhancedDispatch<Quadrat> | 
 export const SubquadratDispatchContext = createContext<EnhancedDispatch<Subquadrat> | null>(null);
 export const SiteDispatchContext = createContext<EnhancedDispatch<Site> | null>(null);
 
-export default function UserSelectionProvider({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
   const plotListContext = usePlotListContext();
   const censusLoadContext = useCensusLoadContext();
   const quadratListContext = useQuadratListContext();
@@ -69,19 +74,19 @@ export default function UserSelectionProvider({ children }: Readonly<{ children:
   useEffect(() => {
     const fetchData = async () => {
       const plotData = await getData('plot');
-      if (plotData) plotDispatch({ type: 'plot', payload: plotData });
+      if (plotData) plotDispatch({type: 'plot', payload: plotData});
 
       const quadratData = await getData('quadrat');
-      if (quadratData) quadratDispatch({ type: "quadrat", payload: quadratData });
+      if (quadratData) quadratDispatch({type: "quadrat", payload: quadratData});
 
       const subquadratData = await getData('subquadrat');
-      if (subquadratData) subquadratDispatch({ type: 'subquadrat', payload: subquadratData });
+      if (subquadratData) subquadratDispatch({type: 'subquadrat', payload: subquadratData});
 
       const censusData = await getData('census');
-      if (censusData) censusDispatch({ type: "census", payload: censusData });
+      if (censusData) censusDispatch({type: "census", payload: censusData});
 
       const siteData = await getData('site');
-      if (siteData) siteDispatch({ type: 'site', payload: siteData });
+      if (siteData) siteDispatch({type: 'site', payload: siteData});
     };
     fetchData().catch(console.error);
     // Set up polling

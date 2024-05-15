@@ -12,6 +12,8 @@ import BugReportIcon from '@mui/icons-material/BugReport';
 import SchemaIcon from '@mui/icons-material/Schema';
 import PlaceIcon from '@mui/icons-material/Place';
 import FilterIcon from '@mui/icons-material/Filter';
+import React from "react";
+import {DataValidity} from '@/app/contexts/datavalidityprovider';
 
 export type SiteConfigProps = {
   label: string;
@@ -28,6 +30,21 @@ export type SiteConfigProps = {
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and storage",
+};
+
+type DataValidityKey = keyof DataValidity;
+
+// Define a mapping type that restricts keys to strings and values to keys of DataValidity
+type ValidityMapping = {
+  [key: string]: DataValidityKey;
+};
+
+export const validityMapping: ValidityMapping = {
+  '/attributes': 'attributes',
+  '/personnel': 'personnel',
+  '/species': 'species',
+  '/quadrats': 'quadrats',
+  '/subquadrats': 'subquadrats',
 };
 
 export const siteConfigNav: SiteConfigProps[] = [
@@ -50,18 +67,6 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: VisibilityIcon
       },
-      {
-        label: "View Taxonomies",
-        href: "/stemtaxonomies",
-        tip: '',
-        icon: FilterIcon
-      },
-      {
-        label: "View Dimensions",
-        href: "/stemdimensions",
-        tip: '',
-        icon: PlaceIcon
-      },
       // {
       //   label: "Validation History",
       //   href: "/validationhistory",
@@ -77,22 +82,8 @@ export const siteConfigNav: SiteConfigProps[] = [
     ],
   },
   {
-    label: "Manual Input Forms (CTFSWeb)",
-    href: "/forms",
-    tip: 'forms from ctfsweb',
-    icon: SettingsSuggestIcon,
-    expanded: [
-      {
-        label: 'Census Form',
-        href: '/census',
-        tip: '',
-        icon: DescriptionIcon,
-      },
-    ]
-  },
-  {
-    label: "Measurement Properties Hub",
-    href: "/properties",
+    label: "Supporting Data Views",
+    href: "/fixeddatainput",
     tip: 'View Modifiable Properties',
     icon: SettingsSuggestIcon,
     expanded: [
@@ -101,12 +92,6 @@ export const siteConfigNav: SiteConfigProps[] = [
         href: '/attributes',
         tip: '',
         icon: DescriptionIcon,
-      },
-      {
-        label: 'Census',
-        href: '/census',
-        tip: '',
-        icon: GridOnIcon,
       },
       {
         label: 'Personnel',
@@ -127,10 +112,28 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: BugReportIcon,
       },
       {
+        label: "View Taxonomies",
+        href: "/stemtaxonomies",
+        tip: '',
+        icon: FilterIcon
+      },
+      {
+        label: "View Dimensions",
+        href: "/stemdimensions",
+        tip: '',
+        icon: PlaceIcon
+      },
+      {
         label: "View All Taxonomies",
         href: "/alltaxonomies",
         tip: '',
         icon: SchemaIcon
+      },
+      {
+        label: 'Measurements Form',
+        href: '/measurementsform',
+        tip: '',
+        icon: DescriptionIcon,
       },
     ]
   },
