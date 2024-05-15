@@ -5,6 +5,7 @@
  */
 import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css';
+import { GridColDef, GridValidRowModel } from "@mui/x-data-grid";
 
 
 export type ValidationErrorID = number;
@@ -100,3 +101,6 @@ export function formatDate(isoDateString: string): string {
 }
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
+  required?: boolean;
+};

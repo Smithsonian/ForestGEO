@@ -36,27 +36,13 @@ export async function GET(request: NextRequest) {
 
     // Query to fetch coremeasurements pending validation (no errors)
     const pendingValidationQuery = `
-      SELECT 
-        cm.CoreMeasurementID,
-        cm.CensusID,
-        cm.PlotID,
-        cm.QuadratID,
-        cm.SubQuadratID,
-        cm.TreeID,
-        cm.StemID,
-        cm.PersonnelID,
-        cm.MeasurementDate,
-        cm.MeasuredDBH,
-        cm.DBHUnit,
-        cm.MeasuredHOM,
-        cm.HOMUnit,
-        cm.Description
+      SELECT cm.*
       FROM 
         ${schema}.coremeasurements AS cm
       LEFT JOIN 
         ${schema}.cmverrors AS cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
       WHERE 
-        cm.IsValidated = b'0' AND cme.CMErrorID IS NULL;
+        cm.IsValidated = b'0' AND cme.CMVErrorID IS NULL;
     `;
     const pendingValidationRows = await runQuery(conn, pendingValidationQuery);
 

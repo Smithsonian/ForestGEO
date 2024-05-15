@@ -3,6 +3,7 @@
 // slugs is a catchall that will vary depending on the type of request placed
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import MapperFactory from "@/config/datamapper";
+import { handleError } from "@/utils/errorhandler";
 import { PoolConnection, format } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -10,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
   const [schema, pageParam, pageSizeParam, plotID, censusID, quadratID] = params.slugs;
-  if (!schema || !pageParam || !pageSizeParam) throw new Error("core slugs schema/page/pageSize not correctly received");
+  if ((!schema || schema === 'undefined') || (!pageParam || pageParam === 'undefined') || (!pageSizeParam || pageSizeParam === 'undefined')) throw new Error("core slugs schema/page/pageSize not correctly received");
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
 
@@ -96,10 +97,10 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
+  const { newRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    const { newRow } = await request.json();
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
     console.log('POST newRow: ', newRow);
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     await conn.commit();
     return NextResponse.json({ message: "Insert successful" }, { status: 200 });
   } catch (error: any) {
-    throw new Error(error);
+    return handleError(error, conn, newRow);
   } finally {
     if (conn) conn.release();
   }
@@ -144,10 +145,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
   let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const { newRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    const { newRow } = await request.json();
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
@@ -159,7 +160,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     }
     return NextResponse.json({ message: "Update successful" }, { status: 200 });
   } catch (error: any) {
-    await conn?.rollback();
+    return handleError(error, conn, newRow);
   } finally {
     if (conn) conn.release();
   }
@@ -173,10 +174,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
   let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const { newRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    const { newRow } = await request.json();
     console.log('delete newrow: ', newRow);
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)){
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
@@ -189,8 +190,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     }
     return NextResponse.json({ message: "Delete successful" }, { status: 200 });
   } catch (error: any) {
-    await conn?.rollback();
-    throw error;
+    return handleError(error, conn, newRow);
   } finally {
     if (conn) conn.release();
   }
