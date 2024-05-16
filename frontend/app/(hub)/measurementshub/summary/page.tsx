@@ -1,9 +1,9 @@
 'use client';
-import React, { useEffect, useState } from "react";
-import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
-import { Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses } from "@mui/material";
+import React, {useEffect, useState} from "react";
+import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
 import DataGridCommons from "@/components/datagridcommons";
-import { MeasurementsSummaryGridColumns } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
   IconButton,
@@ -20,8 +20,8 @@ import {
   Snackbar,
   Stack,
 } from "@mui/joy";
-import Select, { SelectOption } from "@mui/joy/Select";
-import { useSession } from "next-auth/react";
+import Select, {SelectOption} from "@mui/joy/Select";
+import {useSession} from "next-auth/react";
 import {
   useCensusContext,
   usePlotContext,
@@ -29,18 +29,18 @@ import {
   useQuadratDispatch,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import { randomId } from "@mui/x-data-grid-generator";
+import {randomId} from "@mui/x-data-grid-generator";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
+import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
 import Option from '@mui/joy/Option';
 import MeasurementSummaryGrid from "@/components/msvdatagrid";
-import { useDataValidity } from "@/app/contexts/datavalidityprovider";
-import { useRefreshFixedData } from "@/app/contexts/refreshfixeddataprovider";
+import {useDataValidity} from "@/app/contexts/datavalidityprovider";
+import {useRefreshFixedData} from "@/app/contexts/refreshfixeddataprovider";
 
-const LargeTooltip = styled(({ className, ...props }: TooltipProps) => (
-  <Tooltip {...props} classes={{ popper: className }} />
-))(({ theme }) => ({
+const LargeTooltip = styled(({className, ...props}: TooltipProps) => (
+  <Tooltip {...props} classes={{popper: className}}/>
+))(({theme}) => ({
   [`& .${tooltipClasses.tooltip}`]: {
     fontSize: 16,
     maxWidth: 600,  // Increase maxWidth to give more space for text
@@ -59,7 +59,7 @@ interface ChecklistProgressMap {
 }
 
 export default function SummaryPage() {
-  const { data: session } = useSession();
+  const {data: session} = useSession();
   const [quadrat, setQuadrat] = useState<Quadrat>(null);
   const [quadratList, setQuadratList] = useState<Quadrat[] | null>([]);
   let currentPlot = usePlotContext();
@@ -130,72 +130,72 @@ export default function SummaryPage() {
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   let {validity} = useDataValidity();
-  const { triggerRefresh } = useRefreshFixedData();
+  const {triggerRefresh} = useRefreshFixedData();
 
   useEffect(() => {
-    const verifyPreconditions = async () => {
-      const checklist = ['attributes', 'species', 'personnel', 'quadrats', 'subquadrats'];
-      let allValid = true;
+      const verifyPreconditions = async () => {
+          const checklist = ['attributes', 'species', 'personnel', 'quadrats', 'subquadrats'];
+          let allValid = true;
 
-      for (const item of checklist) {
-        const url = `/api/cmprevalidation/${item}/${currentSite?.schemaName}/${currentPlot?.id}/${currentCensus?.censusID}`;
+          for (const item of checklist) {
+            const url = `/api/cmprevalidation/${item}/${currentSite?.schemaName}/${currentPlot?.id}/${currentCensus?.censusID}`;
 
-        try {
-          const response = await fetch(url, { method: 'GET' });
-          if (!response.ok) {
-            throw new Error(`Failed: ${response.statusText}`);
-          }
-          if (item === 'quadrats') 
-          setChecklistProgress(prevState => ({
-            ...prevState,
-            [item]: {
-              progress: 100,
-              message: "Passed: " + item.charAt(0).toUpperCase() + item.substring(1),
-              error: undefined
+            try {
+              const response = await fetch(url, {method: 'GET'});
+              if (!response.ok) {
+                throw new Error(`Failed: ${response.statusText}`);
+              }
+              if (item === 'quadrats')
+                setChecklistProgress(prevState => ({
+                  ...prevState,
+                  [item]: {
+                    progress: 100,
+                    message: "Passed: " + item.charAt(0).toUpperCase() + item.substring(1),
+                    error: undefined
+                  }
+                }));
+            } catch (err: any) {
+              if (item === 'quadrats') {
+                setChecklistProgress(prevState => ({
+                  ...prevState,
+                  [item]: {
+                    progress: 100, // Ensure progress is 100% even on failure
+                    message: "Failure: " + item.charAt(0).toUpperCase() + item.substring(1),
+                    error: "A plot must contain at least 1 quadrat for the current census!"
+                  }
+                }));
+              } else if (item === 'subquadrats') {
+                setChecklistProgress(prevState => ({
+                  ...prevState,
+                  [item]: {
+                    progress: 100, // Ensure progress is 100% even on failure
+                    message: "Failure: " + item.charAt(0).toUpperCase() + item.substring(1),
+                    error: "Each quadrat in the current census and plot must contain at least 1 subquadrat!"
+                  }
+                }));
+              } else {
+                setChecklistProgress(prevState => ({
+                  ...prevState,
+                  [item]: {
+                    progress: 100, // Ensure progress is 100% even on failure
+                    message: "Failure: " + item.charAt(0).toUpperCase() + item.substring(1),
+                    error: "Table must contain at least 1 row of data!"
+                  }
+                }));
+              }
+              allValid = false;
             }
-          }));
-        } catch (err: any) {
-          if (item === 'quadrats') {
-            setChecklistProgress(prevState => ({
-              ...prevState,
-              [item]: {
-                progress: 100, // Ensure progress is 100% even on failure
-                message: "Failure: " + item.charAt(0).toUpperCase() + item.substring(1),
-                error: "A plot must contain at least 1 quadrat for the current census!"
-              }
-            }));
-          } else if (item === 'subquadrats') {
-            setChecklistProgress(prevState => ({
-              ...prevState,
-              [item]: {
-                progress: 100, // Ensure progress is 100% even on failure
-                message: "Failure: " + item.charAt(0).toUpperCase() + item.substring(1),
-                error: "Each quadrat in the current census and plot must contain at least 1 subquadrat!"
-              }
-            }));
-          } else {
-            setChecklistProgress(prevState => ({
-              ...prevState,
-              [item]: {
-                progress: 100, // Ensure progress is 100% even on failure
-                message: "Failure: " + item.charAt(0).toUpperCase() + item.substring(1),
-                error: "Table must contain at least 1 row of data!"
-              }
-            }));
           }
-          allValid = false;
+          setIsUploadAllowed(allValid);
         }
-      }
-      setIsUploadAllowed(allValid);
-    }
       ;
 
-    if (progressDialogOpen) {
-      verifyPreconditions().catch(console.error);
-    }
-  }, [progressDialogOpen]
+      if (progressDialogOpen) {
+        verifyPreconditions().catch(console.error);
+      }
+    }, [progressDialogOpen]
   )
-    ;
+  ;
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -233,7 +233,7 @@ export default function SummaryPage() {
       isNew: true,
     };
     setRows(oldRows => [...oldRows, newRow]);
-    setRowModesModel(oldModel => ({ ...oldModel, [id]: { mode: GridRowModes.Edit } }));
+    setRowModesModel(oldModel => ({...oldModel, [id]: {mode: GridRowModes.Edit}}));
   };
 
   const handleCloseGlobalError = () => {
@@ -254,11 +254,11 @@ export default function SummaryPage() {
       open={progressDialogOpen}
       onClose={() => {
       }}
-      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
     >
       <ModalDialog
         size="lg"
-        sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
+        sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
         role="alertdialog"
       >
         <DialogTitle>Pre-Validation Systems Check</DialogTitle>
@@ -269,15 +269,15 @@ export default function SummaryPage() {
           </Typography>
           <List>
             {['attributes', 'species', 'personnel', 'quadrats', 'subquadrats'].map((item, index) => {
-              const progressData = checklistProgress[item] || { progress: 0, message: "Pending..." };
+              const progressData = checklistProgress[item] || {progress: 0, message: "Pending..."};
               const tooltipMessage = progressData.error
                 ? `${progressData.error}`
                 : progressData.message;
 
               return (
-                <ListItem sx={{ alignItems: 'center', display: 'flex', flexDirection: 'row' }} key={item}>
+                <ListItem sx={{alignItems: 'center', display: 'flex', flexDirection: 'row'}} key={item}>
                   <ListItemContent
-                    sx={{ minWidth: '160px', mr: 2, my: 'auto' }}> {/* Ensure vertical centering with margin auto */}
+                    sx={{minWidth: '160px', mr: 2, my: 'auto'}}> {/* Ensure vertical centering with margin auto */}
                     <Typography level={'body-md'}>{progressData.message}</Typography>
                   </ListItemContent>
                   <LargeTooltip title={tooltipMessage} placement="top" arrow>
@@ -346,7 +346,7 @@ export default function SummaryPage() {
   const handleQuadratSelection = async (selectedQuadrat: Quadrat | null) => {
     setQuadrat(selectedQuadrat);
     if (quadratDispatch) {
-      await quadratDispatch({ quadrat: selectedQuadrat });
+      await quadratDispatch({quadrat: selectedQuadrat});
     }
   };
 
@@ -373,7 +373,7 @@ export default function SummaryPage() {
         <Option value="">None</Option>
         {quadratList?.map((item) => (
           <Option value={item?.quadratName} key={item?.quadratName}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
               <Typography level="body-lg">{item?.quadratName}</Typography>
             </Box>
           </Option>
@@ -381,7 +381,7 @@ export default function SummaryPage() {
       </Select>
       <Button onClick={handleConfirmQuadrat} size="sm" color="primary">Confirm</Button>
       {!validity['quadrats'] && (
-        <Alert severity="warning" sx={{ mt: 2 }}>
+        <Alert severity="warning" sx={{mt: 2}}>
           <Typography level="body-lg" color="warning">No quadrats exist to be </Typography>
         </Alert>
       )}
@@ -395,37 +395,37 @@ export default function SummaryPage() {
           <Alert onClose={handleCloseGlobalError} severity="error">{globalError}</Alert>
         </Snackbar>
       )}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <ProgressDialog />
+      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+        <ProgressDialog/>
         <Box sx={{
           width: '100%', display: 'flex', justifyContent: 'space-between',
           alignItems: 'center', backgroundColor: 'warning.main', borderRadius: '4px', p: 2
         }}>
           <Stack direction="column">
-            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+            <Box sx={{display: 'flex', flexDirection: 'column', flexGrow: 1}}>
               {session?.user.isAdmin && (
-                <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>Note: ADMINISTRATOR VIEW</Typography>
+                <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
               )}
-              <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This is a locked view and will not allow
+              <Typography level={"title-md"} sx={{color: "#ffa726"}}>Note: This is a locked view and will not allow
                 modification.</Typography>
-              <Typography level={"body-md"} sx={{ color: "#ffa726" }}>Please use this view as a way to confirm changes
+              <Typography level={"body-md"} sx={{color: "#ffa726"}}>Please use this view as a way to confirm changes
                 made
                 to measurements.</Typography>
             </Box>
           </Stack>
-          <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'left', marginLeft: '5%' }}>
-            <QuadratSelectionMenu />
+          <Box sx={{flexGrow: 1, display: 'flex', justifyContent: 'left', marginLeft: '5%'}}>
+            <QuadratSelectionMenu/>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
             <Button onClick={() => setProgressDialogOpen(true)} variant="solid" color="primary">Upload</Button>
           </Box>
         </Box>
       </Box>
       <UploadParentModal isUploadModalOpen={isUploadModalOpen}
-        handleCloseUploadModal={() => {
-          setIsUploadModalOpen(false);
-          setRefresh(true);
-        }} formType={"measurements"} />
+                         handleCloseUploadModal={() => {
+                           setIsUploadModalOpen(false);
+                           setRefresh(true);
+                         }} formType={"measurements"}/>
       <MeasurementSummaryGrid
         locked={!validity['quadrats'] && !currentQuadrat}
         gridColumns={MeasurementsSummaryGridColumns}
