@@ -14,7 +14,7 @@ export type QuadratsRDS = {
   area: number | null;
   unit: string | null;
   quadratShape: string | null;
-  personnel?: PersonnelRDS[];
+  // personnel?: PersonnelRDS[];
 };
 
 export interface QuadratRaw {
@@ -37,34 +37,18 @@ export interface QuadratsResult {
   QuadratShape: any;
 }
 
-export class QuadratsMapper implements IDataMapper<any, QuadratsRDS> {
-  demapData(results: QuadratsRDS[]): any[] {
-    // Implement the demapData method to convert the QuadratsRDS array to a format suitable for the data source
-    return results.map(quadrat => ({
-      QuadratID: quadrat.quadratID,
-      PlotID: quadrat.plotID,
-      CensusID: quadrat.censusID,
-      QuadratName: quadrat.quadratName,
-      DimensionX: quadrat.dimensionX,
-      DimensionY: quadrat.dimensionY,
-      Area: quadrat.area,
-      Unit: quadrat.unit,
-      QuadratShape: quadrat.quadratShape,
-      Personnel: JSON.stringify(quadrat.personnel)
-    }));
-  }
-
+export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratsRDS> {
   mapData(results: any[], indexOffset: number = 1): QuadratsRDS[] {
     // Implement the mapData method to convert the data source format to the QuadratsRDS format
     return results.map((item, index) => {
       // Parse the personnel JSON, add 'id' property
-      const personnelWithId: PersonnelRDS[] = item.personnel ? JSON.parse(`[${item.personnel}]`).map((p: any, idx: number) => ({
-        id: idx + 1,
-        personnelID: p.personnelID,
-        firstName: p.firstName,
-        lastName: p.lastName,
-        role: p.role
-      })) : [];
+      // const personnelWithId: PersonnelRDS[] = item.personnel ? JSON.parse(`[${item.personnel}]`).map((p: any, idx: number) => ({
+      //   id: idx + 1,
+      //   personnelID: p.personnelID,
+      //   firstName: p.firstName,
+      //   lastName: p.lastName,
+      //   role: p.role
+      // })) : [];
 
       return {
         id: index + indexOffset,
@@ -77,10 +61,27 @@ export class QuadratsMapper implements IDataMapper<any, QuadratsRDS> {
         area: Number(item.Area),
         unit: String(item.Unit),
         quadratShape: String(item.QuadratShape),
-        personnel: personnelWithId
+        // personnel: personnelWithId
       };
     });
   }
+
+  demapData(results: QuadratsRDS[]): any[] {
+    // Implement the demapData method to convert the QuadratsRDS array to a format suitable for the data source
+    return results.map(quadrat => ({
+      QuadratID: quadrat.quadratID,
+      PlotID: quadrat.plotID,
+      CensusID: quadrat.censusID,
+      QuadratName: quadrat.quadratName,
+      DimensionX: quadrat.dimensionX,
+      DimensionY: quadrat.dimensionY,
+      Area: quadrat.area,
+      Unit: quadrat.unit,
+      QuadratShape: quadrat.quadratShape,
+      // Personnel: JSON.stringify(quadrat.personnel)
+    }));
+  }
+
 }
 
 export const quadratsFields = [
@@ -90,7 +91,6 @@ export const quadratsFields = [
   'area',
   'unit',
   'quadratShape',
-  'personnel'
 ];
 
 
@@ -103,7 +103,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'Name',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 140,
+    minWidth: 140,
     align: 'left',
     type: 'string',
     editable: true
@@ -113,7 +113,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'X',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 125,
+    minWidth: 125,
     align: 'left',
     type: 'number',
     editable: true
@@ -123,20 +123,20 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'Y',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 125,
+    minWidth: 125,
     align: 'left',
     type: 'number',
     editable: true
   },
-  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', type: 'number', editable: true },
-  { field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', type: 'singleSelect', 
+  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, minWidth: 125, align: 'left', type: 'number', editable: true },
+  { field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, minWidth: 125, align: 'left', type: 'singleSelect', 
   valueOptions: unitSelectionOptions, editable: true },
   {
     field: 'quadratShape',
     headerName: 'Shape',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 125,
+    minWidth: 125,
     align: 'left',
     type: 'string',
     editable: true

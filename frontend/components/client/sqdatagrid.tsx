@@ -8,7 +8,7 @@ import { GridRowsProp, GridRowModesModel, GridRowModes } from "@mui/x-data-grid"
 import { randomId } from "@mui/x-data-grid-generator";
 import { useSession } from "next-auth/react";
 import React, { useState } from "react";
-import DataGridCommons from "../datagridcommons";
+import DataGridCommons from "../datagrids/datagridcommons";
 import { Typography } from "@mui/joy";
 
 export default function SubquadratsDataGrid() {

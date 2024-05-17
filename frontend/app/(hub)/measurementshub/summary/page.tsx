@@ -2,7 +2,7 @@
 import React, {useEffect, useState} from "react";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
-import DataGridCommons from "@/components/datagridcommons";
+import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
@@ -34,9 +34,8 @@ import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmoda
 import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
 import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
 import Option from '@mui/joy/Option';
-import MeasurementSummaryGrid from "@/components/msvdatagrid";
-import {useDataValidity} from "@/app/contexts/datavalidityprovider";
-import {useRefreshFixedData} from "@/app/contexts/refreshfixeddataprovider";
+import MeasurementSummaryGrid from "@/components/datagrids/msvdatagrid";
+import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
 
 const LargeTooltip = styled(({className, ...props}: TooltipProps) => (
   <Tooltip {...props} classes={{popper: className}}/>
@@ -129,8 +128,7 @@ export default function SummaryPage() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
-  let {validity} = useDataValidity();
-  const {triggerRefresh} = useRefreshFixedData();
+  let {validity} = useDataValidityContext();
 
   useEffect(() => {
       const verifyPreconditions = async () => {

@@ -2,35 +2,22 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
-import {StemDimensionsGridColumns} from '@/config/sqlrdsdefinitions/views/stemdimensionsviewrds';
+import {PersonnelGridColumns} from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {useSession} from "next-auth/react";
-import {Box, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
-export default function StemTreeDetailsPage() {
+export default function PersonnelDataGrid() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      stemID: 0,
-      stemTag: '',
-      treeID: 0,
-      treeTag: '',
-      familyName: null,
-      genusName: null,
-      speciesName: null,
-      subSpeciesName: null,
-      quadratName: null,
-      plotName: null,
-      locationName: null,
-      countryName: null,
-      quadratDimensionX: null,
-      quadratDimensionY: null,
-      stemQuadX: null,
-      stemQuadY: null,
-      stemDescription: null,
+      personnelID: 0,
+      firstName: '',
+      lastName: '',
+      role: '',
     },
   ];
   const [rows, setRows] = React.useState(initialRows);
@@ -47,35 +34,23 @@ export default function StemTreeDetailsPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   let currentPlot = usePlotContext();
   const {data: session} = useSession();
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
     // New row object
-    const nextStemID = (rows.length > 0
-      ? rows.reduce((max, row) => Math.max(row.stemID, max), 0)
+    const nextPersonnelID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.personnelID, max), 0)
       : 0) + 1;
 
     const newRow = {
       id: id,
-      stemID: nextStemID,
-      stemTag: '',
-      treeID: 0,
-      treeTag: '',
-      familyName: null,
-      genusName: null,
-      speciesName: null,
-      subSpeciesName: null,
-      quadratName: null,
-      plotName: null,
-      locationName: null,
-      countryName: null,
-      quadratDimensionX: null,
-      quadratDimensionY: null,
-      stemQuadX: null,
-      stemQuadY: null,
-      stemDescription: null,
+      personnelID: nextPersonnelID,
+      firstName: '',
+      lastName: '',
+      role: '',
       isNew: true
     };
     // Add the new row to the state
@@ -83,7 +58,7 @@ export default function StemTreeDetailsPage() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'stemTag'},
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'firstName'},
     }));
   };
   return (
@@ -111,13 +86,20 @@ export default function StemTreeDetailsPage() {
               Please use this view as a way to confirm changes made to measurements.
             </Typography>
           </Box>
+
+          {/* Upload Button */}
+          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+
         </Box>
       </Box>
 
+      <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
+        setIsUploadModalOpen(false);
+        setRefresh(true);
+      }} formType={'personnel'}/>
       <DataGridCommons
-        locked={true}
-        gridType="stemdimensionsview"
-        gridColumns={StemDimensionsGridColumns}
+        gridType="personnel"
+        gridColumns={PersonnelGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

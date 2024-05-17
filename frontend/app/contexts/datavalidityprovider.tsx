@@ -1,81 +1,93 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useRefreshFixedData } from "./refreshfixeddataprovider";
 import { useCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
+import { UnifiedValidityFlags } from "@/config/macros";
 
-export type DataValidity = {
-  attributes: boolean;
-  personnel: boolean;
-  species: boolean;
-  quadrats: boolean;
-  subquadrats: boolean;
-};
-
-const initialDataValidity: DataValidity = {
+const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
   personnel: false,
   species: false,
   quadrats: false,
   subquadrats: false,
+  quadratpersonnel: false,
 };
 
 const DataValidityContext = createContext<{
-  validity: DataValidity;
-  setValidity: (type: keyof DataValidity, value: boolean) => void;
+  validity: UnifiedValidityFlags;
+  setValidity: (type: keyof UnifiedValidityFlags, value: boolean) => void;
+  triggerRefresh: (types?: (keyof UnifiedValidityFlags)[]) => void;
+  recheckValidityIfNeeded: () => Promise<void>;
 }>({
-  validity: initialDataValidity,
-  setValidity: () => {
-  },
+  validity: initialValidityState,
+  setValidity: () => { },
+  triggerRefresh: () => { },
+  recheckValidityIfNeeded: async () => { },
 });
 
 export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
-  const [validity, setValidityState] = useState<DataValidity>(initialDataValidity);
-  const { refreshFixedDataFlags, setRefreshFixedDataFlag } = useRefreshFixedData();
+  const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
+  const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
+
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useCensusContext();
 
-  const setValidity = useCallback((type: keyof DataValidity, value: boolean) => {
+  const setValidity = useCallback((type: keyof UnifiedValidityFlags, value: boolean) => {
     setValidityState(prev => ({ ...prev, [type]: value }));
+    console.log(`setValidity: ${type} set to ${value}`);
   }, []);
 
-  const checkDataValidity = useCallback(async (type?: keyof DataValidity) => {
-    const checklist: (keyof DataValidity)[] = type ? [type] : ['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'];
-    for (let item of checklist) {
-      if (!currentSite || !currentPlot || !currentCensus) break;
-      else {
-        let url = `/api/cmprevalidation/${item}/${currentSite?.schemaName}/${currentPlot?.id}/${currentCensus?.censusID}`;
-        let response = await fetch(url, { method: 'GET' });
-        setValidity(item, response.ok);
-      }
-    }
+  const checkDataValidity = useCallback(async (type?: keyof UnifiedValidityFlags) => {
+    if (!currentSite || !currentPlot || !currentCensus) return;
+    let url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.censusID}`;
+    console.log(`Fetching data validity for ${type} from ${url}`);
+    let response = await fetch(url, { method: 'GET' });
+    setValidity(type as keyof UnifiedValidityFlags, response.ok);
   }, [currentSite, currentPlot, currentCensus, setValidity]);
 
-  // Initial load of data validity on component mount
-  useEffect(() => {
-    checkDataValidity().catch(console.error);
-  }, [checkDataValidity]);
+  const recheckValidityIfNeeded = useCallback(async () => {
+    console.log('Rechecking validity if needed:', validity);
+    if ((Object.values(validity).some(flag => !flag)) || refreshNeeded) {
+      const typesToRefresh = Object.entries(validity)
+        .filter(([_, value]) => !value)
+        .map(([key]) => key as keyof UnifiedValidityFlags);
 
-  // React to changes in refresh flags
-  useEffect(() => {
-    const recheckValidityIfNeeded = async () => {
-      if (Object.values(refreshFixedDataFlags).some(flag => flag) && currentSite && currentPlot && currentCensus) {
-        const typesToRefresh = Object.entries(refreshFixedDataFlags)
-          .filter(([_, value]) => value)
-          .map(([key]) => key as keyof DataValidity);
+      console.log('Refreshing data validity for types:', typesToRefresh);
+      await Promise.all(typesToRefresh.map(item => checkDataValidity(item)));
+      console.log('Validity after processing:', validity);
+      setRefreshNeeded(false); // Reset the refresh flag after rechecking
+    } else {
+      console.log('No flags set for rechecking, or missing site/plot/census data');
+    }
+  }, [validity, checkDataValidity, refreshNeeded]);
 
-        await Promise.all(typesToRefresh.map(item => checkDataValidity(item)));
-        typesToRefresh.forEach(key => setRefreshFixedDataFlag(key, false));
-      }
-    };
-    recheckValidityIfNeeded().catch(console.error);
-  }, [refreshFixedDataFlags, checkDataValidity, currentSite, currentPlot, currentCensus, setRefreshFixedDataFlag]);
+  useEffect(() => {
+    if (refreshNeeded) {
+      recheckValidityIfNeeded().catch(console.error);
+    }
+  }, [refreshNeeded, recheckValidityIfNeeded]);
+
+  useEffect(() => {
+    if (currentSite && currentPlot && currentCensus) {
+      triggerRefresh(); // Trigger initial refresh when user logs in
+    }
+  }, [currentSite, currentPlot, currentCensus]);
+
+  const triggerRefresh = useCallback((types?: (keyof UnifiedValidityFlags)[]) => {
+    console.log('triggerRefresh called with types:', types);
+    if (types) {
+      types.forEach(type => setValidity(type, false));
+    } else {
+      Object.keys(validity).forEach(key => setValidity(key as keyof UnifiedValidityFlags, false));
+    }
+    setRefreshNeeded(true); // Trigger a refresh
+  }, [setValidity]);
 
   return (
-    <DataValidityContext.Provider value={{ validity, setValidity }}>
+    <DataValidityContext.Provider value={{ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }}>
       {children}
     </DataValidityContext.Provider>
   );
 };
 
-export const useDataValidity = () => useContext(DataValidityContext);
+export const useDataValidityContext = () => useContext(DataValidityContext);

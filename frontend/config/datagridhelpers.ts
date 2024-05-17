@@ -22,61 +22,15 @@ export interface Templates {
     [fieldName: string]: FieldTemplate
   }
 }
-function getType(value: any): FieldTemplate['type'] {
-  if (typeof value === 'number') {
-    return 'number';
-  } else if (typeof value === 'string') {
-    return 'string';
-  } else if (typeof value === 'boolean') {
-    return 'boolean';
-  } else if (value instanceof Date) {
-    return 'date';
-  } else if (Array.isArray(value)) {
-    return 'array';
-  } else {
-    return 'unknown';
-  }
-}
-
-export function validateRowStructure(
-  gridType: string,
-  oldRow: GridRowModel
-): boolean {
-  const template = newRowTemplates[gridType];
-  if (!template) {
-    throw new Error('Invalid grid type submitted');
-  }
-
-  const currentDate = new Date();
-
-  return Object.keys(template).every(key => {
-    const expected = template[key];
-    const value = oldRow[key];
-
-    if (!(key in oldRow) || getType(value) !== expected.type) {
-      return false;
-    }
-
-    if (expected.type === 'date' && value instanceof Date) {
-      return value.toDateString() === currentDate.toDateString();
-    }
-
-    if ('initialValue' in expected && expected.initialValue !== null) {
-      return value === expected.initialValue;
-    }
-
-    return true;
-  });
-}
 
 export type FetchQueryFunction = (
   siteSchema: string,
   gridType: string,
   page: number,
   pageSize: number,
-  plotID: number,
-  censusID: number,
-  quadratID: number
+  plotID?: number,
+  censusID?: number,
+  quadratID?: number
 ) => string;
 export type ProcessPostPatchQueryFunction = ( // incorporated validation system into this too 
   siteSchema: string,
@@ -104,8 +58,8 @@ export const createFetchQuery: FetchQueryFunction = (
   gridType,
   page,
   pageSize,
-  plotID,
-  censusID,
+  plotID?,
+  censusID?,
   quadratID?: number
 ) => {
   return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${censusID}` + `${quadratID ? `/${quadratID}` : ``}`;
@@ -116,7 +70,6 @@ export const createDeleteQuery: ProcessDeletionQueryFunction = (
   gridType: string,
   deletionID: number | string
 ) => {
-  let gridID = getGridID(gridType);
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
 
@@ -136,6 +89,8 @@ export function getGridID(gridType: string): string {
       return 'personnelID';
     case 'quadrats':
       return 'quadratID';
+    case 'quadratpersonnel':
+      return 'quadratPersonnelID';
     case 'subquadrats':
       return 'subquadratID';
     case 'alltaxonomiesview':
@@ -187,149 +142,3 @@ export function computeMutation(
       throw new Error('invalid grid type submitted');
   }
 }
-
-// templates need to match to the newRow objects being added in each respective DataGridCommons usage -- please ensure that these are set and maintained.
-const newRowTemplates: Templates = {
-  attributes: {
-    id: { type: 'string' },
-    code: { type: 'string', initialValue: '' },
-    description: { type: 'string', initialValue: '' },
-    status: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  census: {
-    id: { type: 'string' },
-    censusID: { type: 'number', initialValue: null }, // auto-incremented
-    plotID: { type: 'number', initialValue: 0 },
-    plotCensusNumber: { type: 'number', initialValue: 0 },
-    startDate: { type: 'date' }, // Special handling for dates
-    endDate: { type: 'date' }, // Special handling for dates
-    description: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  personnel: {
-    id: { type: 'string' },
-    personnelID: { type: 'number', initialValue: null }, // null indicates auto-incremented
-    firstName: { type: 'string', initialValue: '' },
-    lastName: { type: 'string', initialValue: '' },
-    role: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  quadrats: {
-    id: { type: 'string' },
-    quadratID: { type: 'number', initialValue: null }, // auto-incremented
-    plotID: { type: 'number', initialValue: 0 },
-    quadratName: { type: 'string', initialValue: '' },
-    dimensionX: { type: 'number', initialValue: 0 },
-    dimensionY: { type: 'number', initialValue: 0 },
-    area: { type: 'number', initialValue: 0 },
-    unit: {type: 'string', initialValue: ''},
-    quadratShape: { type: 'string', initialValue: '' },
-    personnel: { type: 'array', initialValue: [] },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  subquadrats: {
-    id: { type: 'string' },
-    subquadratID: { type: 'number', initialValue: null }, // auto-incremented
-    subquadratName: { type: 'string', initialValue: '' },
-    quadratID: {type: 'number', initialValue: 0},
-    x: { type: 'number', initialValue: 0 },
-    y: { type: 'number', initialValue: 0 },
-    unit: { type: 'string', initialValue: ''},
-    ordering: { type: 'number', initialValue: 0 },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  species: {
-    id: { type: 'string' },
-    speciesID: { type: 'number', initialValue: null },
-    genusID: { type: 'number', initialValue: 0 },
-    currentTaxonFlag: { type: 'boolean', initialValue: false },
-    obsoleteTaxonFlag: { type: 'boolean', initialValue: false },
-    speciesName: { type: 'string', initialValue: '' },
-    subspeciesName: { type: 'string', initialValue: '' },
-    speciesCode: { type: 'string', initialValue: '' },
-    idLevel: { type: 'string', initialValue: '' },
-    speciesAuthority: { type: 'string', initialValue: '' },
-    subspeciesAuthority: { type: 'string', initialValue: '' },
-    fieldFamily: { type: 'string', initialValue: '' },
-    description: { type: 'string', initialValue: '' },
-    referenceID: { type: 'number', initialValue: 0 },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  stemDimensions: {
-    id: { type: 'string' },
-    stemID: { type: 'number', initialValue: null },
-    stemTag: { type: 'string', initialValue: '' },
-    treeID: { type: 'number', initialValue: 0 },
-    treeTag: { type: 'string', initialValue: '' },
-    stemLocalX: { type: 'number', initialValue: 0 },
-    stemLocalY: { type: 'number', initialValue: 0 },
-    stemUnits: { type: 'string', initialValue: '' },
-    subquadratID: { type: 'number', initialValue: 0 },
-    subquadratName: { type: 'string', initialValue: '' },
-    subquadratDimensionX: { type: 'number', initialValue: 0 },
-    subquadratDimensionY: { type: 'number', initialValue: 0 },
-    subquadratX: { type: 'number', initialValue: 0 },
-    subquadratY: { type: 'number', initialValue: 0 },
-    subquadratUnits: { type: 'string', initialValue: '' },
-    subquadratOrderPosition: { type: 'number', initialValue: 0 },
-    quadratID: { type: 'number', initialValue: 0 },
-    quadratName: { type: 'string', initialValue: '' },
-    quadratDimensionX: { type: 'number', initialValue: 0 },
-    quadratDimensionY: { type: 'number', initialValue: 0 },
-    quadratUnits: { type: 'string', initialValue: '' },
-    plotID: { type: 'number', initialValue: 0 },
-    plotName: { type: 'string', initialValue: '' },
-    locationName: { type: 'string', initialValue: '' },
-    countryName: { type: 'string', initialValue: '' },
-    plotDimensionX: { type: 'number', initialValue: 0 },
-    plotDimensionY: { type: 'number', initialValue: 0 },
-    plotGlobalX: { type: 'number', initialValue: 0 },
-    plotGlobalY: { type: 'number', initialValue: 0 },
-    plotGlobalZ: { type: 'number', initialValue: 0 },
-    plotUnits: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  stemTaxonomies: {
-    id: { type: 'string' },
-    stemID: { type: 'number', initialValue: null },
-    stemTag: { type: 'string', initialValue: '' },
-    treeID: { type: 'number', initialValue: 0 },
-    treeTag: { type: 'string', initialValue: '' },
-    speciesID: { type: 'number', initialValue: 0 },
-    speciesCode: { type: 'string', initialValue: '' },
-    familyID: { type: 'number', initialValue: 0 },
-    family: { type: 'string', initialValue: '' },
-    genusID: { type: 'number', initialValue: 0 },
-    genus: { type: 'string', initialValue: '' },
-    speciesName: { type: 'string', initialValue: '' },
-    subspeciesName: { type: 'string', initialValue: '' },
-    currentTaxonFlag: { type: 'string', initialValue: '' },
-    obsoleteTaxonFlag: { type: 'string', initialValue: '' },
-    genusAuthority: { type: 'string', initialValue: '' },
-    speciesAuthority: { type: 'string', initialValue: '' },
-    subspeciesAuthority: { type: 'string', initialValue: '' },
-    speciesIDLevel: { type: 'string', initialValue: '' },
-    speciesFieldFamily: { type: 'string', initialValue: '' },
-    isNew: { type: 'boolean', initialValue: true }
-  },
-  allTaxonomies: {
-    id: { type: 'string' },
-    speciesID: { type: 'number', initialValue: null },
-    speciesCode: { type: 'string', initialValue: '' },
-    family: { type: 'string', initialValue: '' },
-    genus: { type: 'string', initialValue: '' },
-    speciesName: { type: 'string', initialValue: '' },
-    subspeciesName: { type: 'string', initialValue: '' },
-    genusAuthority: { type: 'string', initialValue: '' },
-    speciesAuthority: { type: 'string', initialValue: '' },
-    subspeciesAuthority: { type: 'string', initialValue: '' },
-    currentTaxonFlag: { type: 'boolean', initialValue: false },
-    obsoleteTaxonFlag: { type: 'boolean', initialValue: false },
-    fieldFamily: { type: 'string', initialValue: '' },
-    speciesDescription: { type: 'string', initialValue: '' },
-    publicationTitle: { type: 'string', initialValue: '' },
-    dateOfPublication: { type: 'date' },
-    citation: { type: 'string', initialValue: '' }
-  }
-};

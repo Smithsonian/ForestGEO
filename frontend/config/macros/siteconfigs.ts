@@ -13,7 +13,7 @@ import SchemaIcon from '@mui/icons-material/Schema';
 import PlaceIcon from '@mui/icons-material/Place';
 import FilterIcon from '@mui/icons-material/Filter';
 import React from "react";
-import {DataValidity} from '@/app/contexts/datavalidityprovider';
+import { UnifiedValidityFlags } from '../macros';
 
 export type SiteConfigProps = {
   label: string;
@@ -32,7 +32,7 @@ export const siteConfig = {
   description: "Census data entry and storage",
 };
 
-type DataValidityKey = keyof DataValidity;
+type DataValidityKey = keyof UnifiedValidityFlags;
 
 // Define a mapping type that restricts keys to strings and values to keys of DataValidity
 type ValidityMapping = {
@@ -45,6 +45,7 @@ export const validityMapping: ValidityMapping = {
   '/species': 'species',
   '/quadrats': 'quadrats',
   '/subquadrats': 'subquadrats',
+  '/quadratpersonnel': 'quadratpersonnel'
 };
 
 export const siteConfigNav: SiteConfigProps[] = [
@@ -102,6 +103,12 @@ export const siteConfigNav: SiteConfigProps[] = [
       {
         label: 'Quadrats',
         href: '/quadrats',
+        tip: '',
+        icon: WidgetsIcon,
+      },
+      {
+        label: 'QuadratPersonnel',
+        href: '/quadratpersonnel',
         tip: '',
         icon: WidgetsIcon,
       },

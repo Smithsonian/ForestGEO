@@ -2,35 +2,28 @@
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
-import {StemDimensionsGridColumns} from '@/config/sqlrdsdefinitions/views/stemdimensionsviewrds';
+import {SpeciesGridColumns} from '@/config/sqlrdsdefinitions/tables/speciesrds';
 import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {useSession} from "next-auth/react";
-import {Box, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
-export default function StemTreeDetailsPage() {
+export default function SpeciesDataGrid() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      stemID: 0,
-      stemTag: '',
-      treeID: 0,
-      treeTag: '',
-      familyName: null,
-      genusName: null,
-      speciesName: null,
-      subSpeciesName: null,
-      quadratName: null,
-      plotName: null,
-      locationName: null,
-      countryName: null,
-      quadratDimensionX: null,
-      quadratDimensionY: null,
-      stemQuadX: null,
-      stemQuadY: null,
-      stemDescription: null,
+      speciesID: 0,
+      speciesCode: '',
+      speciesName: '',
+      subSpeciesName: '',
+      defaultDBHMax: 0,
+      idLevel: '',
+      authority: '',
+      fieldFamily: '',
+      description: '',
+      referenceID: 0,
     },
   ];
   const [rows, setRows] = React.useState(initialRows);
@@ -47,43 +40,36 @@ export default function StemTreeDetailsPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  let currentPlot = usePlotContext();
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
-  // Function to fetch paginated data
+  let currentPlot = usePlotContext();
+
   const addNewRowToGrid = () => {
     const id = randomId();
     // New row object
-    const nextStemID = (rows.length > 0
-      ? rows.reduce((max, row) => Math.max(row.stemID, max), 0)
+    const nextSpeciesID = (rows.length > 0
+      ? rows.reduce((max, row) => Math.max(row.speciesID, max), 0)
       : 0) + 1;
 
     const newRow = {
       id: id,
-      stemID: nextStemID,
-      stemTag: '',
-      treeID: 0,
-      treeTag: '',
-      familyName: null,
-      genusName: null,
-      speciesName: null,
-      subSpeciesName: null,
-      quadratName: null,
-      plotName: null,
-      locationName: null,
-      countryName: null,
-      quadratDimensionX: null,
-      quadratDimensionY: null,
-      stemQuadX: null,
-      stemQuadY: null,
-      stemDescription: null,
-      isNew: true
+      speciesCode: '',
+      speciesID: nextSpeciesID,
+      speciesName: '',
+      subSpeciesName: '',
+      defaultDBHMax: 0,
+      idLevel: '',
+      authority: '',
+      fieldFamily: '',
+      description: '',
+      isNew: true,
     };
     // Add the new row to the state
     setRows(oldRows => [...oldRows, newRow]);
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'stemTag'},
+      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'speciesName'},
     }));
   };
   return (
@@ -111,13 +97,20 @@ export default function StemTreeDetailsPage() {
               Please use this view as a way to confirm changes made to measurements.
             </Typography>
           </Box>
+
+          {/* Upload Button */}
+          <Button onClick={() => setIsUploadModalOpen(true)} color={'primary'}>Upload</Button>
         </Box>
       </Box>
 
+      <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
+                           setIsUploadModalOpen(false);
+                           setRefresh(true);
+                         }} formType={'species'} />
+
       <DataGridCommons
-        locked={true}
-        gridType="stemdimensionsview"
-        gridColumns={StemDimensionsGridColumns}
+        gridType="species"
+        gridColumns={SpeciesGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

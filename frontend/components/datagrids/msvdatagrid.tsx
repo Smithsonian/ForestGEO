@@ -44,7 +44,6 @@ import {
   createFetchQuery,
   createPostPatchQuery,
   getGridID,
-  validateRowStructure,
 } from "@/config/datagridhelpers";
 import { CMError } from "@/config/macros/uploadsystemmacros";
 import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
@@ -58,7 +57,6 @@ import {
 } from "@/app/contexts/userselectionprovider";
 import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
-import { RefreshFixedDataFlags, useRefreshFixedData } from '@/app/contexts/refreshfixeddataprovider';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -195,11 +193,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const currentCensus = useCensusContext();
   const currentQuadrat = useQuadratContext();
 
-  const { triggerRefresh } = useRefreshFixedData();
-
   const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
 
-  const { data: session } = useSession();
   const currentSite = useSiteContext();
 
   const { updateQuadratsContext, updateCensusContext, updatePlotsContext } =
@@ -480,8 +475,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
         newRow
       );
 
-      const isNewRow = validateRowStructure('measurementssummaryview', oldRow);
-
       const gridID = getGridID('measurementssummaryview');
       const fetchProcessQuery = createPostPatchQuery(
         currentSite?.schemaName ?? '',
@@ -495,7 +488,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
       try {
         let response, responseJSON;
-        if (isNewRow) {
+        if (oldRow.isNew) {
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -519,7 +512,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             setSnackbar({ children: `Row updated!`, severity: 'success' });
           }
         }
-        if (['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes('measurementssummaryview')) triggerRefresh(['measurementssummaryview' as keyof RefreshFixedDataFlags]);
+        // if (['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes('measurementssummaryview')) triggerRefresh(['measurementssummaryview' as keyof RefreshFixedDataFlags]);
         if (oldRow.isNew) {
           setIsNewRowAdded(false);
           setShouldAddRowAfterFetch(false);

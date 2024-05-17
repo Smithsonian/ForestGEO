@@ -104,3 +104,12 @@ export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
   required?: boolean;
 };
+
+export type UnifiedValidityFlags = {
+  attributes: boolean;
+  personnel: boolean;
+  species: boolean;
+  quadrats: boolean;
+  subquadrats: boolean;
+  quadratpersonnel: boolean;
+}
