@@ -40,7 +40,6 @@ import {
   createFetchQuery,
   createPostPatchQuery,
   getGridID,
-  validateRowStructure,
 } from "@/config/datagridhelpers";
 import { useSession } from "next-auth/react";
 import {
@@ -50,8 +49,9 @@ import {
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
 import { redirect } from 'next/navigation';
-import { RefreshFixedDataFlags, useRefreshFixedData } from '@/app/contexts/refreshfixeddataprovider';
 import UpdateContextsFromIDB from '@/config/updatecontextsfromidb';
+import { UnifiedValidityFlags } from '@/config/macros';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -128,7 +128,6 @@ function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
 function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
   return columns.filter(col => col.field === 'actions' || !allValuesAreNull(rows, col.field));
 }
-
 /**
  * Renders common UI components for data grids.
  *
@@ -136,7 +135,7 @@ function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] 
  * validation errors and more. Renders a DataGrid component with customized
  * columns and cell renderers.
  */
-export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
+export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const {
     addNewRowToGrid,
     gridColumns,
@@ -168,7 +167,7 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
   const currentCensus = useCensusContext();
   const currentQuadrat = useQuadratContext();
 
-  const { triggerRefresh } = useRefreshFixedData();
+  const { triggerRefresh } = useDataValidityContext();
 
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
@@ -211,28 +210,30 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
 
   const performSaveAction = async (id: GridRowId) => {
     if (locked) return;
-    console.log('save confirmed');
+    // console.log('save confirmed');
     setRowModesModel(oldModel => ({
       ...oldModel,
       [id]: { mode: GridRowModes.View }
     }));
-    const row = rows.find(row => row.id === id);
+    // console.log('Updated rowModesModel:', rowModesModel);
+    const row = rows.find(row => String(row.id) === String(id));
     if (row?.isNew) {
       setIsNewRowAdded(false);
       setShouldAddRowAfterFetch(false);
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
+    triggerRefresh([gridType as keyof UnifiedValidityFlags]);
     await fetchPaginatedData(paginationModel.page);
   };
 
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
-    let gridID = getGridID(gridType);
-    const deletionID = rows.find(row => row.id == id)![gridID];
+    const deletionID = rows.find(row => String(row.id) === String(id))?.id;
+    if (!deletionID) return;
     const deleteQuery = createDeleteQuery(
       currentSite?.schemaName ?? '',
       gridType,
-      gridID,
+      getGridID(gridType),
       deletionID
     );
     const response = await fetch(deleteQuery, {
@@ -240,14 +241,15 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ oldRow: undefined, newRow: rows.find(row => row.id === id)! })
+      body: JSON.stringify({ oldRow: undefined, newRow: rows.find(row => String(row.id) === String(id))! })
     });
-    if (!response.ok)
+    if (!response.ok) {
       setSnackbar({ children: 'Error: Deletion failed', severity: 'error' });
-    else {
+    } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
       setSnackbar({ children: 'Row successfully deleted', severity: 'success' });
-      setRows(rows.filter(row => row.id !== id));
+      setRows(rows.filter(row => String(row.id) !== String(id)));
+      triggerRefresh([gridType as keyof UnifiedValidityFlags]);
       await fetchPaginatedData(paginationModel.page);
     }
   };
@@ -260,7 +262,7 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
   const handleDeleteClick = (id: GridRowId) => () => {
     if (locked) return;
     if (gridType === 'census') {
-      const rowToDelete = rows.find(row => row.id === id);
+      const rowToDelete = rows.find(row => String(row.id) === String(id));
       if (
         currentCensus &&
         rowToDelete &&
@@ -275,10 +277,10 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
 
   const handleAddNewRow = async () => {
     if (locked) {
-      console.log('rowCount: ', rowCount);
+      // console.log('rowCount: ', rowCount);
       return;
     }
-    console.log('handleAddNewRow triggered');
+    // console.log('handleAddNewRow triggered');
 
     const newRowCount = rowCount + 1;
     const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
@@ -288,6 +290,8 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
     setIsNewRowAdded(true);
     setShouldAddRowAfterFetch(isNewPageNeeded);
     setNewLastPage(calculatedNewLastPage);
+
+    // console.log('newRowCount:', newRowCount, 'calculatedNewLastPage:', calculatedNewLastPage, 'isNewPageNeeded:', isNewPageNeeded);
 
     if (isNewPageNeeded) {
       await setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
@@ -309,16 +313,15 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
       gridType,
       pageToFetch,
       paginationModel.pageSize,
-      currentPlot?.id ?? 0,
-      currentCensus?.censusID ?? 0,
-      currentQuadrat?.quadratID ?? 0
+      currentPlot?.id,
+      currentCensus?.censusID,
+      currentQuadrat?.quadratID
     );
     try {
       const response = await fetch(paginatedQuery, { method: 'GET' });
       const data = await response.json();
       console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
-      console.log('output: ', data.output);
       setRows(data.output);
       setRowCount(data.totalCount);
 
@@ -327,6 +330,8 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
         addNewRowToGrid();
         setIsNewRowAdded(false);
       }
+
+      console.log('Data validity refresh triggered for gridType:', gridType);
     } catch (error) {
       console.error('Error fetching data:', error);
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
@@ -354,36 +359,27 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
   }, [refresh, setRefresh]);
 
   const processRowUpdate = useCallback(async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
-    const isNewRow = validateRowStructure(gridType, oldRow);
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(currentSite?.schemaName ?? '', gridType, gridID);
 
-    if (newRow[gridID] === '') {
-      throw new Error(`Primary key ${gridID} cannot be empty!`);
+    if (newRow.id === '') {
+      throw new Error(`Primary key id cannot be empty!`);
     }
-    
+
     try {
       let response, responseJSON;
-      if (isNewRow) {
-        response = await fetch(fetchProcessQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-        });
-      } else {
-        response = await fetch(fetchProcessQuery, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-        });
-      }
+      response = await fetch(fetchProcessQuery, {
+        method: oldRow.isNew ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+      });
       responseJSON = await response.json();
       if (!response.ok) {
         setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
         return Promise.reject(responseJSON.row); // Return the problematic row
       }
-      setSnackbar({ children: isNewRow ? 'New row added!' : 'Row updated!', severity: 'success' });
-      if (isNewRow) {
+      setSnackbar({ children: oldRow.isNew ? 'New row added!' : 'Row updated!', severity: 'success' });
+      if (oldRow.isNew) {
         setIsNewRowAdded(false);
         setShouldAddRowAfterFetch(false);
         await fetchPaginatedData(paginationModel.page);
@@ -396,6 +392,7 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
   }, [setSnackbar, setIsNewRowAdded, fetchPaginatedData, paginationModel.page, gridType]);
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
+    // console.log('New Row Modes Model:', newRowModesModel);
     setRowModesModel(newRowModesModel);
   };
 
@@ -412,31 +409,35 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
 
   const handleEditClick = (id: GridRowId) => () => {
     if (locked) return;
-    const row = rows.find(r => r.id === id);
+    const row = rows.find(row => String(row.id) === String(id));
     if (row && handleSelectQuadrat) {
       handleSelectQuadrat(row.quadratID);
     }
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
+    // console.log('Edit Click - Before Set:', rowModesModel);
+    setRowModesModel((prevModel) => ({
+      ...prevModel,
+      [id]: { mode: GridRowModes.Edit },
+    }));
+    // console.log('Edit Click - After Set:', rowModesModel);
   };
 
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
     if (locked) return;
     event?.preventDefault();
-
-    const row = rows.find(r => r.id === id);
+    // console.log('Cancel clicked for row ID:', id);
+    const row = rows.find(row => String(row.id) === String(id));
     if (row?.isNew) {
+      // console.log('New row cancelled, removing from rows');
       setRows(oldRows => oldRows.filter(row => row.id !== id));
       setIsNewRowAdded(false);
-
       if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
-        const newPage =
-          paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
+        const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
         setPaginationModel({ ...paginationModel, page: newPage });
       }
     } else {
-      setRowModesModel(oldModel => ({
-        ...oldModel,
-        [id]: { mode: GridRowModes.View, ignoreModifications: true }
+      setRowModesModel((prevModel) => ({
+        ...prevModel,
+        [id]: { mode: GridRowModes.View, ignoreModifications: true },
       }));
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
@@ -451,7 +452,9 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
       cellClassName: 'actions',
       getActions: ({ id }) => {
         if (locked) return [];
+        // console.log('rowModesModel:', rowModesModel);
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
+        // console.log('Row ID:', id, 'Is in edit mode:', isInEditMode);
 
         if (isInEditMode) {
           return [
@@ -494,9 +497,12 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
       return commonColumns;
     }
     return [...commonColumns, getGridActionsColumn()];
-  }, [gridColumns, locked]);
+  }, [gridColumns, locked, rowModesModel]);
 
-  const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
+  const filteredColumns = useMemo(() => {
+    if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns)
+    else return columns;
+  }, [rows, columns]);
 
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
@@ -526,6 +532,10 @@ export default function GenericDataGrid(props: Readonly<DataGridCommonProps>) {
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
             processRowUpdate={processRowUpdate}
+            onProcessRowUpdateError={(error) => {
+              console.error('Row update error:', error);
+              setSnackbar({ children: 'Error updating row', severity: 'error' });
+            }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
                 event.defaultMuiPrevented = true;

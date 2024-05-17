@@ -13,6 +13,7 @@ import { AllTaxonomyViewMapper } from "./sqlrdsdefinitions/views/alltaxonomyview
 import { ValidationHistoryMapper } from "./sqlrdsdefinitions/tables/valchangelogrds";
 import { PlotsMapper } from "./sqlrdsdefinitions/tables/plotrds";
 import { StemTaxonomiesMapper } from "./sqlrdsdefinitions/views/stemtaxonomyviewrds";
+import { QuadratPersonnelMapper } from "./sqlrdsdefinitions/tables/quadratpersonnelrds";
 
 export function parseDate(date: any): Date | null {
   if (!date) return null;
@@ -47,6 +48,8 @@ class MapperFactory {
         return new PlotsMapper() as any;
       case 'attributes':
         return new AttributesMapper() as any;
+      case 'quadratpersonnel':
+        return new QuadratPersonnelMapper as any;
       case 'census':
         return new CensusMapper() as any;
       case 'personnel':

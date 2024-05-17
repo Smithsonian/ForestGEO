@@ -8,7 +8,6 @@ import UserSelectionProvider from "@/app/contexts/userselectionprovider";
 import { LoadingProvider } from "@/app/contexts/loadingprovider";
 import { GlobalLoadingIndicator } from "@/styles/globalloadingindicator";
 import { DataValidityProvider } from "@/app/contexts/datavalidityprovider";
-import { RefreshFixedDataProvider } from "./contexts/refreshfixeddataprovider";
 
 export default function RootLayout({ children, }: Readonly<{ children: React.ReactNode; }>) {
   return (
@@ -23,13 +22,11 @@ export default function RootLayout({ children, }: Readonly<{ children: React.Rea
             <CoreDataProvider>
               <ListSelectionProvider>
                 <UserSelectionProvider>
-                  <RefreshFixedDataProvider>
-                    <DataValidityProvider>
-                      <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>
-                        {children}
-                      </Box>
-                    </DataValidityProvider>
-                  </RefreshFixedDataProvider>
+                  <DataValidityProvider>
+                    <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>
+                      {children}
+                    </Box>
+                  </DataValidityProvider>
                 </UserSelectionProvider>
               </ListSelectionProvider>
             </CoreDataProvider>

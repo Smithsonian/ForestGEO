@@ -1,7 +1,7 @@
 // app/api/fetchall/[fetchType]/route.test.ts
 import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
-import { GET } from '@/app/api/fetchall/[fetchType]/route';
+import { GET } from '@/app/api/fetchall/[[...slugs]]/route';
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import MapperFactory from "@/config/datamapper";  // Ensure it is imported as default
 import { PoolConnection } from 'mysql2/promise';
@@ -50,7 +50,7 @@ describe('GET /api/fetchall/[fetchType]', () => {
       const url = new URL(`http://localhost/api/fetchall/${type}?schema=testschema`);
       const request = new NextRequest(url.toString());
 
-      const response = await GET(request, { params: { fetchType: type } });
+      const response = await GET(request, { params: { slugs: type } });
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(mockResults);
@@ -62,7 +62,7 @@ describe('GET /api/fetchall/[fetchType]', () => {
     const url = new URL(`http://localhost/api/fetchall/${fetchType}`);
     const request = new NextRequest(url.toString());
 
-    await expect(GET(request, { params: { fetchType } })).rejects.toThrow("Schema selection was not provided to API endpoint");
+    await expect(GET(request, { params: { slugs: fetchType } })).rejects.toThrow("Schema selection was not provided to API endpoint");
   });
 
   it('handles SQL errors gracefully', async () => {
@@ -73,6 +73,6 @@ describe('GET /api/fetchall/[fetchType]', () => {
     const url = new URL(`http://localhost/api/fetchall/${fetchType}?schema=testschema`);
     const request = new NextRequest(url.toString());
 
-    await expect(GET(request, { params: { fetchType } })).rejects.toThrow("Call failed");
+    await expect(GET(request, { params: { slugs: fetchType } })).rejects.toThrow("Call failed");
   });
 });
