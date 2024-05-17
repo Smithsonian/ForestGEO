@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
 
-  if (!plotID || !censusID) throw new Error("Core plot/census information not received");
+  if ((!plotID || plotID === '0') || (!censusID || censusID === '0')) throw new Error("Core plot/census information not received");
   let conn: PoolConnection | null = null;
   // app/api/fixeddata/get/[dataType]/[[...slugs]]/route.ts
   try {
@@ -30,25 +30,36 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
       case 'stems':
       case 'alltaxonomiesview':
       case 'stemtaxonomiesview':
+      case 'quadratpersonnel':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} LIMIT ?, ?`;
         break;
       case 'quadrats':
+        // paginatedQuery = `
+        // SELECT SQL_CALC_FOUND_ROWS q.*, 
+        // GROUP_CONCAT(JSON_OBJECT(
+        //   'personnelID', p.PersonnelID,
+        //   'firstName', p.FirstName,
+        //   'lastName', p.LastName,
+        //   'role', p.Role
+        // ) SEPARATOR ',') AS personnel
+        // FROM ${schema}.${params.dataType} q
+        // LEFT JOIN ${schema}.quadratpersonnel qp ON q.QuadratID = qp.QuadratID
+        // LEFT JOIN ${schema}.personnel p ON qp.PersonnelID = p.PersonnelID
+        // WHERE PlotID = ${plotID} AND CensusID = ${censusID}
+        // GROUP BY q.QuadratID
+        // LIMIT ?, ?`; // plotID, censusID, and quadratID are still strings!
+        
+        // attempting to shift usage of quadratpersonnel to a separate datagrid -- it is causing issues with new quadrat submission and is not actually part 
+        // of the core table structure so is extraneous to quadrat retrieval (specifically)
         paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS q.*, 
-        GROUP_CONCAT(JSON_OBJECT(
-          'personnelID', p.PersonnelID,
-          'firstName', p.FirstName,
-          'lastName', p.LastName,
-          'role', p.Role
-        ) SEPARATOR ',') AS personnel
-        FROM ${schema}.${params.dataType} q
-        LEFT JOIN ${schema}.quadratpersonnel qp ON q.QuadratID = qp.QuadratID
-        LEFT JOIN ${schema}.personnel p ON qp.PersonnelID = p.PersonnelID
-        WHERE PlotID = ${plotID} AND CensusID = ${censusID}
-        GROUP BY q.QuadratID
+        SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} 
+        WHERE PlotID = ${plotID} AND CensusID = ${censusID} 
+        GROUP BY QuadratID
         LIMIT ?, ?`; // plotID, censusID, and quadratID are still strings!
         break;
       case 'subquadrats':
+        // quadrats are required!
+        if (quadratID === '0' || quadratID === 'undefined') throw new Error("QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route");
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS s.*
         FROM ${schema}.${params.dataType} s
         JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
@@ -66,20 +77,17 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
       case 'stemdimensionsview':
         paginatedQuery = `
         SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType}
-        WHERE PlotID = ${plotID} AND CensusID = ${censusID} ${quadratID ? `AND QuadratID = ${quadratID}` : ``}
+        WHERE PlotID = ${plotID} AND CensusID = ${censusID} ${quadratID !== '0' && quadratID !== 'undefined' ? `AND QuadratID = ${quadratID}` : ``}
         LIMIT ?, ?
         `;
         break;
     }
-    console.log('paginatedQuery: ', paginatedQuery);
     const paginatedResults = await runQuery(conn, paginatedQuery, queryParams);
-    console.log('unmapped results: ', paginatedResults);
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const rows = mapper.mapData(paginatedResults);
-    console.log('mapped results: ', rows);
     return new NextResponse(JSON.stringify({ output: rows, totalCount: totalRows }), { status: 200 });
   } catch (error: any) {
     if (conn) await conn.rollback();
@@ -102,23 +110,23 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     conn = await getConn();
     await conn.beginTransaction();
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
-    console.log('POST newRow: ', newRow);
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const newRowData = mapper.demapData([newRow])[0];
     let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
     if (params.dataType.includes('view')) {
       // views --> should not be handled in the same sense
     } else if (params.dataType === 'quadrats') {
-      const { Personnel, ...coreNewRowData } = newRowData;
-      delete coreNewRowData[demappedGridID]; // when inserting, we need to remove primary auto-incrementing key from new row EXCEPT FOR attributes, where Code is required
-      const result = await runQuery(conn, 'INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, coreNewRowData]);
-      const quadratID = result.insertId;
-      if (Personnel && Personnel.length > 0) {
-        for (const person of Personnel) {
-          const insertPersonnelQuery = format('INSERT INTO ?? (QuadratID, PersonnelID) VALUES (?, ?)', [`${schema}.quadratpersonnel`, quadratID, person.PersonnelID]);
-          await runQuery(conn, insertPersonnelQuery);
-        }
-      }
+      // const { Personnel, ...coreNewRowData } = newRowData;
+      delete newRowData[demappedGridID]; // when inserting, we need to remove primary auto-incrementing key from new row EXCEPT FOR attributes, where Code is required
+      let formatted = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+      await runQuery(conn, formatted);
+      // const quadratID = result.insertId;
+      // if (Personnel && Personnel.length > 0) {
+      //   for (const person of Personnel) {
+      //     const insertPersonnelQuery = format('INSERT INTO ?? (QuadratID, PersonnelID) VALUES (?, ?)', [`${schema}.quadratpersonnel`, quadratID, person.PersonnelID]);
+      //     await runQuery(conn, insertPersonnelQuery);
+      //   }
+      // }
     } else if (params.dataType === 'attributes') {
       const insertAttributeQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       await runQuery(conn, insertAttributeQuery);

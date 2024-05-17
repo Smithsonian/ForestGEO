@@ -1,20 +1,20 @@
 "use client";
 import * as React from 'react';
-import {Dispatch, SetStateAction, useEffect, useState} from 'react';
+import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
 import List from '@mui/joy/List';
 import ListItem from '@mui/joy/ListItem';
-import ListItemButton, {listItemButtonClasses} from '@mui/joy/ListItemButton';
+import ListItemButton, { listItemButtonClasses } from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import {LoginLogout} from "@/components/loginlogout";
-import {siteConfigNav, validityMapping} from "@/config/macros/siteconfigs";
-import {SiteConfigProps} from "@/config/macros/siteconfigs";
-import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import {Plot, PlotRDS} from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { LoginLogout } from "@/components/loginlogout";
+import { siteConfigNav, validityMapping } from "@/config/macros/siteconfigs";
+import { SiteConfigProps } from "@/config/macros/siteconfigs";
+import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import { Plot, PlotRDS } from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
   useCensusContext,
   useCensusDispatch,
@@ -23,7 +23,7 @@ import {
   useSiteContext,
   useSiteDispatch
 } from "@/app/contexts/userselectionprovider";
-import {usePathname, useRouter} from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Button,
   DialogActions,
@@ -48,22 +48,22 @@ import {
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import {useCensusListContext, usePlotListContext, useSiteListContext} from "@/app/contexts/listselectionprovider";
-import {useCensusLoadContext, usePlotsLoadContext} from "@/app/contexts/coredataprovider";
-import {Census, CensusRDS, CensusRaw} from '@/config/sqlrdsdefinitions/tables/censusrds';
-import {getData} from "@/config/db";
-import {useSession} from "next-auth/react";
-import {SlideToggle, TransitionComponent} from "@/components/client/clientmacros";
+import { useCensusListContext, usePlotListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
+import { useCensusLoadContext, usePlotsLoadContext } from "@/app/contexts/coredataprovider";
+import { Census, CensusRDS, CensusRaw } from '@/config/sqlrdsdefinitions/tables/censusrds';
+import { getData } from "@/config/db";
+import { useSession } from "next-auth/react";
+import { SlideToggle, TransitionComponent } from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import {CensusLogo, DeleteIcon, EditIcon, PlotLogo} from "@/components/icons";
-import {RainbowIcon} from '@/styles/rainbowicon';
-import {DatePicker} from '@mui/x-date-pickers';
+import { CensusLogo, DeleteIcon, EditIcon, PlotLogo } from "@/components/icons";
+import { RainbowIcon } from '@/styles/rainbowicon';
+import { DatePicker } from '@mui/x-date-pickers';
 import dayjs from 'dayjs';
 import StopIcon from '@mui/icons-material/Stop';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import {useDataValidity} from "@/app/contexts/datavalidityprovider";
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -71,7 +71,7 @@ export interface SimpleTogglerProps {
   renderToggle: any;
 }
 
-export function SimpleToggler({isOpen, renderToggle, children,}: Readonly<SimpleTogglerProps>) {
+export function SimpleToggler({ isOpen, renderToggle, children, }: Readonly<SimpleTogglerProps>) {
   return (
     <React.Fragment>
       {renderToggle}
@@ -100,21 +100,19 @@ interface MRTProps {
 
 function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean | undefined, setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined) {
   const Icon = siteConfigProps.icon;
-  const {plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete} = props;
+  const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   let currentSite = useSiteContext();
   let currentPlot = usePlotContext();
   let currentCensus = useCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
-      // selected={props.pathname === siteConfigProps.href || siteConfigProps.expanded.find(value => value.href === props.pathname) !== undefined}
       color={pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
         if (setMenuOpen) {
           setMenuOpen(!menuOpen);
         }
       }}>
-      {/* Apply a badge to the parent item if any subitems are incomplete */}
       <Tooltip title={isParentDataIncomplete ? "Missing Core Data!" : "Requirements Met"} arrow>
         <Badge
           color="danger"
@@ -122,14 +120,14 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
           badgeContent={isParentDataIncomplete ? '!' : undefined}
           invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
         >
-          <Icon/>
+          <Icon />
         </Badge>
       </Tooltip>
       <ListItemContent>
         <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
       </ListItemContent>
       <KeyboardArrowDownIcon
-        sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
+        sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }}
       />
     </ListItemButton>
   );
@@ -142,7 +140,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar(props: SidebarProps) {
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   let currentSite = useSiteContext();
   let siteDispatch = useSiteDispatch();
   let currentPlot = usePlotContext();
@@ -154,8 +152,8 @@ export default function Sidebar(props: SidebarProps) {
   let censusLoadContext = useCensusLoadContext();
   let siteListContext = useSiteListContext();
   let plotsLoadContext = usePlotsLoadContext();
+  const {validity} = useDataValidityContext();
 
-  let {validity} = useDataValidity();
   const [plot, setPlot] = useState<Plot>(currentPlot);
   const initialPlot: PlotRDS = {
     id: 0,
@@ -208,15 +206,16 @@ export default function Sidebar(props: SidebarProps) {
   const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
   const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
 
-  const {coreDataLoaded, setManualReset, siteListLoaded} = props;
+  const { coreDataLoaded, setManualReset, siteListLoaded} = props;
 
   const [plotModalMode, setPlotModalMode] = useState<'add' | 'edit'>('add');
   const [censusModalMode, setCensusModalMode] = useState<'add' | 'edit'>('add');
   const [plotMarkedForDeletion, setPlotMarkedForDeletion] = useState<PlotRDS>(initialPlot);
   const [openPlotDeletionConfirmDialog, setOpenPlotDeletionConfirmDialog] = useState(false);
-  const [openCensusOpenCloseModal, setOpenCensusOpenCloseModal] = useState(false);
+  const [openCensusCloseModal, setOpenCensusCloseModal] = useState(false);
   const [censusMarkedForUpdate, setCensusMarkedForUpdate] = useState<CensusRDS>(null);
   const [censusMFUType, setCensusMFUType] = useState<'open' | 'close'>('open');
+  
   const getSortedCensusData = () => {
     // Ensure censusListContext is defined before processing
     if (!censusListContext || !Array.isArray(censusListContext)) {
@@ -278,7 +277,7 @@ export default function Sidebar(props: SidebarProps) {
     // Update the site context (original onSiteChange functionality)
     setSite(selectedSite);
     if (siteDispatch) {
-      await siteDispatch({site: selectedSite});
+      await siteDispatch({ site: selectedSite });
     }
     if (selectedSite === null) { // site's been reset, plot needs to be voided
       await handlePlotSelection(null);
@@ -303,7 +302,7 @@ export default function Sidebar(props: SidebarProps) {
       // Clamp the value to ensure it's positive
       value = Math.max(value, 0);
       setNewPlotRDS(prev => {
-        const updated = {...prev, [prop]: value};
+        const updated = { ...prev, [prop]: value };
         // Automatically calculate and update the area if dimensions change
         if ((prop === 'dimensionX' || prop === 'dimensionY') && typeof value === 'number') {
           updated.area = calculateArea(
@@ -320,7 +319,6 @@ export default function Sidebar(props: SidebarProps) {
       }));
     }
   };
-
 
   const handleCensusInputChange = (prop: keyof CensusRaw, value: any) => {
     setNewCensusRDS(prev => {
@@ -372,8 +370,8 @@ export default function Sidebar(props: SidebarProps) {
 
     let response = await fetch(url, {
       method: method,
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({oldRow: undefined, newRow: newPlotRDS})
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldRow: undefined, newRow: newPlotRDS })
     });
 
     if (response.ok) {
@@ -389,8 +387,8 @@ export default function Sidebar(props: SidebarProps) {
   const handleDeletePlot = async (plot: PlotRDS) => {
     const response = await fetch(`/api/fixeddata/plots/${currentSite?.schemaName}/plotID`, {
       method: 'DELETE',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({oldRow: undefined, newRow: plot})
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldRow: undefined, newRow: plot })
     });
     if (response.ok) {
       setManualReset(true);  // Reload data to reflect deletion
@@ -419,8 +417,11 @@ export default function Sidebar(props: SidebarProps) {
       alert('Please ensure the plotID is correctly set and not zero.');
       return;
     }
+
     let response;
     const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
+
+    // Check if we are adding a new census
     if (censusModalMode === 'add') {
       // Find the highest plotCensusNumber for the current plot in the loaded context
       const plotCensuses = censusLoadContext?.filter(census => census?.plotID === currentPlot?.id) || [];
@@ -428,23 +429,28 @@ export default function Sidebar(props: SidebarProps) {
         (max, census) => (census?.plotCensusNumber! > max ? census?.plotCensusNumber! : max),
         0
       );
+
+      // Create a new census with an incremented plotCensusNumber
       response = await fetch(url, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          oldRow: undefined, newRow: {
+          oldRow: undefined,
+          newRow: {
             ...newCensusRDS,
-            plotCensusNumber: ++highestPlotCensusNumber,
+            plotCensusNumber: highestPlotCensusNumber + 1,
           }
         })
       });
     } else {
+      // Handle closing the census
       response = await fetch(url, {
         method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({oldRow: undefined, newRow: newCensusRDS})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow: undefined, newRow: newCensusRDS })
       });
     }
+
     if (response.ok) {
       setOpenCensusSelectionModal(false);
       setShowCensusModForm(false);
@@ -459,7 +465,7 @@ export default function Sidebar(props: SidebarProps) {
   const handlePlotSelection = async (selectedPlot: Plot | null) => {
     setPlot(selectedPlot);
     if (plotDispatch) {
-      await plotDispatch({plot: selectedPlot});
+      await plotDispatch({ plot: selectedPlot });
     }
     if (selectedPlot === null) {
       await handleCensusSelection(null); // if plot's reset, then census needs to be voided too
@@ -470,7 +476,7 @@ export default function Sidebar(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: CensusRDS | null) => {
     setCensus(selectedCensus);
     if (censusDispatch) {
-      await censusDispatch({census: selectedCensus});
+      await censusDispatch({ census: selectedCensus });
     }
   };
 
@@ -479,7 +485,6 @@ export default function Sidebar(props: SidebarProps) {
     storedSite ? await handleSiteSelection(storedSite) : undefined;
     storedPlot ? await handlePlotSelection(storedPlot) : undefined;
     storedCensus ? await handleCensusSelection(storedCensus) : undefined;
-    // setShowResumeDialog(false);
   };
 
   const renderCensusValue = (option: SelectOption<string> | null) => {
@@ -510,15 +515,15 @@ export default function Sidebar(props: SidebarProps) {
 
   const renderPlotForm = () => {
     return (
-      <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
         <DialogTitle>{plotModalMode === 'add' ? 'Add New Plot' : 'Edit Plot'}</DialogTitle>
-        <form noValidate autoComplete="off" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-          <Grid container spacing={2} sx={{flexGrow: 1}}>
+        <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <Grid container spacing={2} sx={{ flexGrow: 1 }}>
             {/* Left Column: Plot and Location Information */}
             <Grid xs={4}>
-              <Grid container spacing={2} sx={{flex: 1}} direction={"column"}>
+              <Grid container spacing={2} sx={{ flex: 1 }} direction={"column"}>
                 <Grid xs={4}>
-                  <FormControl required sx={{marginBottom: '8px', width: '100%'}}>
+                  <FormControl required sx={{ marginBottom: '8px', width: '100%' }}>
                     <FormLabel>Plot Name</FormLabel>
                     <Input
                       type="text"
@@ -528,7 +533,7 @@ export default function Sidebar(props: SidebarProps) {
                   </FormControl>
                 </Grid>
                 <Grid xs={4}>
-                  <FormControl sx={{marginBottom: '8px', width: '100%'}}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
                     <FormLabel>Location Name</FormLabel>
                     <Input
                       type="text"
@@ -538,7 +543,7 @@ export default function Sidebar(props: SidebarProps) {
                   </FormControl>
                 </Grid>
                 <Grid xs={4}>
-                  <FormControl sx={{marginBottom: '8px', width: '100%'}}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
                     <FormLabel>Country Name</FormLabel>
                     <Input
                       type="text"
@@ -552,9 +557,9 @@ export default function Sidebar(props: SidebarProps) {
 
             {/* Middle Column: Dimensions and Coordinates */}
             <Grid xs={4}>
-              <Grid container spacing={2} sx={{flexGrow: 1}}>
+              <Grid container spacing={2} sx={{ flexGrow: 1 }}>
                 <Grid xs={6}>
-                  <FormControl sx={{marginBottom: '8px', width: '100%'}} error={newPlotRDS.dimensionX! <= 0}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }} error={newPlotRDS.dimensionX! <= 0}>
                     <FormLabel>Dimension X</FormLabel>
                     <Input
                       type="number"
@@ -568,7 +573,7 @@ export default function Sidebar(props: SidebarProps) {
                   </FormControl>
                 </Grid>
                 <Grid xs={6}>
-                  <FormControl sx={{marginBottom: '8px', width: '100%'}} error={newPlotRDS.dimensionY! <= 0}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }} error={newPlotRDS.dimensionY! <= 0}>
                     <FormLabel>Dimension Y</FormLabel>
                     <Input
                       type="number"
@@ -586,17 +591,17 @@ export default function Sidebar(props: SidebarProps) {
 
             {/* Right Column: Other Fields */}
             <Grid xs={4}>
-              <Grid container spacing={2} sx={{flexGrow: 1}}>
+              <Grid container spacing={2} sx={{ flexGrow: 1 }}>
                 <Grid xs={4}>
-                  <FormControl sx={{marginBottom: '8px', width: '100%'}}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
                     <FormLabel>Unit</FormLabel>
                     <Select
                       value={newPlotRDS.unit!}
                       onChange={(_event: React.SyntheticEvent | null,
-                                 newValue: string | null,) => handlePlotInputChange('unit', newValue ?? '')}
+                        newValue: string | null,) => handlePlotInputChange('unit', newValue ?? '')}
                       defaultValue={'m'}
                       placeholder="Select unit"
-                      sx={{minWidth: '200px'}}
+                      sx={{ minWidth: '200px' }}
                     >
                       <List>
                         <ListSubheader>Metric Units</ListSubheader>
@@ -609,7 +614,7 @@ export default function Sidebar(props: SidebarProps) {
                   </FormControl>
                 </Grid>
                 <Grid xs={4}>
-                  <FormControl sx={{marginBottom: '8px', width: '100%'}}>
+                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
                     <FormLabel>Plot Shape</FormLabel>
                     <Input
                       type="text"
@@ -619,16 +624,16 @@ export default function Sidebar(props: SidebarProps) {
                   </FormControl>
                 </Grid>
                 <Grid xs={4}>
-                  <FormControl sx={{width: '100%'}}>
+                  <FormControl sx={{ width: '100%' }}>
                     <FormLabel>Area</FormLabel>
-                    <Input type="text" disabled value={newPlotRDS.area!}/>
+                    <Input type="text" disabled value={newPlotRDS.area!} />
                   </FormControl>
                 </Grid>
               </Grid>
             </Grid>
           </Grid>
           <Stack direction={"row"}>
-            <FormControl sx={{marginRight: '8px', width: '100%'}} error={newPlotRDS.globalX! <= 0}>
+            <FormControl sx={{ marginRight: '8px', width: '100%' }} error={newPlotRDS.globalX! <= 0}>
               <FormLabel>Global X</FormLabel>
               <Input
                 type="number"
@@ -640,7 +645,7 @@ export default function Sidebar(props: SidebarProps) {
                 <FormHelperText>Value must be greater than 0!</FormHelperText>
               )}
             </FormControl>
-            <FormControl sx={{marginRight: '8px', width: '100%'}} error={newPlotRDS.globalY! <= 0}>
+            <FormControl sx={{ marginRight: '8px', width: '100%' }} error={newPlotRDS.globalY! <= 0}>
               <FormLabel>Global Y</FormLabel>
               <Input
                 type="number"
@@ -652,7 +657,7 @@ export default function Sidebar(props: SidebarProps) {
                 <FormHelperText>Value must be greater than 0!</FormHelperText>
               )}
             </FormControl>
-            <FormControl sx={{marginRight: '8px', width: '100%'}} error={newPlotRDS.globalZ! <= 0}>
+            <FormControl sx={{ marginRight: '8px', width: '100%' }} error={newPlotRDS.globalZ! <= 0}>
               <FormLabel>Global Z</FormLabel>
               <Input
                 type="number"
@@ -665,9 +670,9 @@ export default function Sidebar(props: SidebarProps) {
               )}
             </FormControl>
           </Stack>
-          <Divider orientation='horizontal' sx={{marginTop: 1}}/>
+          <Divider orientation='horizontal' sx={{ marginTop: 1 }} />
           {/* Plot Description */}
-          <FormControl sx={{marginTop: '16px', width: '100%'}}>
+          <FormControl sx={{ marginTop: '16px', width: '100%' }}>
             <FormLabel>Plot Description</FormLabel>
             <Textarea
               name="soft"
@@ -690,13 +695,13 @@ export default function Sidebar(props: SidebarProps) {
       : true;
 
     return (
-      <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
-        <DialogTitle sx={{marginBottom: 2}}>Add New Census</DialogTitle>
-        <form noValidate autoComplete="off" style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-          <Grid container spacing={1.5} sx={{flexGrow: 1}}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <DialogTitle sx={{ marginBottom: 2 }}>Add New Census</DialogTitle>
+        <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <Grid container spacing={1.5} sx={{ flexGrow: 1 }}>
             <Grid xs={6}>
               <Grid container spacing={1} direction="column" justifyContent="flex-start" alignItems="center">
-                <Grid xs={6} sx={{mb: 0.5}}>
+                <Grid xs={6} sx={{ mb: 0.5 }}>
                   <FormControl required>
                     <FormLabel>Starting Date</FormLabel>
                     <DatePicker
@@ -707,7 +712,7 @@ export default function Sidebar(props: SidebarProps) {
                     />
                   </FormControl>
                 </Grid>
-                <Grid xs={6} sx={{mb: 0.5}}>
+                <Grid xs={6} sx={{ mb: 0.5 }}>
                   <FormControl>
                     <FormLabel>Description</FormLabel>
                     <Input
@@ -721,7 +726,7 @@ export default function Sidebar(props: SidebarProps) {
             </Grid>
             <Grid xs={6}>
               <Grid container spacing={1} direction="column" justifyContent="flex-start" alignItems="center">
-                <Grid xs={6} sx={{mb: 0.5}}>
+                <Grid xs={6} sx={{ mb: 0.5 }}>
                   <FormControl error={!isEndDateAfterStartDate}>
                     <FormLabel>Ending Date</FormLabel>
                     <DatePicker
@@ -742,7 +747,7 @@ export default function Sidebar(props: SidebarProps) {
                     )}
                   </FormControl>
                 </Grid>
-                <Grid xs={6} sx={{mb: 0.5}}>
+                <Grid xs={6} sx={{ mb: 0.5 }}>
                   <FormControl error={!isPlotIDValid}>
                     <FormLabel>PlotID</FormLabel>
                     <Input
@@ -770,10 +775,10 @@ export default function Sidebar(props: SidebarProps) {
   // Define the array type
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
-    {toggle: undefined, setToggle: undefined},
-    {toggle: measurementsToggle, setToggle: setMeasurementsToggle},
-    {toggle: propertiesToggle, setToggle: setPropertiesToggle},
-    {toggle: formsToggle, setToggle: setFormsToggle}
+    { toggle: undefined, setToggle: undefined },
+    { toggle: measurementsToggle, setToggle: setMeasurementsToggle },
+    { toggle: propertiesToggle, setToggle: setPropertiesToggle },
+    { toggle: formsToggle, setToggle: setFormsToggle }
   ];
 
   const renderSiteOptions = () => {
@@ -799,7 +804,7 @@ export default function Sidebar(props: SidebarProps) {
         }}
       >
         {/* Allowed Sites Group */}
-        <List aria-labelledby="allowed-sites-group" sx={{'--ListItemDecorator-size': '28px'}}>
+        <List aria-labelledby="allowed-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="allowed-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
@@ -812,10 +817,10 @@ export default function Sidebar(props: SidebarProps) {
           ))}
         </List>
 
-        <ListDivider role="none"/>
+        <ListDivider role="none" />
 
         {/* Other Sites Group */}
-        <List aria-labelledby="other-sites-group" sx={{'--ListItemDecorator-size': '28px'}}>
+        <List aria-labelledby="other-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="other-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
@@ -832,7 +837,7 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   return (
-    <Stack direction={"row"} sx={{display: 'flex', width: 'fit-content'}}>
+    <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
       {/*BASE SIDEBAR*/}
       <Box
         className="Sidebar"
@@ -862,21 +867,21 @@ export default function Sidebar(props: SidebarProps) {
             },
           })}
         />
-        <Box sx={{flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1}}>
-          <Box sx={{display: 'flex', alignItems: 'left', flexDirection: 'column'}}>
+        <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
             <Stack direction={"column"}>
               <Typography level="h1">
-                <Box sx={{display: 'flex', alignItems: 'center'}}>
-                  <Box sx={{marginRight: 1.5}}>
-                    <RainbowIcon/>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ marginRight: 1.5 }}>
+                    <RainbowIcon />
                   </Box>
                   ForestGEO
                 </Box>
                 {session?.user.isAdmin &&
-                  <Typography level="h1" color='danger' sx={{marginLeft: 0.5}}>(Admin)</Typography>}
+                  <Typography level="h1" color='danger' sx={{ marginLeft: 0.5 }}>(Admin)</Typography>}
               </Typography>
             </Stack>
-            <Divider orientation='horizontal' sx={{my: 0.75}}/>
+            <Divider orientation='horizontal' sx={{ my: 0.75 }} />
             <Link component={"button"} onClick={() => {
               if (siteListLoaded) {
                 setOpenSiteSelectionModal(true);
@@ -887,7 +892,7 @@ export default function Sidebar(props: SidebarProps) {
               display: 'flex', alignItems: 'center', paddingBottom: '0.25em', width: '100%', textAlign: 'left'
             }}>
               <Avatar>
-                <TravelExploreIcon/>
+                <TravelExploreIcon />
               </Avatar>
               <Typography
                 color={!currentSite?.siteName ? "danger" : "success"}
@@ -907,43 +912,43 @@ export default function Sidebar(props: SidebarProps) {
               display: 'flex', alignItems: 'center', paddingBottom: '0.75em', width: '100%', textAlign: 'left'
             }}>
               <Avatar size={"sm"}>
-                <PlotLogo/>
+                <PlotLogo />
               </Avatar>
               <Typography color={!currentPlot?.key ? "danger" : "success"}
-                          level="h3"
-                          sx={{marginLeft: 1, display: 'flex', flexGrow: 1}}>
+                level="h3"
+                sx={{ marginLeft: 1, display: 'flex', flexGrow: 1 }}>
                 {currentPlot ? `Plot: ${currentPlot.key}` : "Select Plot"}
               </Typography>
             </Link>
             <SlideToggle
               isOpen={!isPlotSelectionRequired}>
               {/* This block will slide down when a plot is selected */}
-              <Box sx={{display: 'flex', flexDirection: 'column'}}>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                 <Link component={"button"} onClick={() => {
                   setOpenCensusSelectionModal(true);
                 }}
-                      sx={{display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left'}}>
+                  sx={{ display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left' }}>
                   <Avatar size={"sm"}>
-                    <CensusLogo/>
+                    <CensusLogo />
                   </Avatar>
                   <Typography color={(!currentCensus) ? "danger" : "success"}
-                              level="h4"
-                              sx={{marginLeft: 1}}>
+                    level="h4"
+                    sx={{ marginLeft: 1 }}>
                     {currentCensus ? `Census: ${currentCensus.plotCensusNumber}` : 'Select Census'}
                   </Typography>
                 </Link>
                 <Box
-                  sx={{marginLeft: '2.5em'}}> {/* Adjust marginLeft to match Avatar's width plus its marginLeft, mt for slight vertical adjustment */}
+                  sx={{ marginLeft: '2.5em' }}> {/* Adjust marginLeft to match Avatar's width plus its marginLeft, mt for slight vertical adjustment */}
                   <Typography color={(!currentCensus) ? "danger" : "primary"}
-                              level="body-md"
-                              sx={{textAlign: 'left', paddingLeft: '1em'}}>
+                    level="body-md"
+                    sx={{ textAlign: 'left', paddingLeft: '1em' }}>
                     {(currentCensus !== null) && (
                       <>{(currentCensus.startDate) ? `Starting: ${new Date(currentCensus?.startDate!).toDateString()}` : ''}</>
                     )}
                   </Typography>
                   <Typography color={(!currentCensus) ? "danger" : "primary"}
-                              level="body-md"
-                              sx={{textAlign: 'left', paddingLeft: '1em'}}>
+                    level="body-md"
+                    sx={{ textAlign: 'left', paddingLeft: '1em' }}>
 
                     {(currentCensus !== null) && (
                       <>{(currentCensus.endDate) ? `Ending ${new Date(currentCensus.endDate).toDateString()}` : `Ongoing`}</>
@@ -951,7 +956,7 @@ export default function Sidebar(props: SidebarProps) {
                   </Typography>
                 </Box>
               </Box>
-              <Divider orientation='horizontal' sx={{marginTop: 2}}/>
+              <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
               {/* Remaining Parts of Navigation Menu -- want this to be accessible from plot selection since not all links need census selection */}
               <Box
                 sx={{
@@ -975,20 +980,20 @@ export default function Sidebar(props: SidebarProps) {
                 >
                   {siteConfigNav.map((item, index: number) => {
                     const Icon = item.icon;
-                    const {toggle, setToggle} = toggleArray[index];
+                    const { toggle, setToggle } = toggleArray[index];
                     // Calculate delay based on index (e.g., 100ms per item)
                     const delay = (index) * 200;
 
                     if (item.expanded.length === 0) {
                       return (
                         <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
-                                             style={{transitionDelay: `${delay}ms`}} direction="up">
+                          style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem>
                             <ListItemButton selected={pathname === item.href}
-                                            disabled={isPlotSelectionRequired || isCensusSelectionRequired}
-                                            color={pathname === item.href ? 'primary' : undefined}
-                                            onClick={() => router.push(item.href)}>
-                              <Icon/>
+                              disabled={isPlotSelectionRequired || isCensusSelectionRequired}
+                              color={pathname === item.href ? 'primary' : undefined}
+                              onClick={() => router.push(item.href)}>
+                              <Icon />
                               <ListItemContent>
                                 <Typography level={"title-sm"}>{item.label}</Typography>
                               </ListItemContent>
@@ -998,13 +1003,13 @@ export default function Sidebar(props: SidebarProps) {
                       );
                     } else {
                       // Calculate the aggregate validity for subitems
-                      const isParentDataIncomplete = item.expanded.some(subItem => {
+                      let isParentDataIncomplete = item.expanded.some(subItem => {
                         const dataKey = validityMapping[subItem.href];
                         return dataKey !== undefined && !validity[dataKey];
                       });
                       return (
                         <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
-                                             style={{transitionDelay: `${delay}ms`}} direction="up">
+                          style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem nested>
                             <SimpleToggler
                               renderToggle={MenuRenderToggle({
@@ -1014,17 +1019,17 @@ export default function Sidebar(props: SidebarProps) {
                               }, item, toggle, setToggle)}
                               isOpen={!!toggle}
                             >
-                              <List sx={{gap: 0.75}} size={"sm"}>
+                              <List sx={{ gap: 0.75 }} size={"sm"}>
                                 {item.expanded.map((link, subIndex) => {
                                   const SubIcon = link.icon;
                                   // Calculate delay based on index (e.g., 100ms per item)
                                   const delay = (subIndex + 1) * 200;
-                                  const dataValidityKey = validityMapping[link.href];  // This should now be safely typed
-                                  const isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
+                                  let dataValidityKey = validityMapping[link.href];  // This should now be safely typed
+                                  let isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle}
-                                                         style={{transitionDelay: `${delay}ms`}} direction="up">
-                                      <ListItem sx={{marginTop: 0.75}}>
+                                      style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                      <ListItem sx={{ marginTop: 0.75 }}>
                                         <ListItemButton
                                           selected={pathname == (item.href + link.href)}
                                           disabled={isPlotSelectionRequired || isCensusSelectionRequired}
@@ -1035,7 +1040,7 @@ export default function Sidebar(props: SidebarProps) {
                                             badgeContent={isDataIncomplete ? '!' : undefined}
                                             invisible={!isDataIncomplete}
                                           >
-                                            <SubIcon/>
+                                            <SubIcon />
                                           </Badge>
                                           <ListItemContent>
                                             <Typography
@@ -1058,9 +1063,9 @@ export default function Sidebar(props: SidebarProps) {
             </SlideToggle>
           </SlideToggle>
         </Box>
-        <Box sx={{display: 'flex', alignItems: 'left', flexDirection: 'column'}}>
-          <Divider orientation={"horizontal"} sx={{mb: 2}}/>
-          <LoginLogout/>
+        <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
+          <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
+          <LoginLogout />
         </Box>
         <Modal open={openSiteSelectionModal} onClose={() => {
           setSite(currentSite);
@@ -1068,12 +1073,12 @@ export default function Sidebar(props: SidebarProps) {
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon/>
+              <WarningRoundedIcon />
               Site Selection
             </DialogTitle>
-            <Divider/>
-            <DialogContent sx={{width: 750}}>
-              <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+            <Divider />
+            <DialogContent sx={{ width: 750 }}>
+              <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Select Site:</Typography>
                   {renderSiteOptions()}
@@ -1081,7 +1086,7 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </DialogContent>
             <DialogActions>
-              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                 <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                   setSite(currentSite);
                   setOpenSiteSelectionModal(false);
@@ -1109,12 +1114,12 @@ export default function Sidebar(props: SidebarProps) {
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon/>
+              <WarningRoundedIcon />
               Plot Selection
             </DialogTitle>
-            <Divider/>
-            <DialogContent sx={{width: 750}}>
-              <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+            <Divider />
+            <DialogContent sx={{ width: 750 }}>
+              <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
                 {showPlotModForm ? (
                   <>{renderPlotForm()}</>
                 ) : (
@@ -1142,24 +1147,24 @@ export default function Sidebar(props: SidebarProps) {
                             alignItems: "center",
                             width: "100%"
                           }}>
-                            <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
+                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
                               <Typography level="body-lg">{item?.key}</Typography>
-                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: "1em"}}>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
                                 Quadrats: {item?.num}
                               </Typography>
-                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: "1em"}}>
+                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
                                 ID: {item?.id}
                               </Typography>
                             </Box>
                             <Box>
-                              <IconButton sx={{ml: "auto"}} onClick={(e) => {
+                              <IconButton sx={{ ml: "auto" }} onClick={(e) => {
                                 e.stopPropagation();
                                 openEditPlotModal(item);
                               }}>
-                                <EditIcon/>
+                                <EditIcon />
                                 Edit
                               </IconButton>
-                              <IconButton sx={{ml: "auto"}} onClick={(e) => {
+                              <IconButton sx={{ ml: "auto" }} onClick={(e) => {
                                 e.stopPropagation(); // Prevents triggering the select's onChange
                                 let searchedPlot = plotsLoadContext?.find(internal => internal.plotID === item?.id);
                                 console.log(plotsLoadContext);
@@ -1167,7 +1172,7 @@ export default function Sidebar(props: SidebarProps) {
                                 setPlotMarkedForDeletion(searchedPlot);
                                 setOpenPlotDeletionConfirmDialog(true);
                               }}>
-                                <DeleteIcon/>
+                                <DeleteIcon />
                                 Delete
                               </IconButton>
                             </Box>
@@ -1175,7 +1180,7 @@ export default function Sidebar(props: SidebarProps) {
                         </Option>
                       ))}
                     </Select>
-                    <Button color="primary" variant="outlined" sx={{alignSelf: 'flex-end'}} onClick={openAddPlotModal}>
+                    <Button color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }} onClick={openAddPlotModal}>
                       Add New Plot
                     </Button>
                   </Stack>
@@ -1184,7 +1189,7 @@ export default function Sidebar(props: SidebarProps) {
             </DialogContent>
             <DialogActions>
               {!showPlotModForm ? (
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                     setPlot(currentPlot);
                     setOpenPlotSelectionModal(false);
@@ -1205,7 +1210,7 @@ export default function Sidebar(props: SidebarProps) {
                   </Button>
                 </Stack>
               ) : (
-                <Stack direction="row" spacing={2} divider={<Divider orientation='vertical'/>}>
+                <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
                   <Button variant="outlined" onClick={() => {
                     setShowPlotModForm(false);
                     setNewPlotRDS(initialPlot);
@@ -1222,12 +1227,12 @@ export default function Sidebar(props: SidebarProps) {
         }}>
           <ModalDialog variant="outlined" role="alertdialog">
             <DialogTitle>
-              <WarningRoundedIcon/>
+              <WarningRoundedIcon />
               Census Selection
             </DialogTitle>
-            <Divider/>
-            <DialogContent sx={{width: 750}}>
-              <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
+            <Divider />
+            <DialogContent sx={{ width: 750 }}>
+              <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
                 {showCensusModForm ? (
                   <>{renderCensusForm()}</>
                 ) : (
@@ -1256,7 +1261,7 @@ export default function Sidebar(props: SidebarProps) {
                     >
                       <List>
                         <Option value={""}>None</Option>
-                        <Divider orientation={"horizontal"}/>
+                        <Divider orientation={"horizontal"} />
                         {sortedCensusList && sortedCensusList.length > 0 && (
                           sortedCensusList.map((item) => (
                             <Option key={item.plotCensusNumber} value={item.plotCensusNumber.toString()}>
@@ -1266,19 +1271,19 @@ export default function Sidebar(props: SidebarProps) {
                                 alignItems: "center",
                                 width: "100%"
                               }}>
-                                <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
+                                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
                                   <Typography level="body-lg">Census: {item.plotCensusNumber}</Typography>
-                                  <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                                  <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                                     {`Started: ${new Date(item.startDate).toDateString()}`}
                                   </Typography>
                                   {item.endDate && (
-                                    <Typography level="body-md" color={"primary"} sx={{paddingLeft: '1em'}}>
+                                    <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
                                       {`Ended: ${new Date(item.endDate).toDateString()}`}
                                     </Typography>
                                   )}
                                 </Box>
                                 <Box>
-                                  <IconButton sx={{ml: "auto"}} onClick={(e) => {
+                                  <IconButton sx={{ ml: "auto" }} onClick={(e) => {
                                     e.stopPropagation();
                                     // Filter and sort logic
                                     const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === item.plotCensusNumber)
@@ -1287,32 +1292,27 @@ export default function Sidebar(props: SidebarProps) {
                                     const mostRecentCensusRDS = filteredCensus?.[0] ?? null;
                                     setCensusMarkedForUpdate(mostRecentCensusRDS);
                                     setCensusMFUType(item.endDate ? 'open' : 'close');
-                                    setOpenCensusOpenCloseModal(true);
+                                    setOpenCensusCloseModal(true);
                                   }}>
-                                    {item.endDate ? (
+                                    {item.endDate === null && (
                                       <>
-                                        <PlayArrowIcon/>
-                                        Reopen Census
-                                      </>
-                                    ) : (
-                                      <>
-                                        <StopIcon/>
+                                        <StopIcon />
                                         Close Census
                                       </>
                                     )}
                                   </IconButton>
-                                  <IconButton sx={{ml: "auto"}} onClick={(e) => {
+                                  <IconButton sx={{ ml: "auto" }} onClick={(e) => {
                                     e.stopPropagation();
                                     openEditCensusModal(item);
                                   }}>
-                                    <EditIcon/>
+                                    <EditIcon />
                                     Edit
                                   </IconButton>
-                                  <IconButton sx={{ml: "auto"}} onClick={(e) => {
+                                  <IconButton sx={{ ml: "auto" }} onClick={(e) => {
                                     e.stopPropagation(); // Prevents triggering the select's onChange
                                     alert('Censuses cannot be deleted!');
                                   }}>
-                                    <DeleteIcon/>
+                                    <DeleteIcon />
                                     Delete
                                   </IconButton>
                                 </Box>
@@ -1322,8 +1322,8 @@ export default function Sidebar(props: SidebarProps) {
                         )}
                       </List>
                     </Select>
-                    <Button color="primary" variant="outlined" sx={{alignSelf: 'flex-end'}}
-                            onClick={openAddCensusModal}>
+                    <Button color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }}
+                      onClick={openAddCensusModal}>
                       Add New Census
                     </Button>
                   </Stack>
@@ -1332,7 +1332,7 @@ export default function Sidebar(props: SidebarProps) {
             </DialogContent>
             <DialogActions>
               {!showCensusModForm ? (
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                     setCensus(currentCensus);
                     if (census) setIsCensusSelectionRequired(false);
@@ -1351,7 +1351,7 @@ export default function Sidebar(props: SidebarProps) {
                   </Button>
                 </Stack>
               ) : (
-                <Stack direction="row" spacing={2} divider={<Divider orientation='vertical'/>}>
+                <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
                   <Button variant="outlined" onClick={() => {
                     setShowCensusModForm(false);
                     setNewCensusRDS(initialCensus);
@@ -1377,13 +1377,13 @@ export default function Sidebar(props: SidebarProps) {
               <Typography level='body-md'>Dimensions and
                 Coordinates: {plotMarkedForDeletion?.dimensionX}x{plotMarkedForDeletion?.dimensionY},
                 ({plotMarkedForDeletion?.globalX + ', ' + plotMarkedForDeletion?.globalY + ', ' + plotMarkedForDeletion?.globalZ})</Typography>
-              <Divider orientation='horizontal' sx={{marginY: 2}}/>
+              <Divider orientation='horizontal' sx={{ marginY: 2 }} />
               <Typography level='body-lg' color='danger'>This action cannot be undone. Please click the Confirm button
                 to continue
                 , or the Cancel button to return to the Plot Selection Menu</Typography>
             </DialogContent>
             <DialogActions>
-              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+              <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                 <Button size={"sm"} color={"warning"} variant="soft" onClick={() => {
                   setOpenPlotDeletionConfirmDialog(false);
                   setPlotMarkedForDeletion(initialPlot);
@@ -1402,90 +1402,57 @@ export default function Sidebar(props: SidebarProps) {
             </DialogActions>
           </ModalDialog>
         </Modal>
-        <Modal open={openCensusOpenCloseModal} onClose={() => {
+        <Modal open={openCensusCloseModal} onClose={() => {
         }}>
           <ModalDialog variant='outlined' role='alertdialog'>
             <DialogTitle>
-              <Typography component={'div'} level='h3' color='danger'>Are you sure you want to {censusMFUType} this
+              <Typography component={'div'} level='h3' color='danger'>Are you sure you want to close this
                 census?</Typography>
             </DialogTitle>
             <DialogContent>
-              <Typography level='body-lg' color='warning'>You are attempting to {censusMFUType} the following
+              <Typography level='body-lg' color='warning'>You are attempting to close the following
                 census:</Typography>
               <Typography level='body-md'>Census: {censusMarkedForUpdate?.plotCensusNumber}</Typography>
               <Typography level='body-md'>Starting: {dayjs(censusMarkedForUpdate?.startDate).toString()}</Typography>
-              {censusMFUType === 'open' && (
-                <Typography level='body-md'>Ending: {dayjs(censusMarkedForUpdate?.startDate).toString()}</Typography>
-              )}
-              {censusMFUType === 'close' && (
-                <DatePicker
-                  label="Choose an ending date"
-                  value={censusMarkedForUpdate?.endDate ? dayjs(censusMarkedForUpdate.endDate) : null}
-                  onChange={(newValue) => {
-                    setCensusMarkedForUpdate(prev => {
-                      return {
-                        ...prev!,
-                        plotID: currentPlot?.id ?? 0,
-                        endDate: newValue ? newValue.toDate() : null
-                      };
-                    });
-                  }}
-                  shouldDisableDate={(date) => dayjs(date).isBefore(dayjs(censusMarkedForUpdate?.startDate))}
-                />
-              )}
+              <DatePicker
+                label="Choose an ending date"
+                value={censusMarkedForUpdate?.endDate ? dayjs(censusMarkedForUpdate.endDate) : null}
+                onChange={(newValue) => {
+                  setCensusMarkedForUpdate(prev => {
+                    return {
+                      ...prev!,
+                      plotID: currentPlot?.id ?? 0,
+                      endDate: newValue ? newValue.toDate() : null
+                    };
+                  });
+                }}
+                shouldDisableDate={(date) => dayjs(date).isBefore(dayjs(censusMarkedForUpdate?.startDate))}
+              />
             </DialogContent>
             <DialogActions>
-              <Stack direction="row" spacing={2} divider={<Divider orientation='vertical'/>}>
+              <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
                 <Button variant="outlined" onClick={() => {
-                  setOpenCensusOpenCloseModal(false);
+                  setOpenCensusCloseModal(false);
                   setCensusMarkedForUpdate(null);
-                  setNewCensusRDS(initialCensus);
                 }}>Cancel</Button>
                 <Button onClick={async () => {
-                  // this seems like a weird route, but it seemed easier to reroute the update request through the existing handleSubmitCensus function
-                  // instead of copy-pasting most of it into its own dedicated function.
-                  // newCensusRDS is cleared at the end of execution, so the only thing left to do otherwise is close this modal and clear censusMarkedForUpdate.
-                  if (censusMFUType === 'open') {
-                    // Prepare the new state locally without setting it immediately
-                    const updatedCensusMarkedForUpdate = {
-                      ...censusMarkedForUpdate!,
-                      plotID: currentPlot?.id ?? 0,
-                      endDate: null
-                    };
-
-                    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
-                    let response = await fetch(url, {
-                      method: 'PATCH',
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({oldRow: undefined, newRow: updatedCensusMarkedForUpdate})
-                    });
-                    if (response.ok) {
-                      setOpenCensusOpenCloseModal(false);
-                      setOpenCensusSelectionModal(false);
-                      setCensusMarkedForUpdate(null);
-                      setManualReset(true);
-                    } else {
-                      alert('Failed to process the census. Please try again');
-                    }
-                  } else {
-                    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
-                    let response = await fetch(url, {
-                      method: 'PATCH',
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({oldRow: undefined, newRow: censusMarkedForUpdate})
-                    });
-                    if (response.ok) {
-                      setOpenCensusOpenCloseModal(false);
-                      setOpenCensusSelectionModal(false);
-                      setCensusMarkedForUpdate(null);
-                      setManualReset(true);
-                    } else {
-                      alert('Failed to process the census. Please try again');
-                    }
+                  const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
+                  let response = await fetch(url, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ oldRow: undefined, newRow: censusMarkedForUpdate })
+                  });
+                  if (response.ok) {
+                    setOpenCensusCloseModal(false);
+                    setOpenCensusSelectionModal(false);
                     setCensusMarkedForUpdate(null);
-                    setOpenCensusOpenCloseModal(false);
+                    setManualReset(true);
+                  } else {
+                    alert('Failed to process the census. Please try again');
                   }
-                }}>{censusMFUType === 'open' ? 'Reopen' : 'Close'} Census</Button>
+                  setCensusMarkedForUpdate(null);
+                  setOpenCensusCloseModal(false);
+                }}>Close Census</Button>
               </Stack>
             </DialogActions>
           </ModalDialog>
