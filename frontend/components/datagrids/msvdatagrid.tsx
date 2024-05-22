@@ -57,6 +57,7 @@ import {
 } from "@/app/contexts/userselectionprovider";
 import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
+import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -242,7 +243,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     });
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    saveAs(blob, `validation_errors_${currentPlot?.key}.csv`);
+    saveAs(blob, `validation_errors_${currentPlot?.plotName}.csv`);
   };
 
   const printErrorRows = () => {
@@ -255,7 +256,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     printContent += "table {width: 100%; border-collapse: collapse;}";
     printContent += "th, td {border: 1px solid black; padding: 8px; text-align: left;}";
     printContent += "</style></head><body>";
-    printContent += `<h5>Site: ${currentSite?.schemaName} | Plot: ${currentPlot?.key} | Census: ${currentCensus?.plotCensusNumber}</h5>`;
+    printContent += `<h5>Site: ${currentSite?.schemaName} | Plot: ${currentPlot?.plotName} | Census: ${currentCensus?.plotCensusNumber}</h5>`;
     printContent += "<table><thead><tr>";
 
     gridColumns.forEach(col => {
@@ -419,7 +420,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       'measurementssummaryview',
       pageToFetch,
       paginationModel.pageSize,
-      currentPlot?.id ?? 0,
+      currentPlot?.plotID ?? 0,
       currentCensus?.censusID ?? 0,
       currentQuadrat?.quadratID ?? 0
     );
@@ -429,7 +430,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
       console.log('output: ', data.output);
-      setRows(data.output);
+      setRows(data.output.length > 0 ? data.output : []);
       setRowCount(data.totalCount);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
@@ -450,7 +451,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   }, [paginationModel.page]);
 
   useEffect(() => {
-    if (currentPlot?.id || currentCensus?.censusID) {
+    if (currentPlot?.plotID || currentCensus?.censusID) {
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
   }, [currentPlot, currentCensus, paginationModel.page]);
@@ -631,7 +632,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       const response = await fetch(
         `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`
       );
-      const errors: CMError[] = await response.json();
+      // {failed: parsedValidationErrors, pending: pendingValidationRows}
+      const data = await response.json();
+      const errors: CMError[] = data.failed;
+      const pending: CoreMeasurementsRDS[] = data.pending;
 
       const errorMap = errors.reduce<Record<number, CMError>>((acc, error) => {
         acc[error.CoreMeasurementID] = error;

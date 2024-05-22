@@ -10,210 +10,6 @@ import {processCensus} from "@/components/processors/processcensus";
 import {bitToBoolean} from "@/config/macros";
 import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import MapperFactory from "@/config/datamapper";
-import {StemRDS, StemResult} from "@/config/sqlrdsdefinitions/tables/stemrds";
-import { GridCellParams } from "@mui/x-data-grid";
-
-export async function selectOrInsertFamily(connection: PoolConnection, schema: string, rowFamilyName: any,): Promise<number | undefined> {
-  let query = `SELECT FamilyID
-               FROM ${schema}.family
-               WHERE Family = ?`;
-  let familyResults = await runQuery(connection, query, [rowFamilyName]);
-  let familyID: number | undefined = undefined;
-  if (familyResults.length === 0) {
-    let insertResults = await runQuery(connection, `INSERT INTO ${schema}.family (Family)
-                                                    VALUES (?)`, [rowFamilyName]);
-    familyID = insertResults.insertId;
-  } else {
-    familyID = familyResults[0].FamilyID;
-  }
-
-  return familyID;
-}
-
-export async function selectOrInsertGenus(connection: PoolConnection, schema: string, rowGenusName: any, familyID?: number): Promise<number | undefined> {
-  let genusResults = await runQuery(connection, `SELECT GenusID
-                                                 FROM ${schema}.genus
-                                                 WHERE Genus = ?`, [rowGenusName]);
-  let genusID: number | undefined = genusResults.length > 0 ? genusResults[0].GenusID : undefined;
-  if (!genusID) {
-    if (familyID) {
-      let insertGenusResults = await runQuery(connection, `INSERT INTO ${schema}.genus (FamilyID, Genus)
-                                                           VALUES (?, ?)`, [familyID, rowGenusName]);
-      genusID = insertGenusResults.insertId;
-    } else {
-      let insertGenusResults = await runQuery(connection, `INSERT INTO ${schema}.genus (Genus)
-                                                           VALUES (?)`, [rowGenusName]);
-      genusID = insertGenusResults.insertId;
-    }
-  }
-  return genusID;
-}
-
-export async function getColumnValueByColumnName<T>(
-  connection: PoolConnection,
-  schema: string,
-  tableName: string,
-  columnNameToExtract: string,
-  columnNameToSearch: string,
-  columnValueToSearch: T
-): Promise<T | undefined> {
-  if (!columnNameToExtract || !columnNameToSearch || !columnValueToSearch) throw new Error('accidentally handed undefined value in parameter');
-
-  try {
-    const query = `
-      SELECT ${columnNameToExtract}
-      FROM ${schema}.${tableName}
-      WHERE ${columnNameToSearch} = ?
-    `;
-
-    const result = await runQuery(connection, query, [columnValueToSearch]); // Type assertion
-
-    if (result.length > 0) {
-      return result[0][columnNameToExtract] as T;
-    } else {
-      return undefined;
-    }
-  } catch (error: any) {
-    console.error(`Error retrieving ${columnNameToExtract} from ${tableName}:`, error.message);
-    throw error;
-  }
-}
-
-export async function processCode(
-  connection: PoolConnection,
-  schema: string,
-  codesArray: string[],
-  coreMeasurementIDConnected: number
-) {
-  if (!codesArray || !coreMeasurementIDConnected) throw new Error('undefined codes array OR coremeasurementID received in processCode');
-
-  try {
-    // Prepare the query to check if the attribute exists
-    const attributeExistsQuery = `
-      SELECT Code
-      FROM ${schema}.attributes
-      WHERE Code = ?
-    `;
-    // Prepare the query to insert code into CMAttributes
-    const insertCMAttributeQuery = `
-      INSERT INTO ${schema}.cmattributes (CoreMeasurementID, Code)
-      VALUES (?, ?) as new_data
-      ON DUPLICATE KEY
-      UPDATE
-        CoreMeasurementID = new_data.CoreMeasurementID,
-        Code = new_data.Code;
-    `;
-
-    // Iterate over each coreMeasurementID
-    // For each coreMeasurementID, iterate over the codesArray
-    for (const code of codesArray) {
-      const attributeResult = await runQuery(connection, attributeExistsQuery, [code]);
-      if (attributeResult.length === 0) {
-        throw new Error(`The attribute code '${code}' does not exist in SQL`);
-      }
-      // Insert each combination of coreMeasurementID and code into CMAttributes
-      await runQuery(connection, insertCMAttributeQuery, [coreMeasurementIDConnected, code]);
-    }
-    // Commit the transaction
-    await connection.commit();
-  } catch (error: any) {
-    console.error('Error processing code:', error.message);
-    throw error;
-  }
-}
-
-export async function processTrees(
-  connection: PoolConnection,
-  schema: string,
-  treeTag: any,
-  speciesID: any,
-): Promise<number | null> {
-  if (!treeTag || !speciesID) throw new Error('undefined treetag or speciesid passed to processTrees');
-
-  try {
-    // Prepare the query with the new alias method
-    const query = `
-      INSERT INTO ${schema}.trees (TreeTag, SpeciesID)
-      VALUES (?, ?) AS new_data
-      ON DUPLICATE KEY
-      UPDATE
-        SpeciesID = new_data.SpeciesID,
-    `;
-
-    // Execute the query
-    const upsertTreesResult = await runQuery(connection, query, [
-      treeTag,
-      speciesID,
-    ]);
-    return upsertTreesResult.insertId;
-  } catch (error: any) {
-    console.error('Error processing trees:', error.message);
-    throw error;
-  }
-}
-
-export async function processStems(
-  connection: PoolConnection,
-  schema: string,
-  stemTag: any,
-  treeID: any,
-  subQuadratID: any,
-  localX: any,
-  localY: any,
-  unit: any
-): Promise<number | null> {
-  if (!stemTag || !treeID || !subQuadratID || !localX || !localY || !unit) {
-    throw new Error('process stems: 1 or more undefined parameters received');
-  }
-
-  try {
-    // Prepare the query
-    const checkQuery = `SELECT *
-                        FROM ${schema}.stems
-                        WHERE TreeID = ?
-                          AND SubquadratID = ?
-                          AND StemTag = ?`;
-
-    const countResults = await runQuery(connection, checkQuery, [treeID, subQuadratID, stemTag]);
-    const mapper = MapperFactory.getMapper<StemResult, StemRDS>('stems');
-
-    if (countResults.length > 0) {
-      // Existing stem found, update it
-      const rows = mapper.mapData(countResults);
-      if (rows.length > 1) {
-        throw new Error("multiple unique stem signatures detected, indicating a breakage in system. Please contact an administrator.");
-      }
-
-      let otherStem = rows[0];
-      let moved = false;
-      if (otherStem.localX !== localX || otherStem.localY !== localY) {
-        moved = true;
-      }
-      const updateQuery = `UPDATE ${schema}.stems
-                           SET TreeID       = ?,
-                               SubquadratID = ?,
-                               StemTag      = ?,
-                               LocalX       = ?,
-                               LocalY       = ?,
-                               Unit         = ?,
-                               Moved        = ?
-                           WHERE StemID = ?`;
-
-      await runQuery(connection, updateQuery, [treeID, subQuadratID, stemTag, localX, localY, unit, moved, otherStem.stemID]);
-      return otherStem.stemID;
-    } else {
-      // New stem, insert it
-      const insertQuery = `INSERT INTO ${schema}.stems (TreeID, SubquadratID, StemTag, LocalX, LocalY, Unit, Moved)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)`;
-
-      const results = await runQuery(connection, insertQuery, [treeID, subQuadratID, stemTag, localX, localY, unit, false]);
-      return results.insertId;
-    }
-  } catch (error: any) {
-    console.error('Error processing stems:', error.message);
-    throw error;
-  }
-}
 
 export async function getPersonnelIDByName(
   connection: PoolConnection,
@@ -248,22 +44,19 @@ export async function getPersonnelIDByName(
   }
 }
 
-export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | null> {
+export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | undefined> {
   const {formType, schema, ...subProps} = props;
   const {connection, rowData} = subProps;
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
-  console.log('INSERT OR UPDATE: schema & mapping found');
   if (formType === 'measurements') {
     return await processCensus({...subProps, schema});
   } else {
     if (mapping.specialProcessing) {
-      console.log('INSERT OR UPDATE: special processing found. Moving to subfunction:');
       await mapping.specialProcessing({...subProps, schema});
     } else {
-      console.log('INSERT OR UPDATE: no special processing found. Beginning manual insert:');
       const columns = Object.keys(mapping.columnMappings);
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
@@ -274,7 +67,6 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
         UPDATE
           ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
       `;
-      console.log(`INSERT OR UPDATE: query constructed: ${query}`);
 
       try {
         // Execute the query using the provided connection
@@ -287,9 +79,8 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
         await connection.rollback();
         throw error; // Re-throw the error after rollback
       }
-      console.log('INSERT OR UPDATE: default query completed. Exiting...');
     }
-    return null;
+    return undefined;
   }
 }
 
@@ -376,6 +167,7 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     `;
     const sitesParams: any[] | undefined = [];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
+    console.log('getallschemas: ', sitesResults);
 
     const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('sites');
     return mapper.mapData(sitesResults);
@@ -430,24 +222,14 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
  * @param fieldList List of fields to check for changes.
  * @returns An array of fields that have changed.
  */
+// helper functions for precise field changes
 export function detectFieldChanges(newRow: any, oldRow: any, fieldList: string[]): string[] {
   return fieldList.filter(field => newRow[field] !== oldRow[field]);
 }
 
-/**
- * Generates SQL UPDATE queries based on the fields that have changed.
- * @param schema The database schema name.
- * @param table The table where the update needs to be made.
- * @param changedFields The fields that have changed.
- * @param newRow The updated row data.
- * @param primaryKey The primary key field name of the table.
- * @returns An array of SQL update statements.
- */
 export function generateUpdateQueries(schema: string, table: string, changedFields: string[], newRow: any, primaryKey: string): string[] {
   return changedFields.map(field => {
-    return mysql.format(`UPDATE ??
-                         SET ?? = ?
-                         WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
+    return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
   });
 }
 
@@ -464,7 +246,7 @@ interface UpdateQueryConfig {
 }
 
 export function generateUpdateOperations(schema: string, newRow: any, oldRow: any, config: UpdateQueryConfig): string[] {
-  const {fieldList, slices} = config;
+  const { fieldList, slices } = config;
   const changedFields = detectFieldChanges(newRow, oldRow, fieldList);
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string[] => {
@@ -472,7 +254,7 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
     if (!sliceConfig) {
       return []; // Safety check in case of an undefined slice
     }
-    const {range, primaryKey} = sliceConfig;
+    const { range, primaryKey } = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
     const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
     return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
@@ -483,24 +265,17 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
     const queries = generateQueriesFromSlice(type);
     return [...acc, ...queries];
   }, [] as string[]).filter(query => query.length > 0);
-};
+}
 
-/**
- * Generates SQL INSERT operations for each configured slice of the newRow.
- * @param schema The database schema name.
- * @param newRow The new row data.
- * @param config Configuration specifying how fields are grouped into slices and their respective tables.
- * @returns An array of SQL insert statements for each slice.
- */
 export function generateInsertOperations(schema: string, newRow: any, config: UpdateQueryConfig): string[] {
-  const {fieldList, slices} = config;
+  const { fieldList, slices } = config;
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string => {
     const sliceConfig = slices[type];
     if (!sliceConfig) {
       return ''; // Safety check in case of an undefined slice
     }
-    const {range} = sliceConfig;
+    const { range } = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
     return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
   };
@@ -511,29 +286,36 @@ export function generateInsertOperations(schema: string, newRow: any, config: Up
   }).filter(query => query.length > 0);
 }
 
+export function generateInsertQuery(schema: string, table: string, fields: string[], newRow: any): string {
+  // Create an object containing only the fields in this slice
+  const dataToInsert = fields.reduce((obj, field) => {
+    obj[field] = newRow[field];
+    return obj;
+  }, {} as Record<string, any>);
+
+  // Use mysql.format to safely construct the query
+  return mysql.format(`INSERT INTO ?? SET ?`, [`${schema}.${table}`, dataToInsert]);
+}
+
+// Field definitions and configurations
 export const stemDimensionsViewFields = [
-  // trees
   'treeTag', // slice (0, 1)
-  // stems
   'stemTag', // slice (1, 5)
   'stemLocalX',
   'stemLocalY',
   'stemUnits',
-  // subquadrats // slice (5, 12)
-  'subquadratName',
+  'subquadratName', // slice (5, 12)
   'subquadratDimensionX',
   'subquadratDimensionY',
   'subquadratX',
   'subquadratY',
   'subquadratUnits',
   'subquadratOrderPosition',
-  // quadrats // slice (12, 16)
-  'quadratName',
+  'quadratName', // slice (12, 16)
   'quadratDimensionX',
   'quadratDimensionY',
   'quadratUnits',
-  // plots // slice (16, )
-  'plotName',
+  'plotName', // slice (16, )
   'locationName',
   'countryName',
   'plotDimensionX',
@@ -545,12 +327,9 @@ export const stemDimensionsViewFields = [
 ];
 
 export const allTaxonomiesFields = [
-  // family
   'family',
-  // genus
   'genus',
   'genusAuthority',
-  // species
   'speciesCode',
   'speciesName',
   'subspeciesName',
@@ -559,23 +338,18 @@ export const allTaxonomiesFields = [
   'obsoleteTaxonFlag',
   'fieldFamily',
   'speciesDescription',
-  // reference
   'publicationTitle',
   'fullReference',
   'dateOfPublication',
   'citation'
 ];
+
 export const stemTaxonomiesViewFields = [
-  // trees
   'treeTag',
-  // stems
   'stemTag',
-  // family
   'family',
-  // genus
   'genus',
   'genusAuthority',
-  // species
   'speciesCode',
   'speciesName',
   'subspeciesName',
@@ -590,50 +364,31 @@ export const stemTaxonomiesViewFields = [
 export const StemDimensionsViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemDimensionsViewFields,
   slices: {
-    trees: {range: [0, 1], primaryKey: 'TreeID'},
-    stems: {range: [1, 5], primaryKey: 'StemID'},
-    subquadrats: {range: [5, 12], primaryKey: 'SubquadratID'},
-    quadrats: {range: [12, 16], primaryKey: 'QuadratID'},
-    plots: {range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID'},
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 5], primaryKey: 'StemID' },
+    subquadrats: { range: [5, 12], primaryKey: 'SubquadratID' },
+    quadrats: { range: [12, 16], primaryKey: 'QuadratID' },
+    plots: { range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID' },
   }
 };
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
-    family: {range: [0, 1], primaryKey: 'FamilyID'},
-    genus: {range: [1, 3], primaryKey: 'GenusID'},
-    species: {range: [3, 11], primaryKey: 'SpeciesID'},
-    reference: {range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID'},
+    family: { range: [0, 1], primaryKey: 'FamilyID' },
+    genus: { range: [1, 3], primaryKey: 'GenusID' },
+    species: { range: [3, 11], primaryKey: 'SpeciesID' },
+    reference: { range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID' },
   }
 };
+
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
-    trees: {range: [0, 1], primaryKey: 'TreeID'},
-    stems: {range: [1, 2], primaryKey: 'StemID'},
-    family: {range: [2, 3], primaryKey: 'FamilyID'},
-    genus: {range: [3, 5], primaryKey: 'GenusID'},
-    species: {range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID'},
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 2], primaryKey: 'StemID' },
+    family: { range: [2, 3], primaryKey: 'FamilyID' },
+    genus: { range: [3, 5], primaryKey: 'GenusID' },
+    species: { range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID' },
   }
 };
-
-/**
- * Generates a single SQL INSERT query for each subset of fields in a newRow.
- * @param schema The database schema name.
- * @param table The table where the insert needs to be made.
- * @param fields The fields to include in the insert.
- * @param newRow The new row data to be inserted.
- * @returns A SQL insert statement.
- */
-export function generateInsertQuery(schema: string, table: string, fields: string[], newRow: any): string {
-  // Create an object containing only the fields in this slice
-  const dataToInsert = fields.reduce((obj, field) => {
-    obj[field] = newRow[field];
-    return obj;
-  }, {} as Record<string, any>);
-
-  // Use mysql.format to safely construct the query
-  return mysql.format(`INSERT INTO ??
-  SET ?`, [`${schema}.${table}`, dataToInsert]);
-}

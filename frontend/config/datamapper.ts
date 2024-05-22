@@ -9,14 +9,14 @@ import { SpeciesMapper } from "./sqlrdsdefinitions/tables/speciesrds";
 import { StemsMapper } from "./sqlrdsdefinitions/tables/stemrds";
 import { StemDimensionsMapper } from "./sqlrdsdefinitions/views/stemdimensionsviewrds";
 import { SubquadratsMapper } from "./sqlrdsdefinitions/tables/subquadratrds";
-import { AllTaxonomyViewMapper } from "./sqlrdsdefinitions/views/alltaxonomyviewrds";
+import { AllTaxonomiesViewMapper } from "./sqlrdsdefinitions/views/alltaxonomyviewrds";
 import { ValidationHistoryMapper } from "./sqlrdsdefinitions/tables/valchangelogrds";
 import { PlotsMapper } from "./sqlrdsdefinitions/tables/plotrds";
 import { StemTaxonomiesMapper } from "./sqlrdsdefinitions/views/stemtaxonomyviewrds";
 import { QuadratPersonnelMapper } from "./sqlrdsdefinitions/tables/quadratpersonnelrds";
 
-export function parseDate(date: any): Date | null {
-  if (!date) return null;
+export function parseDate(date: any): Date | undefined {
+  if (!date) return undefined;
   // Check if date is a number (UNIX timestamp), string, or already a Date object
   if (typeof date === 'number') {
     return new Date(date * 1000); // Convert UNIX timestamp to milliseconds
@@ -25,7 +25,7 @@ export function parseDate(date: any): Date | null {
   } else if (date instanceof Date) {
     return date; // Already a Date object
   } else {
-    return null; // Invalid type for date
+    return undefined; // Invalid type for date
   }
 }
 
@@ -64,7 +64,7 @@ class MapperFactory {
         return new SubquadratsMapper() as any;
       // views:
       case 'alltaxonomiesview':
-        return new AllTaxonomyViewMapper() as any;
+        return new AllTaxonomiesViewMapper() as any;
       case 'stemdimensionsview':
         return new StemDimensionsMapper() as any;
       case 'stemtaxonomiesview':

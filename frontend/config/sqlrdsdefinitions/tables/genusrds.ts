@@ -2,12 +2,12 @@ import { GridColDef } from '@mui/x-data-grid';
 import { IDataMapper } from '../../datamapper';
 
 export type GenusRDS = {
-  id: number;
-  genusID: number;
-  familyID: number | null;
-  genus: string | null;
-  referenceID: number | null;
-  genusAuthority: string | null;
+  id?: number;
+  genusID?: number;
+  familyID?: number;
+  genus?: string;
+  referenceID?: number;
+  genusAuthority?: string;
 };
 
 export interface GenusResult {
@@ -22,23 +22,25 @@ export class GenusMapper implements IDataMapper<GenusResult, GenusRDS> {
   mapData(results: GenusResult[], indexOffset: number = 1): GenusRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      genusID: Number(item.GenusID),
-      familyID: Number(item.FamilyID),
-      genus: String(item.Genus),
-      referenceID: Number(item.ReferenceID),
-      genusAuthority: String(item.GenusAuthority),
+      genusID: item.GenusID != null ? Number(item.GenusID) : undefined,
+      familyID: item.FamilyID != null ? Number(item.FamilyID) : undefined,
+      genus: item.Genus != null ? String(item.Genus) : undefined,
+      referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
+      genusAuthority: item.GenusAuthority != null ? String(item.GenusAuthority) : undefined,
     }));
   }
+
   demapData(results: GenusRDS[]): GenusResult[] {
     return results.map((item) => ({
-      GenusID: Number(item.genusID),
-      FamilyID: Number(item.familyID),
-      Genus: String(item.genus),
-      ReferenceID: Number(item.referenceID),
-      GenusAuthority: String(item.genusAuthority)
+      GenusID: item.genusID != null ? Number(item.genusID) : null,
+      FamilyID: item.familyID != null ? Number(item.familyID) : null,
+      Genus: item.genus != null ? String(item.genus) : null,
+      ReferenceID: item.referenceID != null ? Number(item.referenceID) : null,
+      GenusAuthority: item.genusAuthority != null ? String(item.genusAuthority) : null,
     }));
   }
 }
+
 
 export const GenusGridColumns: GridColDef[] = [
   { field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},

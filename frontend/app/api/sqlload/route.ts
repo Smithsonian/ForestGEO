@@ -29,24 +29,24 @@ export async function POST(request: NextRequest) {
   let quadratIDParam = request.nextUrl.searchParams.get("quadrat");
   if (!quadratIDParam) throw new Error("no quadrat ID provided");
   let quadratID = parseInt(quadratIDParam.trim());
-  // full name
-  let fullName = request.nextUrl.searchParams.get("user");
-  if (!fullName) throw new Error('no full name provided!');
-  fullName = fullName.trim();
   // form type
   let formType = request.nextUrl.searchParams.get("formType");
   if (!formType) throw new Error('no formType provided!');
   formType = formType.trim();
-  // unit of measurement
-  let dbhUnit = request.nextUrl.searchParams.get('dbhUnit');
-  if (!dbhUnit) throw new Error('no DBH unitOfMeasurement provided!');
-  dbhUnit = dbhUnit.trim();
-  let homUnit = request.nextUrl.searchParams.get('homUnit');
-  if (!homUnit) throw new Error('no HOM unitOfMeasurement provided!');
-  dbhUnit = dbhUnit.trim();
-  let coordUnit = request.nextUrl.searchParams.get('coordUnit');
-  if (!coordUnit) throw new Error('no Coordinate unitOfMeasurement provided!');
-  dbhUnit = dbhUnit.trim();
+// full name
+  let fullName = request.nextUrl.searchParams.get("user") ?? undefined;
+  // if (!fullName) throw new Error('no full name provided!');
+  // fullName = fullName.trim();
+  // unit of measurement --> use has been incorporated into form
+  // let dbhUnit = request.nextUrl.searchParams.get('dbhUnit');
+  // if (!dbhUnit) throw new Error('no DBH unitOfMeasurement provided!');
+  // dbhUnit = dbhUnit.trim();
+  // let homUnit = request.nextUrl.searchParams.get('homUnit');
+  // if (!homUnit) throw new Error('no HOM unitOfMeasurement provided!');
+  // dbhUnit = dbhUnit.trim();
+  // let coordUnit = request.nextUrl.searchParams.get('coordUnit');
+  // if (!coordUnit) throw new Error('no Coordinate unitOfMeasurement provided!');
+  // dbhUnit = dbhUnit.trim();
 
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
@@ -88,6 +88,7 @@ export async function POST(request: NextRequest) {
   for (const rowId in fileRowSet) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
+    console.log('row for row ID: ', row);
     try {
       let props: InsertUpdateProcessingProps = {
         schema,
@@ -98,13 +99,15 @@ export async function POST(request: NextRequest) {
         censusID,
         quadratID,
         fullName,
-        dbhUnit: dbhUnit,
-        homUnit: homUnit,
-        coordUnit: coordUnit,
+        // dbhUnit: dbhUnit,
+        // homUnit: homUnit,
+        // coordUnit: coordUnit,
       };
       const coreMeasurementID = await insertOrUpdate(props);
       if (formType === 'measurements' && coreMeasurementID) {
         idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});
+      } else if (formType === 'measurements' && coreMeasurementID === undefined) {
+        throw new Error("CoreMeasurement insertion failure at row: " + row);
       }
     } catch (error) {
       if (error instanceof Error) {

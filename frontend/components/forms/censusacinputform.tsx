@@ -393,7 +393,7 @@ const CensusAutocompleteInputForm = () => {
 
     try {
       // Add code to retrieve additional required parameters like schema, fileName, etc.
-      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.id}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=measurements&uom=metric`, {
+      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.plotID}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=measurements&uom=metric`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -437,7 +437,7 @@ const CensusAutocompleteInputForm = () => {
   }
   return (
     <Box sx={{display: 'flex', width: '100%', height: '100%', flexDirection: 'column'}}>
-      <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.key ?? 'None'}, Census
+      <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.plotName ?? 'None'}, Census
         ID: {currentCensus?.censusID ?? '0'}</Typography>
       <Box sx={{display: 'flex', justifyContent: 'flex-end', marginTop: 2}}>
         <Button

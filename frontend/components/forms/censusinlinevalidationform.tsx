@@ -410,7 +410,7 @@ const CensusAutocompleteInputForm = () => {
 
   return (
     <Box sx={{display: 'flex', width: '100%', height: '100%', flexDirection: 'column'}}>
-      <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.key ?? 'None'}, Census
+      <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.plotName ?? 'None'}, Census
         ID: {currentCensus?.censusID ?? '0'}</Typography>
       <Box sx={{display: 'flex', justifyContent: 'flex-end', marginTop: 2}}>
         {/* <Button

@@ -23,7 +23,7 @@ const DataValidityContext = createContext<{
   triggerRefresh: () => { },
   recheckValidityIfNeeded: async () => { },
 });
-
+ 
 export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
   const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
@@ -34,27 +34,22 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
 
   const setValidity = useCallback((type: keyof UnifiedValidityFlags, value: boolean) => {
     setValidityState(prev => ({ ...prev, [type]: value }));
-    console.log(`setValidity: ${type} set to ${value}`);
   }, []);
 
   const checkDataValidity = useCallback(async (type?: keyof UnifiedValidityFlags) => {
     if (!currentSite || !currentPlot || !currentCensus) return;
     let url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.censusID}`;
-    console.log(`Fetching data validity for ${type} from ${url}`);
     let response = await fetch(url, { method: 'GET' });
     setValidity(type as keyof UnifiedValidityFlags, response.ok);
   }, [currentSite, currentPlot, currentCensus, setValidity]);
 
   const recheckValidityIfNeeded = useCallback(async () => {
-    console.log('Rechecking validity if needed:', validity);
     if ((Object.values(validity).some(flag => !flag)) || refreshNeeded) {
       const typesToRefresh = Object.entries(validity)
         .filter(([_, value]) => !value)
         .map(([key]) => key as keyof UnifiedValidityFlags);
 
-      console.log('Refreshing data validity for types:', typesToRefresh);
       await Promise.all(typesToRefresh.map(item => checkDataValidity(item)));
-      console.log('Validity after processing:', validity);
       setRefreshNeeded(false); // Reset the refresh flag after rechecking
     } else {
       console.log('No flags set for rechecking, or missing site/plot/census data');
@@ -74,7 +69,6 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   }, [currentSite, currentPlot, currentCensus]);
 
   const triggerRefresh = useCallback((types?: (keyof UnifiedValidityFlags)[]) => {
-    console.log('triggerRefresh called with types:', types);
     if (types) {
       types.forEach(type => setValidity(type, false));
     } else {

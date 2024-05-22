@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import { PoolConnection } from "mysql2/promise";
 import { CMError } from "@/config/macros/uploadsystemmacros";
+import MapperFactory from "@/config/datamapper";
 
 export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
@@ -45,8 +46,9 @@ export async function GET(request: NextRequest) {
         cm.IsValidated = b'0' AND cme.CMVErrorID IS NULL;
     `;
     const pendingValidationRows = await runQuery(conn, pendingValidationQuery);
-
-    return new NextResponse(JSON.stringify({failed: parsedValidationErrors, pending: pendingValidationRows}), {
+    const mapper = MapperFactory.getMapper<any, any>('coremeasurements');
+    const mappedPending = mapper.mapData(pendingValidationRows);
+    return new NextResponse(JSON.stringify({failed: parsedValidationErrors, pending: mappedPending}), {
       status: 200,
       headers: {
         'Content-Type': 'application/json'

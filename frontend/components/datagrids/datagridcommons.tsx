@@ -307,20 +307,20 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   };
 
   const fetchPaginatedData = async (pageToFetch: number) => {
-    console.log('fetchPaginatedData triggered');
+    // console.log('fetchPaginatedData triggered');
     let paginatedQuery = createFetchQuery(
       currentSite?.schemaName ?? '',
       gridType,
       pageToFetch,
       paginationModel.pageSize,
-      currentPlot?.id,
+      currentPlot?.plotID,
       currentCensus?.censusID,
       currentQuadrat?.quadratID
     );
     try {
       const response = await fetch(paginatedQuery, { method: 'GET' });
       const data = await response.json();
-      console.log('fetchPaginatedData data (json-converted): ', data);
+      // console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
       setRows(data.output);
       setRowCount(data.totalCount);
@@ -331,7 +331,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         setIsNewRowAdded(false);
       }
 
-      console.log('Data validity refresh triggered for gridType:', gridType);
+      // console.log('Data validity refresh triggered for gridType:', gridType);
     } catch (error) {
       console.error('Error fetching data:', error);
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
@@ -345,7 +345,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   }, [paginationModel.page]);
 
   useEffect(() => {
-    if (currentPlot?.id || currentCensus?.censusID) {
+    if (currentPlot?.plotID || currentCensus?.censusID) {
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
   }, [currentPlot, currentCensus, paginationModel.page]);
@@ -500,7 +500,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   }, [gridColumns, locked, rowModesModel]);
 
   const filteredColumns = useMemo(() => {
-    if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns)
+    if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns);
     else return columns;
   }, [rows, columns]);
 
