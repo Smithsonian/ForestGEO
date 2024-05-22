@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   if (!file) return NextResponse.error();
   let containerClient: any = null;
   try {
-    containerClient = await getContainerClient(`${plot}-${census}`);
+    containerClient = await getContainerClient(`${plot}-${census}`.toLowerCase());
   } catch (error: any) {
     if (error instanceof Error) {
       console.error("Error getting container client:", error.message);

@@ -16,43 +16,43 @@ import {
   LoadAction
 } from "@/config/macros/contextreducers";
 
-export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | null>(null);
-export const AttributeLoadContext = createContext<AttributesRDS[] | null>(null);
-export const CensusLoadContext = createContext<CensusRDS[] | null>(null);
-export const PersonnelLoadContext = createContext<PersonnelRDS[] | null>(null);
-export const QuadratsLoadContext = createContext<QuadratsRDS[] | null>(null);
-export const SpeciesLoadContext = createContext<SpeciesRDS[] | null>(null);
-export const PlotsLoadContext = createContext<PlotRDS[] | null>(null);
-export const CoreMeasurementLoadDispatchContext = createContext<EnhancedDispatch<CoreMeasurementsRDS[]> | null>(null);
-export const AttributeLoadDispatchContext = createContext<EnhancedDispatch<AttributesRDS[]> | null>(null);
-export const CensusLoadDispatchContext = createContext<EnhancedDispatch<CensusRDS[]> | null>(null);
-export const PersonnelLoadDispatchContext = createContext<EnhancedDispatch<PersonnelRDS[]> | null>(null);
-export const QuadratsLoadDispatchContext = createContext<EnhancedDispatch<QuadratsRDS[]> | null>(null);
-export const SpeciesLoadDispatchContext = createContext<EnhancedDispatch<SpeciesRDS[]> | null>(null);
-export const PlotsLoadDispatchContext = createContext<EnhancedDispatch<PlotRDS[]> | null>(null);
+export const CoreMeasurementLoadContext = createContext<CoreMeasurementsRDS[] | undefined>(undefined);
+export const AttributeLoadContext = createContext<AttributesRDS[] | undefined>(undefined);
+export const CensusLoadContext = createContext<CensusRDS[] | undefined>(undefined);
+export const PersonnelLoadContext = createContext<PersonnelRDS[] | undefined>(undefined);
+export const QuadratsLoadContext = createContext<QuadratsRDS[] | undefined>(undefined);
+export const SpeciesLoadContext = createContext<SpeciesRDS[] | undefined>(undefined);
+export const PlotsLoadContext = createContext<PlotRDS[] | undefined>(undefined);
+export const CoreMeasurementLoadDispatchContext = createContext<EnhancedDispatch<CoreMeasurementsRDS[]> | undefined>(undefined);
+export const AttributeLoadDispatchContext = createContext<EnhancedDispatch<AttributesRDS[]> | undefined>(undefined);
+export const CensusLoadDispatchContext = createContext<EnhancedDispatch<CensusRDS[]> | undefined>(undefined);
+export const PersonnelLoadDispatchContext = createContext<EnhancedDispatch<PersonnelRDS[]> | undefined>(undefined);
+export const QuadratsLoadDispatchContext = createContext<EnhancedDispatch<QuadratsRDS[]> | undefined>(undefined);
+export const SpeciesLoadDispatchContext = createContext<EnhancedDispatch<SpeciesRDS[]> | undefined>(undefined);
+export const PlotsLoadDispatchContext = createContext<EnhancedDispatch<PlotRDS[]> | undefined>(undefined);
 
 export function CoreDataProvider({ children }: Readonly<{ children: React.ReactNode }>) {
 
   const [coreMeasurementLoad, coreMeasurementLoadDispatch] =
-    useReducer<React.Reducer<CoreMeasurementsRDS[] | null, LoadAction<CoreMeasurementsRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<CoreMeasurementsRDS[] | undefined, LoadAction<CoreMeasurementsRDS[]>>>(genericLoadReducer, []);
 
   const [attributeLoad, attributeLoadDispatch] =
-    useReducer<React.Reducer<AttributesRDS[] | null, LoadAction<AttributesRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<AttributesRDS[] | undefined, LoadAction<AttributesRDS[]>>>(genericLoadReducer, []);
 
   const [censusLoad, censusLoadDispatch] =
-    useReducer<React.Reducer<CensusRDS[] | null, LoadAction<CensusRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<CensusRDS[] | undefined, LoadAction<CensusRDS[]>>>(genericLoadReducer, []);
 
   const [personnelLoad, personnelLoadDispatch] =
-    useReducer<React.Reducer<PersonnelRDS[] | null, LoadAction<PersonnelRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<PersonnelRDS[] | undefined, LoadAction<PersonnelRDS[]>>>(genericLoadReducer, []);
 
   const [quadratsLoad, quadratsLoadDispatch] =
-    useReducer<React.Reducer<QuadratsRDS[] | null, LoadAction<QuadratsRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<QuadratsRDS[] | undefined, LoadAction<QuadratsRDS[]>>>(genericLoadReducer, []);
 
   const [speciesLoad, speciesLoadDispatch] =
-    useReducer<React.Reducer<SpeciesRDS[] | null, LoadAction<SpeciesRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<SpeciesRDS[] | undefined, LoadAction<SpeciesRDS[]>>>(genericLoadReducer, []);
 
   const [plotsLoad, plotsLoadDispatch] =
-    useReducer<React.Reducer<PlotRDS[] | null, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<PlotRDS[] | undefined, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
 
   const enhancedCoreMeasurementLoadDispatch = createEnhancedDispatch(coreMeasurementLoadDispatch, 'coreMeasurementLoad');
   const enhancedAttributeLoadDispatch = createEnhancedDispatch(attributeLoadDispatch, 'attributeLoad');

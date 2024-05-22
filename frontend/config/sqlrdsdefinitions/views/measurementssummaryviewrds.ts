@@ -2,6 +2,52 @@ import {GridColDef} from "@mui/x-data-grid";
 import moment from "moment";
 import {IDataMapper, parseDate} from "../../datamapper";
 import { unitSelectionOptions } from "@/config/macros";
+import { ValidationFunction, RowValidationErrors } from "@/config/macros/formdetails";
+
+export const validateMeasurementsRow: ValidationFunction = (row) => {
+  const errors: RowValidationErrors = {};
+
+  if (row['dbhunit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['dbhunit'])) {
+    errors['dbhunit'] = 'Invalid DBH unit value.';
+  }
+  if (row['homunit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['homunit'])) {
+    errors['homunit'] = 'Invalid HOM unit value.';
+  }
+
+  return Object.keys(errors).length > 0 ? errors : null;
+};
+
+export type MeasurementsSummaryRDS = {
+  id?: number;
+  coreMeasurementID?: number;
+  plotID?: number;
+  plotName?: string;
+  censusID?: number;
+  censusStartDate?: any;
+  censusEndDate?: any;
+  quadratID?: number;
+  quadratName?: string;
+  subquadratID?: number;
+  subquadratName?: string;
+  speciesID?: number;
+  speciesCode?: string;
+  treeID?: number;
+  treeTag?: string;
+  stemID?: number;
+  stemTag?: string;
+  stemLocalX?: number;
+  stemLocalY?: number;
+  stemUnits?: string;
+  personnelID?: number;
+  personnelName?: string;
+  measurementDate?: any;
+  measuredDBH?: number;
+  dbhUnits?: string;
+  measuredHOM?: number;
+  homUnits?: string;
+  description?: string;
+  attributes?: string;
+};
 
 export interface MeasurementsSummaryResult {
   CoreMeasurementID: any;
@@ -34,103 +80,71 @@ export interface MeasurementsSummaryResult {
   Attributes: any;
 }
 
-export type MeasurementsSummaryRDS = {
-  id: number;
-  coreMeasurementID: number;
-  plotID: number | null;
-  plotName: string | null;
-  censusID: number | null;
-  censusStartDate: any;
-  censusEndDate: any;
-  quadratID: number | null;
-  quadratName: string | null;
-  subquadratID: number | null;
-  subquadratName: string | null;
-  speciesID: number | null;
-  speciesCode: string | null;
-  treeID: number | null;
-  treeTag: string | null;
-  stemID: number | null;
-  stemTag: string | null;
-  stemLocalX: number | null;
-  stemLocalY: number | null;
-  stemUnits: string | null;
-  personnelID: number | null;
-  personnelName: string | null;
-  measurementDate: any;
-  measuredDBH: number | null;
-  dbhUnits: string | null;
-  measuredHOM: number | null;
-  homUnits: string | null;
-  description: string | null;
-  attributes: string | null;
-};
-
 export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummaryResult, MeasurementsSummaryRDS> {
   demapData(results: MeasurementsSummaryRDS[]): MeasurementsSummaryResult[] {
     return results.map(item => ({
-      CoreMeasurementID: item.coreMeasurementID,
-      PlotID: item.plotID,
-      PlotName: item.plotName,
-      CensusID: item.censusID,
+      CoreMeasurementID: item.coreMeasurementID != null ? String(item.coreMeasurementID) : null,
+      PlotID: item.plotID != null ? String(item.plotID) : null,
+      PlotName: item.plotName != null ? String(item.plotName) : null,
+      CensusID: item.censusID != null ? String(item.censusID) : null,
       StartDate: item.censusStartDate,
       EndDate: item.censusEndDate,
-      QuadratID: item.quadratID,
-      QuadratName: item.quadratName,
-      SubquadratID: item.subquadratID,
-      SubquadratName: item.subquadratName,
-      SpeciesID: item.speciesID,
-      SpeciesCode: item.speciesCode,
-      TreeID: item.treeID,
-      TreeTag: item.treeTag,
-      StemID: item.stemID,
-      StemTag: item.stemTag,
-      StemLocalX: item.stemLocalX,
-      StemLocalY: item.stemLocalY,
-      StemUnits: item.stemUnits,
-      PersonnelID: item.personnelID,
-      PersonnelName: item.personnelName,
+      QuadratID: item.quadratID != null ? String(item.quadratID) : null,
+      QuadratName: item.quadratName != null ? String(item.quadratName) : null,
+      SubquadratID: item.subquadratID != null ? String(item.subquadratID) : null,
+      SubquadratName: item.subquadratName != null ? String(item.subquadratName) : null,
+      SpeciesID: item.speciesID != null ? String(item.speciesID) : null,
+      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
+      TreeID: item.treeID != null ? String(item.treeID) : null,
+      TreeTag: item.treeTag != null ? String(item.treeTag) : null,
+      StemID: item.stemID != null ? String(item.stemID) : null,
+      StemTag: item.stemTag != null ? String(item.stemTag) : null,
+      StemLocalX: item.stemLocalX != null ? String(item.stemLocalX) : null,
+      StemLocalY: item.stemLocalY != null ? String(item.stemLocalY) : null,
+      StemUnits: item.stemUnits != null ? String(item.stemUnits) : null,
+      PersonnelID: item.personnelID != null ? String(item.personnelID) : null,
+      PersonnelName: item.personnelName != null ? String(item.personnelName) : null,
       MeasurementDate: item.measurementDate,
-      MeasuredDBH: item.measuredDBH,
-      DBHUnits: item.dbhUnits,
-      MeasuredHOM: item.measuredHOM,
-      HOMUnits: item.homUnits,
-      Description: item.description,
-      Attributes: item.attributes
+      MeasuredDBH: item.measuredDBH != null ? String(item.measuredDBH) : null,
+      DBHUnits: item.dbhUnits != null ? String(item.dbhUnits) : null,
+      MeasuredHOM: item.measuredHOM != null ? String(item.measuredHOM) : null,
+      HOMUnits: item.homUnits != null ? String(item.homUnits) : null,
+      Description: item.description != null ? String(item.description) : null,
+      Attributes: item.attributes != null ? String(item.attributes) : null,
     }));
   }
 
   mapData(results: MeasurementsSummaryResult[], indexOffset: number = 1): MeasurementsSummaryRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      coreMeasurementID: Number(item.CoreMeasurementID),
-      plotID: Number(item.PlotID),
-      plotName: String(item.PlotName),
-      censusID: Number(item.CensusID),
+      coreMeasurementID: item.CoreMeasurementID != null ? Number(item.CoreMeasurementID) : undefined,
+      plotID: item.PlotID != null ? Number(item.PlotID) : undefined,
+      plotName: item.PlotName != null ? String(item.PlotName) : undefined,
+      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
       censusStartDate: parseDate(item.StartDate),
       censusEndDate: parseDate(item.EndDate),
-      quadratID: Number(item.QuadratID),
-      quadratName: String(item.QuadratName),
-      subquadratID: Number(item.SubquadratID),
-      subquadratName: String(item.SubquadratName),
-      speciesID: Number(item.SpeciesID),
-      speciesCode: String(item.SpeciesCode),
-      treeID: Number(item.TreeID),
-      treeTag: String(item.TreeTag),
-      stemID: Number(item.StemID),
-      stemTag: String(item.StemTag),
-      stemLocalX: Number(item.StemLocalX),
-      stemLocalY: Number(item.StemLocalY),
-      stemUnits: String(item.StemUnits),
-      personnelID: Number(item.PersonnelID),
-      personnelName: String(item.PersonnelName),
+      quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
+      quadratName: item.QuadratName != null ? String(item.QuadratName) : undefined,
+      subquadratID: item.SubquadratID != null ? Number(item.SubquadratID) : undefined,
+      subquadratName: item.SubquadratName != null ? String(item.SubquadratName) : undefined,
+      speciesID: item.SpeciesID != null ? Number(item.SpeciesID) : undefined,
+      speciesCode: item.SpeciesCode != null ? String(item.SpeciesCode) : undefined,
+      treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
+      treeTag: item.TreeTag != null ? String(item.TreeTag) : undefined,
+      stemID: item.StemID != null ? Number(item.StemID) : undefined,
+      stemTag: item.StemTag != null ? String(item.StemTag) : undefined,
+      stemLocalX: item.StemLocalX != null ? Number(item.StemLocalX) : undefined,
+      stemLocalY: item.StemLocalY != null ? Number(item.StemLocalY) : undefined,
+      stemUnits: item.StemUnits != null ? String(item.StemUnits) : undefined,
+      personnelID: item.PersonnelID != null ? Number(item.PersonnelID) : undefined,
+      personnelName: item.PersonnelName != null ? String(item.PersonnelName) : undefined,
       measurementDate: parseDate(item.MeasurementDate),
-      measuredDBH: Number(item.MeasuredDBH),
-      dbhUnits: String(item.DBHUnits),
-      measuredHOM: Number(item.MeasuredHOM),
-      homUnits: String(item.HOMUnits),
-      description: String(item.Description),
-      attributes: String(item.Attributes)
+      measuredDBH: item.MeasuredDBH != null ? Number(item.MeasuredDBH) : undefined,
+      dbhUnits: item.DBHUnits != null ? String(item.DBHUnits) : undefined,
+      measuredHOM: item.MeasuredHOM != null ? Number(item.MeasuredHOM) : undefined,
+      homUnits: item.HOMUnits != null ? String(item.HOMUnits) : undefined,
+      description: item.Description != null ? String(item.Description) : undefined,
+      attributes: item.Attributes != null ? String(item.Attributes) : undefined,
     }));
   }
 }

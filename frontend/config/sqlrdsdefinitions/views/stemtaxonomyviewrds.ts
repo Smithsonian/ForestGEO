@@ -2,6 +2,29 @@ import {IDataMapper} from "@/config/datamapper";
 import {bitToBoolean} from "@/config/macros";
 import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
 
+export type StemTaxonomiesViewRDS = {
+  id?: number;
+  stemID?: number;
+  stemTag?: string;
+  treeID?: number;
+  treeTag?: string;
+  speciesID?: number;
+  speciesCode?: string;
+  familyID?: number;
+  family?: string;
+  genusID?: number;
+  genus?: string;
+  speciesName?: string;
+  subspeciesName?: string;
+  currentTaxonFlag?: boolean;
+  obsoleteTaxonFlag?: boolean;
+  genusAuthority?: string;
+  speciesAuthority?: string;
+  subspeciesAuthority?: string;
+  speciesIDLevel?: string;
+  speciesFieldFamily?: string;
+}
+
 export interface StemTaxonomiesViewResult {
   StemID: any;
   StemTag: any;
@@ -24,76 +47,53 @@ export interface StemTaxonomiesViewResult {
   SpeciesFieldFamily: any;
 }
 
-export type StemTaxonomiesViewRDS = {
-  id: number;
-  stemID: number;
-  stemTag: string;
-  treeID: number;
-  treeTag: string;
-  speciesID: number | null;
-  speciesCode: string | null;
-  familyID: number | null;
-  family: string | null;
-  genusID: number | null;
-  genus: string | null;
-  speciesName: string | null;
-  subspeciesName: string | null;
-  currentTaxonFlag: boolean | null;
-  obsoleteTaxonFlag: boolean | null;
-  genusAuthority: string | null;
-  speciesAuthority: string | null;
-  subspeciesAuthority: string | null;
-  speciesIDLevel: string | null;
-  speciesFieldFamily: string | null;
-}
-
 export class StemTaxonomiesMapper implements IDataMapper<StemTaxonomiesViewResult, StemTaxonomiesViewRDS> {
   demapData(results: StemTaxonomiesViewRDS[]): StemTaxonomiesViewResult[] {
     return results.map((item) => ({
-      StemID: item.stemID,
-      StemTag: item.stemTag,
-      TreeID: item.treeID,
-      TreeTag: item.treeTag,
-      SpeciesID: item.speciesID,
-      SpeciesCode: item.speciesCode,
-      FamilyID: item.familyID,
-      Family: item.family,
-      GenusID: item.genusID,
-      Genus: item.genus,
-      SpeciesName: item.speciesName,
-      SubspeciesName: item.subspeciesName,
-      CurrentTaxonFlag: item.currentTaxonFlag,
-      ObsoleteTaxonFlag: item.obsoleteTaxonFlag,
-      GenusAuthority: item.genusAuthority,
-      SpeciesAuthority: item.speciesAuthority,
-      SubspeciesAuthority: item.subspeciesAuthority,
-      SpeciesIDLevel: item.speciesIDLevel,
-      SpeciesFieldFamily: item.speciesFieldFamily
+      StemID: item.stemID != null ? String(item.stemID) : null,
+      StemTag: item.stemTag != null ? String(item.stemTag) : null,
+      TreeID: item.treeID != null ? String(item.treeID) : null,
+      TreeTag: item.treeTag != null ? String(item.treeTag) : null,
+      SpeciesID: item.speciesID != null ? String(item.speciesID) : null,
+      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
+      FamilyID: item.familyID != null ? String(item.familyID) : null,
+      Family: item.family != null ? String(item.family) : null,
+      GenusID: item.genusID != null ? String(item.genusID) : null,
+      Genus: item.genus != null ? String(item.genus) : null,
+      SpeciesName: item.speciesName != null ? String(item.speciesName) : null,
+      SubspeciesName: item.subspeciesName != null ? String(item.subspeciesName) : null,
+      CurrentTaxonFlag: item.currentTaxonFlag != null ? item.currentTaxonFlag : null,
+      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != null ? item.obsoleteTaxonFlag : null,
+      GenusAuthority: item.genusAuthority != null ? String(item.genusAuthority) : null,
+      SpeciesAuthority: item.speciesAuthority != null ? String(item.speciesAuthority) : null,
+      SubspeciesAuthority: item.subspeciesAuthority != null ? String(item.subspeciesAuthority) : null,
+      SpeciesIDLevel: item.speciesIDLevel != null ? String(item.speciesIDLevel) : null,
+      SpeciesFieldFamily: item.speciesFieldFamily != null ? String(item.speciesFieldFamily) : null,
     }));
   }
 
   mapData(results: StemTaxonomiesViewResult[], indexOffset: number = 1): StemTaxonomiesViewRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      stemID: Number(item.StemID),
-      stemTag: String(item.StemTag),
-      treeID: Number(item.TreeID),
-      treeTag: String(item.TreeTag),
-      speciesID: Number(item.SpeciesID),
-      speciesCode: String(item.SpeciesCode),
-      familyID: Number(item.FamilyID),
-      family: String(item.Family),
-      genusID: Number(item.GenusID),
-      genus: String(item.Genus),
-      speciesName: String(item.SpeciesName),
-      subspeciesName: String(item.SubspeciesName),
-      currentTaxonFlag: bitToBoolean(item.CurrentTaxonFlag),
-      obsoleteTaxonFlag: bitToBoolean(item.ObsoleteTaxonFlag),
-      genusAuthority: String(item.GenusAuthority),
-      speciesAuthority: String(item.SpeciesAuthority),
-      subspeciesAuthority: String(item.SubspeciesAuthority),
-      speciesIDLevel: String(item.SpeciesIDLevel),
-      speciesFieldFamily: String(item.SpeciesFieldFamily)
+      stemID: item.StemID != null ? Number(item.StemID) : undefined,
+      stemTag: item.StemTag != null ? String(item.StemTag) : undefined,
+      treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
+      treeTag: item.TreeTag != null ? String(item.TreeTag) : undefined,
+      speciesID: item.SpeciesID != null ? Number(item.SpeciesID) : undefined,
+      speciesCode: item.SpeciesCode != null ? String(item.SpeciesCode) : undefined,
+      familyID: item.FamilyID != null ? Number(item.FamilyID) : undefined,
+      family: item.Family != null ? String(item.Family) : undefined,
+      genusID: item.GenusID != null ? Number(item.GenusID) : undefined,
+      genus: item.Genus != null ? String(item.Genus) : undefined,
+      speciesName: item.SpeciesName != null ? String(item.SpeciesName) : undefined,
+      subspeciesName: item.SubspeciesName != null ? String(item.SubspeciesName) : undefined,
+      currentTaxonFlag: item.CurrentTaxonFlag != null ? bitToBoolean(item.CurrentTaxonFlag) : undefined,
+      obsoleteTaxonFlag: item.ObsoleteTaxonFlag != null ? bitToBoolean(item.ObsoleteTaxonFlag) : undefined,
+      genusAuthority: item.GenusAuthority != null ? String(item.GenusAuthority) : undefined,
+      speciesAuthority: item.SpeciesAuthority != null ? String(item.SpeciesAuthority) : undefined,
+      subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
+      speciesIDLevel: item.SpeciesIDLevel != null ? String(item.SpeciesIDLevel) : undefined,
+      speciesFieldFamily: item.SpeciesFieldFamily != null ? String(item.SpeciesFieldFamily) : undefined,
     }));
   }
 }

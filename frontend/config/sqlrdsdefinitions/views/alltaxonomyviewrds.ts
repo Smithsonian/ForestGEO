@@ -1,33 +1,32 @@
 import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
 import {IDataMapper, parseDate} from "../../datamapper";
 import {bitToBoolean} from "@/config/macros";
-import {detectFieldChanges, generateUpdateQueries} from "@/components/processors/processorhelperfunctions";
 
-export type AllTaxonomyViewRDS = {
-  id: number;
-  speciesID: number;
-  speciesCode: string;
-  familyID: number;
-  family: string | null;
-  genusID: number;
-  genus: string | null;
-  genusAuthority: string | null;
-  speciesName: string | null;
-  subspeciesName: string | null;
-  speciesIDLevel: string | null;
-  speciesAuthority: string | null;
-  subspeciesAuthority: string | null;
-  currentTaxonFlag: boolean | null;
-  obsoleteTaxonFlag: boolean | null;
-  fieldFamily: string | null;
-  speciesDescription: string | null;
-  referenceID: number;
-  publicationTitle: string | null;
-  dateOfPublication: Date | null;
-  citation: string | null;
+export type AllTaxonomiesViewRDS = {
+  id?: number;
+  speciesID?: number;
+  speciesCode?: string;
+  familyID?: number;
+  family?: string;
+  genusID?: number;
+  genus?: string;
+  genusAuthority?: string;
+  speciesName?: string;
+  subspeciesName?: string;
+  speciesIDLevel?: string;
+  speciesAuthority?: string;
+  subspeciesAuthority?: string;
+  currentTaxonFlag?: boolean;
+  obsoleteTaxonFlag?: boolean;
+  fieldFamily?: string;
+  speciesDescription?: string;
+  referenceID?: number;
+  publicationTitle?: string;
+  dateOfPublication?: Date;
+  citation?: string;
 }
 
-export interface AllTaxonomyViewResult {
+export interface AllTaxonomiesViewResult {
   SpeciesID: any;
   SpeciesCode: any;
   FamilyID: any;
@@ -51,61 +50,61 @@ export interface AllTaxonomyViewResult {
   Citation: any;
 }
 
-export class AllTaxonomyViewMapper implements IDataMapper<AllTaxonomyViewResult, AllTaxonomyViewRDS> {
-  demapData(results: AllTaxonomyViewRDS[]): AllTaxonomyViewResult[] {
+export class AllTaxonomiesViewMapper implements IDataMapper<AllTaxonomiesViewResult, AllTaxonomiesViewRDS> {
+  demapData(results: AllTaxonomiesViewRDS[]): AllTaxonomiesViewResult[] {
     return results.map(item => ({
-      SpeciesID: item.speciesID,
-      SpeciesCode: item.speciesCode,
-      FamilyID: item.familyID,
-      Family: item.family,
-      GenusID: item.genusID,
-      Genus: item.genus,
-      GenusAuthority: item.genusAuthority,
-      SpeciesName: item.speciesName,
-      SubspeciesName: item.subspeciesName,
-      SpeciesIDLevel: item.speciesIDLevel,
-      SpeciesAuthority: item.speciesAuthority,
-      SubspeciesAuthority: item.subspeciesAuthority,
-      CurrentTaxonFlag: item.currentTaxonFlag,
-      ObsoleteTaxonFlag: item.obsoleteTaxonFlag,
-      FieldFamily: item.fieldFamily,
-      SpeciesDescription: item.speciesDescription,
-      ReferenceID: item.referenceID,
-      PublicationTitle: item.publicationTitle,
+      SpeciesID: item.speciesID != null ? String(item.speciesID) : null,
+      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
+      FamilyID: item.familyID != null ? String(item.familyID) : null,
+      Family: item.family != null ? String(item.family) : null,
+      GenusID: item.genusID != null ? String(item.genusID) : null,
+      Genus: item.genus != null ? String(item.genus) : null,
+      GenusAuthority: item.genusAuthority != null ? String(item.genusAuthority) : null,
+      SpeciesName: item.speciesName != null ? String(item.speciesName) : null,
+      SubspeciesName: item.subspeciesName != null ? String(item.subspeciesName) : null,
+      SpeciesIDLevel: item.speciesIDLevel != null ? String(item.speciesIDLevel) : null,
+      SpeciesAuthority: item.speciesAuthority != null ? String(item.speciesAuthority) : null,
+      SubspeciesAuthority: item.subspeciesAuthority != null ? String(item.subspeciesAuthority) : null,
+      CurrentTaxonFlag: item.currentTaxonFlag != null ? item.currentTaxonFlag : null,
+      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != null ? item.obsoleteTaxonFlag : null,
+      FieldFamily: item.fieldFamily != null ? String(item.fieldFamily) : null,
+      SpeciesDescription: item.speciesDescription != null ? String(item.speciesDescription) : null,
+      ReferenceID: item.referenceID != null ? String(item.referenceID) : null,
+      PublicationTitle: item.publicationTitle != null ? String(item.publicationTitle) : null,
       FullReference: `${item.publicationTitle} (${item.dateOfPublication?.toISOString()})`,
-      DateOfPublication: item.dateOfPublication,
-      Citation: item.citation
+      DateOfPublication: item.dateOfPublication != null ? item.dateOfPublication.toISOString() : null,
+      Citation: item.citation != null ? String(item.citation) : null,
     }));
   }
 
-  mapData(results: AllTaxonomyViewResult[], indexOffset: number = 1): AllTaxonomyViewRDS[] {
+  mapData(results: AllTaxonomiesViewResult[], indexOffset: number = 1): AllTaxonomiesViewRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      speciesID: Number(item.SpeciesID),
-      speciesCode: String(item.SpeciesCode),
-      familyID: Number(item.FamilyID),
-      family: String(item.Family),
-      genusID: Number(item.GenusID),
-      genus: String(item.Genus),
-      genusAuthority: String(item.GenusAuthority),
-      speciesName: String(item.SpeciesName),
-      subspeciesName: String(item.SubspeciesName),
-      speciesIDLevel: String(item.SpeciesIDLevel),
-      speciesAuthority: String(item.SpeciesAuthority),
-      subspeciesAuthority: String(item.SubspeciesAuthority),
-      currentTaxonFlag: bitToBoolean(item.CurrentTaxonFlag),
-      obsoleteTaxonFlag: bitToBoolean(item.ObsoleteTaxonFlag),
-      fieldFamily: String(item.FieldFamily),
-      speciesDescription: String(item.SpeciesDescription),
-      referenceID: Number(item.ReferenceID),
-      publicationTitle: String(item.PublicationTitle),
-      dateOfPublication: parseDate(item.DateOfPublication),
-      citation: String(item.Citation)
+      speciesID: item.SpeciesID != null ? Number(item.SpeciesID) : undefined,
+      speciesCode: item.SpeciesCode != null ? String(item.SpeciesCode) : undefined,
+      familyID: item.FamilyID != null ? Number(item.FamilyID) : undefined,
+      family: item.Family != null ? String(item.Family) : undefined,
+      genusID: item.GenusID != null ? Number(item.GenusID) : undefined,
+      genus: item.Genus != null ? String(item.Genus) : undefined,
+      genusAuthority: item.GenusAuthority != null ? String(item.GenusAuthority) : undefined,
+      speciesName: item.SpeciesName != null ? String(item.SpeciesName) : undefined,
+      subspeciesName: item.SubspeciesName != null ? String(item.SubspeciesName) : undefined,
+      speciesIDLevel: item.SpeciesIDLevel != null ? String(item.SpeciesIDLevel) : undefined,
+      speciesAuthority: item.SpeciesAuthority != null ? String(item.SpeciesAuthority) : undefined,
+      subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
+      currentTaxonFlag: item.CurrentTaxonFlag != null ? bitToBoolean(item.CurrentTaxonFlag) : undefined,
+      obsoleteTaxonFlag: item.ObsoleteTaxonFlag != null ? bitToBoolean(item.ObsoleteTaxonFlag) : undefined,
+      fieldFamily: item.FieldFamily != null ? String(item.FieldFamily) : undefined,
+      speciesDescription: item.SpeciesDescription != null ? String(item.SpeciesDescription) : undefined,
+      referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
+      publicationTitle: item.PublicationTitle != null ? String(item.PublicationTitle) : undefined,
+      dateOfPublication: item.DateOfPublication != null ? parseDate(item.DateOfPublication) : undefined,
+      citation: item.Citation != null ? String(item.Citation) : undefined,
     }));
   }
 }
 
-export const AllTaxonomyViewGridColumns: GridColDef[] = [
+export const AllTaxonomiesViewGridColumns: GridColDef[] = [
   {
     field: 'speciesID',
     headerName: '#',
@@ -162,7 +161,7 @@ export const AllTaxonomyViewGridColumns: GridColDef[] = [
   },
   {
     field: 'genusAuthority',
-    headerName: 'Genus Authority',
+    headerName: 'Genus Auth',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -171,7 +170,7 @@ export const AllTaxonomyViewGridColumns: GridColDef[] = [
   },
   {
     field: 'speciesAuthority',
-    headerName: 'Species Authority',
+    headerName: 'Species Auth',
     headerClassName: 'header',
     flex: 1,
     align: 'left',

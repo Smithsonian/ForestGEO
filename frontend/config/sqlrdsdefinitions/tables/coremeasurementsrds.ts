@@ -1,25 +1,25 @@
-import {GridColDef} from '@mui/x-data-grid';
+import { GridColDef } from '@mui/x-data-grid';
 import { IDataMapper, parseDate } from "../../datamapper";
 import { bitToBoolean, booleanToBit, unitSelectionOptions } from '@/config/macros';
 
 export type CoreMeasurementsRDS = {
-  id: number;
-  coreMeasurementID: number;
-  censusID: number | null;
-  plotID: number | null;
-  quadratID: number | null;
-  subquadratID: number | null;
-  treeID: number | null;
-  stemID: number | null;
-  personnelID: number | null;
-  isValidated: boolean | null;
-  measurementDate: Date | null;
-  measuredDBH: number | null;
-  dbhUnit: string | null;
-  measuredHOM: number | null;
-  homUnit: string | null;
-  description: string | null;
-  userDefinedFields: string | null;
+  id?: number;
+  coreMeasurementID?: number;
+  censusID?: number;
+  plotID?: number;
+  quadratID?: number;
+  subquadratID?: number;
+  treeID?: number;
+  stemID?: number;
+  personnelID?: number;
+  isValidated?: boolean;
+  measurementDate?: Date;
+  measuredDBH?: number;
+  dbhUnit?: string;
+  measuredHOM?: number;
+  homUnit?: string;
+  description?: string;
+  userDefinedFields?: string;
 };
 
 export interface CoreMeasurementsResult {
@@ -45,46 +45,46 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
   mapData(results: CoreMeasurementsResult[], indexOffset: number = 1): CoreMeasurementsRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      coreMeasurementID: Number(item.CoreMeasurementID),
-      censusID: Number(item.CensusID),
-      plotID: Number(item.PlotID),
-      quadratID: Number(item.QuadratID),
-      subquadratID: Number(item.SubquadratID),
-      treeID: Number(item.TreeID),
-      stemID: Number(item.StemID),
-      personnelID: Number(item.PersonnelID),
-      isValidated: bitToBoolean(item.IsValidated),
-      measurementDate: parseDate(item.MeasurementDate),
-      measuredDBH: Number(item.MeasuredDBH),
-      dbhUnit: String(item.DBHUnit),
-      measuredHOM: Number(item.MeasuredHOM),
-      homUnit: String(item.HOMUnit),
-      description: item.Description,
-      userDefinedFields: item.UserDefinedFields,
+      coreMeasurementID: item.CoreMeasurementID != null ? Number(item.CoreMeasurementID) : undefined,
+      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
+      plotID: item.PlotID != null ? Number(item.PlotID) : undefined,
+      quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
+      subquadratID: item.SubquadratID != null ? Number(item.SubquadratID) : undefined,
+      treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
+      stemID: item.StemID != null ? Number(item.StemID) : undefined,
+      personnelID: item.PersonnelID != null ? Number(item.PersonnelID) : undefined,
+      isValidated: item.IsValidated != null ? bitToBoolean(item.IsValidated) : undefined,
+      measurementDate: item.MeasurementDate != null ? parseDate(item.MeasurementDate) : undefined,
+      measuredDBH: item.MeasuredDBH != null ? Number(item.MeasuredDBH) : undefined,
+      dbhUnit: item.DBHUnit != null ? String(item.DBHUnit) : undefined,
+      measuredHOM: item.MeasuredHOM != null ? Number(item.MeasuredHOM) : undefined,
+      homUnit: item.HOMUnit != null ? String(item.HOMUnit) : undefined,
+      description: item.Description != null ? String(item.Description) : undefined,
+      userDefinedFields: item.UserDefinedFields != null ? String(item.UserDefinedFields) : undefined,
     }));
   }
-   demapData(results: CoreMeasurementsRDS[]): CoreMeasurementsResult[] {
-      return results.map((item) => ({
-        CoreMeasurementID: Number(item.coreMeasurementID),
-        CensusID: Number(item.censusID),
-        PlotID: Number(item.plotID),
-        QuadratID: Number(item.quadratID),
-        SubquadratID: Number(item.subquadratID),
-        TreeID: Number(item.treeID),
-        StemID: Number(item.stemID),
-        PersonnelID: Number(item.personnelID),
-        IsValidated: booleanToBit(item.isValidated!),
-        MeasurementDate: item.measurementDate ? parseDate(item.measurementDate) : null,
-        MeasuredDBH: Number(item.measuredDBH),
-        DBHUnit: String(item.dbhUnit),
-        MeasuredHOM: Number(item.measuredHOM),
-        HOMUnit: String(item.homUnit),
-        Description: String(item.description),
-        UserDefinedFields: String(item.userDefinedFields)
-      }));
-   }
-}
 
+  demapData(results: CoreMeasurementsRDS[]): CoreMeasurementsResult[] {
+    return results.map((item) => ({
+      CoreMeasurementID: item.coreMeasurementID != null ? Number(item.coreMeasurementID) : null,
+      CensusID: item.censusID != null ? Number(item.censusID) : null,
+      PlotID: item.plotID != null ? Number(item.plotID) : null,
+      QuadratID: item.quadratID != null ? Number(item.quadratID) : null,
+      SubquadratID: item.subquadratID != null ? Number(item.subquadratID) : null,
+      TreeID: item.treeID != null ? Number(item.treeID) : null,
+      StemID: item.stemID != null ? Number(item.stemID) : null,
+      PersonnelID: item.personnelID != null ? Number(item.personnelID) : null,
+      IsValidated: item.isValidated != null ? booleanToBit(item.isValidated) : null,
+      MeasurementDate: item.measurementDate != null ? item.measurementDate.toISOString() : null,
+      MeasuredDBH: item.measuredDBH != null ? Number(item.measuredDBH) : null,
+      DBHUnit: item.dbhUnit != null ? String(item.dbhUnit) : null,
+      MeasuredHOM: item.measuredHOM != null ? Number(item.measuredHOM) : null,
+      HOMUnit: item.homUnit != null ? String(item.homUnit) : null,
+      Description: item.description != null ? String(item.description) : null,
+      UserDefinedFields: item.userDefinedFields != null ? String(item.userDefinedFields) : null,
+    }));
+  }
+}
 export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},

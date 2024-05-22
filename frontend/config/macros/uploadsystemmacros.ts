@@ -62,7 +62,7 @@ export interface UploadReviewFilesProps {
   setUploadError: Dispatch<SetStateAction<any>>;
   setErrorComponent: Dispatch<SetStateAction<string>>;
   // centralized functions
-  areHeadersValid: (actualHeaders: string[]) => boolean;
+  areHeadersValid: (actualHeaders: string[]) => { isValid: boolean, missingHeaders: string[] };
   handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
   handleApproval: () => Promise<void>;
   handleCancel: () => Promise<void>;

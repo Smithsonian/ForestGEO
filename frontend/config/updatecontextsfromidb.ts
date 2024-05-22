@@ -1,30 +1,15 @@
 // useUpdateContextsFromIDB.ts
 import {useCensusLoadDispatch, usePlotsLoadDispatch, useQuadratsLoadDispatch} from "@/app/contexts/coredataprovider";
-import {useCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSubquadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {
+  useCensusListDispatch,
+  useQuadratListDispatch,
+  useSubquadratListDispatch
+} from "@/app/contexts/listselectionprovider";
 import {clearDataByKey, getData, setData} from "@/config/db";
-import {Census, CensusRDS} from "./sqlrdsdefinitions/tables/censusrds";
+import {CensusRDS} from "./sqlrdsdefinitions/tables/censusrds";
 import {Quadrat, QuadratsRDS} from "./sqlrdsdefinitions/tables/quadratrds";
 import {Plot, PlotRDS} from "./sqlrdsdefinitions/tables/plotrds";
-import { Subquadrat } from "./sqlrdsdefinitions/tables/subquadratrds";
-
-async function createAndUpdateQuadratList(quadratsRDSLoad: QuadratsRDS[]) {
-  let quadratList: Quadrat[] = quadratsRDSLoad.map(quadratRDS => ({
-    quadratID: quadratRDS.quadratID || 0,
-    plotID: quadratRDS.plotID || 0,
-    quadratName: quadratRDS.quadratName || '',
-  }));
-  await setData('quadratList', quadratList);
-}
-
-// Helper function to create and update Plot list
-async function createAndUpdatePlotList(plotRDSLoad: PlotRDS[], quadratsRDSLoad: QuadratsRDS[]) {
-  let plotList: Plot[] = plotRDSLoad.map(plotRDS => ({
-    key: plotRDS.plotName || '',
-    num: quadratsRDSLoad.filter(quadrat => quadrat.plotID === plotRDS.plotID).length,
-    id: plotRDS.plotID || 0,
-  }));
-  await setData('plotList', plotList);
-}
+import {Subquadrat} from "./sqlrdsdefinitions/tables/subquadratrds";
 
 // Helper function to create and update Census list
 async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]) {
@@ -63,10 +48,9 @@ async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]) {
   });
 
   // Convert map to array and save data
-  let censusList: Census[] = Array.from(uniqueCensusMap.values());
+  let censusList: CensusRDS[] = Array.from(uniqueCensusMap.values());
   await setData('censusList', censusList);
 }
-
 
 
 async function fetchData(endpoint: string) {
@@ -102,19 +86,13 @@ async function updateQuadratsIDB(schema: string) {
   const hashEndpoint = `/api/hash/quadrats?schema=${schema}`;
   const dataEndpoint = `/api/fetchall/quadrats?schema=${schema}`;
 
-  const quadratsRDSLoad: QuadratsRDS[] = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'quadratsHash', 'quadratsLoad');
-  await createAndUpdateQuadratList(quadratsRDSLoad);
+  await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'quadratsHash', 'quadratsLoad');
 }
 
 async function updatePlotsIDB(schema: string) {
   const hashEndpoint = `/api/hash/plots?schema=${schema}`;
   const dataEndpoint = `/api/fetchall/plots?schema=${schema}`;
-  const plotRDSLoad = await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'plotsHash', 'plotsLoad');
-  let quadratsRDSLoad: QuadratsRDS[] = await getData('quadratsLoad');
-  if (!quadratsRDSLoad) {
-    throw new Error('quadratsLoad IDB retrieval failed');
-  }
-  await createAndUpdatePlotList(plotRDSLoad, quadratsRDSLoad);
+  await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'plotsHash', 'plotsLoad');
 }
 
 async function updateCensusIDB(schema: string) {
@@ -129,6 +107,8 @@ async function updateSubquadratsIDB(schema: string) {
   const dataEndpoint = `/api/fetchall/subquadrats?schema=${schema}`;
   await checkHashAndUpdateData(hashEndpoint, dataEndpoint, 'subquadratsHash', 'subquadratList'); // don't need to do additional processing so can send directly to IDB and exit
 }
+
+
 
 export async function loadServerDataIntoIDB(dataType: string, schema: string) {
   switch (dataType) {
@@ -153,7 +133,6 @@ const UpdateContextsFromIDB = ({schema}: UpdateContextsIDBProps) => {
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
-  const plotsListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
   const subquadratListDispatch = useSubquadratListDispatch();
@@ -182,22 +161,19 @@ const UpdateContextsFromIDB = ({schema}: UpdateContextsIDBProps) => {
     let censusRDSLoad: CensusRDS[] = await getData('censusLoad');
     if (!censusRDSLoad || censusRDSLoad.length === 0) throw new Error('censusLoad data failed');
     if (censusLoadDispatch) await censusLoadDispatch({censusLoad: censusRDSLoad});
-    const censusListData: Census[] = await getData('censusList');
+    const censusListData: CensusRDS[] = await getData('censusList');
     if (!censusListData || censusListData.length === 0) throw new Error('censusList data failed');
     if (censusListDispatch) await censusListDispatch({censusList: censusListData});
   };
 
   const updatePlotsContext = async () => {
+    console.log('updatePlotsContext');
     // IDB load stored separately: PLOTS
     await loadServerDataIntoIDB('plots', schema);
     // Check if plotsLoad data is available in localStorage
     const plotsLoadData: PlotRDS[] = await getData('plotsLoad');
     if (!plotsLoadData || plotsLoadData.length === 0) throw new Error('plotsLoad data failed');
     if (plotsLoadDispatch) await plotsLoadDispatch({plotsLoad: plotsLoadData});
-    // Check if plotList data is available in localStorage
-    const plotListData: Plot[] = await getData('plotList');
-    if (!plotListData || plotListData.length === 0) throw new Error('plotList data failed');
-    if (plotsListDispatch) await plotsListDispatch({plotList: plotListData});
   };
 
   return {updateQuadratsContext, updateCensusContext, updatePlotsContext};

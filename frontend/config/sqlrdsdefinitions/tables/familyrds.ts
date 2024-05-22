@@ -2,10 +2,10 @@ import { GridColDef } from '@mui/x-data-grid';
 import { IDataMapper } from '../../datamapper';
 
 export type FamilyRDS = {
-  id: number;
-  familyID: number;
-  family: string | null;
-  referenceID: number | null;
+  id?: number;
+  familyID?: number;
+  family?: string;
+  referenceID?: number;
 };
 
 export interface FamilyResult {
@@ -18,16 +18,17 @@ export class FamilyMapper implements IDataMapper<FamilyResult, FamilyRDS> {
   mapData(results: FamilyResult[], indexOffset: number = 1): FamilyRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      familyID: Number(item.FamilyID),
-      family: String(item.Family),
-      referenceID: Number(item.ReferenceID)
+      familyID: item.FamilyID != null ? Number(item.FamilyID) : undefined,
+      family: item.Family != null ? String(item.Family) : undefined,
+      referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
     }));
   }
+
   demapData(results: FamilyRDS[]): FamilyResult[] {
     return results.map((item) => ({
-      FamilyID: Number(item.familyID),
-      Family: String(item.family),
-      ReferenceID: Number(item.referenceID),
+      FamilyID: item.familyID != null ? Number(item.familyID) : null,
+      Family: item.family != null ? String(item.family) : null,
+      ReferenceID: item.referenceID != null ? Number(item.referenceID) : null,
     }));
   }
 }

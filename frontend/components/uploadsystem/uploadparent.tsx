@@ -111,13 +111,19 @@ export default function UploadParent(props: UploadParentProps) {
     };
   }, [isDataUnsaved]); // Run the effect when isDataUnsaved changes
 
-  function areHeadersValid(actualHeaders: string[]): boolean {
+  function areHeadersValid(actualHeaders: string[]): { isValid: boolean, missingHeaders: string[] } {
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
     const requiredExpectedHeadersLower = requiredHeaders.map(header => header.label.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
-
-    return requiredExpectedHeadersLower.every(expectedHeader =>
-      actualHeadersLower.includes(expectedHeader));
+  
+    const missingHeaders = requiredExpectedHeadersLower.filter(expectedHeader =>
+      !actualHeadersLower.includes(expectedHeader)
+    );
+  
+    return {
+      isValid: missingHeaders.length === 0,
+      missingHeaders: missingHeaders.map(header => header.charAt(0).toUpperCase() + header.slice(1))
+    };
   }
 
   async function handleReturnToStart() {
@@ -190,109 +196,106 @@ export default function UploadParent(props: UploadParentProps) {
 
   // Function to parse a single file and update relevant states
   const parseFile = async (file: FileWithPath) => {
-    try {
-      const fileText = await file.text();
-      const isCSV = file.name.endsWith('.csv');
-      const delimiter = isCSV ? "," : "\t";
+  try {
+    const fileText = await file.text();
+    const isCSV = file.name.endsWith('.csv');
+    const delimiter = isCSV ? "," : "\t";
 
-      parse<FileRow>(fileText, {
-        delimiter: delimiter,
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: (h) => h.trim(),
-        transform: (value, field) => {
-          // Handle the 'date' field for 'measurements' form type
-          if (uploadForm === 'measurements' && field === 'date') {
-            const regex = /(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
-            const match = value.match(regex);
+    parse<FileRow>(fileText, {
+      delimiter: delimiter,
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h) => h.trim(),
+      transform: (value, field) => {
+        if (uploadForm === 'measurements' && field === 'date') {
+          const regex = /(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
+          const match = value.match(regex);
 
-            if (match) {
-              let normalizedDate;
-              // Check if the format is YYYY-MM-DD
-              if (match[1]) {
-                normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-              } else { // Otherwise, assume DD-MM-YYYY
-                normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
-              }
+          if (match) {
+            let normalizedDate;
+            if (match[1]) {
+              normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+            } else {
+              normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+            }
 
-              const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
-              if (parsedDate.isValid()) {
-                return parsedDate.toDate();
-              } else {
-                console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
-                return value; // Returning the original value, but you might want to handle this differently.
-              }
+            const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+            if (parsedDate.isValid()) {
+              return parsedDate.toDate();
             } else {
               console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
               return value;
             }
+          } else {
+            console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+            return value;
           }
-          return value;
-        },
-        complete: function (results: ParseResult<FileRow>) {
-          const expectedHeaders = TableHeadersByFormType[uploadForm];
-          const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+        }
+        return value;
+      },
+      complete: async (results: ParseResult<FileRow>) => {
+        const expectedHeaders = TableHeadersByFormType[uploadForm];
+        const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
 
-          if (!expectedHeaders || !requiredHeaders) {
-            console.error(`No headers defined for form type: ${uploadForm}`);
-            setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
-            return;
-          }
+        if (!expectedHeaders || !requiredHeaders) {
+          console.error(`No headers defined for form type: ${uploadForm}`);
+          setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+          return;
+        }
 
-          const updatedFileRowSet: FileRowSet = {};
-          let fileErrors: FileRowSet = {};
+        const updatedFileRowSet: FileRowSet = {};
+        const fileErrors: FileRowSet = {};
 
-          results.data.forEach((row, index) => {
-            const rowId = `row-${index}`;
-            updatedFileRowSet[rowId] = row;
+        for (const [index, row] of results.data.entries()) {
+          const rowId = `row-${index}`;
+          updatedFileRowSet[rowId] = row;
 
-            let rowErrors: FileRow = {};
-            let hasError = false;
+          const rowErrors: FileRow = {};
+          let hasError = false;
 
-            requiredHeaders.forEach((header) => {
-              const value = row[header.label];
-              if (value === null || value === undefined || value === "" || value === "NULL") {
-                rowErrors[header.label] = "This field is required";
-                hasError = true;
-              }
-            });
-
-            if (hasError) {
-              fileErrors[rowId] = rowErrors;
+          for (const header of requiredHeaders) {
+            const value = row[header.label];
+            if (value === null || value === undefined || value === "" || value === "NULL") {
+              rowErrors[header.label] = "This field is required";
+              hasError = true;
             }
-          });
-          // Update states: parsedData, errorRows, errors
-          setParsedData(prevParsedData => ({
-            ...prevParsedData,
-            [file.name]: updatedFileRowSet,
-          }));
-          setErrorRows(prevErrorRows => ({
-            ...prevErrorRows,
-            [file.name]: updatedFileRowSet,
-          }));
-          setErrors(prevErrors => ({
-            ...prevErrors,
-            [file.name]: fileErrors
-          }));
+          }
 
-          // Update the headers collection
-          setAllFileHeaders(prevHeaders => ({
-            ...prevHeaders,
-            [file.name]: results.meta.fields || []
-          }));
-        },
-      });
-    } catch (error: any) {
-      const errorWithFile = {
-        message: error.message,
-        file: file.name,
-        originalError: error
-      };
-      setUploadError(errorWithFile);
-      setErrorComponent('UploadParseFiles');
-      setReviewState(ReviewStates.ERRORS);
-    }
-  };
+          if (hasError) {
+            fileErrors[rowId] = rowErrors;
+          } 
+        }
+
+        setParsedData(prevParsedData => ({
+          ...prevParsedData,
+          [file.name]: updatedFileRowSet,
+        }));
+        setErrorRows(prevErrorRows => ({
+          ...prevErrorRows,
+          [file.name]: updatedFileRowSet,
+        }));
+        setErrors(prevErrors => ({
+          ...prevErrors,
+          [file.name]: fileErrors
+        }));
+
+        setAllFileHeaders(prevHeaders => ({
+          ...prevHeaders,
+          [file.name]: results.meta.fields || []
+        }));
+      },
+    });
+  } catch (error: any) {
+    const errorWithFile = {
+      message: error.message,
+      file: file.name,
+      originalError: error
+    };
+    setUploadError(errorWithFile);
+    setErrorComponent('UploadParseFiles');
+    setReviewState(ReviewStates.ERRORS);
+  }
+};
 
   async function handleInitialSubmit() {
     setReviewState(ReviewStates.REVIEW);
@@ -345,7 +348,7 @@ export default function UploadParent(props: UploadParentProps) {
           handleInitialSubmit={handleInitialSubmit}
           handleAddFile={handleAddFile}
           handleRemoveFile={handleRemoveFile}
-          handleReplaceFile={handleReplaceFile}/>;
+          handleReplaceFile={handleReplaceFile} />;
       case ReviewStates.REVIEW:
         return <UploadReviewFiles
           dbhUnit={dbhUnit}
@@ -387,7 +390,7 @@ export default function UploadParent(props: UploadParentProps) {
           parsedData={parsedData}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
-          schema={currentSite.schemaName}
+          schema={currentSite.schemaName || ''}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
           setUploadError={setUploadError}
@@ -397,12 +400,12 @@ export default function UploadParent(props: UploadParentProps) {
       case ReviewStates.VALIDATE:
         return <UploadValidation
           setReviewState={setReviewState}
-          schema={currentSite.schemaName}
+          schema={currentSite.schemaName || ''}
         />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
-          schema={currentSite.schemaName}
+          schema={currentSite.schemaName || ''}
         />;
       case ReviewStates.UPLOAD_AZURE:
         return <UploadFireAzure
@@ -413,9 +416,9 @@ export default function UploadParent(props: UploadParentProps) {
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
           cmErrors={cmErrors}
-          user={session?.user?.name!} allRowToCMID={allRowToCMID}/>;
+          user={session?.user?.name!} allRowToCMID={allRowToCMID} />;
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm}/>;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
       default:
         return (
           <UploadError

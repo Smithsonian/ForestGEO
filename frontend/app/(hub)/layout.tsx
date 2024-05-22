@@ -1,8 +1,8 @@
 "use client";
-import React, {createContext, useCallback, useEffect, useRef, useState} from "react";
-import {subtitle, title} from "@/config/primitives";
-import {useSession} from "next-auth/react";
-import {usePathname} from "next/navigation";
+import React, { useEffect, useCallback, useRef, useState } from "react";
+import { subtitle, title } from "@/config/primitives";
+import { useSession } from "next-auth/react";
+import { usePathname } from "next/navigation";
 import {
   useCensusLoadContext,
   useCensusLoadDispatch,
@@ -12,59 +12,62 @@ import {
 import {
   useCensusListContext,
   useCensusListDispatch,
-  usePlotListDispatch,
   useQuadratListDispatch,
   useSiteListDispatch,
   useSubquadratListDispatch
 } from "@/app/contexts/listselectionprovider";
-import {clearAllIDBData, getData} from "@/config/db";
-import {siteConfig} from "@/config/macros/siteconfigs";
-import Sidebar from "@/components/sidebar";
-import Header from "@/components/header";
-import {Box} from "@mui/joy";
+import { clearAllIDBData, getData } from "@/config/db";
+import { siteConfig } from "@/config/macros/siteconfigs";
+const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
+const Header = dynamic(() => import('@/components/header'), { ssr: false });
+import { Box, Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Typography } from "@mui/joy";
 import Divider from "@mui/joy/Divider";
-import {useLoading} from "@/app/contexts/loadingprovider";
-import {loadServerDataIntoIDB} from "@/config/updatecontextsfromidb";
+import { useLoading } from "@/app/contexts/loadingprovider";
+import { loadServerDataIntoIDB } from "@/config/updatecontextsfromidb";
 import {
-  useCensusDispatch, 
+  useCensusDispatch,
   usePlotDispatch,
   useQuadratDispatch,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import { useDataValidityContext } from "../contexts/datavalidityprovider";
+import { getAllSchemas } from "@/components/processors/processorhelperfunctions";
+import { useJoyride } from "../contexts/joyrideprovider";
+import dynamic from "next/dynamic";
+import { Step } from "react-joyride";
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
-      return <h3 className={title({color: "cyan"})} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>;
+      return <h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3>;
     case '/measurementshub/summary':
-      return <h3 className={title({color: "green"})} key={endpoint}>Measurements Summary</h3>;
+      return <h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3>;
     case '/measurementshub/validationhistory':
-      return <h3 className={title({color: "green"})} key={endpoint}>Validation History</h3>;
-    case '/properties/attributes':
-      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Attributes</h3>;
-    case '/properties/census':
-      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Census</h3>;
-    case '/properties/personnel':
-      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Personnel</h3>;
-    case '/properties/quadrats':
-      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Quadrats</h3>;
-    case '/properties/species':
-      return <h3 className={title({color: "sky"})} key={endpoint}>Properties Hub - Species</h3>;
-    case '/censusform':
-      return <h3 className={title({color: "sky"})} key={endpoint}>Census Form</h3>;
+      return <h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3>;
+    case '/fixeddatainput/attributes':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data Hub - Attributes</h3>;
+    case '/fixeddatainput/census':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Census</h3>;
+    case '/fixeddatainput/personnel':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Personnel</h3>;
+    case '/fixeddatainput/quadrats':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Quadrats</h3>;
+    case '/fixeddatainput/subquadrats':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Subquadrats</h3>;
+    case '/fixeddatainput/quadratpersonnel':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - QuadratPersonnel</h3>;
+    case '/fixeddatainput/alltaxonomies':
+      return <h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Species</h3>;
     default:
       return <></>;
   }
 }
 
-export default function HubLayout({children,}: Readonly<{ children: React.ReactNode }>) {
-  const {setLoading} = useLoading();
+export default function HubLayout({ children, }: Readonly<{ children: React.ReactNode }>) {
+  const { setLoading } = useLoading();
 
   const censusLoadDispatch = useCensusLoadDispatch();
   const quadratsLoadDispatch = useQuadratsLoadDispatch();
   const plotsLoadDispatch = usePlotsLoadDispatch();
-  const plotsListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const censusListDispatch = useCensusListDispatch();
   const siteListDispatch = useSiteListDispatch();
@@ -79,8 +82,9 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
   const delayValue = 500;
   // site/session definition
   const currentSite = useSiteContext();
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
+  const { startTutorial, stopTutorial, runTutorial } = useJoyride();
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
   const [coreDataLoaded, setCoreDataLoaded] = useState(false);
@@ -102,8 +106,8 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
           uniqueCensusMap.set(plotCensusNumber, {
             plotID: censusRDS?.plotID || 0,
             plotCensusNumber,
-            startDate: censusRDS?.startDate ? new Date(censusRDS.startDate) : null,
-            endDate: censusRDS?.endDate ? new Date(censusRDS.endDate) : null,
+            startDate: censusRDS?.startDate ? new Date(censusRDS.startDate) : undefined,
+            endDate: censusRDS?.endDate ? new Date(censusRDS.endDate) : undefined,
             description: censusRDS?.description || ''
           });
         } else {
@@ -125,9 +129,8 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
       // Check if the census list actually needs to be updated
       const newCensusList = Array.from(uniqueCensusMap.values());
       if (JSON.stringify(censusListContext) !== JSON.stringify(newCensusList)) {
-        console.log('Updating Census List...'); // Debugging Log
         if (censusListDispatch) {
-          await censusListDispatch({censusList: newCensusList});
+          await censusListDispatch({ censusList: newCensusList });
         }
       }
     };
@@ -145,43 +148,41 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
       try {
         // Function to load and dispatch Census data
         const loadCensusData = async () => {
-          await loadServerDataIntoIDB('census', currentSite.schemaName);
+          await loadServerDataIntoIDB('census', currentSite?.schemaName || '');
           const censusData = await getData('censusLoad');
           const censusList = await getData('censusList');
 
           if (!censusData || !censusList) return false;
-          censusLoadDispatch && await censusLoadDispatch({censusLoad: censusData});
-          censusListDispatch && await censusListDispatch({censusList: censusList});
+          censusLoadDispatch && await censusLoadDispatch({ censusLoad: censusData });
+          censusListDispatch && await censusListDispatch({ censusList: censusList });
           return true;
         };
 
         // Function to load and dispatch Plots data
         const loadPlotsQuadratsSubquadratsData = async () => {
+          // load plots
+          await loadServerDataIntoIDB('plots', currentSite.schemaName || '');
+          const plotsData = await getData('plotsLoad');
+          console.log('Plots Data', plotsData);
+          if (!plotsData) return false;
+          plotsLoadDispatch && await plotsLoadDispatch({ plotsLoad: plotsData });
+          await delay(delayValue);
           // load quadrats
-          await loadServerDataIntoIDB('quadrats', currentSite.schemaName);
+          await loadServerDataIntoIDB('quadrats', currentSite.schemaName || '');
 
           const quadratsData = await getData('quadratsLoad');
           const quadratList = await getData('quadratList');
 
           if (!quadratsData || !quadratList) return false;
-          quadratsLoadDispatch && await quadratsLoadDispatch({quadratsLoad: quadratsData});
-          quadratListDispatch && await quadratListDispatch({quadratList: quadratList});
+          quadratsLoadDispatch && await quadratsLoadDispatch({ quadratsLoad: quadratsData });
+          quadratListDispatch && await quadratListDispatch({ quadratList: quadratList });
 
           // load subquadrats
-          await loadServerDataIntoIDB('subquadrats', currentSite.schemaName);
+          await loadServerDataIntoIDB('subquadrats', currentSite.schemaName || '');
 
           const subquadratList = await getData('subquadratList');
           if (!subquadratList) return false;
-          subquadratListDispatch && subquadratListDispatch({subquadratList: subquadratList});
-          // load plots
-          await loadServerDataIntoIDB('plots', currentSite.schemaName);
-          const plotsData = await getData('plotsLoad');
-          const plotList = await getData('plotList');
-          if (!plotsData || !plotList) return false;
-          plotsLoadDispatch && await plotsLoadDispatch({plotsLoad: plotsData});
-          plotsListDispatch && await plotsListDispatch({plotList: plotList});
-          await delay(delayValue);
-          return true;
+          subquadratListDispatch && subquadratListDispatch({ subquadratList: subquadratList });
         };
 
         // Parallelize data loading
@@ -200,19 +201,25 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     // Removed direct use of Dispatch functions for core data, as it's handled within clientmacros now.
     setLoading(true, 'Loading Sites...');
     await delay(delayValue);
-    if (session && !siteListLoaded) {
-      let email = session?.user?.email ?? '';
-      if (email === '') {
-        throw new Error("Session user's name or email is undefined");
+    try {
+      if (session && !siteListLoaded) {
+        let email = session?.user?.email ?? '';
+        if (email === '') {
+          throw new Error("Session user's name or email is undefined");
+        }
+        let sites = session?.user?.allsites ?? [];
+        if (sites.length === 0) {
+          throw new Error("Session sites undefined");
+        } else {
+          siteListDispatch ? await siteListDispatch({ siteList: sites }) : undefined;
+          await delay(delayValue);
+        }
       }
-      let sites = session?.user?.allsites ?? [];
-      if (sites.length === 0) {
-        throw new Error("Session sites undefined");
-      } else {
-        siteListDispatch ? await siteListDispatch({siteList: sites}) : undefined;
-        await delay(delayValue);
-      }
+    } catch (e: any) {
+      const allsites = await getAllSchemas();
+      siteListDispatch ? await siteListDispatch({ siteList: allsites }) : undefined;
     }
+
     setLoading(false);
   }, [session, setLoading]);
 
@@ -236,15 +243,18 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
     if (siteListLoaded && currentSite && !coreDataLoaded) {
       // clear currently selected plot & census
       setLoading(true, "Clearing selections...");
-      if (quadratDispatch) quadratDispatch({quadrat: null}).catch(console.error);
-      if (censusDispatch) censusDispatch({census: null}).catch(console.error);
-      if (plotDispatch) plotDispatch({plot: null}).catch(console.error);
+      if (quadratDispatch) quadratDispatch({ quadrat: undefined }).catch(console.error);
+      if (censusDispatch) censusDispatch({ census: undefined }).catch(console.error);
+      if (plotDispatch) plotDispatch({ plot: undefined }).catch(console.error);
       setLoading(false);
 
       // Site list loaded and current site selected, fetch core data
-      fetchAndUpdateCoreData().then(() => setCoreDataLoaded(true)).catch(console.error);
+      fetchAndUpdateCoreData().then(() => {
+        setCoreDataLoaded(true);
+        startTutorial(); // Start the tutorial after core data is loaded
+      }).catch(console.error);
     }
-  }, [siteListLoaded, currentSite, coreDataLoaded, fetchAndUpdateCoreData]);
+  }, [siteListLoaded, currentSite, coreDataLoaded, fetchAndUpdateCoreData, startTutorial]);
 
   useEffect(() => {
     if (manualReset) {
@@ -252,9 +262,9 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
       clearAllIDBData().catch(console.error);
       setCoreDataLoaded(false);
       setSiteListLoaded(false);
-      if (quadratDispatch) quadratDispatch({quadrat: null}).catch(console.error);
-      if (censusDispatch) censusDispatch({census: null}).catch(console.error);
-      if (plotDispatch) plotDispatch({plot: null}).catch(console.error);
+      if (quadratDispatch) quadratDispatch({ quadrat: undefined }).catch(console.error);
+      if (censusDispatch) censusDispatch({ census: undefined }).catch(console.error);
+      if (plotDispatch) plotDispatch({ plot: undefined }).catch(console.error);
       setManualReset(false);
       setLoading(false);
     }
@@ -262,8 +272,20 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
 
   return (
     <>
-      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset}/>
-      <Header/>
+      <Modal open={false} onClose={stopTutorial}>
+        <ModalDialog>
+          <DialogTitle>Tutorial</DialogTitle>
+          <DialogContent>
+            <Typography>Would you like to start the tutorial?</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={stopTutorial}>Skip</Button>
+            <Button onClick={startTutorial}>Start</Button>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
+      <Sidebar siteListLoaded={siteListLoaded} coreDataLoaded={coreDataLoaded} setManualReset={setManualReset} />
+      <Header />
       <Box
         component="main"
         className="MainContent"
@@ -288,7 +310,7 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
         }}>
           {renderSwitch(pathname)}
         </Box>
-        <Divider orientation={"horizontal"} sx={{my: '5px'}}/>
+        <Divider orientation={"horizontal"} sx={{ my: '5px' }} />
         <Box
           sx={{
             display: 'flex',
@@ -304,21 +326,21 @@ export default function HubLayout({children,}: Readonly<{ children: React.ReactN
             </>
           )}
         </Box>
-        <Divider orientation={"horizontal"}/>
+        <Divider orientation={"horizontal"} />
         <Box mt={3}
-             sx={{
-               display: 'flex',
-               alignItems: 'center',
-               alignSelf: 'center',
-               flexDirection: 'row',
-               marginBottom: '15px'
-             }}>
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            alignSelf: 'center',
+            flexDirection: 'row',
+            marginBottom: '15px'
+          }}>
           <Box>
-            <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
+            <h1 className={title({ color: "violet" })}>{siteConfig.name}&nbsp;</h1>
           </Box>
-          <Divider orientation={"vertical"} sx={{marginRight: 2}}/>
+          <Divider orientation={"vertical"} sx={{ marginRight: 2 }} />
           <Box>
-            <p className={subtitle({color: "cyan"})}>{siteConfig.description}</p>
+            <p className={subtitle({ color: "cyan" })}>{siteConfig.description}</p>
           </Box>
         </Box>
       </Box>

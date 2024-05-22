@@ -116,10 +116,10 @@ export default function CensusDataGrid() {
     const newOpenCensus = {
       id: newCensusId,
       censusID: newCensusId,
-      plotID: currentPlot ? currentPlot.id : 0, // Assuming currentPlot holds the current plot context
+      plotID: currentPlot?.plotID ? currentPlot.plotID : 0, // Assuming currentPlot holds the current plot context
       plotCensusNumber: newCensusId,
       startDate: new Date(), // Current date as start date
-      endDate: null, // Open-ended census
+      endDate: undefined, // Open-ended census
       description: 'Open-ended census added automatically'
     };
 
