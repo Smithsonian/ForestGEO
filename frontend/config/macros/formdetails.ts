@@ -12,13 +12,14 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
   label: header
 }));
 
+// this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
 export const TableHeadersByFormType: Record<string, { label: string; }[]> = {
   "attributes": [{label: "code"}, {label: "description"}, {label: "status"}],
   "personnel": [{label: "firstname"}, {label: "lastname"}, {label: "role"}],
-  "species": [{label: "spcode"}, {label: "genus"}, {label: "species"}, {label: "idlevel"}, {label: "family"}, {label: "authority"}],
-  "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}],
-  "subquadrats": [{label: "subquadrat"}, {label: "quadrat"}, {label: "xindex"}, {label: "yindex"}, {label: "orderindex"}],
-  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "subquadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "dbhUnit"}, {label: "hom"}, {label: "homUnit"}, {label: "date"}, {label: "codes"},],
+  "species": [{label: "spcode"}, {label: "family"}, {label: "genus"}, {label: "species"}, {label: "subspecies"}, {label: "idlevel"}, {label: "authority"}, {label: "subspeciesauthority"}],
+  "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
+  "subquadrats": [{label: "subquadrat"}, {label: "quadrat"}, {label: "dimx"}, {label: "dimy"}, {label: "xindex"}, {label: "yindex"}, {label: "unit"}, {label: "orderindex"}],
+  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "subquadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "dbhunit"}, {label: "hom"}, {label: "homunit"}, {label: "date"}, {label: "codes"},],
   "arcgis_xlsx": arcgisHeaders
 };
 
@@ -68,7 +69,7 @@ export interface FileErrors {
 }
 
 export type FileRow = {
-  [header: string]: string; // {header --> value}
+  [header: string]: string | null; // {header --> value}
 };
 
 export type FileRowSet = {
@@ -88,6 +89,34 @@ export interface UploadedFileData {
   date?: Date;
 }
 
+// custom forms (unique)
+export type MeasurementForm = {
+  tag?: string;
+  stemtag?: string;
+  spcode?: string;
+  subquadrat?: string;
+  lx?: string;
+  ly?: string;
+  unit?: string;
+  dbh?: string;
+  dbhunit?: string;
+  hom?: string;
+  homunit?: string;
+  date?: string;
+  codes?: string;
+}
+
+export type SpeciesForm = {
+  spcode?: string;
+  family?: string;
+  genus?: string;
+  species?: string;
+  subspecies?: string;
+  idlevel?: string;
+  authority?: string;
+  subspeciesauthority?: string;
+}
+
 // CONSTANT MACROS
 
 export const fileColumns = [
@@ -100,3 +129,8 @@ export const fileColumns = [
   // {key: 'isCurrentVersion', label: 'Is Current Version?'},
 ];
 
+export type RowValidationErrors = {
+  [key: string]: string;
+}
+
+export type ValidationFunction = (row: FileRow) => RowValidationErrors | null;

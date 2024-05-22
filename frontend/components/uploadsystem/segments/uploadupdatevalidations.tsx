@@ -18,7 +18,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
 
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);
-    const response = await fetch(`/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id.toString()}&censusID=${currentCensus?.censusID.toString()}`);
+    const response = await fetch(`/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${currentCensus?.censusID?.toString()}`);
     const result = await response.json();
     console.log('rows validated: ', result.rowsValidated);
     setIsUpdateValidationComplete(true);

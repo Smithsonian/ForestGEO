@@ -3,11 +3,11 @@ import { IDataMapper, parseDate } from '../../datamapper';
 
 
 export type ReferenceRDS = {
-  id: number;
-  referenceID: number;
-  publicationTitle: string | null;
-  fullReference: string | null;
-  dateOfPublication: Date | null;
+  id?: number;
+  referenceID?: number;
+  publicationTitle?: string;
+  fullReference?: string;
+  dateOfPublication?: Date;
 };
 
 export interface ReferenceResult {
@@ -20,23 +20,24 @@ export interface ReferenceResult {
 export class ReferenceMapper implements IDataMapper<ReferenceResult, ReferenceRDS> {
   demapData(results: ReferenceRDS[]): ReferenceResult[] {
     return results.map(item => ({
-      ReferenceID: item.referenceID,
-      PublicationTitle: item.publicationTitle,
-      FullReference: item.fullReference,
-      DateOfPublication: item.dateOfPublication
+      ReferenceID: item.referenceID != null ? String(item.referenceID) : null,
+      PublicationTitle: item.publicationTitle != null ? String(item.publicationTitle) : null,
+      FullReference: item.fullReference != null ? String(item.fullReference) : null,
+      DateOfPublication: item.dateOfPublication != null ? item.dateOfPublication.toISOString() : null,
     }));
-
   }
+
   mapData(results: ReferenceResult[], indexOffset: number = 1): ReferenceRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      referenceID: Number(item.ReferenceID),
-      publicationTitle: String(item.PublicationTitle),
-      fullReference: String(item.FullReference),
-      dateOfPublication: parseDate(item.DateOfPublication)
+      referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
+      publicationTitle: item.PublicationTitle != null ? String(item.PublicationTitle) : undefined,
+      fullReference: item.FullReference != null ? String(item.FullReference) : undefined,
+      dateOfPublication: item.DateOfPublication != null ? parseDate(item.DateOfPublication) : undefined,
     }));
   }
 }
+
 
 export const ReferenceGridColumns: GridColDef[] = [
   { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', },

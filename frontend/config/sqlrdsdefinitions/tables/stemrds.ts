@@ -4,17 +4,17 @@ import { bitToBoolean, booleanToBit, unitSelectionOptions } from '../../macros';
 
 
 export type StemRDS = {
-  id: number;
-  stemID: number;
-  treeID: number | null;
-  subquadratID: number | null;
-  stemNumber: number | null;
-  stemTag: string | null;
-  localX: number | null;
-  localY: number | null;
-  unit: string | null;
-  moved: boolean | null;
-  stemDescription: string | null;
+  id?: number;
+  stemID?: number;
+  treeID?: number;
+  subquadratID?: number;
+  stemNumber?: number;
+  stemTag?: string;
+  localX?: number;
+  localY?: number;
+  unit?: string;
+  moved?: boolean;
+  stemDescription?: string;
 };
 
 export interface StemResult {
@@ -29,35 +29,36 @@ export interface StemResult {
   Moved: any;
   StemDescription: any;
 }
-export class StemsMapper implements IDataMapper<StemResult, StemRDS> {
-  demapData(results: StemRDS[]): StemResult[] {
-    return results.map(item => ({
-      StemID: item.stemID?.toString() || '',
-      TreeID: item.treeID?.toString() || '',
-      SubquadratID: item.subquadratID?.toString() || '',
-      StemNumber: item.stemNumber?.toString() || '',
-      StemTag: item.stemTag || '',
-      LocalX: item.localX?.toString() || '',
-      LocalY: item.localY?.toString() || '',
-      Moved: booleanToBit(item.moved!),
-      Unit: item.unit || '',
-      StemDescription: item.stemDescription || ''
-    }));
-  }
 
+export class StemsMapper implements IDataMapper<StemResult, StemRDS> {
   mapData(results: StemResult[], indexOffset: number = 1): StemRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      stemID: Number(item.StemID),
-      treeID: Number(item.TreeID),
-      subquadratID: Number(item.SubquadratID),
-      stemNumber: Number(item.StemNumber),
-      stemTag: String(item.StemTag),
-      localX: Number(item.LocalX),
-      localY: Number(item.LocalY),
-      moved: bitToBoolean(item.Moved),
-      unit: String(item.Unit),
-      stemDescription: String(item.StemDescription)
+      stemID: item.StemID != null ? Number(item.StemID) : undefined,
+      treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
+      subquadratID: item.SubquadratID != null ? Number(item.SubquadratID) : undefined,
+      stemNumber: item.StemNumber != null ? Number(item.StemNumber) : undefined,
+      stemTag: item.StemTag != null ? String(item.StemTag) : undefined,
+      localX: item.LocalX != null ? Number(item.LocalX) : undefined,
+      localY: item.LocalY != null ? Number(item.LocalY) : undefined,
+      moved: item.Moved != null ? bitToBoolean(item.Moved) : undefined,
+      unit: item.Unit != null ? String(item.Unit) : undefined,
+      stemDescription: item.StemDescription != null ? String(item.StemDescription) : undefined,
+    }));
+  }
+
+  demapData(results: StemRDS[]): StemResult[] {
+    return results.map(item => ({
+      StemID: item.stemID != null ? String(item.stemID) : null,
+      TreeID: item.treeID != null ? String(item.treeID) : null,
+      SubquadratID: item.subquadratID != null ? String(item.subquadratID) : null,
+      StemNumber: item.stemNumber != null ? String(item.stemNumber) : null,
+      StemTag: item.stemTag != null ? String(item.stemTag) : null,
+      LocalX: item.localX != null ? String(item.localX) : null,
+      LocalY: item.localY != null ? String(item.localY) : null,
+      Moved: item.moved != null ? booleanToBit(item.moved) : null,
+      Unit: item.unit != null ? String(item.unit) : null,
+      StemDescription: item.stemDescription != null ? String(item.stemDescription) : null,
     }));
   }
 }

@@ -60,6 +60,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         return new NextResponse(null, { status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE });
     }
     // If all conditions are satisfied
+    connection.release();
     return new NextResponse(null, { status: 200 });
   } catch (e: any) {
     console.error(e);

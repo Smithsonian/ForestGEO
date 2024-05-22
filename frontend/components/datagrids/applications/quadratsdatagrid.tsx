@@ -58,7 +58,7 @@ export default function QuadratsDataGrid() {
     // we want to select a quadrat contextually when using this grid FOR subquadrats selection
     // however, this information should not be retained, as the user might select a different quadrat or change quadrat information
     // thus, we add the `| null` to the function and ensure that the context is properly reset when the user is done making changes or cancels their changes.
-    if (quadratID === null) quadratDispatch && quadratDispatch({quadrat: null}).catch(console.error); // dispatches are asynchronous
+    if (quadratID === null) quadratDispatch && quadratDispatch({quadrat: undefined}).catch(console.error); // dispatches are asynchronous
     else {
       const selectedQuadrat = rows.find(row => row.quadratID === quadratID) as Quadrat; // GridValidRowModel needs to be cast to Quadrat
       if (selectedQuadrat && quadratDispatch) quadratDispatch({quadrat: selectedQuadrat}).catch(console.error);

@@ -27,13 +27,13 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const redirectLink = () => {
     switch (uploadForm) {
       case 'attributes':
-        return redirect('/properties/attributes');
+        return redirect('/fixeddatainput/attributes');
       case 'personnel':
-        return redirect('/properties/personnel');
+        return redirect('/fixeddatainput/personnel');
       case 'species':
-        return redirect('/properties/species');
+        return redirect('/fixeddatainput/species');
       case 'quadrats':
-        return redirect('/properties/quadrats');
+        return redirect('/fixeddatainput/quadrats');
       case 'measurements':
         return redirect('/measurementshub/summary');
       case 'arcgis_files':

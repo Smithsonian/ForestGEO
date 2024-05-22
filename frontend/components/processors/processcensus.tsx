@@ -1,109 +1,91 @@
 import { booleanToBit } from '@/config/macros';
-import { runQuery, SpecialProcessingProps, } from '@/components/processors/processormacros';
-import {
-  getColumnValueByColumnName,
-  getPersonnelIDByName,
-  processCode,
-  processStems,
-  processTrees
-} from './processorhelperfunctions';
+import { runQuery, SpecialProcessingProps } from '@/components/processors/processormacros';
+import { getPersonnelIDByName } from './processorhelperfunctions';
 import moment from 'moment';
 
-export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | null> {
-  const { connection, rowData, schema, plotID, censusID, quadratID, fullName, dbhUnit, homUnit, coordUnit } = props;
+export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
+  const { connection, rowData, schema, plotID, censusID, quadratID, fullName } = props;
   if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Process Census: Missing plotID, censusID, quadratID or full name");
+
   try {
-    /**
-     *       "tag": "Trees.TreeTag",
-     *       "stemtag": "Stems.StemTag",
-     *       "spcode": "Species.SpeciesCode",
-     *       "subquadrat": "SubQuadrats.SQName",
-     *       "lx": "Stems.LocalX",
-     *       "ly": "Stems.LocalY",
-     *       "dbh": "CoreMeasurements.MeasuredDBH",
-     *       "codes": "Attributes.Code",
-     *       "hom": "CoreMeasurement.MeasuredHOM",
-     *       "date": "CoreMeasurement.MeasurementDate",
-     *       "dbhUnit", "homUnit", "coordUnit"
-     */
     await connection.beginTransaction();
-    // Foreign key checks and error handling for species, quadrat, and plot
-    console.log('extracting species ID by code');
-    const speciesID = await getColumnValueByColumnName(
-      connection,
-      schema,
-      'Species',
-      'SpeciesID',
-      'SpeciesCode',
-      rowData.spcode
-    );
-    if (!speciesID) throw new Error(`Species with code ${rowData.spcode} does not exist.`);
-    console.log(`speciesID: ${speciesID}`);
 
-    const query = `SELECT sq.SQID, sq.QuadratID FROM ${schema}.subquadrats sq JOIN ${schema}.quadrats q ON sq.QuadratID = q.QuadratID WHERE (sq.SQName = ? AND q.PlotID = ?);`;
-    const sqResults = await runQuery(connection, query, [rowData.subquadrat, plotID]);
-    console.log(sqResults);
-    const subquadratID = sqResults[0].SQID;
-    const quadratID = sqResults[0].QuadratID;
+    // Upsert into trees
+    if (rowData.tag) {
+      let query = `INSERT INTO ${schema}.trees (TreeTag) VALUES (?) ON DUPLICATE KEY UPDATE TreeID = LAST_INSERT_ID(TreeID)`;
+      let result = await runQuery(connection, query, [rowData.tag]);
+      const treeID = result.insertId;
 
-    // subspecies table has been deprecated!
+      // Fetch the necessary foreign key IDs
+      let rows;
+      if (rowData.spcode) {
+        query = `SELECT SpeciesID FROM ${schema}.species WHERE SpeciesCode = ?`;
+        rows = await runQuery(connection, query, [rowData.spcode]);
+        if (rows.length === 0) throw new Error(`SpeciesCode ${rowData.spcode} not found.`);
+        const speciesID = rows[0].SpeciesID;
 
-    // Insert or update Trees with SpeciesID and SubSpeciesID
-    const treeID = await processTrees(connection, schema, rowData.tag, speciesID);
-    if (treeID === null) throw new Error(`Tree with tag ${rowData.tag} does not exist.`);
-    console.log(`treeID: ${treeID}`);
+        query = `SELECT SubquadratID FROM ${schema}.subquadrats WHERE SubquadratName = ?`;
+        rows = await runQuery(connection, query, [rowData.subquadrat]);
+        if (rows.length === 0) throw new Error(`SubquadratName ${rowData.subquadrat} not found.`);
+        const subquadratID = rows[0].SubquadratID;
 
-    // Insert or update Stems
-    const stemID = await processStems(connection, schema, rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly, coordUnit);
-    if (stemID === null) throw new Error(`Insertion failure at processStems with data: ${[rowData.stemtag, treeID, subquadratID, rowData.lx, rowData.ly, coordUnit]}`);
-    console.log(`stemID: ${stemID}`);
+        // Upsert into stems
+        if (rowData.stemtag && rowData.lx && rowData.ly) {
+          query = `
+            INSERT INTO ${schema}.stems (StemTag, TreeID, SpeciesID, SubquadratID, LocalX, LocalY, Unit) 
+            VALUES (?, ?, ?, ?, ?, ?, ?) 
+            ON DUPLICATE KEY UPDATE StemID = LAST_INSERT_ID(StemID), TreeID = VALUES(TreeID), SpeciesID = VALUES(SpeciesID), SubquadratID = VALUES(SubquadratID), LocalX = VALUES(LocalX), LocalY = VALUES(LocalY), Unit = VALUES(Unit)
+          `;
+          result = await runQuery(connection, query, [rowData.stemtag, treeID, speciesID, subquadratID, rowData.lx, rowData.ly, rowData.unit]);
+          const stemID = result.insertId;
 
-    const personnelID = await getPersonnelIDByName(connection, schema, fullName);
-    if (personnelID === null) throw new Error(`PersonnelID for personnel with name ${fullName} does not exist`);
-    console.log(`personnelID: ${personnelID}`);
+          // Upsert into coremeasurements
+          if (rowData.dbh && rowData.dbhunit && rowData.hom && rowData.homunit && rowData.date) {
+            query = `
+              INSERT INTO ${schema}.coremeasurements 
+              (CensusID, PlotID, QuadratID, SubquadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, DBHUnit, MeasuredHOM, HOMUnit) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+              ON DUPLICATE KEY UPDATE CoreMeasurementID = LAST_INSERT_ID(CoreMeasurementID), 
+              MeasuredDBH = VALUES(MeasuredDBH), DBHUnit = VALUES(DBHUnit), 
+              MeasuredHOM = VALUES(MeasuredHOM), HOMUnit = VALUES(HOMUnit), MeasurementDate = VALUES(MeasurementDate)
+            `;
+            const personnelID = await getPersonnelIDByName(connection, schema, fullName);
+            result = await runQuery(connection, query, [
+              censusID, plotID, quadratID, subquadratID, treeID, stemID, personnelID, 0, moment(rowData.date).format('YYYY-MM-DD'),
+              rowData.dbh, rowData.dbhunit, rowData.hom, rowData.homunit
+            ]);
+            const coreMeasurementID = result.insertId;
 
-    const measurementInsertQuery = `
-    INSERT INTO ${schema}.coremeasurements
-    (CensusID, PlotID, QuadratID, SubquadratID, TreeID, StemID, PersonnelID, IsValidated, MeasurementDate, MeasuredDBH, DBHUnit, MeasuredHOM, HOMUnit, Description, UserDefinedFields)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-    `;
-    const dbhResult = await runQuery(connection, measurementInsertQuery, [
-      censusID,
-      plotID,
-      quadratID,
-      subquadratID,
-      treeID,
-      stemID,
-      personnelID,
-      booleanToBit(false), // isValidated is false by default
-      moment(rowData.date).format('YYYY-MM-DD'),
-      rowData.dbh ?? null,
-      dbhUnit,
-      rowData.hom ?? null,
-      homUnit,
-      null,
-      null,
-    ]);
-
-    if (dbhResult.affectedRows <= 0) {
-      throw new Error(`Insertion failed for CoreMeasurement.`);
+            // Insert into cmattributes after verifying each code exists in attributes table
+            if (rowData.codes) {
+              const codes = rowData.codes.split(';').map(code => code.trim()).filter(Boolean);
+              for (const code of codes) {
+                query = `SELECT COUNT(*) as count FROM ${schema}.attributes WHERE Code = ?`;
+                const [attributeRows] = await runQuery(connection, query, [code]);
+                if (attributeRows[0].count === 0) {
+                  throw new Error(`Attribute code ${code} not found.`);
+                }
+                query = `
+                  INSERT INTO ${schema}.cmattributes (CoreMeasurementID, Code) 
+                  VALUES (?, ?)
+                  ON DUPLICATE KEY UPDATE CMAID = LAST_INSERT_ID(CMAID)
+                `;
+                await runQuery(connection, query, [coreMeasurementID, code]);
+              }
+            }
+            await connection.commit();
+            return coreMeasurementID;
+          }
+        }
+      }
     }
 
-    const dbhCMID = dbhResult.insertId;
-    if (dbhCMID === null || dbhCMID === 0) {
-      throw new Error(`The DBH insertion's CoreMeasurementID is null, or 0, indicating that insertion was not successful`);
-    }
-
-    // Process Attributes and CMAttributes for codes
-    const codesArray = rowData.codes.split(';').filter(code => code.trim());
-    await processCode(connection, schema, codesArray, dbhCMID);
-
-    // Commit transaction
     await connection.commit();
-    return dbhCMID ?? null;
-  } catch (error) {
-    // Rollback transaction in case of error
+    console.log('Upsert successful');
+    return undefined;
+  } catch (error: any) {
     await connection.rollback();
+    console.error('Upsert failed:', error.message);
     throw error;
   }
 }

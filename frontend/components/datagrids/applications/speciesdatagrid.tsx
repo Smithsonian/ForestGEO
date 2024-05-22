@@ -11,13 +11,29 @@ import {Box, Button, Typography} from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function SpeciesDataGrid() {
+  /**
+   *   id?: number;
+  speciesID?: number;
+  genusID?: number;
+  currentTaxonFlag?: boolean;
+  obsoleteTaxonFlag?: boolean;
+  speciesName?: string;
+  subspeciesName?: string;
+  speciesCode?: string;
+  idLevel?: string;
+  speciesAuthority?: string;
+  subspeciesAuthority?: string;
+  fieldFamily?: string;
+  description?: string;
+  referenceID?: number;
+   */
   const initialRows: GridRowsProp = [
     {
       id: 0,
       speciesID: 0,
       speciesCode: '',
       speciesName: '',
-      subSpeciesName: '',
+      subspeciesName: '',
       defaultDBHMax: 0,
       idLevel: '',
       authority: '',

@@ -1,12 +1,16 @@
-// dynamic structuring attempt
-// dataType will be the table or view name reference to be placed as part of the request
-// slugs is a catchall that will vary depending on the type of request placed
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import MapperFactory from "@/config/datamapper";
 import { handleError } from "@/utils/errorhandler";
 import { PoolConnection, format } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
-
+import {
+  generateInsertOperations,
+  generateUpdateOperations,
+  StemDimensionsViewQueryConfig,
+  AllTaxonomiesViewQueryConfig,
+  StemTaxonomiesViewQueryConfig,
+} from '@/components/processors/processorhelperfunctions';
+import { error } from "console";
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, censusID, (optional) quadratID
 export async function GET(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
@@ -34,23 +38,6 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} LIMIT ?, ?`;
         break;
       case 'quadrats':
-        // paginatedQuery = `
-        // SELECT SQL_CALC_FOUND_ROWS q.*, 
-        // GROUP_CONCAT(JSON_OBJECT(
-        //   'personnelID', p.PersonnelID,
-        //   'firstName', p.FirstName,
-        //   'lastName', p.LastName,
-        //   'role', p.Role
-        // ) SEPARATOR ',') AS personnel
-        // FROM ${schema}.${params.dataType} q
-        // LEFT JOIN ${schema}.quadratpersonnel qp ON q.QuadratID = qp.QuadratID
-        // LEFT JOIN ${schema}.personnel p ON qp.PersonnelID = p.PersonnelID
-        // WHERE PlotID = ${plotID} AND CensusID = ${censusID}
-        // GROUP BY q.QuadratID
-        // LIMIT ?, ?`; // plotID, censusID, and quadratID are still strings!
-        
-        // attempting to shift usage of quadratpersonnel to a separate datagrid -- it is causing issues with new quadrat submission and is not actually part 
-        // of the core table structure so is extraneous to quadrat retrieval (specifically)
         paginatedQuery = `
         SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} 
         WHERE PlotID = ${plotID} AND CensusID = ${censusID} 
@@ -77,7 +64,8 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
       case 'stemdimensionsview':
         paginatedQuery = `
         SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType}
-        WHERE PlotID = ${plotID} AND CensusID = ${censusID} ${quadratID !== '0' && quadratID !== 'undefined' ? `AND QuadratID = ${quadratID}` : ``}
+        WHERE PlotID = ${plotID} AND CensusID = ${censusID} 
+        ${quadratID && quadratID !== '0' && quadratID !== 'undefined' ? `AND QuadratID = ${quadratID}` : ''}
         LIMIT ?, ?
         `;
         break;
@@ -98,8 +86,6 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
 }
 
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
-// Key note --> the gridID string parameter needs to correspond to the data type ..Result type, not the ...RDS type! (first letter needs to be capitalized!)
-// json body-provided oldRow, newRow --> oldRow object is removed
 export async function POST(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
@@ -113,27 +99,31 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const newRowData = mapper.demapData([newRow])[0];
     let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+
     if (params.dataType.includes('view')) {
-      // views --> should not be handled in the same sense
-    } else if (params.dataType === 'quadrats') {
-      // const { Personnel, ...coreNewRowData } = newRowData;
-      delete newRowData[demappedGridID]; // when inserting, we need to remove primary auto-incrementing key from new row EXCEPT FOR attributes, where Code is required
-      let formatted = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      await runQuery(conn, formatted);
-      // const quadratID = result.insertId;
-      // if (Personnel && Personnel.length > 0) {
-      //   for (const person of Personnel) {
-      //     const insertPersonnelQuery = format('INSERT INTO ?? (QuadratID, PersonnelID) VALUES (?, ?)', [`${schema}.quadratpersonnel`, quadratID, person.PersonnelID]);
-      //     await runQuery(conn, insertPersonnelQuery);
-      //   }
-      // }
+      let queryConfig;
+      switch (params.dataType) {
+        case 'stemdimensionsview':
+          queryConfig = StemDimensionsViewQueryConfig;
+          break;
+        case 'alltaxonomiesview':
+          queryConfig = AllTaxonomiesViewQueryConfig;
+          break;
+        case 'stemtaxonomiesview':
+          queryConfig = StemTaxonomiesViewQueryConfig;
+          break;
+        default:
+          throw new Error("incorrect view call");
+      }
+      const insertQueries = generateInsertOperations(schema, newRow, queryConfig);
+      for (const query of insertQueries) {
+        await runQuery(conn, query);
+      }
     } else if (params.dataType === 'attributes') {
-      const insertAttributeQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      await runQuery(conn, insertAttributeQuery);
+      const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+      await runQuery(conn, insertQuery);
     } else {
-      console.log(newRowData);
       delete newRowData[demappedGridID];
-      console.log('new: ', newRowData);
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       await runQuery(conn, insertQuery);
     }
@@ -153,17 +143,37 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
   let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow } = await request.json();
+  const { newRow, oldRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
+      const oldRowData = mapper.demapData([oldRow])[0];
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
       const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]);
-      console.log(updateQuery);
       await runQuery(conn, updateQuery);
+      await conn.commit();
+    } else {
+      let queryConfig;
+      switch (params.dataType) {
+        case 'stemdimensionsview':
+          queryConfig = StemDimensionsViewQueryConfig;
+          break;
+        case 'alltaxonomiesview':
+          queryConfig = AllTaxonomiesViewQueryConfig;
+          break;
+        case 'stemtaxonomiesview':
+          queryConfig = StemTaxonomiesViewQueryConfig;
+          break;
+        default:
+          throw new Error("incorrect view call");
+      }
+      const updateQueries = generateUpdateOperations(schema, newRow, oldRow, queryConfig);
+      for (const query of updateQueries) {
+        await runQuery(conn, query);
+      }
       await conn.commit();
     }
     return NextResponse.json({ message: "Update successful" }, { status: 200 });
@@ -173,6 +183,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     if (conn) conn.release();
   }
 }
+
+// Define mappings for views to base tables and primary keys
+const viewToTableMappings: Record<string, { table: string, primaryKey: string }> = {
+  'alltaxonomiesview': { table: 'species', primaryKey: 'SpeciesID' },
+  'stemdimensionsview': { table: 'stems', primaryKey: 'StemID' },
+  'stemtaxonomiesview': { table: 'stems', primaryKey: 'StemID' },
+  'measurementssummaryview': { table: 'coremeasurements', primaryKey: 'CoreMeasurementID' },
+};
 
 // slugs: schema, gridID
 // body: full data row, only need first item from it this time though
@@ -186,16 +204,29 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    console.log('delete newrow: ', newRow);
-    if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)){
+
+    // Handle deletion for views
+    if (['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const deleteRowData = mapper.demapData([newRow])[0];
-      const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
-      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+      const viewConfig = viewToTableMappings[params.dataType];
+      if (!viewConfig) throw new Error(`No table mapping found for view ${params.dataType}`);
+
+      const { [viewConfig.primaryKey]: primaryKeyValue } = deleteRowData;
+      if (!primaryKeyValue) throw new Error(`Primary key value missing for ${viewConfig.primaryKey} in view ${params.dataType}`);
+
+      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${viewConfig.table}`, viewConfig.primaryKey, primaryKeyValue]);
       await runQuery(conn, deleteQuery);
       await conn.commit();
       return NextResponse.json({ message: "Delete successful" }, { status: 200 });
     }
+    // Handle deletion for tables
+    const mapper = MapperFactory.getMapper<any, any>(params.dataType);
+    const deleteRowData = mapper.demapData([newRow])[0];
+    const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
+    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+    await runQuery(conn, deleteQuery);
+    await conn.commit();
     return NextResponse.json({ message: "Delete successful" }, { status: 200 });
   } catch (error: any) {
     return handleError(error, conn, newRow);

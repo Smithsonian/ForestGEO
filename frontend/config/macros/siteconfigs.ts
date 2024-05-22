@@ -42,7 +42,7 @@ type ValidityMapping = {
 export const validityMapping: ValidityMapping = {
   '/attributes': 'attributes',
   '/personnel': 'personnel',
-  '/species': 'species',
+  '/alltaxonomies': 'species',
   '/quadrats': 'quadrats',
   '/subquadrats': 'subquadrats',
   '/quadratpersonnel': 'quadratpersonnel'
@@ -107,41 +107,47 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: WidgetsIcon,
       },
       {
+        label: 'Subquadrats',
+        href: '/subquadrats',
+        tip: '',
+        icon: WidgetsIcon,
+      },
+      {
         label: 'QuadratPersonnel',
         href: '/quadratpersonnel',
         tip: '',
         icon: WidgetsIcon,
       },
-      {
-        label: 'Species',
-        href: '/species',
-        tip: '',
-        icon: BugReportIcon,
-      },
-      {
-        label: "View Taxonomies",
-        href: "/stemtaxonomies",
-        tip: '',
-        icon: FilterIcon
-      },
-      {
-        label: "View Dimensions",
-        href: "/stemdimensions",
-        tip: '',
-        icon: PlaceIcon
-      },
+      // {
+      //   label: 'Species',
+      //   href: '/species',
+      //   tip: '',
+      //   icon: BugReportIcon,
+      // },
+      // {
+      //   label: "View Stem Taxonomies",
+      //   href: "/stemtaxonomies",
+      //   tip: '',
+      //   icon: FilterIcon
+      // },
+      // {
+      //   label: "View Stem Dimensions",
+      //   href: "/stemdimensions",
+      //   tip: '',
+      //   icon: PlaceIcon
+      // },
       {
         label: "View All Taxonomies",
         href: "/alltaxonomies",
         tip: '',
         icon: SchemaIcon
       },
-      {
-        label: 'Measurements Form',
-        href: '/measurementsform',
-        tip: '',
-        icon: DescriptionIcon,
-      },
+      // {
+      //   label: 'Measurements Form',
+      //   href: '/measurementsform',
+      //   tip: '',
+      //   icon: DescriptionIcon,
+      // },
     ]
   },
 ];

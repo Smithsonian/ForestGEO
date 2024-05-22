@@ -8,6 +8,7 @@ import UserSelectionProvider from "@/app/contexts/userselectionprovider";
 import { LoadingProvider } from "@/app/contexts/loadingprovider";
 import { GlobalLoadingIndicator } from "@/styles/globalloadingindicator";
 import { DataValidityProvider } from "@/app/contexts/datavalidityprovider";
+import { JoyrideProvider } from "./contexts/joyrideprovider";
 
 export default function RootLayout({ children, }: Readonly<{ children: React.ReactNode; }>) {
   return (

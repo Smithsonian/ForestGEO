@@ -3,99 +3,99 @@ import {GridColDef} from "@mui/x-data-grid";
 import {bitToBoolean} from "@/config/macros";
 
 export type ViewFullTableRDS = {
-  id: number;
-  coreMeasurementID: number;
-  measurementDate: Date | null;
-  measuredDBH: number | null;
-  dbhUnit: string | null;
-  measuredHOM: number | null;
-  homUnit: string | null;
-  coreMeasurementDescription: string | null;
-  isValidated: boolean | null;
-  userDefinedFields: string | null;
-  plotID: number | null;
-  plotName: string | null;
-  locationName: string | null;
-  countryName: string | null;
-  dimensionX: number | null;
-  dimensionY: number | null;
-  plotArea: number | null;
-  globalX: number | null;
-  globalY: number | null;
-  globalZ: number | null;
-  plotUnit: string | null;
-  plotShape: string | null;
-  plotDescription: string | null;
-  censusID: number | null;
-  censusStartDate: Date | null;
-  censusEndDate: Date | null;
-  censusDescription: string | null;
-  plotCensusNumber: number | null;
-  quadratID: number | null;
-  quadratName: string | null;
-  quadratDimensionX: number | null;
-  quadratDimensionY: number | null;
-  quadratArea: number | null;
-  quadratShape: string | null;
-  quadratUnit: string | null;
-  subquadratID: number | null;
-  subquadratName: string | null;
-  subquadratDimensionX: number | null;
-  subquadratDimensionY: number | null;
-  x: number | null;
-  y: number | null;
-  subquadratUnit: string | null;
-  treeID: number | null;
-  treeTag: string | null;
-  stemID: number | null;
-  stemTag: string | null;
-  localX: number | null;
-  localY: number | null;
-  stemUnit: string | null;
-  personnelID: number | null;
-  firstName: string | null;
-  lastName: string | null;
-  personnelRoles: string | null;
-  quadratPersonnelID: number | null;
-  quadratPersonnelAssignedDate: Date | null;
-  quadratPersonnelRole: string | null;
-  speciesID: number | null;
-  speciesCode: string | null;
-  speciesName: string | null;
-  subspeciesName: string | null;
-  subspeciesAuthority: string | null;
-  idLevel: string | null;
-  speciesLimitID: number | null;
-  limitType: string | null;
-  upperBound: number | null;
-  lowerBound: number | null;
-  speciesLimitUnit: string | null;
-  genusID: number | null;
-  genus: string | null;
-  genusAuthority: string | null;
-  familyID: number | null;
-  family: string | null;
-  referenceID: number | null;
-  publicationTitle: string | null;
-  fullReference: string | null;
-  dateOfPublication: Date | null;
-  citation: string | null;
-  attributeCode: string | null;
-  attributeDescription: string | null;
-  attributeStatus: string | null;
-  cmvErrorID: number | null;
-  validationErrorID: number | null;
-  validationErrorDescription: string | null;
-  validationRunID: number | null;
-  procedureName: string | null;
-  runDateTime: Date | null;
-  targetRowID: number | null;
-  validationOutcome: string | null;
-  errorMessage: string | null;
-  validationCriteria: string | null;
-  measuredValue: string | null;
-  expectedValueRange: string | null;
-  additionalDetails: string | null;
+  id?: number;
+  coreMeasurementID?: number;
+  measurementDate?: Date;
+  measuredDBH?: number;
+  dbhUnit?: string;
+  measuredHOM?: number;
+  homUnit?: string;
+  coreMeasurementDescription?: string;
+  isValidated?: boolean;
+  userDefinedFields?: string;
+  plotID?: number;
+  plotName?: string;
+  locationName?: string;
+  countryName?: string;
+  dimensionX?: number;
+  dimensionY?: number;
+  plotArea?: number;
+  globalX?: number;
+  globalY?: number;
+  globalZ?: number;
+  plotUnit?: string;
+  plotShape?: string;
+  plotDescription?: string;
+  censusID?: number;
+  censusStartDate?: Date;
+  censusEndDate?: Date;
+  censusDescription?: string;
+  plotCensusNumber?: number;
+  quadratID?: number;
+  quadratName?: string;
+  quadratDimensionX?: number;
+  quadratDimensionY?: number;
+  quadratArea?: number;
+  quadratShape?: string;
+  quadratUnit?: string;
+  subquadratID?: number;
+  subquadratName?: string;
+  subquadratDimensionX?: number;
+  subquadratDimensionY?: number;
+  x?: number;
+  y?: number;
+  subquadratUnit?: string;
+  treeID?: number;
+  treeTag?: string;
+  stemID?: number;
+  stemTag?: string;
+  localX?: number;
+  localY?: number;
+  stemUnit?: string;
+  personnelID?: number;
+  firstName?: string;
+  lastName?: string;
+  personnelRoles?: string;
+  quadratPersonnelID?: number;
+  quadratPersonnelAssignedDate?: Date;
+  quadratPersonnelRole?: string;
+  speciesID?: number;
+  speciesCode?: string;
+  speciesName?: string;
+  subspeciesName?: string;
+  subspeciesAuthority?: string;
+  idLevel?: string;
+  speciesLimitID?: number;
+  limitType?: string;
+  upperBound?: number;
+  lowerBound?: number;
+  speciesLimitUnit?: string;
+  genusID?: number;
+  genus?: string;
+  genusAuthority?: string;
+  familyID?: number;
+  family?: string;
+  referenceID?: number;
+  publicationTitle?: string;
+  fullReference?: string;
+  dateOfPublication?: Date;
+  citation?: string;
+  attributeCode?: string;
+  attributeDescription?: string;
+  attributeStatus?: string;
+  cmvErrorID?: number;
+  validationErrorID?: number;
+  validationErrorDescription?: string;
+  validationRunID?: number;
+  procedureName?: string;
+  runDateTime?: Date;
+  targetRowID?: number;
+  validationOutcome?: string;
+  errorMessage?: string;
+  validationCriteria?: string;
+  measuredValue?: string;
+  expectedValueRange?: string;
+  additionalDetails?: string;
 };
 
 export interface ViewFullTableResult {
@@ -196,199 +196,200 @@ export interface ViewFullTableResult {
 export class ViewFullTableMapper implements IDataMapper<ViewFullTableResult, ViewFullTableRDS> {
   demapData(results: ViewFullTableRDS[]): ViewFullTableResult[] {
     return results.map((item) => ({
-      CoreMeasurementID: item.coreMeasurementID,
-      MeasurementDate: item.measurementDate,
-      MeasuredDBH: item.measuredDBH,
-      DBHUnit: item.dbhUnit,
-      MeasuredHOM: item.measuredHOM,
-      HOMUnit: item.homUnit,
-      CoreMeasurementDescription: item.coreMeasurementDescription,
-      IsValidated: item.isValidated,
-      UserDefinedFields: item.userDefinedFields,
-      PlotID: item.plotID,
-      PlotName: item.plotName,
-      LocationName: item.locationName,
-      CountryName: item.countryName,
-      DimensionX: item.dimensionX,
-      DimensionY: item.dimensionY,
-      PlotArea: item.plotArea,
-      GlobalX: item.globalX,
-      GlobalY: item.globalY,
-      GlobalZ: item.globalZ,
-      PlotUnit: item.plotUnit,
-      PlotShape: item.plotShape,
-      PlotDescription: item.plotDescription,
-      CensusID: item.censusID,
-      CensusStartDate: item.censusStartDate,
-      CensusEndDate: item.censusEndDate,
-      CensusDescription: item.censusDescription,
-      PlotCensusNumber: item.plotCensusNumber,
-      QuadratID: item.quadratID,
-      QuadratName: item.quadratName,
-      QuadratDimensionX: item.quadratDimensionX,
-      QuadratDimensionY: item.quadratDimensionY,
-      QuadratArea: item.quadratArea,
-      QuadratShape: item.quadratShape,
-      QuadratUnit: item.quadratUnit,
-      SubquadratID: item.subquadratID,
-      SubquadratName: item.subquadratName,
-      SubquadratDimensionX: item.subquadratDimensionX,
-      SubquadratDimensionY: item.subquadratDimensionY,
-      X: item.x,
-      Y: item.y,
-      SubquadratUnit: item.subquadratUnit,
-      TreeID: item.treeID,
-      TreeTag: item.treeTag,
-      StemID: item.stemID,
-      StemTag: item.stemTag,
-      LocalX: item.localX,
-      LocalY: item.localY,
-      StemUnit: item.stemUnit,
-      PersonnelID: item.personnelID,
-      FirstName: item.firstName,
-      LastName: item.lastName,
-      PersonnelRoles: item.personnelRoles,
-      QuadratPersonnelID: item.quadratPersonnelID,
-      QuadratPersonnelAssignedDate: item.quadratPersonnelAssignedDate,
-      QuadratPersonnelRole: item.quadratPersonnelRole,
-      SpeciesID: item.speciesID,
-      SpeciesCode: item.speciesCode,
-      SpeciesName: item.speciesName,
-      SubspeciesName: item.subspeciesName,
-      SubspeciesAuthority: item.subspeciesAuthority,
-      IDLevel: item.idLevel,
-      SpeciesLimitID: item.speciesLimitID,
-      LimitType: item.limitType,
-      UpperBound: item.upperBound,
-      LowerBound: item.lowerBound,
-      SpeciesLimitUnit: item.speciesLimitUnit,
-      GenusID: item.genusID,
-      Genus: item.genus,
-      GenusAuthority: item.genusAuthority,
-      FamilyID: item.familyID,
-      Family: item.family,
-      ReferenceID: item.referenceID,
-      PublicationTitle: item.publicationTitle,
-      FullReference: item.fullReference,
-      DateOfPublication: item.dateOfPublication,
-      Citation: item.citation,
-      AttributeCode: item.attributeCode,
-      AttributeDescription: item.attributeDescription,
-      AttributeStatus: item.attributeStatus,
-      CMVErrorID: item.cmvErrorID,
-      ValidationErrorID: item.validationErrorID,
-      ValidationErrorDescription: item.validationErrorDescription,
-      ValidationRunID: item.validationRunID,
-      ProcedureName: item.procedureName,
-      RunDateTime: item.runDateTime,
-      TargetRowID: item.targetRowID,
-      ValidationOutcome: item.validationOutcome,
-      ErrorMessage: item.errorMessage,
-      ValidationCriteria: item.validationCriteria,
-      MeasuredValue: item.measuredValue,
-      ExpectedValueRange: item.expectedValueRange,
-      AdditionalDetails: item.additionalDetails,
+      CoreMeasurementID: item.coreMeasurementID != null ? String(item.coreMeasurementID) : null,
+      MeasurementDate: item.measurementDate != null ? item.measurementDate.toISOString() : null,
+      MeasuredDBH: item.measuredDBH != null ? String(item.measuredDBH) : null,
+      DBHUnit: item.dbhUnit != null ? String(item.dbhUnit) : null,
+      MeasuredHOM: item.measuredHOM != null ? String(item.measuredHOM) : null,
+      HOMUnit: item.homUnit != null ? String(item.homUnit) : null,
+      CoreMeasurementDescription: item.coreMeasurementDescription != null ? String(item.coreMeasurementDescription) : null,
+      IsValidated: item.isValidated != null ? item.isValidated : null,
+      UserDefinedFields: item.userDefinedFields != null ? String(item.userDefinedFields) : null,
+      PlotID: item.plotID != null ? String(item.plotID) : null,
+      PlotName: item.plotName != null ? String(item.plotName) : null,
+      LocationName: item.locationName != null ? String(item.locationName) : null,
+      CountryName: item.countryName != null ? String(item.countryName) : null,
+      DimensionX: item.dimensionX != null ? String(item.dimensionX) : null,
+      DimensionY: item.dimensionY != null ? String(item.dimensionY) : null,
+      PlotArea: item.plotArea != null ? String(item.plotArea) : null,
+      GlobalX: item.globalX != null ? String(item.globalX) : null,
+      GlobalY: item.globalY != null ? String(item.globalY) : null,
+      GlobalZ: item.globalZ != null ? String(item.globalZ) : null,
+      PlotUnit: item.plotUnit != null ? String(item.plotUnit) : null,
+      PlotShape: item.plotShape != null ? String(item.plotShape) : null,
+      PlotDescription: item.plotDescription != null ? String(item.plotDescription) : null,
+      CensusID: item.censusID != null ? String(item.censusID) : null,
+      CensusStartDate: item.censusStartDate != null ? item.censusStartDate.toISOString() : null,
+      CensusEndDate: item.censusEndDate != null ? item.censusEndDate.toISOString() : null,
+      CensusDescription: item.censusDescription != null ? String(item.censusDescription) : null,
+      PlotCensusNumber: item.plotCensusNumber != null ? String(item.plotCensusNumber) : null,
+      QuadratID: item.quadratID != null ? String(item.quadratID) : null,
+      QuadratName: item.quadratName != null ? String(item.quadratName) : null,
+      QuadratDimensionX: item.quadratDimensionX != null ? String(item.quadratDimensionX) : null,
+      QuadratDimensionY: item.quadratDimensionY != null ? String(item.quadratDimensionY) : null,
+      QuadratArea: item.quadratArea != null ? String(item.quadratArea) : null,
+      QuadratShape: item.quadratShape != null ? String(item.quadratShape) : null,
+      QuadratUnit: item.quadratUnit != null ? String(item.quadratUnit) : null,
+      SubquadratID: item.subquadratID != null ? String(item.subquadratID) : null,
+      SubquadratName: item.subquadratName != null ? String(item.subquadratName) : null,
+      SubquadratDimensionX: item.subquadratDimensionX != null ? String(item.subquadratDimensionX) : null,
+      SubquadratDimensionY: item.subquadratDimensionY != null ? String(item.subquadratDimensionY) : null,
+      X: item.x != null ? String(item.x) : null,
+      Y: item.y != null ? String(item.y) : null,
+      SubquadratUnit: item.subquadratUnit != null ? String(item.subquadratUnit) : null,
+      TreeID: item.treeID != null ? String(item.treeID) : null,
+      TreeTag: item.treeTag != null ? String(item.treeTag) : null,
+      StemID: item.stemID != null ? String(item.stemID) : null,
+      StemTag: item.stemTag != null ? String(item.stemTag) : null,
+      LocalX: item.localX != null ? String(item.localX) : null,
+      LocalY: item.localY != null ? String(item.localY) : null,
+      StemUnit: item.stemUnit != null ? String(item.stemUnit) : null,
+      PersonnelID: item.personnelID != null ? String(item.personnelID) : null,
+      FirstName: item.firstName != null ? String(item.firstName) : null,
+      LastName: item.lastName != null ? String(item.lastName) : null,
+      PersonnelRoles: item.personnelRoles != null ? String(item.personnelRoles) : null,
+      QuadratPersonnelID: item.quadratPersonnelID != null ? String(item.quadratPersonnelID) : null,
+      QuadratPersonnelAssignedDate: item.quadratPersonnelAssignedDate != null ? item.quadratPersonnelAssignedDate.toISOString() : null,
+      QuadratPersonnelRole: item.quadratPersonnelRole != null ? String(item.quadratPersonnelRole) : null,
+      SpeciesID: item.speciesID != null ? String(item.speciesID) : null,
+      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
+      SpeciesName: item.speciesName != null ? String(item.speciesName) : null,
+      SubspeciesName: item.subspeciesName != null ? String(item.subspeciesName) : null,
+      SubspeciesAuthority: item.subspeciesAuthority != null ? String(item.subspeciesAuthority) : null,
+      IDLevel: item.idLevel != null ? String(item.idLevel) : null,
+      SpeciesLimitID: item.speciesLimitID != null ? String(item.speciesLimitID) : null,
+      LimitType: item.limitType != null ? String(item.limitType) : null,
+      UpperBound: item.upperBound != null ? String(item.upperBound) : null,
+      LowerBound: item.lowerBound != null ? String(item.lowerBound) : null,
+      SpeciesLimitUnit: item.speciesLimitUnit != null ? String(item.speciesLimitUnit) : null,
+      GenusID: item.genusID != null ? String(item.genusID) : null,
+      Genus: item.genus != null ? String(item.genus) : null,
+      GenusAuthority: item.genusAuthority != null ? String(item.genusAuthority) : null,
+      FamilyID: item.familyID != null ? String(item.familyID) : null,
+      Family: item.family != null ? String(item.family) : null,
+      ReferenceID: item.referenceID != null ? String(item.referenceID) : null,
+      PublicationTitle: item.publicationTitle != null ? String(item.publicationTitle) : null,
+      FullReference: item.fullReference != null ? String(item.fullReference) : null,
+      DateOfPublication: item.dateOfPublication != null ? item.dateOfPublication.toISOString() : null,
+      Citation: item.citation != null ? String(item.citation) : null,
+      AttributeCode: item.attributeCode != null ? String(item.attributeCode) : null,
+      AttributeDescription: item.attributeDescription != null ? String(item.attributeDescription) : null,
+      AttributeStatus: item.attributeStatus != null ? String(item.attributeStatus) : null,
+      CMVErrorID: item.cmvErrorID != null ? String(item.cmvErrorID) : null,
+      ValidationErrorID: item.validationErrorID != null ? String(item.validationErrorID) : null,
+      ValidationErrorDescription: item.validationErrorDescription != null ? String(item.validationErrorDescription) : null,
+      ValidationRunID: item.validationRunID != null ? String(item.validationRunID) : null,
+      ProcedureName: item.procedureName != null ? String(item.procedureName) : null,
+      RunDateTime: item.runDateTime != null ? item.runDateTime.toISOString() : null,
+      TargetRowID: item.targetRowID != null ? String(item.targetRowID) : null,
+      ValidationOutcome: item.validationOutcome != null ? String(item.validationOutcome) : null,
+      ErrorMessage: item.errorMessage != null ? String(item.errorMessage) : null,
+      ValidationCriteria: item.validationCriteria != null ? String(item.validationCriteria) : null,
+      MeasuredValue: item.measuredValue != null ? String(item.measuredValue) : null,
+      ExpectedValueRange: item.expectedValueRange != null ? String(item.expectedValueRange) : null,
+      AdditionalDetails: item.additionalDetails != null ? String(item.additionalDetails) : null,
     }));
   }
 
   mapData(results: ViewFullTableResult[], indexOffset: number = 1): ViewFullTableRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      coreMeasurementID: Number(item.CoreMeasurementID),
-      measurementDate: parseDate(item.MeasurementDate),
-      measuredDBH: Number(item.MeasuredDBH),
-      dbhUnit: String(item.DBHUnit),
-      measuredHOM: Number(item.MeasuredHOM),
-      homUnit: String(item.HOMUnit),
-      coreMeasurementDescription: String(item.CoreMeasurementDescription),
-      isValidated: bitToBoolean(item.IsValidated),
-      userDefinedFields: String(item.UserDefinedFields),
-      plotID: Number(item.PlotID),
-      plotName: String(item.PlotName),
-      locationName: String(item.LocationName),
-      countryName: String(item.CountryName),
-      dimensionX: Number(item.DimensionX),
-      dimensionY: Number(item.DimensionY),
-      plotArea: Number(item.PlotArea),
-      globalX: Number(item.GlobalX),
-      globalY: Number(item.GlobalY),
-      globalZ: Number(item.GlobalZ),
-      plotUnit: String(item.PlotUnit),
-      plotShape: String(item.PlotShape),
-      plotDescription: String(item.PlotDescription),
-      censusID: Number(item.CensusID),
-      censusStartDate: parseDate(item.CensusStartDate),
-      censusEndDate: parseDate(item.CensusEndDate),
-      censusDescription: String(item.CensusDescription),
-      plotCensusNumber: Number(item.PlotCensusNumber),
-      quadratID: Number(item.QuadratID),
-      quadratName: String(item.QuadratName),
-      quadratDimensionX: Number(item.QuadratDimensionX),
-      quadratDimensionY: Number(item.QuadratDimensionY),
-      quadratArea: Number(item.QuadratArea),
-      quadratShape: String(item.QuadratShape),
-      quadratUnit: String(item.QuadratUnit),
-      subquadratID: Number(item.SubquadratID),
-      subquadratName: String(item.SubquadratName),
-      subquadratDimensionX: Number(item.SubquadratDimensionX),
-      subquadratDimensionY: Number(item.SubquadratDimensionY),
-      x: Number(item.X),
-      y: Number(item.Y),
-      subquadratUnit: String(item.SubquadratUnit),
-      treeID: Number(item.TreeID),
-      treeTag: String(item.TreeTag),
-      stemID: Number(item.StemID),
-      stemTag: String(item.StemTag),
-      localX: Number(item.LocalX),
-      localY: Number(item.LocalY),
-      stemUnit: String(item.StemUnit),
-      personnelID: Number(item.PersonnelID),
-      firstName: String(item.FirstName),
-      lastName: String(item.LastName),
-      personnelRoles: String(item.PersonnelRoles),
-      quadratPersonnelID: Number(item.QuadratPersonnelID),
-      quadratPersonnelAssignedDate: parseDate(item.QuadratPersonnelAssignedDate),
-      quadratPersonnelRole: String(item.QuadratPersonnelRole),
-      speciesID: Number(item.SpeciesID),
-      speciesCode: String(item.SpeciesCode),
-      speciesName: String(item.SpeciesName),
-      subspeciesName: String(item.SubspeciesName),
-      subspeciesAuthority: String(item.SubspeciesAuthority),
-      idLevel: String(item.IDLevel),
-      speciesLimitID: Number(item.SpeciesLimitID),
-      limitType: String(item.LimitType),
-      upperBound: Number(item.UpperBound),
-      lowerBound: Number(item.LowerBound),
-      speciesLimitUnit: String(item.SpeciesLimitUnit),
-      genusID: Number(item.GenusID),
-      genus: String(item.Genus),
-      genusAuthority: String(item.GenusAuthority),
-      familyID: Number(item.FamilyID),
-      family: String(item.Family),
-      referenceID: Number(item.ReferenceID),
-      publicationTitle: String(item.PublicationTitle),
-      fullReference: String(item.FullReference),
-      dateOfPublication: parseDate(item.DateOfPublication),
-      citation: String(item.Citation),
-      attributeCode: String(item.AttributeCode),
-      attributeDescription: String(item.AttributeDescription),
-      attributeStatus: String(item.AttributeStatus),
-      cmvErrorID: Number(item.CMVErrorID),
-      validationErrorID: Number(item.ValidationErrorID),
-      validationErrorDescription: String(item.ValidationErrorDescription),
-      validationRunID: Number(item.ValidationRunID),
-      procedureName: String(item.ProcedureName),
-      runDateTime: parseDate(item.RunDateTime),
-      targetRowID: Number(item.TargetRowID),
-      validationOutcome: String(item.ValidationOutcome),
-      errorMessage: String(item.ErrorMessage),
-      validationCriteria: String(item.ValidationCriteria),
-      measuredValue: String(item.MeasuredValue),
-      expectedValueRange: String(item.ExpectedValueRange),
-      additionalDetails: String(item.AdditionalDetails),
+      coreMeasurementID: item.CoreMeasurementID != null ? Number(item.CoreMeasurementID) : undefined,
+      measurementDate: item.MeasurementDate != null ? parseDate(item.MeasurementDate) : undefined,
+      measuredDBH: item.MeasuredDBH != null ? Number(item.MeasuredDBH) : undefined,
+      dbhUnit: item.DBHUnit != null ? String(item.DBHUnit) : undefined,
+      measuredHOM: item.MeasuredHOM != null ? Number(item.MeasuredHOM) : undefined,
+      homUnit: item.HOMUnit != null ? String(item.HOMUnit) : undefined,
+      coreMeasurementDescription: item.CoreMeasurementDescription != null ? String(item.CoreMeasurementDescription) : undefined,
+      isValidated: item.IsValidated != null ? bitToBoolean(item.IsValidated) : undefined,
+      userDefinedFields: item.UserDefinedFields != null ? String(item.UserDefinedFields) : undefined,
+      plotID: item.PlotID != null ? Number(item.PlotID) : undefined,
+      plotName: item.PlotName != null ? String(item.PlotName) : undefined,
+      locationName: item.LocationName != null ? String(item.LocationName) : undefined,
+      countryName: item.CountryName != null ? String(item.CountryName) : undefined,
+      dimensionX: item.DimensionX != null ? Number(item.DimensionX) : undefined,
+      dimensionY: item.DimensionY != null ? Number(item.DimensionY) : undefined,
+      plotArea: item.PlotArea != null ? Number(item.PlotArea) : undefined,
+      globalX: item.GlobalX != null ? Number(item.GlobalX) : undefined,
+      globalY: item.GlobalY != null ? Number(item.GlobalY) : undefined,
+      globalZ: item.GlobalZ != null ? Number(item.GlobalZ) : undefined,
+      plotUnit: item.PlotUnit != null ? String(item.PlotUnit) : undefined,
+      plotShape: item.PlotShape != null ? String(item.PlotShape) : undefined,
+      plotDescription: item.PlotDescription != null ? String(item.PlotDescription) : undefined,
+      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
+      censusStartDate: item.CensusStartDate != null ? parseDate(item.CensusStartDate) : undefined,
+      censusEndDate: item.CensusEndDate != null ? parseDate(item.CensusEndDate) : undefined,
+      censusDescription: item.CensusDescription != null ? String(item.CensusDescription) : undefined,
+      plotCensusNumber: item.PlotCensusNumber != null ? Number(item.PlotCensusNumber) : undefined,
+      quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
+      quadratName: item.QuadratName != null ? String(item.QuadratName) : undefined,
+      quadratDimensionX: item.QuadratDimensionX != null ? Number(item.QuadratDimensionX) : undefined,
+      quadratDimensionY: item.QuadratDimensionY != null ? Number(item.QuadratDimensionY) : undefined,
+      quadratArea: item.QuadratArea != null ? Number(item.QuadratArea) : undefined,
+      quadratShape: item.QuadratShape != null ? String(item.QuadratShape) : undefined,
+      quadratUnit: item.QuadratUnit != null ? String(item.QuadratUnit) : undefined,
+      subquadratID: item.SubquadratID != null ? Number(item.SubquadratID) : undefined,
+      subquadratName: item.SubquadratName != null ? String(item.SubquadratName) : undefined,
+      subquadratDimensionX: item.SubquadratDimensionX != null ? Number(item.SubquadratDimensionX) : undefined,
+      subquadratDimensionY: item.SubquadratDimensionY != null ? Number(item.SubquadratDimensionY) : undefined,
+      x: item.X != null ? Number(item.X) : undefined,
+      y: item.Y != null ? Number(item.Y) : undefined,
+      subquadratUnit: item.SubquadratUnit != null ? String(item.SubquadratUnit) : undefined,
+      treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
+      treeTag: item.TreeTag != null ? String(item.TreeTag) : undefined,
+      stemID: item.StemID != null ? Number(item.StemID) : undefined,
+      stemTag: item.StemTag != null ? String(item.StemTag) : undefined,
+      localX: item.LocalX != null ? Number(item.LocalX) : undefined,
+      localY: item.LocalY != null ? Number(item.LocalY) : undefined,
+      stemUnit: item.StemUnit != null ? String(item.StemUnit) : undefined,
+      personnelID: item.PersonnelID != null ? Number(item.PersonnelID) : undefined,
+      firstName: item.FirstName != null ? String(item.FirstName) : undefined,
+      lastName: item.LastName != null ? String(item.LastName) : undefined,
+      personnelRoles: item.PersonnelRoles != null ? String(item.PersonnelRoles) : undefined,
+      quadratPersonnelID: item.QuadratPersonnelID != null ? Number(item.QuadratPersonnelID) : undefined,
+      quadratPersonnelAssignedDate: item.QuadratPersonnelAssignedDate != null ? parseDate(item.QuadratPersonnelAssignedDate) : undefined,
+      quadratPersonnelRole: item.QuadratPersonnelRole != null ? String(item.QuadratPersonnelRole) : undefined,
+      speciesID: item.SpeciesID != null ? Number(item.SpeciesID) : undefined,
+      speciesCode: item.SpeciesCode != null ? String(item.SpeciesCode) : undefined,
+      speciesName: item.SpeciesName != null ? String(item.SpeciesName) : undefined,
+      subspeciesName: item.SubspeciesName != null ? String(item.SubspeciesName) : undefined,
+      subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
+      idLevel: item.IDLevel != null ? String(item.IDLevel) : undefined,
+      speciesLimitID: item.SpeciesLimitID != null ? Number(item.SpeciesLimitID) : undefined,
+      limitType: item.LimitType != null ? String(item.LimitType) : undefined,
+      upperBound: item.UpperBound != null ? Number(item.UpperBound) : undefined,
+      lowerBound: item.LowerBound != null ? Number(item.LowerBound) : undefined,
+      speciesLimitUnit: item.SpeciesLimitUnit != null ? String(item.SpeciesLimitUnit) : undefined,
+      genusID: item.GenusID != null ? Number(item.GenusID) : undefined,
+      genus: item.Genus != null ? String(item.Genus) : undefined,
+      genusAuthority: item.GenusAuthority != null ? String(item.GenusAuthority) : undefined,
+      familyID: item.FamilyID != null ? Number(item.FamilyID) : undefined,
+      family: item.Family != null ? String(item.Family) : undefined,
+      referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
+      publicationTitle: item.PublicationTitle != null ? String(item.PublicationTitle) : undefined,
+      fullReference: item.FullReference != null ? String(item.FullReference) : undefined,
+      dateOfPublication: item.DateOfPublication != null ? parseDate(item.DateOfPublication) : undefined,
+      citation: item.Citation != null ? String(item.Citation) : undefined,
+      attributeCode: item.AttributeCode != null ? String(item.AttributeCode) : undefined,
+      attributeDescription: item.AttributeDescription != null ? String(item.AttributeDescription) : undefined,
+      attributeStatus: item.AttributeStatus != null ? String(item.AttributeStatus) : undefined,
+      cmvErrorID: item.CMVErrorID != null ? Number(item.CMVErrorID) : undefined,
+      validationErrorID: item.ValidationErrorID != null ? Number(item.ValidationErrorID) : undefined,
+      validationErrorDescription: item.ValidationErrorDescription != null ? String(item.ValidationErrorDescription) : undefined,
+      validationRunID: item.ValidationRunID != null ? Number(item.ValidationRunID) : undefined,
+      procedureName: item.ProcedureName != null ? String(item.ProcedureName) : undefined,
+      runDateTime: item.RunDateTime != null ? parseDate(item.RunDateTime) : undefined,
+      targetRowID: item.TargetRowID != null ? Number(item.TargetRowID) : undefined,
+      validationOutcome: item.ValidationOutcome != null ? String(item.ValidationOutcome) : undefined,
+      errorMessage: item.ErrorMessage != null ? String(item.ErrorMessage) : undefined,
+      validationCriteria: item.ValidationCriteria != null ? String(item.ValidationCriteria) : undefined,
+      measuredValue: item.MeasuredValue != null ? String(item.MeasuredValue) : undefined,
+      expectedValueRange: item.ExpectedValueRange != null ? String(item.ExpectedValueRange) : undefined,
+      additionalDetails: item.AdditionalDetails != null ? String(item.AdditionalDetails) : undefined,
     }));
   }
 }
+
 
 export const ViewFullTableGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: 'Core Measurement ID', headerClassName: 'header', flex: 1, align: 'left'},

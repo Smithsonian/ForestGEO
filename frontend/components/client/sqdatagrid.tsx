@@ -1,13 +1,13 @@
 "use client";
 
-import { useQuadratContext } from "@/app/contexts/userselectionprovider";
-import { SubQuadratGridColumns } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
+import { useCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { SubquadratGridColumns } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 import { AlertProps } from "@mui/material";
 import { Box } from "@mui/system";
-import { GridRowsProp, GridRowModesModel, GridRowModes } from "@mui/x-data-grid";
+import { GridRowsProp, GridRowModesModel, GridRowModes, GridColDef } from "@mui/x-data-grid";
 import { randomId } from "@mui/x-data-grid-generator";
 import { useSession } from "next-auth/react";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import DataGridCommons from "../datagrids/datagridcommons";
 import { Typography } from "@mui/joy";
 
@@ -18,7 +18,7 @@ export default function SubquadratsDataGrid() {
       id: 0,
       subquadratID: 0,
       subquadratName: '',
-      quadratID: currentQuadrat?.quadratID ?? 0,
+      quadratID: undefined,
       xIndex: 0,
       yIndex: 0,
       sqIndex: 0,
@@ -39,6 +39,35 @@ export default function SubquadratsDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const { data: session } = useSession();
+  const currentPlot = usePlotContext();
+  const currentCensus = useCensusContext();
+  const currentSite = useSiteContext();
+  const [quadratOptions, setQuadratOptions] = useState<{ label: string; value: number; }[]>([]);
+
+  useEffect(() => {
+    const fetchOptions = async () => {
+      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.censusID}?schema=${currentSite?.schemaName}`);
+      const quadratData = await quadratResponse.json();
+      if (quadratData.length === 0) throw new Error("quadratData fetchall is empty");
+      setQuadratOptions(quadratData.map((item: any) => ({
+        label: item.quadratName, // Adjust based on your data structure
+        value: item.quadratID,
+      })));
+    };
+    if (currentSite && currentPlot && currentCensus) fetchOptions().catch(console.error);
+  }, [currentSite, currentPlot, currentCensus]);
+  const modifiedSubquadratGridColumns: GridColDef[] = SubquadratGridColumns.map((col) => {
+    if (col.field === 'quadratID') {
+      return {
+        ...col,
+        type: 'singleSelect',
+        valueOptions: quadratOptions,
+        editable: true,
+      };
+    }
+    return col;
+  });
+  
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -54,7 +83,7 @@ export default function SubquadratsDataGrid() {
       id: id,
       subquadratID: nextSubQuadratID,
       subquadratName: '',
-      quadratID: currentQuadrat?.quadratID ?? 0,
+      quadratID: undefined,
       xIndex: 0,
       yIndex: 0,
       sqIndex: nextSQIndex,
@@ -99,7 +128,7 @@ export default function SubquadratsDataGrid() {
 
       <DataGridCommons
         gridType="subquadrats"
-        gridColumns={SubQuadratGridColumns}
+        gridColumns={SubquadratGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

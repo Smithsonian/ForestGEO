@@ -50,7 +50,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
       }
       const response = await fetch(
-        `/api/storageload?fileName=${file.name}&plot=${currentPlot?.key.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`, {
+        `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`, {
           method: 'POST',
           body: formData
         });
@@ -62,7 +62,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       setErrorComponent('UploadFire');
       setReviewState(ReviewStates.ERRORS);
     }
-  }, [currentCensus?.censusID, currentPlot?.key, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]);
+  }, [currentCensus?.censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]);
 
   useEffect(() => {
     const calculateTotalOperations = () => {

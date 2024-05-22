@@ -4,55 +4,66 @@ import { HTTPResponses } from "@/config/macros";
 import { PoolConnection } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
 
+const buildQuery = (schema: string, fetchType: string, plotID?: string, censusID?: string, quadratID?: string): string => {
+  if (fetchType === 'plots') {
+    return `
+      SELECT 
+        p.*, 
+        COUNT(q.QuadratID) AS NumQuadrats
+      FROM 
+        ${schema}.plots p
+      LEFT JOIN 
+        ${schema}.quadrats q ON p.PlotID = q.PlotID
+      GROUP BY 
+        p.PlotID
+      ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ''}`;
+  }
+
+  let query = `SELECT * FROM ${schema}.${fetchType}`;
+  const conditions = [];
+
+  if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID))) conditions.push(`PlotID = ${plotID}`);
+  if (censusID && censusID !== 'undefined' && !isNaN(parseInt(censusID))) conditions.push(`CensusID = ${censusID}`);
+  if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
+
+  if (conditions.length > 0) {
+    query += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  return query;
+};
+
 
 export async function GET(request: NextRequest, { params }: { params: { slugs?: string[] } }) {
   const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema || schema === 'undefined') throw new Error("Schema selection was not provided to API endpoint");
-  if (!params.slugs || params.slugs.length === 0) throw new Error("fetchType was not correctly provided");
-  // optional parameter handling -- if optional parameters are provided, check for them and handle appropriately.
-  if (params.slugs.length > 1) {
-    // fetchType will always be first
-    // order of provision: plotID, censusID, quadratID
-    let [fetchType, plotID, censusID, quadratID] = params.slugs; // censusID or quadratID may be null
-    let paginatedQuery = `SELECT * FROM ${schema}.${fetchType} 
-    WHERE ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `PlotID = ${plotID} ` : ``} 
-    ${censusID && censusID !== 'undefined' && !isNaN(parseInt(censusID)) ? `AND CensusID = ${censusID} ` : ``}
-    ${quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID)) ? ` AND QuadratID = ${quadratID}` : ``}`;
-    let conn: PoolConnection | null = null;
-    try {
-      conn = await getConn();
+  if (!schema || schema === 'undefined') {
+    throw new Error("Schema selection was not provided to API endpoint");
+  }
 
-      const results = await runQuery(conn, paginatedQuery);
-      if (!results) return new NextResponse(null, { status: 500 });
+  const [fetchType, plotID, censusID, quadratID] = params.slugs ?? [];
+  if (!fetchType) {
+    throw new Error("fetchType was not correctly provided");
+  } 
 
-      let mapper: IDataMapper<any, any>;
-      mapper = MapperFactory.getMapper<any, any>(fetchType);
-      const rows = mapper.mapData(results);
-      return new NextResponse(JSON.stringify(rows), { status: HTTPResponses.OK });
-    } catch (error) {
-      console.error('Error:', error);
-      throw new Error("Call failed");
-    } finally {
-      if (conn) conn.release();
+  console.log('fetchType: ', fetchType);
+
+  const query = buildQuery(schema, fetchType, plotID, censusID, quadratID);
+  let conn: PoolConnection | null = null;
+
+  try {
+    conn = await getConn();
+    const results = await runQuery(conn, query);
+    if (!results) {
+      return new NextResponse(null, { status: 500 });
     }
-  } else {
-    const [fetchType] = params.slugs;
-    let conn: PoolConnection | null = null;
-    try {
-      conn = await getConn();
 
-      const results = await runQuery(conn, `SELECT * FROM ${schema}.${fetchType}`);
-      if (!results) return new NextResponse(null, { status: 500 });
-
-      let mapper: IDataMapper<any, any>;
-      mapper = MapperFactory.getMapper<any, any>(fetchType);
-      const rows = mapper.mapData(results);
-      return new NextResponse(JSON.stringify(rows), { status: HTTPResponses.OK });
-    } catch (error) {
-      console.error('Error:', error);
-      throw new Error("Call failed");
-    } finally {
-      if (conn) conn.release();
-    }
+    const mapper: IDataMapper<any, any> = MapperFactory.getMapper<any, any>(fetchType);
+    const rows = mapper.mapData(results);
+    return new NextResponse(JSON.stringify(rows), { status: HTTPResponses.OK });
+  } catch (error) {
+    console.error('Error:', error);
+    throw new Error("Call failed");
+  } finally {
+    if (conn) conn.release();
   }
 }

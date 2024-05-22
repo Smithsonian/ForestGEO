@@ -1,14 +1,5 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper, parseDate } from "../../datamapper";
-import { Templates } from '@/config/datagridhelpers';
-
-export interface Census {
-  plotID: number;
-  plotCensusNumber: number;
-  startDate: Date;
-  endDate: Date;
-  description: string;
-}
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper, parseDate} from "../../datamapper";
 
 export interface CensusResult {
   CensusID: any;
@@ -20,37 +11,39 @@ export interface CensusResult {
 }
 
 export type CensusRaw = {
-  id: number;
-  censusID: number;
-  plotID: number | null;
-  plotCensusNumber: number | null;
-  startDate: Date | null;
-  endDate: Date | null;
-  description: string | null;
+  id?: number;
+  censusID?: number;
+  plotID?: number;
+  plotCensusNumber?: number;
+  startDate?: Date;
+  endDate?: Date;
+  description?: string;
 };
 
-export type CensusRDS = CensusRaw | null;
+export type CensusRDS = CensusRaw | undefined;
+
 
 export class CensusMapper implements IDataMapper<CensusResult, CensusRDS> {
   mapData(results: CensusResult[], indexOffset: number = 1): CensusRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
-      censusID: Number(item.CensusID),
-      plotID: Number(item.PlotID),
-      plotCensusNumber: Number(item.PlotCensusNumber),
-      startDate: parseDate(item.StartDate),
-      endDate: parseDate(item.EndDate),
-      description: String(item.Description)
+      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
+      plotID: item.PlotID != null ? Number(item.PlotID) : undefined,
+      plotCensusNumber: item.PlotCensusNumber != null ? Number(item.PlotCensusNumber) : undefined,
+      startDate: item.StartDate ? parseDate(item.StartDate) : undefined,
+      endDate: item.EndDate ? parseDate(item.EndDate) : undefined,
+      description: item.Description != null ? String(item.Description) : undefined
     }));
   }
+
   demapData(results: CensusRDS[]): CensusResult[] {
-    return results.map((item) => ({
-      CensusID: Number(item?.censusID),
-      PlotID: Number(item?.plotID),
-      PlotCensusNumber: Number(item?.plotCensusNumber),
-      StartDate:  item?.startDate ? parseDate(item?.startDate) : null,
-      EndDate: item?.endDate ? parseDate(item?.endDate) : null,
-      Description: String(item?.description)
+    return results.map((item): CensusResult => ({
+      CensusID: item?.censusID !== undefined ? Number(item.censusID) : null,
+      PlotID: item?.plotID !== undefined ? Number(item.plotID) : null,
+      PlotCensusNumber: item?.plotCensusNumber !== undefined ? Number(item.plotCensusNumber) : null,
+      StartDate: item?.startDate ? parseDate(item.startDate) : null,
+      EndDate: item?.endDate ? parseDate(item.endDate) : null,
+      Description: item?.description !== undefined ? String(item.description) : null
     }));
   }
 }
@@ -111,5 +104,5 @@ export const CensusGridColumns: GridColDef[] = [
       } else return "null";
     }
   },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, type: 'string', editable: true },
+  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, type: 'string', editable: true},
 ];

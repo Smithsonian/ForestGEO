@@ -64,7 +64,7 @@ export default function QuadratPersonnelDataGrid() {
 
   useEffect(() => {
     const fetchOptions = async () => {
-      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.id}/${currentCensus?.censusID}?schema=${currentSite?.schemaName}`);
+      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.censusID}?schema=${currentSite?.schemaName}`);
       const quadratData = await quadratResponse.json();
       if (quadratData.length === 0) throw new Error("quadratData fetchall is empty");
       setQuadratOptions(quadratData.map((item: any) => ({

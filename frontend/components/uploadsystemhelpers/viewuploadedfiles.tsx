@@ -42,7 +42,7 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
     <Box sx={{display: 'flex', flexDirection: "column"}}>
       <Typography level={"title-lg"}>
         Accessing
-        Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+        Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
         <br/>
         <Button sx={{width: 'fit-content'}} onClick={refreshFiles}>Refresh Files</Button>
         <br/>
@@ -112,7 +112,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const getListOfFiles = useCallback(async () => {
     try {
-      let response = await fetch(`/api/filehandlers/downloadallfiles?plot=${currentPlot?.key.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, {
+      let response = await fetch(`/api/filehandlers/downloadallfiles?plot=${currentPlot?.plotName?.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, {
         method: 'GET',
       });
 
@@ -184,7 +184,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
           <Box sx={{display: 'flex', flexDirection: "column"}}>
             <Typography level={"title-lg"} marginBottom={2}>
               Accessing
-              Container: {currentPlot?.key.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+              Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
             </Typography>
             <Button variant={"contained"} sx={{width: 'fit-content', marginBottom: 2}}
                     onClick={refreshFiles}>Refresh
@@ -244,11 +244,11 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           } : {}}>{new Date(row.date ? row.date : '').toString()}</TableCell>
                           <TableCell align="center">
                             <Button
-                              onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() => handleDownload(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                               <DownloadIcon/>
                             </Button>
                             <Button
-                              onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() => handleDelete(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                               <DeleteIcon/>
                             </Button>
                           </TableCell>
@@ -293,14 +293,14 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           } : {}}>{row.fileErrors}</TableCell>
                           <TableCell align="center">
                             <Button
-                              onClick={() => handleDownload(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() => handleDownload(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                               <DownloadIcon/>
                             </Button>
                             <Button>
                               <EditIcon/>
                             </Button>
                             <Button
-                              onClick={() => handleDelete(`${currentPlot?.key.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() => handleDelete(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
                               <DeleteIcon/>
                             </Button>
                           </TableCell>

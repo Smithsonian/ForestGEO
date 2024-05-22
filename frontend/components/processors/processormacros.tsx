@@ -5,7 +5,6 @@ import {FileRow} from "@/config/macros/formdetails";
 import {processSpecies} from "@/components/processors/processspecies";
 import * as fs from "fs";
 import {NextRequest} from "next/server";
-import {processQuadrats} from "@/components/processors/processquadrats";
 import {processCensus} from "@/components/processors/processcensus";
 import {PoolMonitor} from "@/config/poolmonitor";
 import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
@@ -15,20 +14,14 @@ export async function getConn() {
   let conn: PoolConnection | null = null;
   try {
     let i = 0;
-    console.log("Attempting to get SQL connection");
     conn = await getSqlConnection(i);
-    console.log("SQL connection obtained");
   } catch (error: any) {
     console.error("Error processing files:", error.message);
     throw new Error(error.message);
   }
   if (!conn) {
-    console.error("Container client or SQL connection is undefined.");
     throw new Error('conn empty');
   }
-  conn.on('release', () => {
-    console.log("Connection released back to pool");
-  });
   return conn;
 }
 
@@ -40,9 +33,6 @@ export interface SpecialProcessingProps {
   censusID?: number;
   quadratID?: number;
   fullName?: string;
-  dbhUnit?: string;
-  homUnit?: string;
-  coordUnit?: string;
 }
 
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
@@ -52,8 +42,9 @@ export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | null>;
+  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | undefined>;
 };
+
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
   "attributes": {
@@ -76,37 +67,46 @@ export const fileMappings: Record<string, FileMapping> = {
     tableName: "",
     columnMappings: {
       "spcode": "Species.SpeciesCode",
+      "family": "Family.Family",
       "genus": "Genus.GenusName",
       "species": "Species.SpeciesName",
+      "subspecies": "Species.SubspeciesName", // optional
       "IDLevel": "Species.IDLevel",
-      "family": "Species.Family",
-      "authority": "Species.Authority"
+      "authority": "Species.Authority",
+      "subauthority": "Species.SubspeciesAuthority", // optional
     },
     specialProcessing: processSpecies
   },
   "quadrats": {
-    tableName: "",
+    tableName: "quadrats",
+    // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
     columnMappings: {
-      "quadrat": "Quadrats.QuadratName",
-      "dimx": "Quadrats.DimensionX",
-      "dimy": "Quadrats.DimensionY"
+      "quadrat": "QuadratName",
+      "startx": "StartX",
+      "starty": "StartY",
+      "dimx": "DimensionX",
+      "dimy": "DimensionY",
+      "unit": "Unit",
+      "quadratshape": "QuadratShape",
     },
-    specialProcessing: processQuadrats
+  },
+  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
+  "subquadrats": {
+    tableName: "subquadrats",
+    columnMappings: {
+      "subquadrat": "SubquadratName",
+      "quadrat": "QuadratID",
+      "dimx": "DimensionX",
+      "dimy": "DimensionY",
+      "xindex": "X",
+      "yindex": "Y",
+      "unit": "Unit",
+      "orderindex": "Ordering",
+    }
   },
   "measurements": {
     tableName: "", // Multiple tables involved
-    columnMappings: {
-      "tag": "Trees.TreeTag",
-      "stemtag": "Stems.StemTag",
-      "spcode": "Species.SpeciesCode",
-      "quadrat": "Quadrats.QuadratName",
-      "lx": "Stems.StemQuadX",
-      "ly": "Stems.StemQuadY",
-      "dbh": "CoreMeasurements.MeasuredDBH",
-      "codes": "Attributes.Code",
-      "hom": "CoreMeasurement.MeasuredHOM",
-      "date": "CoreMeasurement.MeasurementDate",
-    },
+    columnMappings: {},
     specialProcessing: processCensus
   },
 };
@@ -133,7 +133,7 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
       throw err;
     } else {
       console.log("Connection attempt failed --> trying again");
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait a bit before retrying
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
   }
