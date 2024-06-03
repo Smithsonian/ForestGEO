@@ -959,7 +959,7 @@ export default function Sidebar(props: SidebarProps) {
               <Divider />
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
-                  <Typography level="title-sm">The most recent census ended on: {getOpenClosedCensusStartEndDate('closed', census)?.toDateString()}</Typography>
+                  <Typography level="title-sm">The most recent census ended on: {moment(getOpenClosedCensusStartEndDate('closed', census) ?? new Date()).utc().toDate().toDateString()}</Typography>
                   <Typography level={"title-sm"}>Select a start date for the new census:</Typography>
                   <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for standardized handling</Typography>
                   <DatePicker
@@ -996,7 +996,7 @@ export default function Sidebar(props: SidebarProps) {
               <Divider />
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
-                  <Typography level={"title-sm"}>Start Date: {getOpenClosedCensusStartEndDate('open', census)?.toDateString()}</Typography>
+                  <Typography level={"title-sm"}>Start Date: {moment(getOpenClosedCensusStartEndDate('open', census) ?? new Date()).utc().toDate().toDateString()}</Typography>
                   <Typography level={"title-sm"}>Select an end date for the current census:</Typography>
                   <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for standardized handling</Typography>
                   <DatePicker
