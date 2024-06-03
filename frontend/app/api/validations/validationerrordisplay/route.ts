@@ -16,14 +16,14 @@ export async function GET(request: NextRequest) {
     const validationErrorsQuery = `
       SELECT 
           cm.CoreMeasurementID AS CoreMeasurementID, 
-          GROUP_CONCAT(ve.ValidationErrorID) AS ValidationErrorIDs,
-          GROUP_CONCAT(ve.ValidationErrorDescription) AS Descriptions
+          GROUP_CONCAT(ve.ValidationID) AS ValidationErrorIDs,
+          GROUP_CONCAT(ve.Description) AS Descriptions
       FROM 
           ${schema}.cmverrors AS cve
       JOIN 
           ${schema}.coremeasurements AS cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
       JOIN 
-          ${schema}.validationerrors AS ve ON cve.ValidationErrorID = ve.ValidationErrorID
+          catalog.validationprocedures AS ve ON cve.ValidationErrorID = ve.ValidationID
       GROUP BY 
           cm.CoreMeasurementID;
     `;

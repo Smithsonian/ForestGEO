@@ -7,8 +7,9 @@ import { randomId } from "@mui/x-data-grid-generator";
 import { useSession } from "next-auth/react";
 import React, { useEffect, useState } from "react";
 import DataGridCommons from "../datagridcommons";
-import { useCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
+import { GridSelections } from "@/config/macros";
 
 export default function QuadratPersonnelDataGrid() {
   const initialRows: GridRowsProp = [{
@@ -33,12 +34,12 @@ export default function QuadratPersonnelDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const { data: session } = useSession();
 
-  const [quadratOptions, setQuadratOptions] = useState<{ label: string; value: number; }[]>([]);
-  const [personnelOptions, setPersonnelOptions] = useState<{ label: string; value: number; }[]>([]);
+  const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
+  const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
 
   let currentSite = useSiteContext();
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let { validity } = useDataValidityContext();
 
   const addNewRowToGrid = () => {
@@ -64,7 +65,7 @@ export default function QuadratPersonnelDataGrid() {
 
   useEffect(() => {
     const fetchOptions = async () => {
-      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.censusID}?schema=${currentSite?.schemaName}`);
+      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`);
       const quadratData = await quadratResponse.json();
       if (quadratData.length === 0) throw new Error("quadratData fetchall is empty");
       setQuadratOptions(quadratData.map((item: any) => ({

@@ -222,12 +222,16 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
  * @param fieldList List of fields to check for changes.
  * @returns An array of fields that have changed.
  */
-// helper functions for precise field changes
 export function detectFieldChanges(newRow: any, oldRow: any, fieldList: string[]): string[] {
   return fieldList.filter(field => newRow[field] !== oldRow[field]);
 }
 
 export function generateUpdateQueries(schema: string, table: string, changedFields: string[], newRow: any, primaryKey: string): string[] {
+  if (!newRow[primaryKey]) {
+    // Skip queries where primary key is null
+    return [];
+  }
+
   return changedFields.map(field => {
     return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
   });

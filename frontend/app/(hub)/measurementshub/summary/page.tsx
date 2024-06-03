@@ -1,9 +1,9 @@
 'use client';
-import React, {useEffect, useState} from "react";
-import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
+import React, { useEffect, useState } from "react";
+import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses } from "@mui/material";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { MeasurementsSummaryGridColumns } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
   IconButton,
@@ -19,28 +19,29 @@ import {
   DialogActions,
   Snackbar,
   Stack,
+  Switch,
 } from "@mui/joy";
-import Select, {SelectOption} from "@mui/joy/Select";
-import {useSession} from "next-auth/react";
+import Select, { SelectOption } from "@mui/joy/Select";
+import { useSession } from "next-auth/react";
 import {
-  useCensusContext,
+  useOrgCensusContext,
   usePlotContext,
   useQuadratContext,
   useQuadratDispatch,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import {randomId} from "@mui/x-data-grid-generator";
+import { randomId } from "@mui/x-data-grid-generator";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
-import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
+import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
 import Option from '@mui/joy/Option';
 import MeasurementSummaryGrid from "@/components/datagrids/msvdatagrid";
-import {useDataValidityContext} from "@/app/contexts/datavalidityprovider";
-import {UnifiedValidityFlags} from "@/config/macros";
+import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
+import { UnifiedValidityFlags } from "@/config/macros";
 
-const LargeTooltip = styled(({className, ...props}: TooltipProps) => (
-  <Tooltip {...props} classes={{popper: className}}/>
-))(({theme}) => ({
+const LargeTooltip = styled(({ className, ...props }: TooltipProps) => (
+  <Tooltip {...props} classes={{ popper: className }} />
+))(({ theme }) => ({
   [`& .${tooltipClasses.tooltip}`]: {
     fontSize: 16,
     maxWidth: 600, // Increase maxWidth to give more space for text
@@ -54,16 +55,16 @@ interface ChecklistProgress {
 }
 
 export default function SummaryPage() {
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const [quadrat, setQuadrat] = useState<Quadrat>();
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let currentSite = useSiteContext();
   let quadratListContext = useQuadratListContext();
   let currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
-  const {validity, recheckValidityIfNeeded} = useDataValidityContext();
+  const { validity, recheckValidityIfNeeded } = useDataValidityContext();
   const [progressDialogOpen, setProgressDialogOpen] = useState(false);
   const [isUploadAllowed, setIsUploadAllowed] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -81,27 +82,27 @@ export default function SummaryPage() {
     {
       id: 0,
       coreMeasurementID: 0,
-      plotID: currentPlot?.plotID,
-      plotName: currentPlot?.plotName,
-      censusID: currentCensus?.censusID,
-      censusStartDate: currentCensus?.startDate,
-      censusEndDate: currentCensus?.endDate,
-      quadratID: currentQuadrat?.quadratID,
-      quadratName: currentQuadrat?.quadratName,
-      subquadratID: 0,
+      plotID: null,
+      plotName: null,
+      censusID: null,
+      censusStartDate: null,
+      censusEndDate: null,
+      quadratID: null,
+      quadratName: '',
+      subquadratID: null,
       subquadratName: '',
-      speciesID: 0,
-      speciesCode: '',
-      treeID: 0,
-      treeTag: '',
-      stemID: 0,
+      stemID: null,
       stemTag: '',
+      speciesID: null,
+      speciesCode: '',
+      treeID: null,
+      treeTag: '',
       stemLocalX: 0,
       stemLocalY: 0,
       stemUnits: '',
       personnelID: 0,
       personnelName: '',
-      measurementDate: undefined,
+      measurementDate: null,
       measuredDBH: 0,
       dbhUnits: '',
       measuredHOM: 0,
@@ -122,6 +123,7 @@ export default function SummaryPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const [useSubquadrats, setUseSubquadrats] = useState(currentPlot?.usesSubquadrats ?? false);
 
   useEffect(() => {
     const verifyPreconditions = async () => {
@@ -141,13 +143,13 @@ export default function SummaryPage() {
       coreMeasurementID: 0,
       plotID: currentPlot?.plotID,
       plotName: currentPlot?.plotName,
-      censusID: currentCensus?.censusID,
-      censusStartDate: currentCensus?.startDate,
-      censusEndDate: currentCensus?.endDate,
-      quadratID: currentQuadrat?.quadratID,
-      quadratName: currentQuadrat?.quadratName,
-      subquadratID: 0,
-      subquadratName: '',
+      censusID: currentCensus?.dateRanges[0].censusID,
+      censusStartDate: currentCensus?.dateRanges[0]?.startDate,
+      censusEndDate: currentCensus?.dateRanges[0]?.endDate,
+      quadratID: null,
+      quadratName: null,
+      subquadratID: null,
+      subquadratName: null,
       speciesID: 0,
       speciesCode: '',
       treeID: 0,
@@ -169,7 +171,7 @@ export default function SummaryPage() {
       isNew: true,
     };
     setRows(oldRows => [...oldRows, newRow]);
-    setRowModesModel(oldModel => ({...oldModel, [id]: {mode: GridRowModes.Edit}}));
+    setRowModesModel(oldModel => ({ ...oldModel, [id]: { mode: GridRowModes.Edit } }));
   };
 
   const handleCloseGlobalError = () => {
@@ -196,11 +198,11 @@ export default function SummaryPage() {
       open={progressDialogOpen}
       onClose={() => {
       }}
-      sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
+      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       <ModalDialog
         size="lg"
-        sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
+        sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
         role="alertdialog"
       >
         <DialogTitle>Pre-Validation Systems Check</DialogTitle>
@@ -228,17 +230,17 @@ export default function SummaryPage() {
                 : progressData.message;
 
               return (
-                <ListItem sx={{alignItems: 'center', display: 'flex', flexDirection: 'row'}} key={item}>
-                  <ListItemContent sx={{minWidth: '160px', mr: 2, my: 'auto'}}>
+                <ListItem sx={{ alignItems: 'center', display: 'flex', flexDirection: 'row' }} key={item}>
+                  <ListItemContent sx={{ minWidth: '160px', mr: 2, my: 'auto' }}>
                     <Typography level={'body-md'}>{progressData.message}</Typography>
                   </ListItemContent>
                   <LargeTooltip title={tooltipMessage} placement="top" arrow>
-                    <Box sx={{width: '100%', maxWidth: 'calc(100% - 180px)', my: 'auto'}}>
+                    <Box sx={{ width: '100%', maxWidth: 'calc(100% - 180px)', my: 'auto' }}>
                       <LinearProgress
                         variant="determinate"
                         value={progressData.progress}
                         color={isValid ? 'primary' : 'error'}
-                        sx={{width: '100%', height: 8}}
+                        sx={{ width: '100%', height: 8 }}
                       />
                     </Box>
                   </LargeTooltip>
@@ -285,7 +287,7 @@ export default function SummaryPage() {
   const handleQuadratSelection = async (selectedQuadrat: Quadrat | undefined) => {
     setQuadrat(selectedQuadrat);
     if (quadratDispatch) {
-      await quadratDispatch({quadrat: selectedQuadrat});
+      await quadratDispatch({ quadrat: selectedQuadrat });
     }
   };
 
@@ -297,7 +299,7 @@ export default function SummaryPage() {
     <Stack direction="column" spacing={2} marginBottom={2}>
       <Typography level="title-sm">Select Quadrat:</Typography>
       <Select
-        disabled={!validity['quadrats']}
+        disabled={!validity['quadrats'] || !currentPlot?.usesSubquadrats}
         placeholder="Select a Quadrat"
         name="None"
         required
@@ -312,20 +314,44 @@ export default function SummaryPage() {
         <Option value="">None</Option>
         {quadratList?.map((item) => (
           <Option value={item?.quadratName} key={item?.quadratName}>
-            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
               <Typography level="body-lg">{item?.quadratName}</Typography>
             </Box>
           </Option>
         ))}
       </Select>
-      <Button onClick={handleConfirmQuadrat} size="sm" color="primary">Confirm</Button>
+      <Button
+        onClick={handleConfirmQuadrat}
+        size="sm"
+        color="primary"
+        disabled={!currentPlot?.usesSubquadrats}
+      >Confirm</Button>
       {!validity['quadrats'] && (
-        <Alert severity="warning" sx={{mt: 2}}>
+        <Alert severity="warning" sx={{ mt: 2 }}>
           <Typography level="body-lg" color="warning">No quadrats exist to be selected.</Typography>
         </Alert>
       )}
     </Stack>
   );
+
+  useEffect(() => {
+    const updateUseSubquadrats = async () => {
+      let updatedPlot = {
+        ...currentPlot,
+        usesSubquadrats: useSubquadrats,
+      };
+      const response = await fetch(`/api/fixeddata/plots?schema=${currentSite?.schemaName ?? ''}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedPlot)
+      });
+      if (!response.ok) setGlobalError('Toggling subquadrats usage failed!');
+    };
+
+    if (currentPlot?.usesSubquadrats !== useSubquadrats) {
+      updateUseSubquadrats().catch(console.error);
+    }
+  }, [currentPlot, useSubquadrats]);
 
   return (
     <>
@@ -334,27 +360,54 @@ export default function SummaryPage() {
           <Alert onClose={handleCloseGlobalError} severity="error">{globalError}</Alert>
         </Snackbar>
       )}
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
-        <ProgressDialog/>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
+        <ProgressDialog />
         <Box sx={{
           width: '100%', display: 'flex', justifyContent: 'space-between',
           alignItems: 'center', backgroundColor: 'warning.main', borderRadius: '4px', p: 2
         }}>
           <Stack direction="column">
-            <Box sx={{display: 'flex', flexDirection: 'column', flexGrow: 1}}>
-              {session?.user.isAdmin && (
-                <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
-              )}
-              <Typography level={"title-md"} sx={{color: "#ffa726"}}>Note: This is a locked view and will not allow
-                modification.</Typography>
-              <Typography level={"body-md"} sx={{color: "#ffa726"}}>Please use this view as a way to confirm changes
-                made to measurements.</Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+              <Box sx={{ flex: 1, display: 'flex', justifyContent: 'left', flexDirection: 'column', marginTop: 2 }}>
+                {currentPlot?.usesSubquadrats ? (
+                  <Box sx={{display: 'flex', flexDirection: 'row'}}>
+                    <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot has been set to accept subquadrats. <br />
+                      Please ensure you select a quadrat before proceeding.</Typography>
+                    <QuadratSelectionMenu />
+                  </Box>
+                ) : (
+                  <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot does not accept subquadrats. <br />
+                    Please ensure that you use quadrat names when submitting new measurements instead of subquadrat names</Typography>
+                )}
+                {session?.user.isAdmin ? (
+                  <Stack direction="column">
+                    <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>Note: ADMINISTRATOR VIEW</Typography>
+                    <Stack direction="row" spacing={4}>
+                      <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Please use the toggle to change this setting if it is incorrect</Typography>
+                      <Switch
+                        checked={useSubquadrats}
+                        onChange={(event) => setUseSubquadrats(event.target.checked)}
+                        color={useSubquadrats ? 'primary' : 'neutral'}
+                        variant={useSubquadrats ? 'solid' : 'outlined'}
+                        endDecorator={useSubquadrats ? 'Use subquadrats' : 'Use quadrats'}
+                        slotProps={{
+                          endDecorator: {
+                            sx: {
+                              minWidth: 24,
+                            },
+                          },
+                        }}
+                      />
+                    </Stack>
+                  </Stack>
+                  
+                ) : (
+                  <Typography level={"title-md"} sx={{ color: "#ffa726" }}>If this setting is inaccurate, please contact an administrator.</Typography>
+                )}
+              </Box>
             </Box>
           </Stack>
-          <Box sx={{flexGrow: 1, display: 'flex', justifyContent: 'left', marginLeft: '5%'}}>
-            <QuadratSelectionMenu/>
-          </Box>
-          <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Button onClick={() => setProgressDialogOpen(true)} variant="solid" color="primary">Upload</Button>
           </Box>
         </Box>
@@ -368,7 +421,7 @@ export default function SummaryPage() {
         formType={"measurements"}
       />
       <MeasurementSummaryGrid
-        locked={!validity['quadrats'] && !currentQuadrat}
+        locked={!validity['quadrats']}
         gridColumns={MeasurementsSummaryGridColumns}
         rows={rows}
         setRows={setRows}

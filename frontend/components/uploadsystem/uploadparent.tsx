@@ -9,10 +9,11 @@ import {
   FileCollectionRowSet,
   FileRow,
   FileRowSet,
+  getTableHeaders,
   RequiredTableHeadersByFormType, TableHeadersByFormType
 } from "@/config/macros/formdetails";
 import {FileWithPath} from "react-dropzone";
-import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";
 import {parse, ParseResult} from "papaparse";
 import {Box, Typography} from "@mui/joy";
@@ -83,7 +84,7 @@ export default function UploadParent(props: UploadParentProps) {
   const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
   const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let currentSite = useSiteContext();
   if (!currentSite) throw new Error('site must be selected!');
   const {data: session} = useSession();
@@ -234,7 +235,7 @@ export default function UploadParent(props: UploadParentProps) {
         return value;
       },
       complete: async (results: ParseResult<FileRow>) => {
-        const expectedHeaders = TableHeadersByFormType[uploadForm];
+        const expectedHeaders = getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false);
         const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
 
         if (!expectedHeaders || !requiredHeaders) {

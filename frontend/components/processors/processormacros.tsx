@@ -1,9 +1,8 @@
-import {PoolConnection, PoolOptions} from 'mysql2/promise';
+import {PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
 import {booleanToBit} from "@/config/macros";
 import {FileRow} from "@/config/macros/formdetails";
 
 import {processSpecies} from "@/components/processors/processspecies";
-import * as fs from "fs";
 import {NextRequest} from "next/server";
 import {processCensus} from "@/components/processors/processcensus";
 import {PoolMonitor} from "@/config/poolmonitor";
@@ -111,28 +110,35 @@ export const fileMappings: Record<string, FileMapping> = {
   },
 };
 const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
-  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
-  host: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
+  user: process.env.AZURE_SQL_USER, // better stored in an app setting such as process.env.DB_USER
+  password: process.env.AZURE_SQL_PASSWORD, // better stored in an app setting such as process.env.DB_PASSWORD
+  host: process.env.AZURE_SQL_SERVER, // better stored in an app setting such as process.env.DB_SERVER
   port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
-  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
-  // ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
+  database: process.env.AZURE_SQL_CATALOG_SCHEMA,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
 };
+// database: process.env.AZURE_SQL_SCHEMA!, // better stored in an app setting such as process.env.DB_NAME
 export const poolMonitor = new PoolMonitor(sqlConfig);
-// const pool = mysql.createPool(sqlConfig);
+// const pool = createPool(sqlConfig);
 
 // Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
+    console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
+    // const connection = await pool.getConnection();
     const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
+    console.log('Connection successful');
     return connection; // Resolve the connection when successful
   } catch (err) {
+    console.error(`Connection attempt ${tries + 1} failed:`, err);
     if (tries == 5) {
       console.error("!!! Cannot connect !!! Error:", err);
       throw err;
     } else {
-      console.log("Connection attempt failed --> trying again");
+      console.log("Retrying connection...");
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }

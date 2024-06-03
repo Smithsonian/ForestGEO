@@ -59,10 +59,10 @@ export const createFetchQuery: FetchQueryFunction = (
   page,
   pageSize,
   plotID?,
-  censusID?,
+  plotCensusNumber?,
   quadratID?: number
 ) => {
-  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${censusID}` + `${quadratID ? `/${quadratID}` : ``}`;
+  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${plotCensusNumber}` + `${quadratID ? `/${quadratID}` : ``}`;
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (

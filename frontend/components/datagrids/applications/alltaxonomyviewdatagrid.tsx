@@ -1,4 +1,4 @@
-// attributes datagrid
+// alltaxonomiesview datagrid
 "use client";
 import { GridRowsProp } from "@mui/x-data-grid";
 import { AlertProps } from "@mui/material";

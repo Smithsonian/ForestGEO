@@ -3,7 +3,7 @@ import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useEffect, useState} from "react";
 import {CensusGridColumns} from '@/config/sqlrdsdefinitions/tables/censusrds';
-import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {Button} from "@mui/joy";
@@ -12,7 +12,7 @@ import {useSession} from "next-auth/react";
 import {redirect} from "next/navigation";
 import {useLoading} from "@/app/contexts/loadingprovider";
 import {DatePicker} from '@mui/x-date-pickers';
-import dayjs from "dayjs";
+import moment from "moment";
 
 
 export default function CensusDataGrid() {
@@ -43,15 +43,12 @@ export default function CensusDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   let currentPlot = usePlotContext();
   let currentSite = useSiteContext();
-  let currentCensus = useCensusContext();
   let {setLoading} = useLoading();
   const {data: session} = useSession();
   const [openCensusId, setOpenCensusId] = useState<number | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
 
   if (!session) redirect('/');
-  const {updateQuadratsContext, updateCensusContext, updatePlotsContext} =
-    UpdateContextsFromIDB({schema: currentSite?.schemaName ?? ''});
 
   // Function to validate the end date
   const validateEndDate = (censusId: number, chosenEndDate: Date | null): boolean => {
@@ -132,9 +129,6 @@ export default function CensusDataGrid() {
       });
       if (!response.ok) throw new Error('Failed to add open-ended census');
       setRefresh(true);
-      setLoading(true, 'Updating Contexts...');
-      await Promise.all([updatePlotsContext(), updateQuadratsContext(), updateCensusContext()]);
-      setLoading(false);
     } catch (error) {
       console.error('Error adding open-ended census:', error);
       setSnackbar({children: 'Error adding open-ended census', severity: 'error'});
@@ -172,9 +166,9 @@ export default function CensusDataGrid() {
       </Button>
       {openCensusId !== null && (
         <DatePicker
-          value={endDate ? dayjs(endDate) : dayjs()}
+          value={endDate ? moment(endDate).utc() : moment().utc()}
           onChange={(date) => setEndDate(date ? date.toDate() : null)}
-          defaultValue={dayjs()}
+          defaultValue={moment().utc()}
         />
       )}
       <DataGridCommons

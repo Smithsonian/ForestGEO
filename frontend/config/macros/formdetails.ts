@@ -23,6 +23,19 @@ export const TableHeadersByFormType: Record<string, { label: string; }[]> = {
   "arcgis_xlsx": arcgisHeaders
 };
 
+export function getTableHeaders(formType: string, usesSubquadrats: boolean): { label: string; }[] {
+  if (formType === "measurements") {
+    return TableHeadersByFormType["measurements"].map(header => {
+      if (header.label === "subquadrat") {
+        return { label: usesSubquadrats ? "subquadrat" : "quadrat" };
+      }
+      return header;
+    });
+  }
+
+  return TableHeadersByFormType[formType];
+}
+
 export const RequiredTableHeadersByFormType: Record<string, { label: string; }[]> = {
   "attributes": [],
   "personnel": [],

@@ -1,21 +1,18 @@
 "use client";
 import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
-import React, {useCallback, useState} from "react";
+import React, {useCallback, useEffect, useState} from "react";
 import {QuadratsGridColumns as BaseQuadratsGridColumns, Quadrat} from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import {
-  useCensusContext,
+  useOrgCensusContext,
   usePlotContext,
   useQuadratDispatch,
-  useSiteContext
 } from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {Box, Button, IconButton, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import CloseIcon from "@mui/icons-material/Close";
-import SubquadratsDataGrid from "@/components/client/sqdatagrid";
 
 export default function QuadratsDataGrid() {
   const initialRows: GridRowsProp = [
@@ -35,6 +32,7 @@ export default function QuadratsDataGrid() {
   const [rows, setRows] = React.useState(initialRows);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
+  const [locked, setLocked] = useState(false);
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
     'children' | 'severity'
@@ -46,13 +44,20 @@ export default function QuadratsDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  // const [censusOptions, setCensusOptions] = useState<GridSelections[]>([]);
   const {data: session} = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormType, setUploadFormType] = useState<'quadrats' | 'subquadrats'>('quadrats');
 
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let quadratDispatch = useQuadratDispatch();
+
+  useEffect(() => {
+    if (currentCensus !== undefined) {
+      setLocked(currentCensus.dateRanges[0].endDate !== undefined); // if the end date is not undefined, then grid should be locked
+    }
+  }, [currentCensus]);
 
   const handleSelectQuadrat = useCallback((quadratID: number | null) => {
     // we want to select a quadrat contextually when using this grid FOR subquadrats selection
@@ -74,7 +79,7 @@ export default function QuadratsDataGrid() {
       id: id,
       quadratID: nextQuadratID,
       plotID: currentPlot ? currentPlot.id : 0,
-      censusID: currentCensus ? currentCensus.censusID : 0,
+      censusID: currentCensus ? currentCensus.dateRanges[0].censusID : 0,
       quadratName: '',
       dimensionX: 0,
       dimensionY: 0,
@@ -244,6 +249,7 @@ export default function QuadratsDataGrid() {
         </ModalDialog>
       </Modal> */}
       <DataGridCommons
+        locked={locked}
         gridType="quadrats"
         gridColumns={quadratsGridColumns}
         rows={rows}
