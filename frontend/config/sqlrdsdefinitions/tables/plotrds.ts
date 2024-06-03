@@ -1,6 +1,6 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { IDataMapper } from '../../datamapper';
-import { unitSelectionOptions } from '@/config/macros';
+import { bitToBoolean, booleanToBit, unitSelectionOptions } from '@/config/macros';
 
 export type PlotRDS = {
   id?: number;
@@ -15,16 +15,11 @@ export type PlotRDS = {
   globalY?: number;
   globalZ?: number;
   unit?: string;
+  usesSubquadrats?: boolean;
   plotShape?: string;
   plotDescription?: string;
   numQuadrats?: number;
 };
-
-export interface PlotRaw {
-  key: string;
-  num: number;
-  id: number;
-}
 
 export type Plot = PlotRDS | undefined;
 
@@ -40,6 +35,7 @@ export interface PlotsResult {
   GlobalY: any;
   GlobalZ: any;
   Unit: any;
+  UsesSubquadrats: any
   PlotShape: any;
   PlotDescription: any;
   NumQuadrats: any;
@@ -60,6 +56,7 @@ export class PlotsMapper implements IDataMapper<PlotsResult, PlotRDS> {
       globalY: item.GlobalY != null ? Number(item.GlobalY) : undefined,
       globalZ: item.GlobalZ != null ? Number(item.GlobalZ) : undefined,
       unit: item.Unit != null ? String(item.Unit) : undefined,
+      usesSubquadrats: item.UsesSubquadrats != null ? bitToBoolean(item.UsesSubquadrats) : undefined,
       plotShape: item.PlotShape != null ? String(item.PlotShape) : undefined,
       plotDescription: item.PlotDescription != null ? String(item.PlotDescription) : undefined,
       numQuadrats: item.NumQuadrats !== null ? Number(item.NumQuadrats) : undefined,
@@ -78,6 +75,7 @@ export class PlotsMapper implements IDataMapper<PlotsResult, PlotRDS> {
       GlobalX: item.globalX ? Number(item.globalX) : null,
       GlobalY: item.globalY !== undefined ? Number(item.globalY) : null,
       GlobalZ: item.globalZ !== undefined ? Number(item.globalZ) : null,
+      UsesSubquadrats: item.usesSubquadrats !== undefined ? booleanToBit(item.usesSubquadrats) : null,
       Unit: item.unit !== undefined ? String(item.unit) : null,
       PlotShape: item.plotShape !== undefined ? String(item.plotShape) : null,
       PlotDescription: item.plotDescription !== undefined ? String(item.plotDescription) : null,

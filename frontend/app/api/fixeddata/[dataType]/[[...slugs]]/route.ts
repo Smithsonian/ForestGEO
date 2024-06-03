@@ -10,23 +10,26 @@ import {
   AllTaxonomiesViewQueryConfig,
   StemTaxonomiesViewQueryConfig,
 } from '@/components/processors/processorhelperfunctions';
-import { error } from "console";
-// slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, censusID, (optional) quadratID
+
+// slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
 export async function GET(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
-  const [schema, pageParam, pageSizeParam, plotID, censusID, quadratID] = params.slugs;
+  const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam] = params.slugs;
   if ((!schema || schema === 'undefined') || (!pageParam || pageParam === 'undefined') || (!pageSizeParam || pageSizeParam === 'undefined')) throw new Error("core slugs schema/page/pageSize not correctly received");
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
 
-  if ((!plotID || plotID === '0') || (!censusID || censusID === '0')) throw new Error("Core plot/census information not received");
+  if ((!plotIDParam || plotIDParam === '0') || (!plotCensusNumberParam || plotCensusNumberParam === '0')) throw new Error("Core plot/census information not received");
+  const plotID = parseInt(plotIDParam);
+  const plotCensusNumber = parseInt(plotCensusNumberParam);
+  const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
   let conn: PoolConnection | null = null;
-  // app/api/fixeddata/get/[dataType]/[[...slugs]]/route.ts
+
   try {
     conn = await getConn();
     let paginatedQuery = ``;
-    let queryParams = [];
-    queryParams.push((page * pageSize).toString(), pageSize.toString());
+    const queryParams: any[] = [];
+
     switch (params.dataType) {
       case 'attributes':
       case 'species':
@@ -35,42 +38,89 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
       case 'alltaxonomiesview':
       case 'stemtaxonomiesview':
       case 'quadratpersonnel':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} LIMIT ?, ?`;
+        paginatedQuery = `
+          SELECT SQL_CALC_FOUND_ROWS * 
+          FROM ${schema}.${params.dataType} 
+          LIMIT ?, ?`;
+        queryParams.push(page * pageSize, pageSize);
         break;
+
       case 'quadrats':
         paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} 
-        WHERE PlotID = ${plotID} AND CensusID = ${censusID} 
-        GROUP BY QuadratID
-        LIMIT ?, ?`; // plotID, censusID, and quadratID are still strings!
+          SELECT SQL_CALC_FOUND_ROWS q.*
+          FROM ${schema}.quadrats q
+          WHERE q.PlotID = ?
+            AND q.CensusID IN (
+              SELECT c.CensusID
+              FROM ${schema}.census c
+              WHERE c.PlotID = q.PlotID
+                AND c.PlotCensusNumber = ?
+            )
+          GROUP BY q.QuadratID
+          LIMIT ?, ?`;
+        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
+
       case 'subquadrats':
-        // quadrats are required!
-        if (quadratID === '0' || quadratID === 'undefined') throw new Error("QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route");
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS s.*
-        FROM ${schema}.${params.dataType} s
-        JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-        WHERE q.QuadratID = ${quadratID} AND q.PlotID = ${plotID} AND q.CensusID = ${censusID}
-        LIMIT ?, ?`;
+        if (!quadratID || quadratID === 0) {
+          throw new Error("QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route");
+        }
+        paginatedQuery = `
+          SELECT SQL_CALC_FOUND_ROWS s.*
+          FROM ${schema}.subquadrats s
+          JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+          WHERE q.QuadratID = ?
+            AND q.PlotID = ?
+            AND q.CensusID IN (
+              SELECT c.CensusID
+              FROM ${schema}.census c
+              WHERE c.PlotID = q.PlotID
+                AND c.PlotCensusNumber = ?
+            )
+          LIMIT ?, ?`;
+        queryParams.push(quadratID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
+
       case 'census':
         paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType}
-        WHERE PlotID = ${plotID}
-        LIMIT ?, ?`;
+          SELECT SQL_CALC_FOUND_ROWS * 
+          FROM ${schema}.census 
+          WHERE PlotID = ?
+          LIMIT ?, ?`;
+        queryParams.push(plotID, page * pageSize, pageSize);
         break;
+
       case 'coremeasurements':
       case 'measurementssummaryview':
       case 'stemdimensionsview':
         paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType}
-        WHERE PlotID = ${plotID} AND CensusID = ${censusID} 
-        ${quadratID && quadratID !== '0' && quadratID !== 'undefined' ? `AND QuadratID = ${quadratID}` : ''}
-        LIMIT ?, ?
-        `;
+          SELECT SQL_CALC_FOUND_ROWS *
+          FROM ${schema}.${params.dataType} cm
+          WHERE PlotID = ?
+            AND CensusID IN (
+              SELECT c.CensusID
+              FROM ${schema}.census c
+              WHERE c.PlotID = PlotID
+                AND c.PlotCensusNumber = ?
+            )
+          LIMIT ?, ?`;
+          // ${quadratID ? `AND cm.QuadratID = ?` : ''}
+        queryParams.push(plotID, plotCensusNumber);
+        // if (quadratID) {
+        //   queryParams.push(quadratID);
+        // }
+        queryParams.push(page * pageSize, pageSize);
         break;
+      default:
+        throw new Error(`Unknown dataType: ${params.dataType}`);
     }
-    const paginatedResults = await runQuery(conn, paginatedQuery, queryParams);
+
+    // Ensure query parameters match the placeholders in the query
+    if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
+      throw new Error("Mismatch between query placeholders and parameters");
+    }
+
+    const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
@@ -124,6 +174,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       await runQuery(conn, insertQuery);
     } else {
       delete newRowData[demappedGridID];
+      if (params.dataType === 'plots') delete newRowData.NumQuadrats;
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       await runQuery(conn, insertQuery);
     }
@@ -150,7 +201,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
-      const oldRowData = mapper.demapData([oldRow])[0];
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
       const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]);
       await runQuery(conn, updateQuery);

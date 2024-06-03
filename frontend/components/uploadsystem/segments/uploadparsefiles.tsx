@@ -14,7 +14,7 @@ import {
   Typography
 } from "@mui/joy";
 import { UploadParseFilesProps } from "@/config/macros/uploadsystemmacros";
-import { TableHeadersByFormType } from "@/config/macros/formdetails";
+import { getTableHeaders, TableHeadersByFormType } from "@/config/macros/formdetails";
 import { Button, Grid } from "@mui/material";
 import { DropzoneLogic } from "@/components/uploadsystemhelpers/dropzone";
 import { FileList } from "@/components/uploadsystemhelpers/filelist";
@@ -22,6 +22,7 @@ import { LoadingButton } from "@mui/lab";
 import React, { useState } from "react";
 import { FileWithPath } from "react-dropzone";
 import WarningIcon from "@mui/icons-material/Warning";
+import { usePlotContext } from "@/app/contexts/userselectionprovider";
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
   const {
@@ -31,6 +32,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
+  let currentPlot = usePlotContext();
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {
@@ -81,7 +83,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             <Typography sx={{ mb: 2 }}>
               You have selected {uploadForm}. Please ensure that your file has the following headers
               before continuing: <br />
-              {uploadForm !== '' && TableHeadersByFormType[uploadForm]?.map(obj => obj.label).join(', ')}
+              {uploadForm !== '' && getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false).map(obj => obj.label).join(', ')}
               <br />
               
             </Typography>

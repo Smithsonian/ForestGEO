@@ -27,7 +27,7 @@ import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import {AutocompleteMultiSelect} from "@/components/forms/autocompletemultiselect";
 import Divider from "@mui/joy/Divider";
 import Typography from "@mui/joy/Typography";
-import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from 'next-auth/react';
 import UploadValidation from "@/components/uploadsystem/segments/uploadvalidation";
 import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
@@ -295,7 +295,7 @@ const CensusAutocompleteInputForm = () => {
 
 
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let currentSite = useSiteContext();
 
   const {data: session} = useSession();
@@ -393,7 +393,7 @@ const CensusAutocompleteInputForm = () => {
 
     try {
       // Add code to retrieve additional required parameters like schema, fileName, etc.
-      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.plotID}&census=${currentCensus?.id}&user=${session?.user?.name}&formType=measurements&uom=metric`, {
+      const response = await fetch(`/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.plotID}&census=${currentCensus?.dateRanges[0].censusID}&user=${session?.user?.name}&formType=measurements&uom=metric`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -438,7 +438,7 @@ const CensusAutocompleteInputForm = () => {
   return (
     <Box sx={{display: 'flex', width: '100%', height: '100%', flexDirection: 'column'}}>
       <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.plotName ?? 'None'}, Census
-        ID: {currentCensus?.censusID ?? '0'}</Typography>
+        ID: {currentCensus?.dateRanges[0].censusID ?? '0'}</Typography>
       <Box sx={{display: 'flex', justifyContent: 'flex-end', marginTop: 2}}>
         <Button
           variant="contained"

@@ -1,5 +1,6 @@
+// contextreducers.ts
 import { Dispatch } from "react";
-import { clearDataByKey, setData } from "../db";
+import { setData } from "../db";
 
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | undefined }) => Promise<void>;
@@ -10,12 +11,7 @@ export function createEnhancedDispatch<T>(
 ): EnhancedDispatch<T> {
   return async (payload: { [key: string]: T | undefined }) => {
     // Save to IndexedDB only if payload is not undefined
-    if (payload[actionType] !== undefined) {
-      await setData(actionType, payload[actionType]);
-    } else {
-      await clearDataByKey(actionType);
-    }
-
+    // await setData(actionType, payload[actionType] !== undefined ? payload[actionType] : undefined); // gonna comment this out temporarily, it seems to be causing issues
     // Dispatch the action
     dispatch({ type: actionType, payload });
   };
@@ -29,15 +25,8 @@ export type LoadAction<T> = {
 // Generic reducer function
 export function genericLoadReducer<T>(state: T | undefined, action: LoadAction<T>): T | undefined {
   switch (action.type) {
-    case 'coreMeasurementLoad':
-    case 'attributeLoad':
-    case 'censusLoad':
-    case 'personnelLoad':
-    case 'quadratsLoad':
-    case 'speciesLoad':
-    case 'subSpeciesLoad':
-    case 'plotsLoad':
     case 'censusList':
+    case 'plotList':
     case 'quadratList':
     case 'subquadratList':
     case 'siteList':

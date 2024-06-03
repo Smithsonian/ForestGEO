@@ -12,6 +12,7 @@ import {
   GridRowModesModel,
   GridRowParams,
   GridRowsProp,
+  GridToolbar,
   GridToolbarContainer,
   GridToolbarProps,
   GridValidRowModel,
@@ -46,11 +47,8 @@ import {
   getGridID,
 } from "@/config/datagridhelpers";
 import { CMError } from "@/config/macros/uploadsystemmacros";
-import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
-import UpdateContextsFromIDB from "@/config/updatecontextsfromidb";
-import { useSession } from "next-auth/react";
 import {
-  useCensusContext,
+  useOrgCensusContext,
   usePlotContext,
   useQuadratContext,
   useSiteContext
@@ -58,14 +56,7 @@ import {
 import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
-
-interface EditToolbarCustomProps {
-  handleAddNewRow?: () => void;
-  handleRefresh?: () => Promise<void>;
-  locked?: boolean;
-}
-
-type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
+import moment from 'moment';
 
 const errorMapping: { [key: string]: string[] } = {
   '1': ["attributes"],
@@ -86,11 +77,20 @@ const errorMapping: { [key: string]: string[] } = {
   '16': ["quadratName"],
 };
 
+interface EditToolbarCustomProps {
+  handleAddNewRow?: () => void;
+  handleRefresh?: () => Promise<void>;
+  locked?: boolean;
+}
+
+type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
+
 export function EditToolbar(props: EditToolbarProps) {
   const { handleAddNewRow, handleRefresh, locked = false } = props;
 
   return (
     <GridToolbarContainer>
+      <GridToolbar />
       {!locked && (
         <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
           Add Row
@@ -191,17 +191,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
 
   const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
+  const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
 
   const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
 
   const currentSite = useSiteContext();
-
-  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } =
-    UpdateContextsFromIDB({
-      schema: currentSite?.schemaName ?? ''
-    });
 
   const extractErrorRows = () => {
     if (errorRowsForExport.length > 0) return;
@@ -270,7 +265,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       gridColumns.forEach(col => {
         console.log('column fields: ', col.field);
         if (col.field === "measurementDate") {
-          printContent += `<td>${new Date(row[col.field]).toDateString() ?? ''}</td>`;
+          printContent += `<td>${moment(new Date(row[col.field])).utc().toDate().toDateString() ?? ''}</td>`;
         } else {
           printContent += `<td>${row[col.field] ?? ''}</td>`;
         }
@@ -414,15 +409,16 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   };
 
   const fetchPaginatedData = async (pageToFetch: number) => {
+    setRefresh(true);
     console.log('fetchPaginatedData triggered');
     let paginatedQuery = createFetchQuery(
       currentSite?.schemaName ?? '',
       'measurementssummaryview',
       pageToFetch,
       paginationModel.pageSize,
-      currentPlot?.plotID ?? 0,
-      currentCensus?.censusID ?? 0,
-      currentQuadrat?.quadratID ?? 0
+      currentPlot?.plotID,
+      currentCensus?.plotCensusNumber,
+      currentQuadrat?.quadratID
     );
     try {
       const response = await fetch(paginatedQuery, { method: 'GET' });
@@ -441,6 +437,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     } catch (error) {
       console.error('Error fetching data:', error);
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
+    } finally {
+      setRefresh(false);
     }
   };
 
@@ -451,7 +449,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   }, [paginationModel.page]);
 
   useEffect(() => {
-    if (currentPlot?.plotID || currentCensus?.censusID) {
+    if (currentPlot?.plotID || currentCensus?.plotCensusNumber) {
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
   }, [currentPlot, currentCensus, paginationModel.page]);
@@ -629,18 +627,20 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   const fetchValidationErrors = async () => {
     try {
-      const response = await fetch(
-        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`
-      );
-      // {failed: parsedValidationErrors, pending: pendingValidationRows}
+      const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`);
       const data = await response.json();
-      const errors: CMError[] = data.failed;
-      const pending: CoreMeasurementsRDS[] = data.pending;
 
-      const errorMap = errors.reduce<Record<number, CMError>>((acc, error) => {
-        acc[error.CoreMeasurementID] = error;
-        return acc;
-      }, {});
+      // Provide default values if data.failed or data.pending is undefined
+      const errors: CMError[] = data?.failed ?? [];
+      const pending: CoreMeasurementsRDS[] = data?.pending ?? [];
+
+      // Only proceed with reduce if errors is an array
+      const errorMap = Array.isArray(errors)
+        ? errors.reduce<Record<number, CMError>>((acc, error) => {
+          acc[error?.CoreMeasurementID] = error;
+          return acc;
+        }, {})
+        : {};
 
       setValidationErrors(errorMap);
     } catch (error) {
@@ -781,6 +781,24 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement as HTMLElement;
+
+      if (activeElement && activeElement.classList.contains('MuiSelect-root')) {
+        if (event.key === 'Enter') {
+          event.stopPropagation();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
   } else {
@@ -833,6 +851,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             columns={filteredColumns}
             editMode='row'
             rowModesModel={rowModesModel}
+            disableColumnSelector
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
             processRowUpdate={processRowUpdate}

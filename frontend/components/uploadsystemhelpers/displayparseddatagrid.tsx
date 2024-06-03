@@ -7,13 +7,14 @@ import '@/styles/validationtable.css';
 import moment from 'moment';
 import { DataGrid, GridCellParams, GridColDef, GridRowModel, GridRowsProp } from '@mui/x-data-grid';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import { FileErrors, FileRow, RequiredTableHeadersByFormType, FileCollectionRowSet, TableHeadersByFormType, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import { FileErrors, FileRow, RequiredTableHeadersByFormType, FileCollectionRowSet, TableHeadersByFormType, RowValidationErrors, ValidationFunction, getTableHeaders } from '@/config/macros/formdetails';
 import { validateAttributesRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/tables/speciesrds';
 import { validateSubquadratsRow } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
 import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { usePlotContext } from '@/app/contexts/userselectionprovider';
 
 export interface ValidationTableProps {
   uploadedData: FileWithPath[];
@@ -75,7 +76,9 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
   } = props;
   const singleFileData = parsedData[fileName] || {};
 
-  const tableHeaders = TableHeadersByFormType[formType] || [];
+  let currentPlot = usePlotContext();
+
+  const tableHeaders = getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [];
   const [validRows, setValidRows] = useState<GridRowsProp>([]);
   const [invalidRows, setInvalidRows] = useState<GridRowsProp>([]);
 

@@ -14,16 +14,17 @@ import { ValidationHistoryMapper } from "./sqlrdsdefinitions/tables/valchangelog
 import { PlotsMapper } from "./sqlrdsdefinitions/tables/plotrds";
 import { StemTaxonomiesMapper } from "./sqlrdsdefinitions/views/stemtaxonomyviewrds";
 import { QuadratPersonnelMapper } from "./sqlrdsdefinitions/tables/quadratpersonnelrds";
+import moment from "moment";
 
 export function parseDate(date: any): Date | undefined {
-  if (!date) return undefined;
+  if (!date || date === null) return undefined;
   // Check if date is a number (UNIX timestamp), string, or already a Date object
   if (typeof date === 'number') {
-    return new Date(date * 1000); // Convert UNIX timestamp to milliseconds
+    return moment(new Date(date * 1000)).utc().toDate() ; // Convert UNIX timestamp to milliseconds
   } else if (typeof date === 'string') {
-    return new Date(date); // Convert date string to Date object
+    return moment(new Date(date)).utc().toDate(); // Convert date string to Date object
   } else if (date instanceof Date) {
-    return date; // Already a Date object
+    return moment(date).utc().toDate(); // Already a Date object
   } else {
     return undefined; // Invalid type for date
   }

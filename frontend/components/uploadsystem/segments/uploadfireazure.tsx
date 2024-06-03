@@ -8,7 +8,7 @@ import {Box, Typography} from "@mui/material";
 import {Stack} from "@mui/joy";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
-import { useCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
                                                            acceptedFiles, uploadForm, setIsDataUnsaved, user, setUploadError,
@@ -25,7 +25,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [startCountdown, setStartCountdown] = useState(false);
 
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors
@@ -50,7 +50,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
       }
       const response = await fetch(
-        `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim()}&census=${currentCensus?.censusID ? currentCensus.censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`, {
+        `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`, {
           method: 'POST',
           body: formData
         });
@@ -62,7 +62,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       setErrorComponent('UploadFire');
       setReviewState(ReviewStates.ERRORS);
     }
-  }, [currentCensus?.censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]);
+  }, [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]);
 
   useEffect(() => {
     const calculateTotalOperations = () => {

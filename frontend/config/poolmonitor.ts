@@ -1,4 +1,4 @@
-import mysql, { Pool, PoolConnection, PoolOptions } from 'mysql2/promise';
+import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
 
 export class PoolMonitor {
   private pool: Pool;
@@ -7,7 +7,7 @@ export class PoolMonitor {
   private waitingForConnection = 0;
 
   constructor(config: PoolOptions) {
-    this.pool = mysql.createPool(config);
+    this.pool = createPool(config);
 
     this.pool.on('acquire', (connection) => {
       this.activeConnections++;
@@ -16,11 +16,11 @@ export class PoolMonitor {
       console.log('Connection state:', this.getPoolStatus());
     });
 
-    this.pool.on('release', () => {
+    this.pool.on('release', (connection) => {
       if (this.activeConnections > 0) {
         this.activeConnections--;
       }
-      console.log(`Released.`);
+      console.log(`Released: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
     });
 
@@ -37,12 +37,20 @@ export class PoolMonitor {
     });
   }
 
+
   async getConnection(): Promise<PoolConnection> {
-    const connection = await this.pool.getConnection();
-    return connection;
+    try {
+      console.log('Requesting new connection...');
+      const connection = await this.pool.getConnection();
+      console.log('Connection acquired');
+      return connection;
+    } catch (error) {
+      console.error('Error getting connection from pool:', error);
+      throw error;
+    }
   }
 
   getPoolStatus() {
-    return `active: ${this.activeConnections} | total: ${this.totalConnectionsCreated} | waiting: ${this.waitingForConnection}`; 
+    return `active: ${this.activeConnections} | total: ${this.totalConnectionsCreated} | waiting: ${this.waitingForConnection}`;
   }
 }

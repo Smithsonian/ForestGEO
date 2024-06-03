@@ -36,7 +36,7 @@ export default function DashboardPage() {
   return (
     <Box sx={{display: 'flex', flexGrow: 1, width: '85%', flexDirection: 'column', marginBottom: 5}}>
       <Typography level={"body-lg"} sx={{paddingBottom: '1em'}}>Please use this guide to navigate through this
-        app&apos;s key features and functionalities. There is also a joyride you can take to guide you through the application!</Typography>
+        app&apos;s key features and functionalities.</Typography>
       <Typography level="h3">Understanding the Sidebar</Typography>
       <Typography level="body-lg" sx={{paddingBottom: '1em'}}>
         The sidebar is intended to provide you with quick and easy access to the different features this app provides.
