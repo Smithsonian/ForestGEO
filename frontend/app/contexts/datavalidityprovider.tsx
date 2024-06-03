@@ -1,7 +1,8 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
 import { UnifiedValidityFlags } from "@/config/macros";
+import { useLoading } from "./loadingprovider";
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
@@ -23,14 +24,24 @@ const DataValidityContext = createContext<{
   triggerRefresh: () => { },
   recheckValidityIfNeeded: async () => { },
 });
- 
+
+const debounce = (func: (...args: any[]) => void, wait: number) => {
+  let timeout: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+};
+
 export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
   const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
 
+  const {setLoading} = useLoading();
+
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
+  const currentCensus = useOrgCensusContext();
 
   const setValidity = useCallback((type: keyof UnifiedValidityFlags, value: boolean) => {
     setValidityState(prev => ({ ...prev, [type]: value }));
@@ -38,9 +49,17 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
 
   const checkDataValidity = useCallback(async (type?: keyof UnifiedValidityFlags) => {
     if (!currentSite || !currentPlot || !currentCensus) return;
-    let url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.censusID}`;
-    let response = await fetch(url, { method: 'GET' });
+    setLoading(true, 'Pre-validation in progress...');
+    let url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.plotCensusNumber}`;
+    let response;
+    try {
+      response = await fetch(url, { method: 'GET' });
+    } catch (error) {
+      console.error(error);
+      response = { ok: false };
+    }
     setValidity(type as keyof UnifiedValidityFlags, response.ok);
+    setLoading(false);
   }, [currentSite, currentPlot, currentCensus, setValidity]);
 
   const recheckValidityIfNeeded = useCallback(async () => {
@@ -56,11 +75,13 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     }
   }, [validity, checkDataValidity, refreshNeeded]);
 
+  const debouncedRecheckValidityIfNeeded = useCallback(debounce(recheckValidityIfNeeded, 300), [recheckValidityIfNeeded]);
+
   useEffect(() => {
     if (refreshNeeded) {
-      recheckValidityIfNeeded().catch(console.error);
+      debouncedRecheckValidityIfNeeded();
     }
-  }, [refreshNeeded, recheckValidityIfNeeded]);
+  }, [refreshNeeded, debouncedRecheckValidityIfNeeded]);
 
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus) {

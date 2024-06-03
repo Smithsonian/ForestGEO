@@ -9,7 +9,7 @@ import {Stack} from "@mui/joy";
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
-import { useCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 
 interface IDToRow {
   coreMeasurementID: number;
@@ -30,7 +30,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   setAllRowToCMID,
 }) => {
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let currentQuadrat = useQuadratContext();
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -46,7 +46,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
       console.log('rows: ', fileData[fileName]);
       const response = await fetch(
-        `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.censusID?.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${personnelRecording}`, {
+        `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${personnelRecording}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(fileData[fileName])
@@ -115,7 +115,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setUploadError(error);
       setReviewState(ReviewStates.ERRORS);
     }
-  }, [uploadForm, currentPlot?.plotID, currentCensus?.censusID, personnelRecording, setAllRowToCMID, setUploadError, setReviewState]);
+  }, [uploadForm, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID, personnelRecording, setAllRowToCMID, setUploadError, setReviewState]);
 
   useEffect(() => {
     switch (uploadForm) {

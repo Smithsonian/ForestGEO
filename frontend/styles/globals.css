@@ -20,16 +20,23 @@ body {
     overflow: visible !important;
 }
 
+/* Keyframes for fading to black */
+
+  
 .error-row {
     background-color: rgba(255, 0, 0, 0.1);
 }
-.pending-validation {
-    background-color: rgba(245, 234, 30, 0.478);
-}
-.validated {
-    background-color: rgba(29, 221, 19, 0.407);
-}
 
+/* .pending-validation {
+    background-color: rgba(245, 234, 30, 0.478);
+} */
+
+/* .validated {
+    background-color: rgba(29, 221, 19, 0.407);
+} */
+  
+
+  
 @keyframes rainbowColor {
     0% {
         color: red;

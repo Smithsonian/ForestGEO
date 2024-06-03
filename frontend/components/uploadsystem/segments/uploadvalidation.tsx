@@ -10,7 +10,7 @@ import {UploadValidationProps} from "@/config/macros/uploadsystemmacros";
 import {ValidationResponse} from "@/components/processors/processormacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {useLoading} from '@/app/contexts/loadingprovider';
-import { useCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 // Define the type for validation messages
 type ValidationMessages = {
   [key: string]: string;
@@ -31,7 +31,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   const [countdown, setCountdown] = useState(5);
   const {setLoading} = useLoading();
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
 
   const defaultMinMaxValues: Record<string, { min?: number, max?: number }> = {
     'ValidateScreenMeasuredDiameterMinMax': {min: undefined, max: undefined},
@@ -71,7 +71,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   };
 
   const performValidation = async (api: string): Promise<{ response: ValidationResponse, hasError: boolean }> => {
-    let queryParams = `schema=${schema}&plotID=${currentPlot?.id}&censusID=${currentCensus?.censusID}`;
+    let queryParams = `schema=${schema}&plotID=${currentPlot?.id}&censusID=${currentCensus?.dateRanges[0].censusID}`;
     if (['ValidateScreenMeasuredDiameterMinMax', 'ValidateHOMUpperAndLowerBounds'].includes(api)) {
       const values = minMaxValues[api] || defaultMinMaxValues[api];
       queryParams += `&minValue=${values.min}&maxValue=${values.max}`;

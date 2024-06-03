@@ -10,6 +10,7 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
+  GridToolbar,
   GridToolbarContainer,
   GridToolbarProps,
   ToolbarPropsOverrides
@@ -43,7 +44,7 @@ import {
 } from "@/config/datagridhelpers";
 import { useSession } from "next-auth/react";
 import {
-  useCensusContext,
+  useOrgCensusContext,
   usePlotContext,
   useQuadratContext,
   useSiteContext
@@ -66,6 +67,7 @@ export function EditToolbar(props: EditToolbarProps) {
 
   return (
     <GridToolbarContainer>
+      <GridToolbar />
       {!locked && (
         <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
           Add Row
@@ -164,7 +166,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
+  const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
 
   const { triggerRefresh } = useDataValidityContext();
@@ -176,8 +178,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
   const { data: session } = useSession();
   const currentSite = useSiteContext();
-
-  const { updateQuadratsContext, updateCensusContext, updatePlotsContext } = UpdateContextsFromIDB({ schema: currentSite?.schemaName ?? '' });
 
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
@@ -222,7 +222,16 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       setShouldAddRowAfterFetch(false);
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
-    triggerRefresh([gridType as keyof UnifiedValidityFlags]);
+    switch (gridType) {
+      case 'stemtaxonomiesview':
+      case 'alltaxonomiesview':
+        triggerRefresh(["species" as keyof UnifiedValidityFlags]);
+      case 'stemdimensionsview':
+        triggerRefresh(["quadrats" as keyof UnifiedValidityFlags]);
+      default:
+        triggerRefresh([gridType as keyof UnifiedValidityFlags]);
+        break;
+    }
     await fetchPaginatedData(paginationModel.page);
   };
 
@@ -266,7 +275,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       if (
         currentCensus &&
         rowToDelete &&
-        rowToDelete.censusID === currentCensus.censusID
+        rowToDelete.censusID === currentCensus.dateRanges[0].censusID
       ) {
         alert('Cannot delete the currently selected census.');
         return;
@@ -314,7 +323,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       pageToFetch,
       paginationModel.pageSize,
       currentPlot?.plotID,
-      currentCensus?.censusID,
+      currentCensus?.plotCensusNumber,
       currentQuadrat?.quadratID
     );
     try {
@@ -345,7 +354,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   }, [paginationModel.page]);
 
   useEffect(() => {
-    if (currentPlot?.plotID || currentCensus?.censusID) {
+    if (currentPlot?.plotID || currentCensus?.plotCensusNumber) {
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
   }, [currentPlot, currentCensus, paginationModel.page]);
@@ -529,6 +538,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             columns={filteredColumns}
             editMode='row'
             rowModesModel={rowModesModel}
+            disableColumnSelector
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
             processRowUpdate={processRowUpdate}

@@ -113,3 +113,7 @@ export type UnifiedValidityFlags = {
   subquadrats: boolean;
   quadratpersonnel: boolean;
 }
+
+export type GridSelections = {
+  label: string; value: number;
+}

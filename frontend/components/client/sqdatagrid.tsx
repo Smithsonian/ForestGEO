@@ -1,6 +1,6 @@
 "use client";
 
-import { useCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { SubquadratGridColumns } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 import { AlertProps } from "@mui/material";
 import { Box } from "@mui/system";
@@ -40,13 +40,13 @@ export default function SubquadratsDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const { data: session } = useSession();
   const currentPlot = usePlotContext();
-  const currentCensus = useCensusContext();
+  const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const [quadratOptions, setQuadratOptions] = useState<{ label: string; value: number; }[]>([]);
 
   useEffect(() => {
     const fetchOptions = async () => {
-      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.censusID}?schema=${currentSite?.schemaName}`);
+      const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`);
       const quadratData = await quadratResponse.json();
       if (quadratData.length === 0) throw new Error("quadratData fetchall is empty");
       setQuadratOptions(quadratData.map((item: any) => ({

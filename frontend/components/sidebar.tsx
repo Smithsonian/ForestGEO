@@ -14,10 +14,10 @@ import { LoginLogout } from "@/components/loginlogout";
 import { siteConfigNav, validityMapping } from "@/config/macros/siteconfigs";
 import { SiteConfigProps } from "@/config/macros/siteconfigs";
 import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { Plot, PlotRDS } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
-  useCensusContext,
-  useCensusDispatch,
+  useOrgCensusContext,
+  useOrgCensusDispatch,
   usePlotContext,
   usePlotDispatch,
   useSiteContext,
@@ -34,38 +34,36 @@ import {
   ModalDialog,
   SelectOption,
   Stack,
-  Input,
-  FormControl,
-  FormLabel,
-  ListSubheader,
-  Grid,
-  Textarea,
-  IconButton,
-  FormHelperText,
   Badge,
   Tooltip,
+  TextField,
 } from "@mui/joy";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import { useCensusListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
-import { useCensusLoadContext, usePlotsLoadContext } from "@/app/contexts/coredataprovider";
-import { CensusRDS, CensusRaw } from '@/config/sqlrdsdefinitions/tables/censusrds';
-import { getData } from "@/config/db";
+import { useOrgCensusListContext, useOrgCensusListDispatch, usePlotListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
 import { useSession } from "next-auth/react";
 import { SlideToggle, TransitionComponent } from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import { CensusLogo, DeleteIcon, EditIcon, PlotLogo } from "@/components/icons";
+import { CensusLogo, PlotLogo } from "@/components/icons";
 import { RainbowIcon } from '@/styles/rainbowicon';
-import { DatePicker } from '@mui/x-date-pickers';
-import dayjs from 'dayjs';
-import StopIcon from '@mui/icons-material/Stop';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { useJoyride } from '@/app/contexts/joyrideprovider';
-import Joyride from 'react-joyride';
+import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import moment from 'moment';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import Joyride, { CallBackProps, Status, STATUS, Step } from 'react-joyride';
+
+// const initialSteps: Step[] = [
+//   {
+//     target: '.site-select',
+//     content: 'Select a site from here.',
+//     disableBeacon: true,
+//     spotlightClicks: true,  // Allow clicks on the spotlighted element
+//     placement: 'right', 
+//   },
+// ];
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -105,7 +103,7 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
   const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   let currentSite = useSiteContext();
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -138,6 +136,7 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
 interface SidebarProps {
   siteListLoaded: boolean
   coreDataLoaded: boolean;
+  setCensusListLoaded: Dispatch<SetStateAction<boolean>>;
   setManualReset: Dispatch<SetStateAction<boolean>>;
 }
 
@@ -147,47 +146,20 @@ export default function Sidebar(props: SidebarProps) {
   let siteDispatch = useSiteDispatch();
   let currentPlot = usePlotContext();
   let plotDispatch = usePlotDispatch();
-  let currentCensus = useCensusContext();
-  let censusDispatch = useCensusDispatch();
-  let censusListContext = useCensusListContext();
-  let censusLoadContext = useCensusLoadContext();
+  let currentCensus = useOrgCensusContext();
+  let censusDispatch = useOrgCensusDispatch();
+  let censusListContext = useOrgCensusListContext();
+  let censusListDispatch = useOrgCensusListDispatch();
   let siteListContext = useSiteListContext();
-  let plotsLoadContext = usePlotsLoadContext();
+  let plotListContext = usePlotListContext();
   const { validity } = useDataValidityContext();
-  const isAllValiditiesTrue = Object.values(validity).every(Boolean);
+  const isAllValiditiesTrue = Object.entries(validity)
+    .filter(([key]) => key !== 'subquadrats')
+    .every(([, value]) => value);
 
   const [plot, setPlot] = useState<Plot>(currentPlot);
-  const initialPlot: PlotRDS = {
-    id: 0,
-    plotID: 0,
-    plotName: '',
-    locationName: '',
-    countryName: '',
-    dimensionX: 0,
-    dimensionY: 0,
-    area: 0,
-    globalX: 0,
-    globalY: 0,
-    globalZ: 0,
-    unit: '',
-    plotShape: '',
-    plotDescription: ''
-  };
-  const initialCensus: CensusRDS = {
-    id: 0,
-    censusID: 0,
-    startDate: undefined,
-    endDate: undefined,
-    description: '',
-    plotCensusNumber: 0,
-    plotID: currentPlot?.plotID ?? 0,
-  };
-  const [newPlotRDS, setNewPlotRDS] = useState<PlotRDS>();
-  const [newCensusRDS, setNewCensusRDS] = useState<CensusRDS>();
-  const [census, setCensus] = useState<CensusRDS>(currentCensus);
+  const [census, setCensus] = useState<OrgCensus>(currentCensus);
   const [site, setSite] = useState<Site>(currentSite);
-  const [showPlotModForm, setShowPlotModForm] = useState(false);
-  const [showCensusModForm, setShowCensusModForm] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const containerRef = React.useRef<HTMLElement>(null);
@@ -197,66 +169,166 @@ export default function Sidebar(props: SidebarProps) {
   const [formsToggle, setFormsToggle] = useState(false);
 
   const [storedPlot, setStoredPlot] = useState<Plot>();
-  const [storedCensus, setStoredCensus] = useState<CensusRDS>();
+  const [storedCensus, setStoredCensus] = useState<OrgCensus>();
   const [storedSite, setStoredSite] = useState<Site>();
 
-  const [isInitialSiteSelectionRequired, setIsInitialSiteSelectionRequired] = useState(true);
-  // Additional states for plot and census selection requirements
-  const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
-  const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
+  const { coreDataLoaded, setManualReset, siteListLoaded, setCensusListLoaded } = props;
 
-  const { coreDataLoaded, setManualReset, siteListLoaded } = props;
+  const [openCloseCensusModal, setOpenCloseCensusModal] = useState(false);
+  const [openReopenCensusModal, setOpenReopenCensusModal] = useState(false);
 
-  const [plotModalMode, setPlotModalMode] = useState<'add' | 'edit'>('add');
-  const [censusModalMode, setCensusModalMode] = useState<'add' | 'edit'>('add');
-  const [plotMarkedForDeletion, setPlotMarkedForDeletion] = useState<PlotRDS>(initialPlot);
-  const [openPlotDeletionConfirmDialog, setOpenPlotDeletionConfirmDialog] = useState(false);
-  const [openCensusCloseModal, setOpenCensusCloseModal] = useState(false);
-  const [censusMarkedForUpdate, setCensusMarkedForUpdate] = useState<CensusRDS>();
-  const [censusMFUType, setCensusMFUType] = useState<'open' | 'close'>('open');
+  const [reopenStartDate, setReopenStartDate] = useState<Date | null>(null);
+  const [closeEndDate, setCloseEndDate] = useState<Date | null>(null);
 
-  const [openSiteSelectionModal, setOpenSiteSelectionModal] = useState(false);
-  const [openPlotSelectionModal, setOpenPlotSelectionModal] = useState(false);
-  const [openCensusSelectionModal, setOpenCensusSelectionModal] = useState(false);
+  /** this has been postponed and marked as a future completion task. the joyride is not critical to the usage of the application.
+  const [run, setRun] = useState(false);
+  const [steps, setSteps] = useState<Step[]>(initialSteps);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [joyridePrompted, setJoyridePrompted] = useState(false);
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const [dashboardLoaded, setDashboardLoaded] = useState(false);
 
-  const getSortedCensusData = () => {
-    // Ensure censusListContext is defined before processing
-    if (!censusListContext || !Array.isArray(censusListContext)) {
-      console.error('Invalid census data. Please check the data source.');
-      return []; // Return an empty array or appropriate fallback
+  useEffect(() => {
+    if (pathname === '/dashboard') {
+      setDashboardLoaded(true);
     }
+  }, [pathname]);
 
-    // Separate the ongoing census (those with `endDate` equal to `null`)
-    const sortedCensusList = censusListContext.filter(c => c?.endDate === undefined);
-    // Filter out completed (historical) censuses
-    const historicalCensuses = censusListContext.filter(c => c?.endDate !== undefined);
+  useEffect(() => {
+    if (session && siteListLoaded && dashboardLoaded && !joyridePrompted) {
+      const startJoyride = confirm("Would you like to start the tutorial?");
+      if (startJoyride) {
+        setRun(true);
+      }
+      setJoyridePrompted(true);
+    }
+  }, [session, siteListLoaded, dashboardLoaded, joyridePrompted]);
 
-    // Sort the historical censuses chronologically by `startDate`
-    const sortedHistoricalCensuses = historicalCensuses.sort((a, b) => {
-      // Convert `startDate` to Date objects if not already
-      const dateA = a?.startDate ? new Date(a?.startDate) : null;
-      const dateB = b?.startDate ? new Date(b?.startDate) : null;
+  const handleJoyrideCallback = (data: CallBackProps) => {
+    const { status, action, index } = data;
+    const finishedStatuses: Status[] = [STATUS.FINISHED, STATUS.SKIPPED];
 
-      // Compare by time value (earliest first)
-      return (dateA?.getTime() ?? 0) - (dateB?.getTime() ?? 0);
-    });
+    if (finishedStatuses.includes(status)) {
+      setRun(false);
+    } else if (action === 'next' && index === 0) {
+      // Move to the next step if site is selected
+      if (site) {
+        setSteps(prevSteps => [
+          ...prevSteps,
+          {
+            target: '.plot-selection',
+            content: 'Select a plot from here.',
+            disableBeacon: true,
+            spotlightClicks: true,
+            placement: 'right', 
+          },
+        ]);
+        setStepIndex(1);
+      } else {
+        alert("Please select a site to proceed.");
+      }
+    } else if (action === 'next' && index === 1) {
+      // Move to the next step if plot is selected
+      if (plot) {
+        setSteps(prevSteps => [
+          ...prevSteps,
+          {
+            target: '.census-select',
+            content: 'Select a census from here.',
+            disableBeacon: true,
+            spotlightClicks: true,
+            placement: 'right', 
+          },
+        ]);
+        setStepIndex(2);
+      } else {
+        alert("Please select a plot to proceed.");
+      }
+    } else if (action === 'next' && index === 2) {
+      // End the tour if census is selected
+      if (census) {
+        setRun(false);
+      } else {
+        alert("Please select a census to proceed.");
+      }
+    }
+  }; */
 
-    // Combine the ongoing census at the top and the sorted historical censuses after
-    return [...sortedCensusList, ...sortedHistoricalCensuses];
+  const getOpenClosedCensusStartEndDate = (censusType: string, census: OrgCensus): Date | undefined => {
+    if (!census) return undefined;
+    const mapper = new OrgCensusToCensusResultMapper();
+    if (censusType === 'open') {
+      const openCensusID = mapper.findOpenCensusID(census);
+      if (!openCensusID) return undefined;
+      const openCensusDateRange = census?.dateRanges.find(dateRange => dateRange.censusID === openCensusID);
+      return openCensusDateRange?.startDate;
+    } else {
+      const closedCensusID = mapper.findClosedCensusID(census);
+      if (!closedCensusID) return undefined;
+      const closedDateRange = census?.dateRanges.find(dateRange => dateRange.censusID === closedCensusID);
+      return closedDateRange?.endDate;
+    }
   };
 
-  const sortedCensusList = getSortedCensusData();
-  useEffect(() => {
-    if (siteListLoaded && session) {
-      getData('site').then((savedSite: Site) => setStoredSite(savedSite)).catch(console.error);
-      getData('plot').then((savedPlot: Plot) => setStoredPlot(savedPlot)).catch(console.error);
-      getData('census').then((savedCensus: CensusRDS) => setStoredCensus(savedCensus)).catch(console.error);
+  const handleReopenCensus = async () => {
+    if (currentCensus && reopenStartDate) {
+      const mapper = new OrgCensusToCensusResultMapper();
+      const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
+      await mapper.reopenCensus(currentSite?.schemaName || '', currentCensus.plotCensusNumber, reopenStartDate, validCensusListContext);
+      setCensusListLoaded(false);
+      setOpenReopenCensusModal(false);
     }
-  }, [siteListLoaded, session]);
+  };
+
+
+  const handleCloseCensus = async () => {
+    if (currentCensus && closeEndDate) {
+      const mapper = new OrgCensusToCensusResultMapper();
+      const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
+      await mapper.closeCensus(currentSite?.schemaName || '', currentCensus.plotCensusNumber, closeEndDate, validCensusListContext);
+      setCensusListLoaded(false);
+      setOpenCloseCensusModal(false);
+    }
+  };
+
+  useEffect(() => {
+    setPlot(currentPlot);
+    setCensus(currentCensus);
+    setSite(currentSite);
+  }, [currentPlot, currentCensus, currentSite]);
+
+  // useEffect(() => {
+  //   if (siteListLoaded && session) {
+  //     const checkAndInitializeKey = async (key: string, defaultValue: any) => {
+  //       try {
+  //         const data = await getData(key);
+  //         if (data === undefined) {
+  //           await setData(key, defaultValue);
+  //         }
+  //       } catch (error) {
+  //         console.error(`Error initializing key ${key} in IDB:`, error);
+  //         await setData(key, defaultValue); // Ensure the key is present
+  //       }
+  //     };
+
+  //     const initializeKeys = async () => {
+  //       await Promise.all([
+  //         checkAndInitializeKey('site', null),
+  //         checkAndInitializeKey('plot', null),
+  //         checkAndInitializeKey('census', null)
+  //       ]);
+  //     };
+
+  //     initializeKeys().then(() => {
+  //       getData('site').then((savedSite: Site) => setStoredSite(savedSite)).catch(console.error);
+  //       getData('plot').then((savedPlot: Plot) => setStoredPlot(savedPlot)).catch(console.error);
+  //       getData('census').then((savedCensus: OrgCensus) => setStoredCensus(savedCensus)).catch(console.error);
+  //     }).catch(console.error);
+  //   }
+  // }, [siteListLoaded, session]);  
 
   useEffect(() => {
     if (storedSite && session) {
-      // Retrieve the user's allowed sites
       const allowedSiteIDs = new Set(session.user.sites.map(site => site.siteID));
       if (allowedSiteIDs.has(storedSite.siteID)) {
         handleResumeSession().catch(console.error);
@@ -266,522 +338,128 @@ export default function Sidebar(props: SidebarProps) {
     }
   }, [storedSite, storedPlot, storedCensus, siteListLoaded]);
 
-  useEffect(() => {
-    // Check if site is selected and core data is loaded, then allow other interactions
-    if (currentSite && coreDataLoaded) {
-      setIsInitialSiteSelectionRequired(false);
-    }
-    if (currentPlot) setIsPlotSelectionRequired(false);
-    if (currentCensus) setIsCensusSelectionRequired(false);
-  }, [currentSite, currentPlot, currentCensus, coreDataLoaded]);
-
-  // This function is an additional layer to manage UI state changes on site selection
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
-    // Update the site context (original onSiteChange functionality)
     setSite(selectedSite);
     if (siteDispatch) {
       await siteDispatch({ site: selectedSite });
     }
-    if (selectedSite === undefined) { // site's been reset, plot needs to be voided
+    if (selectedSite === undefined) {
       await handlePlotSelection(undefined);
     }
   };
 
-  // Function to calculate the area based on dimensionX and dimensionY
-  const calculateArea = (dimensionX: number, dimensionY: number): number => {
-    return dimensionX * dimensionY;
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === '-' || e.key === 'e') {
-      e.preventDefault();
-    }
-  };
-
-  // Handle changes in input and update the area when dimension changes
-  // value has been clamped to ensure negative numbers are not inserted
-  const handlePlotInputChange = (prop: keyof PlotRDS, value: string | number) => {
-    if (typeof value === 'number') {
-      // Clamp the value to ensure it's positive
-      value = Math.max(value, 0);
-      setNewPlotRDS(prev => {
-        const updated = { ...prev, [prop]: value };
-        // Automatically calculate and update the area if dimensions change
-        if ((prop === 'dimensionX' || prop === 'dimensionY') && typeof value === 'number') {
-          updated.area = calculateArea(
-            prop === 'dimensionX' ? value : prev?.dimensionX!,
-            prop === 'dimensionY' ? value : prev?.dimensionY!
-          );
-        }
-        return updated;
-      });
-    } else {
-      setNewPlotRDS(prev => ({
-        ...prev,
-        [prop]: value
-      }));
-    }
-  };
-
-  const handleCensusInputChange = (prop: keyof CensusRaw, value: any) => {
-    setNewCensusRDS(prev => {
-      let updatedValue = value;
-
-      // Ensure that the starting date is before the ending date
-      if (prop === 'startDate') {
-        updatedValue = value !== undefined ? value : prev![prop];
-        if (dayjs(updatedValue).isAfter(dayjs(prev?.endDate))) {
-          // Automatically adjust end date if needed
-          updatedValue = prev?.endDate;
-        }
-      }
-
-      // Ensure that the ending date is after the starting date
-      if (prop === 'endDate') {
-        updatedValue = value !== undefined ? value : prev![prop];
-        if (dayjs(updatedValue).isBefore(dayjs(prev?.startDate))) {
-          // Automatically adjust start date if needed
-          updatedValue = prev?.startDate;
-        }
-      }
-
-      return {
-        ...prev!,
-        [prop]: updatedValue
-      };
-    });
-  };
-
-  // When adding a new plot
-  const openAddPlotModal = () => {
-    setNewPlotRDS(initialPlot); // Reset form or set to defaults
-    setPlotModalMode('add');
-    setShowPlotModForm(true);
-  };
-
-  const openEditPlotModal = (plot: Plot) => {
-    let searchedPlot = plotsLoadContext?.find(item => item.plotID === plot?.id);
-    if (!searchedPlot) throw new Error("could not find plotRDS object from plot");
-    setNewPlotRDS(searchedPlot);
-    setPlotModalMode('edit');
-    setShowPlotModForm(true);
-  };
-
-  const handleSubmitPlot = async () => {
-    const url = `/api/fixeddata/plots/${currentSite?.schemaName}/plotID`;
-    const method = plotModalMode === 'add' ? 'POST' : 'PATCH';
-
-    let response = await fetch(url, {
-      method: method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oldRow: undefined, newRow: newPlotRDS })
-    });
-
-    if (response.ok) {
-      setManualReset(true); // Reload data
-      setOpenPlotSelectionModal(false); // Close modal
-      setShowPlotModForm(false); // Reset the form state
-      setNewPlotRDS(initialPlot); // Clear the form
-    } else {
-      alert('Failed to process the plot. Please try again.');
-    }
-  };
-
-  const handleDeletePlot = async (plot: PlotRDS) => {
-    const response = await fetch(`/api/fixeddata/plots/${currentSite?.schemaName}/plotID`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oldRow: undefined, newRow: plot })
-    });
-    if (response.ok) {
-      setManualReset(true);  // Reload data to reflect deletion
-      setOpenPlotSelectionModal(false);  // Close the plot selection modal
-    } else {
-      alert('Failed to delete the plot. Please try again.');
-    }
-  };
-
-  const openAddCensusModal = () => {
-    setNewCensusRDS(initialCensus);
-    setCensusModalMode('add');
-    setShowCensusModForm(true);
-  };
-
-  const openEditCensusModal = (tempCensus: CensusRDS) => {
-    const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === tempCensus?.plotCensusNumber)
-      .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
-    // Update the context with the most recent census
-    const mostRecentCensusRDS = filteredCensus?.[0] ?? undefined;
-    setNewCensusRDS(mostRecentCensusRDS);
-  };
-
-  const handleSubmitCensus = async () => {
-    if (newCensusRDS?.plotID === 0) {
-      alert('Please ensure the plotID is correctly set and not zero.');
-      return;
-    }
-
-    let response;
-    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
-
-    // Check if we are adding a new census
-    if (censusModalMode === 'add') {
-      // Find the highest plotCensusNumber for the current plot in the loaded context
-      const plotCensuses = censusLoadContext?.filter(census => census?.plotID === currentPlot?.plotID) || [];
-      let highestPlotCensusNumber = plotCensuses.reduce(
-        (max, census) => (census?.plotCensusNumber! > max ? census?.plotCensusNumber! : max),
-        0
-      );
-
-      // Create a new census with an incremented plotCensusNumber
-      response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          oldRow: undefined,
-          newRow: {
-            ...newCensusRDS,
-            plotCensusNumber: highestPlotCensusNumber + 1,
-          }
-        })
-      });
-    } else {
-      // Handle closing the census
-      response = await fetch(url, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oldRow: undefined, newRow: newCensusRDS })
-      });
-    }
-
-    if (response.ok) {
-      setOpenCensusSelectionModal(false);
-      setShowCensusModForm(false);
-      setNewCensusRDS(initialCensus);
-      setManualReset(true);
-    } else {
-      alert('Failed to process the census. Please try again');
-    }
-  };
-
-  // Handle plot selection
   const handlePlotSelection = async (selectedPlot: Plot) => {
     setPlot(selectedPlot);
     if (plotDispatch) {
       await plotDispatch({ plot: selectedPlot });
     }
     if (selectedPlot === undefined) {
-      await handleCensusSelection(undefined); // if plot's reset, then census needs to be voided too
+      await handleCensusSelection(undefined);
     }
   };
 
-  // Handle census selection
-  const handleCensusSelection = async (selectedCensus: CensusRDS | undefined) => {
+  const handleCensusSelection = async (selectedCensus: OrgCensus) => {
     setCensus(selectedCensus);
     if (censusDispatch) {
       await censusDispatch({ census: selectedCensus });
     }
   };
 
-  // Saved session loading is modified to focus on Plot and Census only
   const handleResumeSession = async () => {
     storedSite ? await handleSiteSelection(storedSite) : undefined;
     storedPlot ? await handlePlotSelection(storedPlot) : undefined;
     storedCensus ? await handleCensusSelection(storedCensus) : undefined;
   };
 
-  const renderCensusValue = (option: SelectOption<string> | null) => {
+  const renderSiteValue = (option: SelectOption<string> | null) => {
     if (!option) {
-      return <Typography>Select a Census</Typography>; // or some placeholder JSX
+      return <Typography>Select a Site</Typography>;
     }
 
-    // Find the corresponding CensusRDS object
-    const selectedValue = option.value; // assuming option has a 'value' property
-    const selectedCensus = censusListContext?.find(c => c?.plotCensusNumber?.toString() === selectedValue);
-    // Return JSX
-    return selectedCensus ? <Typography>{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography> :
-      <Typography>No Census</Typography>;
+    const selectedValue = option.value;
+    const selectedSite = siteListContext?.find(c => c?.siteName?.toString() === selectedValue);
+    return (
+      <>
+        {selectedSite ? (
+          <Stack direction={"column"} alignItems={'start'}>
+            <Typography level='body-lg'>{`Site: ${selectedSite?.siteName}`}</Typography>
+            <Stack direction={"column"} alignItems={'start'} >
+              <Typography level="body-sm" color={"primary"}>
+                &mdash; Schema: {selectedSite.schemaName}
+              </Typography>
+            </Stack>
+          </Stack>
+        ) : (
+          <Typography level='body-lg'>Select a Site</Typography>
+        )}
+      </>
+    );
   };
 
   const renderPlotValue = (option: SelectOption<string> | null) => {
     if (!option) {
-      return <Typography>Select a Plot</Typography>; // or some placeholder JSX
+      return <Typography>Select a Plot</Typography>;
     }
 
-    // Find the corresponding CensusRDS object
-    const selectedValue = option.value; // assuming option has a 'value' property
-    const selectedPlot = plotsLoadContext?.find(c => c?.plotName === selectedValue);
+    const selectedValue = option.value;
+    const selectedPlot = plotListContext?.find(c => c?.plotName === selectedValue);
 
-    // Return JSX
-    return selectedPlot ? <Typography>{`Plot: ${selectedPlot?.plotName}`}</Typography> :
-      <Typography>No Plot</Typography>;
-  };
-
-  const renderPlotForm = () => {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <DialogTitle>{plotModalMode === 'add' ? 'Add New Plot' : 'Edit Plot'}</DialogTitle>
-        <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <Grid container spacing={2} sx={{ flexGrow: 1 }}>
-            {/* Left Column: Plot and Location Information */}
-            <Grid xs={4}>
-              <Grid container spacing={2} sx={{ flex: 1 }} direction={"column"}>
-                <Grid xs={4}>
-                  <FormControl required sx={{ marginBottom: '8px', width: '100%' }}>
-                    <FormLabel>Plot Name</FormLabel>
-                    <Input
-                      type="text"
-                      value={newPlotRDS?.plotName}
-                      onChange={(e) => handlePlotInputChange('plotName', e.target.value)}
-                    />
-                  </FormControl>
-                </Grid>
-                <Grid xs={4}>
-                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
-                    <FormLabel>Location Name</FormLabel>
-                    <Input
-                      type="text"
-                      value={newPlotRDS?.locationName}
-                      onChange={(e) => handlePlotInputChange('locationName', e.target.value)}
-                    />
-                  </FormControl>
-                </Grid>
-                <Grid xs={4}>
-                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
-                    <FormLabel>Country Name</FormLabel>
-                    <Input
-                      type="text"
-                      value={newPlotRDS?.countryName}
-                      onChange={(e) => handlePlotInputChange('countryName', e.target.value)}
-                    />
-                  </FormControl>
-                </Grid>
-              </Grid>
-            </Grid>
-
-            {/* Middle Column: Dimensions and Coordinates */}
-            <Grid xs={4}>
-              <Grid container spacing={2} sx={{ flexGrow: 1 }}>
-                <Grid xs={6}>
-                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}
-                    error={newPlotRDS?.dimensionX !== undefined && newPlotRDS.dimensionX <= 0}>
-                    <FormLabel>Dimension X</FormLabel>
-                    <Input
-                      type="number"
-                      value={newPlotRDS?.dimensionX}
-                      onKeyDown={handleKeyDown}
-                      onChange={(e) => handlePlotInputChange('dimensionX', Number(e.target.value))}
-                    />
-                    {newPlotRDS?.dimensionX && newPlotRDS?.dimensionX <= 0 && (
-                      <FormHelperText>Value must be greater than 0!</FormHelperText>
-                    )}
-                  </FormControl>
-                </Grid>
-                <Grid xs={6}>
-                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}
-                    error={newPlotRDS?.dimensionY !== undefined && newPlotRDS?.dimensionY <= 0}>
-                    <FormLabel>Dimension Y</FormLabel>
-                    <Input
-                      type="number"
-                      value={newPlotRDS?.dimensionY}
-                      onKeyDown={handleKeyDown}
-                      onChange={(e) => handlePlotInputChange('dimensionY', Number(e.target.value))}
-                    />
-                    {newPlotRDS?.dimensionY !== undefined && newPlotRDS.dimensionY! <= 0 && (
-                      <FormHelperText>Value must be greater than 0!</FormHelperText>
-                    )}
-                  </FormControl>
-                </Grid>
-              </Grid>
-            </Grid>
-
-            {/* Right Column: Other Fields */}
-            <Grid xs={4}>
-              <Grid container spacing={2} sx={{ flexGrow: 1 }}>
-                <Grid xs={4}>
-                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
-                    <FormLabel>Unit</FormLabel>
-                    <Select
-                      value={newPlotRDS?.unit}
-                      onChange={(_event: React.SyntheticEvent | null,
-                        newValue: string | null,) => handlePlotInputChange('unit', newValue ?? '')}
-                      defaultValue={'m'}
-                      placeholder="Select unit"
-                      sx={{ minWidth: '200px' }}
-                    >
-                      <List>
-                        <ListSubheader>Metric Units</ListSubheader>
-                        <Option value="km">Kilometers (km)</Option>
-                        <Option value="m">Meters (m)</Option>
-                        <Option value="cm">Centimeters (cm)</Option>
-                        <Option value="mm">Millimeters (mm)</Option>
-                      </List>
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid xs={4}>
-                  <FormControl sx={{ marginBottom: '8px', width: '100%' }}>
-                    <FormLabel>Plot Shape</FormLabel>
-                    <Input
-                      type="text"
-                      value={newPlotRDS?.plotShape}
-                      onChange={(e) => handlePlotInputChange('plotShape', e.target.value)}
-                    />
-                  </FormControl>
-                </Grid>
-                <Grid xs={4}>
-                  <FormControl sx={{ width: '100%' }}>
-                    <FormLabel>Area</FormLabel>
-                    <Input type="text" disabled value={newPlotRDS?.area} />
-                  </FormControl>
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-          <Stack direction={"row"}>
-            <FormControl sx={{ marginRight: '8px', width: '100%' }}
-              error={newPlotRDS?.globalX !== undefined && newPlotRDS.globalX! <= 0}>
-              <FormLabel>Global X</FormLabel>
-              <Input
-                type="number"
-                value={newPlotRDS?.globalX}
-                onKeyDown={handleKeyDown}
-                onChange={(e) => handlePlotInputChange('globalX', Number(e.target.value))}
-              />
-              {newPlotRDS?.globalX !== undefined && newPlotRDS?.globalX <= 0 && (
-                <FormHelperText>Value must be greater than 0!</FormHelperText>
-              )}
-            </FormControl>
-            <FormControl sx={{ marginRight: '8px', width: '100%' }}
-              error={newPlotRDS?.globalY !== undefined && newPlotRDS?.globalY <= 0}>
-              <FormLabel>Global Y</FormLabel>
-              <Input
-                type="number"
-                value={newPlotRDS?.globalY}
-                onKeyDown={handleKeyDown}
-                onChange={(e) => handlePlotInputChange('globalY', Number(e.target.value))}
-              />
-              {newPlotRDS?.globalY !== undefined && newPlotRDS?.globalY <= 0 && (
-                <FormHelperText>Value must be greater than 0!</FormHelperText>
-              )}
-            </FormControl>
-            <FormControl sx={{ marginRight: '8px', width: '100%' }}
-              error={newPlotRDS?.globalZ !== undefined && newPlotRDS?.globalZ <= 0}>
-              <FormLabel>Global Z</FormLabel>
-              <Input
-                type="number"
-                value={newPlotRDS?.globalZ}
-                onKeyDown={handleKeyDown}
-                onChange={(e) => handlePlotInputChange('globalZ', Number(e.target.value))}
-              />
-              {newPlotRDS?.globalZ !== undefined && newPlotRDS?.globalZ <= 0 && (
-                <FormHelperText>Value must be greater than 0!</FormHelperText>
-              )}
-            </FormControl>
+      <>
+        {selectedPlot ? (
+          <Stack direction="column" alignItems="start">
+            <Typography level='body-md'>{`Plot: ${selectedPlot?.plotName}`}</Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <Typography level="body-sm" color={"primary"}>
+                &mdash; Quadrats: {selectedPlot.numQuadrats}
+              </Typography>
+            </Box>
           </Stack>
-          <Divider orientation='horizontal' sx={{ marginTop: 1 }} />
-          {/* Plot Description */}
-          <FormControl sx={{ marginTop: '16px', width: '100%' }}>
-            <FormLabel>Plot Description</FormLabel>
-            <Textarea
-              name="soft"
-              minRows={4}
-              value={newPlotRDS?.plotDescription}
-              onChange={(e) => handlePlotInputChange('plotDescription', e.target.value)}
-            />
-          </FormControl>
-        </form>
-      </Box>
+        ) : (
+          <Typography>Select a Plot</Typography>
+        )}
+      </>
     );
   };
 
+  const renderCensusValue = (option: SelectOption<string> | null) => {
+    if (!option) {
+      return <Typography>Select a Census</Typography>;
+    }
 
-  const renderCensusForm = () => {
-    const isPlotIDValid = newCensusRDS?.plotID !== 0;
-    const isEndDatePresent = !!newCensusRDS?.endDate;
-    const isEndDateAfterStartDate = newCensusRDS?.startDate && newCensusRDS?.endDate
-      ? dayjs(newCensusRDS.endDate).isAfter(dayjs(newCensusRDS.startDate))
-      : true;
-
+    const selectedValue = option.value;
+    const selectedCensus = censusListContext?.find(c => c?.plotCensusNumber?.toString() === selectedValue);
+    // return selectedCensus ? <Typography>{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography> :
+    //   <Typography>No Census</Typography>;
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <DialogTitle sx={{ marginBottom: 2 }}>Add New Census</DialogTitle>
-        <form noValidate autoComplete="off" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <Grid container spacing={1.5} sx={{ flexGrow: 1 }}>
-            <Grid xs={6}>
-              <Grid container spacing={1} direction="column" justifyContent="flex-start" alignItems="center">
-                <Grid xs={6} sx={{ mb: 0.5 }}>
-                  <FormControl required>
-                    <FormLabel>Starting Date</FormLabel>
-                    <DatePicker
-                      label="Choose a starting Date"
-                      value={dayjs(newCensusRDS?.startDate)}
-                      onChange={(newValue) => handleCensusInputChange('startDate', newValue?.toDate())}
-                      shouldDisableDate={(date) => dayjs(date).isAfter(dayjs(newCensusRDS?.endDate))}
-                    />
-                  </FormControl>
-                </Grid>
-                <Grid xs={6} sx={{ mb: 0.5 }}>
-                  <FormControl>
-                    <FormLabel>Description</FormLabel>
-                    <Input
-                      type="text"
-                      value={newCensusRDS?.description!}
-                      onChange={(e) => handleCensusInputChange('description', e.target.value)}
-                    />
-                  </FormControl>
-                </Grid>
-              </Grid>
-            </Grid>
-            <Grid xs={6}>
-              <Grid container spacing={1} direction="column" justifyContent="flex-start" alignItems="center">
-                <Grid xs={6} sx={{ mb: 0.5 }}>
-                  <FormControl error={!isEndDateAfterStartDate}>
-                    <FormLabel>Ending Date</FormLabel>
-                    <DatePicker
-                      label="Choose an ending Date (optional)"
-                      value={newCensusRDS?.endDate ? dayjs(newCensusRDS.endDate) : null}
-                      onChange={(newValue) => handleCensusInputChange('endDate', newValue?.toDate())}
-                      shouldDisableDate={(date) => dayjs(date).isBefore(dayjs(newCensusRDS?.startDate))}
-                    />
-                    {!isEndDateAfterStartDate && (
-                      <FormHelperText>
-                        Error: Ending date must be after the starting date.
-                      </FormHelperText>
-                    )}
-                    {!isEndDatePresent && isEndDateAfterStartDate && (
-                      <FormHelperText>
-                        Warning: You are creating an &quot;open&quot; census (no end date specified).
-                      </FormHelperText>
-                    )}
-                  </FormControl>
-                </Grid>
-                <Grid xs={6} sx={{ mb: 0.5 }}>
-                  <FormControl error={!isPlotIDValid}>
-                    <FormLabel>PlotID</FormLabel>
-                    <Input
-                      disabled
-                      type="number"
-                      value={currentPlot?.plotID}
-                      error={!isPlotIDValid}
-                    />
-                    {!isPlotIDValid && <FormHelperText>Error: Plot ID cannot be zero</FormHelperText>}
-                  </FormControl>
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-        </form>
-      </Box>
+      <>
+        {selectedCensus ? (
+          <Stack direction={"column"} alignItems={'start'}>
+            <Typography level='body-md'>{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
+            <Stack direction={"column"} alignItems={'start'} >
+              <Typography color={(!census) ? "danger" : "primary"} level="body-sm">
+                {(census !== undefined) && (
+                  <>{(census.dateRanges[0]?.startDate) ? `\u2014 Starting: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : ''}</>
+                )}
+              </Typography>
+              <Typography color={(!census) ? "danger" : "primary"} level="body-sm">
+                {(census !== undefined) && (
+                  <>{(census.dateRanges[0]?.endDate) ? `\u2014 Ending ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : `\u2014 Ongoing`}</>
+                )}
+              </Typography>
+            </Stack>
+          </Stack>
+        ) : (
+          <Typography>Select a Census</Typography>
+        )}
+      </>
     );
   };
-
   type ToggleObject = {
     toggle?: boolean;
     setToggle?: Dispatch<SetStateAction<boolean>>;
   };
 
-  // Define the array type
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
     { toggle: undefined, setToggle: undefined },
@@ -790,31 +468,129 @@ export default function Sidebar(props: SidebarProps) {
     { toggle: formsToggle, setToggle: setFormsToggle }
   ];
 
+  const renderCensusOptions = () => (
+    <Select
+      placeholder="Select a Census"
+      className="census-select"
+      name="None"
+      required
+      autoFocus
+      size={"md"}
+      renderValue={renderCensusValue}
+      onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
+        if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
+        else {
+          const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
+          const selectedCensus = censusListContext?.find(census => census?.plotCensusNumber === selectedPlotCensusNumber) || undefined;
+          await handleCensusSelection(selectedCensus);
+        }
+      }}
+    >
+      <List>
+        <Option value={""}>None</Option>
+        <Divider orientation={"horizontal"} />
+        {censusListContext?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map((item) => (
+          <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
+            <Box sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              width: "100%"
+            }}>
+              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
+                {item?.dateRanges?.map((dateRange, index) => (
+                  <React.Fragment key={index}>
+                    <Stack direction={"row"}>
+                      <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em' }}>
+                        {`${dateRange.startDate ? new Date(dateRange.startDate).toDateString() : 'undefined'}`}
+                      </Typography>
+                      <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
+                        &lt;===&gt;
+                      </Typography>
+                      <Typography level="body-sm" color={"neutral"}>
+                        {`${dateRange.endDate ? new Date(dateRange.endDate).toDateString() : 'Ongoing'}`}
+                      </Typography>
+                    </Stack>
+                  </React.Fragment>
+                ))}
+              </Box>
+            </Box>
+          </Option>
+        ))}
+      </List>
+    </Select>
+  );
+
+  const renderPlotOptions = () => (
+    <Select
+      placeholder="Select a Plot"
+      className="plot-selection"
+      name="None"
+      required
+      autoFocus
+      size={"md"}
+      renderValue={renderPlotValue}
+      onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
+        const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
+        await handlePlotSelection(selectedPlot);
+      }}
+    >
+      <Option value={""}>None</Option>
+      {plotListContext?.map((item) => (
+        <Option value={item?.plotName} key={item?.plotName}>
+          <Box sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            width: "100%"
+          }}>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <Typography level="body-md">{item?.plotName}</Typography>
+              <Typography level="body-sm" color={"primary"} sx={{ paddingLeft: "1em" }}>
+                Quadrats: {item?.numQuadrats}
+              </Typography>
+            </Box>
+          </Box>
+        </Option>
+      ))}
+    </Select>
+  );
   const renderSiteOptions = () => {
     const allowedSites = siteListContext?.filter(site =>
-      session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-    );
+      session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort((a, b) => {
+        const nameA = a.siteName?.toLowerCase() ?? '';
+        const nameB = b.siteName?.toLowerCase() ?? '';
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });;
 
     const otherSites = siteListContext?.filter(site =>
-      !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)
-    );
+      !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort((a, b) => {
+        const nameA = a.siteName?.toLowerCase() ?? '';
+        const nameB = b.siteName?.toLowerCase() ?? '';
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });;
 
     return (
       <Select
-        className='site-selection-menu'
+        className='site-select'
         placeholder="Select a Site"
         name="None"
         required
         autoFocus
         size={"md"}
+        renderValue={renderSiteValue}
         value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ""}
         onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
           const selectedSite = siteListContext?.find(site => site?.siteName === newValue) || undefined;
-          setSite(selectedSite);
+          await handleSiteSelection(selectedSite);
         }}
       >
-        {/** NULL/SITE DESELECT */}
-        <List className="site-deselect-option-3" aria-labelledby="deselect-site">
+        <List>
           <ListItem sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Deselect Site (will trigger app reset!):
@@ -823,8 +599,7 @@ export default function Sidebar(props: SidebarProps) {
           <Option key="none" value="">None</Option>
         </List>
         <ListDivider role="none" />
-        {/* Allowed Sites Group */}
-        <List className="site-allowed-site-list-4" aria-labelledby="allowed-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
+        <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="allowed-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
@@ -836,11 +611,8 @@ export default function Sidebar(props: SidebarProps) {
             </Option>
           ))}
         </List>
-
         <ListDivider role="none" />
-
-        {/* Other Sites Group */}
-        <List className="site-not-allowed-site-list-5" aria-labelledby="other-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
+        <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="other-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
@@ -858,6 +630,20 @@ export default function Sidebar(props: SidebarProps) {
 
   return (
     <>
+      {/* <Joyride
+        steps={steps}
+        run={run}
+        stepIndex={stepIndex}
+        continuous
+        showProgress
+        showSkipButton
+        callback={handleJoyrideCallback}
+        styles={{
+          options: {
+            zIndex: 10000,
+          },
+        }}
+      /> */}
       <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
           className="Sidebar"
@@ -888,7 +674,7 @@ export default function Sidebar(props: SidebarProps) {
             })}
           />
           <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
               <Stack direction={"column"}>
                 <Typography level="h1">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -903,145 +689,109 @@ export default function Sidebar(props: SidebarProps) {
                 </Typography>
               </Stack>
               <Divider orientation='horizontal' sx={{ my: 0.75 }} />
-              <Link className="site-selection-1" component={"button"} onClick={() => {
-                if (siteListLoaded) {
-                  setOpenSiteSelectionModal(true);
-                } else {
-                  alert('Site list loading failed. Please contact an administrator.');
-                }
-              }} sx={{
-                display: 'flex', alignItems: 'center', paddingBottom: '0.25em', width: '100%', textAlign: 'left'
-              }}>
-                <Avatar>
+              <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                <Avatar sx={{ marginRight: 1 }}>
                   <TravelExploreIcon />
                 </Avatar>
-                <Typography
-                  color={!currentSite?.siteName ? "danger" : "success"}
-                  level="h2"
-                  sx={{
-                    marginLeft: 1, display: 'flex', flexGrow: 1
-                  }}>
-                  {currentSite !== undefined ? `Site: ${currentSite.siteName}` : "Select Site"}
-                </Typography>
-              </Link>
-            </Box>
-            <SlideToggle isOpen={!isInitialSiteSelectionRequired}>
-              <Link className="plot-selection-6" component={"button"} onClick={() => {
-                setOpenPlotSelectionModal(true);
-              }} sx={{
-                display: 'flex', alignItems: 'center', paddingBottom: '0.75em', width: '100%', textAlign: 'left'
-              }}>
-                <Avatar size={"sm"}>
-                  <PlotLogo />
-                </Avatar>
-                <Typography color={!currentPlot?.plotName ? "danger" : "success"}
-                  level="h3"
-                  sx={{ marginLeft: 1, display: 'flex', flexGrow: 1 }}>
-                  {currentPlot !== undefined ? `Plot: ${currentPlot.plotName}` : "Select Plot"}
-                </Typography>
-              </Link>
-              <SlideToggle
-                isOpen={!isPlotSelectionRequired}>
-                <Box className="census-selection-12" sx={{ display: 'flex', flexDirection: 'column' }}>
-                  <Link component={"button"} onClick={() => {
-                    setOpenCensusSelectionModal(true);
-                  }}
-                    sx={{ display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left' }}>
-                    <Avatar size={"sm"}>
-                      <CensusLogo />
-                    </Avatar>
-                    <Typography color={(!currentCensus) ? "danger" : "success"}
-                      level="h4"
-                      sx={{ marginLeft: 1 }}>
-                      {currentCensus !== undefined ? `Census: ${currentCensus.plotCensusNumber}` : 'Select Census'}
-                    </Typography>
-                  </Link>
-                  <Box
-                    sx={{ marginLeft: '2.5em' }}>
-                    <Typography color={(!currentCensus) ? "danger" : "primary"}
-                      level="body-md"
-                      sx={{ textAlign: 'left', paddingLeft: '1em' }}>
-                      {(currentCensus !== undefined) && (
-                        <>{(currentCensus.startDate) ? `Starting: ${new Date(currentCensus?.startDate!).toDateString()}` : ''}</>
-                      )}
-                    </Typography>
-                    <Typography color={(!currentCensus) ? "danger" : "primary"}
-                      level="body-md"
-                      sx={{ textAlign: 'left', paddingLeft: '1em' }}>
-                      {(currentCensus !== undefined) && (
-                        <>{(currentCensus.endDate) ? `Ending ${new Date(currentCensus.endDate).toDateString()}` : `Ongoing`}</>
-                      )}
-                    </Typography>
-                  </Box>
+                <Box sx={{ flexGrow: 1 }}>
+                  {renderSiteOptions()}
                 </Box>
-                <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
-                <Box
+              </Box>
+              {(site !== undefined) && (
+                <>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                    <Avatar size={"sm"} sx={{ marginRight: 1 }}>
+                      <PlotLogo />
+                    </Avatar>
+                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center' }}>
+                      {renderPlotOptions()}
+                    </Box>
+                  </Box>
+                  {plot !== undefined && (
+                    <>
+                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                        <Avatar size={"sm"} sx={{ marginRight: 1 }}>
+                          <CensusLogo />
+                        </Avatar>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center' }}>
+                          {renderCensusOptions()}
+                        </Box>
+                      </Box>
+                      <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
+                    </>
+                  )}
+                </>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, ml: -1 }}> {/* Added ml: -1 to adjust the position of the navigation menu */}
+              <Box
+                sx={{
+                  minHeight: 0,
+                  overflow: 'hidden auto',
+                  flexGrow: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  [`& .${listItemButtonClasses.root}`]: {
+                    gap: 1.5,
+                  },
+                }}
+              >
+                <List
+                  size="lg"
                   sx={{
-                    minHeight: 0,
-                    overflow: 'hidden auto',
-                    flexGrow: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    [`& .${listItemButtonClasses.root}`]: {
-                      gap: 1.5,
-                    },
+                    gap: 1,
+                    '--List-nestedInsetStart': '30px',
+                    '--ListItem-radius': (theme) => theme.vars.radius.sm,
                   }}
                 >
-                  <List
-                    size="lg"
-                    sx={{
-                      gap: 1,
-                      '--List-nestedInsetStart': '30px',
-                      '--ListItem-radius': (theme) => theme.vars.radius.sm,
-                    }}
-                  >
-                    {siteConfigNav.map((item, index: number) => {
-                      const Icon = item.icon;
-                      const { toggle, setToggle } = toggleArray[index];
-                      const delay = (index) * 200;
+                  {siteConfigNav.map((item, index: number) => {
+                    const Icon = item.icon;
+                    const { toggle, setToggle } = toggleArray[index];
+                    const delay = (index) * 200;
 
-                      const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
-                        if (isDataIncomplete) {
-                          switch (href) {
-                            case '/summary':
-                              return 'You must resolve all supporting data warnings before adding measurements!';
-                            case '/subquadrats':
-                              return 'Subquadrats cannot be viewed until quadrats are valid.';
-                            case '/quadratpersonnel':
-                              return 'Quadrat personnel cannot be viewed until both quadrats and personnel are valid.';
-                            default:
-                              return 'Data needed to complete census!';
-                          }
-                        } else {
-                          return 'Requirements Met';
-                        }
-                      };
-
-                      const getDisabledState = (href: string) => {
+                    const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
+                      if (isDataIncomplete) {
                         switch (href) {
                           case '/summary':
-                            return !isAllValiditiesTrue;
+                            return 'You must resolve all supporting data warnings before adding measurements!';
                           case '/subquadrats':
-                            return !validity['quadrats'];
+                            return 'Subquadrats cannot be viewed until quadrats are valid.';
                           case '/quadratpersonnel':
-                            return !(validity['quadrats'] && validity['personnel']);
+                            return 'QuadratPersonnel cannot be viewed until both quadrats and personnel are valid.';
                           default:
-                            return false;
+                            return 'Data needed to complete census!';
                         }
-                      };
+                      } else {
+                        return 'Requirements Met';
+                      }
+                    };
 
-                      if (item.expanded.length === 0) {
-                        const isLinkDisabled = getDisabledState(item.href);
-                        const isDataIncomplete = isLinkDisabled;
+                    const getDisabledState = (href: string) => {
+                      switch (href) {
+                        case '/summary':
+                          return !isAllValiditiesTrue;
+                        case '/subquadrats':
+                          return !validity['quadrats'];
+                        case '/quadratpersonnel':
+                          return !(validity['quadrats'] && validity['personnel']);
+                        default:
+                          return false;
+                      }
+                    };
 
-                        return (
-                          <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
-                            style={{ transitionDelay: `${delay}ms` }} direction="down">
-                            <ListItem>
+                    if (item.expanded.length === 0) {
+                      const isLinkDisabled = getDisabledState(item.href);
+                      const isDataIncomplete = isLinkDisabled;
+
+                      return (
+                        <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
+                          style={{ transitionDelay: `${delay}ms` }} direction="down">
+                          <ListItem>
+                            {(site !== undefined && plot !== undefined && census !== undefined) ? (
                               <Tooltip title={getTooltipMessage(item.href, isDataIncomplete)} arrow>
                                 <Box sx={{ display: 'flex', flex: 1 }}>
                                   <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
-                                    disabled={isPlotSelectionRequired || isCensusSelectionRequired || isLinkDisabled}
+                                    disabled={(plot === undefined || census === undefined || isLinkDisabled)}
                                     color={pathname === item.href ? 'primary' : undefined}
                                     onClick={() => {
                                       if (!isLinkDisabled) {
@@ -1062,44 +812,71 @@ export default function Sidebar(props: SidebarProps) {
                                   </ListItemButton>
                                 </Box>
                               </Tooltip>
-                            </ListItem>
-                          </TransitionComponent>
-                        );
-                      } else {
-                        let isParentDataIncomplete = item.expanded.some(subItem => {
-                          const dataKey = validityMapping[subItem.href];
-                          return dataKey !== undefined && !validity[dataKey];
-                        });
-                        return (
-                          <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
-                            style={{ transitionDelay: `${delay}ms` }} direction="down">
-                            <ListItem nested>
-                              <SimpleToggler
-                                renderToggle={MenuRenderToggle({
-                                  plotSelectionRequired: isPlotSelectionRequired,
-                                  censusSelectionRequired: isCensusSelectionRequired,
-                                  pathname, isParentDataIncomplete
-                                }, item, toggle, setToggle)}
-                                isOpen={!!toggle}
-                              >
-                                <List sx={{ gap: 0.75 }} size={"sm"}>
-                                  {item.expanded.map((link, subIndex) => {
-                                    const SubIcon = link.icon;
-                                    const delay = (subIndex + 1) * 200;
-                                    let dataValidityKey = validityMapping[link.href];
-                                    let isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
-                                    const isLinkDisabled = getDisabledState(link.href);
-                                    const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
+                            ) : (
+                              <Box sx={{ display: 'flex', flex: 1 }}>
+                                <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
+                                  disabled={(plot === undefined || census === undefined || isLinkDisabled)}
+                                  color={pathname === item.href ? 'primary' : undefined}
+                                  onClick={() => {
+                                    if (!isLinkDisabled) {
+                                      router.push(item.href);
+                                    }
+                                  }}>
+                                  <Icon />
+                                  <ListItemContent>
+                                    <Typography level={"title-sm"}>{item.label}</Typography>
+                                  </ListItemContent>
+                                </ListItemButton>
+                              </Box>
+                            )}
+                          </ListItem>
+                        </TransitionComponent>
+                      );
+                    } else {
+                      let isParentDataIncomplete = item.expanded.some(subItem => {
+                        // Skip validity check for subquadrats
+                        if (subItem.href === '/subquadrats') {
+                          return false;
+                        }
 
-                                    return (
-                                      <TransitionComponent key={link.href} in={!!toggle}
-                                        style={{ transitionDelay: `${delay}ms` }} direction="down">
-                                        <ListItem sx={{ marginTop: 0.75 }}>
+                        const dataKey = validityMapping[subItem.href];
+                        return dataKey !== undefined && !validity[dataKey];
+                      });
+                      return (
+                        <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
+                          style={{ transitionDelay: `${delay}ms` }} direction="down">
+                          <ListItem nested>
+                            <SimpleToggler
+                              renderToggle={MenuRenderToggle({
+                                plotSelectionRequired: plot === undefined,
+                                censusSelectionRequired: census === undefined,
+                                pathname, isParentDataIncomplete
+                              }, item, toggle, setToggle)}
+                              isOpen={!!toggle}
+                            >
+                              <List sx={{ gap: 0.75 }} size={"sm"}>
+                                {item.expanded.map((link, subIndex) => {
+                                  // Skip rendering for subquadrats
+                                  if (link.href === '/subquadrats') {
+                                    return null;
+                                  }
+                                  const SubIcon = link.icon;
+                                  const delay = (subIndex + 1) * 200;
+                                  let dataValidityKey = validityMapping[link.href];
+                                  let isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
+                                  const isLinkDisabled = getDisabledState(link.href);
+                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
+
+                                  return (
+                                    <TransitionComponent key={link.href} in={!!toggle}
+                                      style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                      <ListItem sx={{ marginTop: 0.75 }}>
+                                        {(site !== undefined && plot !== undefined && census !== undefined) ? (
                                           <Tooltip title={tooltipMessage} arrow>
                                             <Box sx={{ display: 'flex', flex: 1 }}>
                                               <ListItemButton sx={{ flex: 1 }}
                                                 selected={pathname == (item.href + link.href)}
-                                                disabled={isPlotSelectionRequired || isCensusSelectionRequired || isLinkDisabled}
+                                                disabled={plot === undefined || census === undefined || isLinkDisabled}
                                                 onClick={() => {
                                                   if (!isLinkDisabled) {
                                                     router.push((item.href + link.href));
@@ -1119,409 +896,130 @@ export default function Sidebar(props: SidebarProps) {
                                               </ListItemButton>
                                             </Box>
                                           </Tooltip>
-                                        </ListItem>
-                                      </TransitionComponent>
-                                    );
-                                  })}
-                                </List>
-                              </SimpleToggler>
-                            </ListItem>
-                          </TransitionComponent>
-                        );
-                      }
-                    })}
-                  </List>
+                                        ) : (
+                                          <Box sx={{ display: 'flex', flex: 1 }}>
+                                            <ListItemButton sx={{ flex: 1 }}
+                                              selected={pathname == (item.href + link.href)}
+                                              disabled={plot === undefined || census === undefined || isLinkDisabled}
+                                              onClick={() => {
+                                                if (!isLinkDisabled) {
+                                                  router.push((item.href + link.href));
+                                                }
+                                              }}>
+                                              <SubIcon />
+                                              <ListItemContent>
+                                                <Typography level={"title-sm"}>{link.label}</Typography>
+                                              </ListItemContent>
+                                            </ListItemButton>
+                                          </Box>
+                                        )}
+                                      </ListItem>
+                                    </TransitionComponent>
+                                  );
+                                })}
+                              </List>
+                            </SimpleToggler>
+                          </ListItem>
+                        </TransitionComponent>
+                      );
+                    }
+                  })}
+                </List>
+              </Box>
+            </Box>
+          </Box>
 
-                </Box>
-              </SlideToggle>
-            </SlideToggle>
+          <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            {census && census.dateRanges[0].endDate ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', width: '100%' }}>
+                <Button disabled={census === undefined} size="sm" variant="solid" color="success" onClick={() => setOpenReopenCensusModal(true)} sx={{ width: '100%', marginBottom: 0.5 }}>
+                  Reopen Census
+                </Button>
+                <Button size="sm" variant="solid" color="primary" sx={{ width: '100%' }}>
+                  Start New Census
+                </Button>
+              </Box>
+            ) : (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', width: '100%' }}>
+                <Button disabled={census === undefined} size="sm" variant="solid" color="danger" onClick={() => setOpenCloseCensusModal(true)} sx={{ width: '100%' }}>
+                  Close Census
+                </Button>
+              </Box>
+            )}
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
-            <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
-            <LoginLogout />
-          </Box>
-          <Modal open={openSiteSelectionModal} onClose={() => {
-            setSite(currentSite);
-            setOpenSiteSelectionModal(false);
-          }}>
-            <ModalDialog variant="outlined" role="alertdialog" className="site-selection-modal-2">
+          <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
+          <LoginLogout />
+          <Modal open={openReopenCensusModal} onClose={() => setOpenReopenCensusModal(false)}>
+            <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
                 <WarningRoundedIcon />
-                Site Selection
+                Reopen Census
               </DialogTitle>
               <Divider />
-              <DialogContent sx={{ width: 750 }}>
-                <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
-                  <Stack direction={"column"} spacing={2}>
-                    <Typography level={"title-sm"}>Select Site:</Typography>
-                    {renderSiteOptions()}
-                  </Stack>
-                </Box>
+              <DialogContent>
+                <Stack direction={"column"} spacing={2}>
+                  <Typography level="title-sm">The most recent census ended on: {getOpenClosedCensusStartEndDate('closed', census)?.toDateString()}</Typography>
+                  <Typography level={"title-sm"}>Select a start date for the new census:</Typography>
+                  <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for standardized handling</Typography>
+                  <DatePicker
+                    label="Reopen Start Date (UTC)"
+                    value={moment(reopenStartDate).utc()}
+                    onChange={(newValue) => {
+                      if (newValue) {
+                        setReopenStartDate(moment(newValue.toDate()).utc().toDate());
+                      } else {
+                        setReopenStartDate(null);
+                      }
+                    }}
+                  />
+                </Stack>
               </DialogContent>
               <DialogActions>
                 <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
-                    setSite(currentSite);
-                    setOpenSiteSelectionModal(false);
-                    if (site) setIsInitialSiteSelectionRequired(false);
-                    else setIsInitialSiteSelectionRequired(true);
-                  }}>
+                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenReopenCensusModal(false)}>
                     Cancel
                   </Button>
-                  <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
-                    await handleSiteSelection(site);
-                    setOpenSiteSelectionModal(false);
-                    if (site) setIsInitialSiteSelectionRequired(false);
-                    else setIsInitialSiteSelectionRequired(true);
-                  }}>
+                  <Button size={"sm"} variant={"soft"} color="success" onClick={handleReopenCensus}>
                     Submit
                   </Button>
                 </Stack>
               </DialogActions>
             </ModalDialog>
           </Modal>
-          <Modal open={openPlotSelectionModal} onClose={() => {
-            setPlot(currentPlot);
-            setShowPlotModForm(false);
-            setOpenPlotSelectionModal(false);
-          }}>
-            <ModalDialog variant="outlined" role="alertdialog" className="plot-selection-modal-7">
-              <DialogTitle>
-                <WarningRoundedIcon />
-                Plot Selection
-              </DialogTitle>
-              <Divider />
-              <DialogContent sx={{ width: 750 }}>
-                <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
-                  {showPlotModForm ? (
-                    <>{renderPlotForm()}</>
-                  ) : (
-                    <Stack direction={"column"} spacing={2}>
-                      <Typography level={"title-sm"}>Select Plot:</Typography>
-                      <Select
-                        placeholder="Select a Plot"
-                        className="plot-selection-select-8"
-                        name="None"
-                        required
-                        autoFocus
-                        size={"md"}
-                        renderValue={renderPlotValue}
-                        onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
-                          const selectedPlot = plotsLoadContext?.find(plot => plot?.plotName === newValue) || undefined;
-                          setPlot(selectedPlot);
-                        }}
-                      >
-                        <Option value={""}>None</Option>
-                        {plotsLoadContext?.map((item) => (
-                          <Option value={item?.plotName} key={item?.plotName}>
-                            <Box sx={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              width: "100%"
-                            }}>
-                              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                                <Typography level="body-lg">{item?.plotName}</Typography>
-                                <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
-                                  Quadrats: {item?.numQuadrats}
-                                </Typography>
-                                <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
-                                  ID: {item?.plotID}
-                                </Typography>
-                              </Box>
-                              <Box>
-                                <IconButton className="plot-edit-button-10" sx={{ ml: "auto" }} onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditPlotModal(item);
-                                }}>
-                                  <EditIcon />
-                                  Edit
-                                </IconButton>
-                                <IconButton className="plot-delete-button-11" sx={{ ml: "auto" }} onClick={(e) => {
-                                  e.stopPropagation();
-                                  let searchedPlot = plotsLoadContext?.find(internal => internal.plotID === item?.id);
-                                  console.log(plotsLoadContext);
-                                  if (!searchedPlot) throw new Error("could not find plotRDS object from plot");
-                                  setPlotMarkedForDeletion(searchedPlot);
-                                  setOpenPlotDeletionConfirmDialog(true);
-                                }}>
-                                  <DeleteIcon />
-                                  Delete
-                                </IconButton>
-                              </Box>
-                            </Box>
-                          </Option>
-                        ))}
-                      </Select>
-                      <Button className="plot-create-9" color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }} onClick={openAddPlotModal}>
-                        Add New Plot
-                      </Button>
-                    </Stack>
-                  )}
-                </Box>
-              </DialogContent>
-              <DialogActions>
-                {!showPlotModForm ? (
-                  <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                    <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
-                      setPlot(currentPlot);
-                      setOpenPlotSelectionModal(false);
-                      setShowPlotModForm(false);
-                      if (plot) setIsPlotSelectionRequired(false);
-                      else setIsPlotSelectionRequired(true);
-                    }}>
-                      Cancel
-                    </Button>
-                    <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
-                      await handlePlotSelection(plot);
-                      setOpenPlotSelectionModal(false);
-                      setShowPlotModForm(false);
-                      if (plot) setIsPlotSelectionRequired(false);
-                      else setIsPlotSelectionRequired(true);
-                    }}>
-                      Submit
-                    </Button>
-                  </Stack>
-                ) : (
-                  <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
-                    <Button variant="outlined" onClick={() => {
-                      setShowPlotModForm(false);
-                      setNewPlotRDS(initialPlot);
-                    }}>Cancel</Button>
-                    <Button onClick={handleSubmitPlot}>{plotModalMode === 'add' ? 'Add Plot' : 'Save Changes'}</Button>
-                  </Stack>
-                )}
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-          <Modal open={openCensusSelectionModal} onClose={() => {
-            setCensus(currentCensus);
-            setOpenCensusSelectionModal(false);
-          }}>
-            <ModalDialog variant="outlined" role="alertdialog" className="census-selection-modal-13">
-              <DialogTitle>
-                <WarningRoundedIcon />
-                Census Selection
-              </DialogTitle>
-              <Divider />
-              <DialogContent sx={{ width: 750 }}>
-                <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
-                  {showCensusModForm ? (
-                    <>{renderCensusForm()}</>
-                  ) : (
-                    <Stack direction={"column"} spacing={2}>
-                      <Typography level={"title-sm"}>Select Census:</Typography>
-                      <Select
-                        placeholder="Select a Census"
-                        className="census-select-14"
-                        name="None"
-                        required
-                        autoFocus
-                        size={"md"}
-                        renderValue={renderCensusValue}
-                        onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
-                          if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
-                          else {
-                            const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
-                            const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === selectedPlotCensusNumber)
-                              .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
-                            const mostRecentCensusRDS = filteredCensus?.[0] ?? undefined;
-                            setCensus(mostRecentCensusRDS);
-                          }
-                        }}
-                      >
-                        <List>
-                          <Option value={""}>None</Option>
-                          <Divider orientation={"horizontal"} />
-                          {sortedCensusList && sortedCensusList.length > 0 && (
-                            sortedCensusList.map((item) => (
-                              <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
-                                <Box sx={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  width: "100%"
-                                }}>
-                                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-                                    <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
-                                    <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                                      {`Started: ${item?.startDate ? new Date(item?.startDate).toDateString() : 'undefined'}`}
-                                    </Typography>
-                                    {item?.endDate && (
-                                      <Typography level="body-md" color={"primary"} sx={{ paddingLeft: '1em' }}>
-                                        {`Ended: ${new Date(item?.endDate).toDateString()}`}
-                                      </Typography>
-                                    )}
-                                  </Box>
-                                  <Box>
-                                    <IconButton className="census-close-16" sx={{ ml: "auto" }} onClick={(e) => {
-                                      e.stopPropagation();
-                                      const filteredCensus = censusLoadContext?.filter(census => census?.plotCensusNumber === item?.plotCensusNumber)
-                                        .sort((a, b) => (b?.startDate?.getTime() ?? 0) - (a?.startDate?.getTime() ?? 0));
-                                      const mostRecentCensusRDS = filteredCensus?.[0] ?? undefined;
-                                      setCensusMarkedForUpdate(mostRecentCensusRDS);
-                                      setCensusMFUType(item?.endDate ? 'open' : 'close');
-                                      setOpenCensusCloseModal(true);
-                                    }}>
-                                      {item?.endDate === undefined && (
-                                        <>
-                                          <StopIcon />
-                                          Close Census
-                                        </>
-                                      )}
-                                    </IconButton>
-                                    <IconButton className="census-edit-17" sx={{ ml: "auto" }} onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditCensusModal(item);
-                                    }}>
-                                      <EditIcon />
-                                      Edit
-                                    </IconButton>
-                                    <IconButton className="census-delete-18" sx={{ ml: "auto" }} onClick={(e) => {
-                                      e.stopPropagation();
-                                      alert('Censuses cannot be deleted!');
-                                    }}>
-                                      <DeleteIcon />
-                                      Delete
-                                    </IconButton>
-                                  </Box>
-                                </Box>
-                              </Option>
-                            ))
-                          )}
-                        </List>
-                      </Select>
-                      <Button className="census-add-new-15" color="primary" variant="outlined" sx={{ alignSelf: 'flex-end' }}
-                        onClick={openAddCensusModal}>
-                        Add New Census
-                      </Button>
-                    </Stack>
-                  )}
-                </Box>
-              </DialogContent>
-              <DialogActions>
-                {!showCensusModForm ? (
-                  <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                    <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
-                      setCensus(currentCensus);
-                      if (census) setIsCensusSelectionRequired(false);
-                      else setIsCensusSelectionRequired(true);
-                      setOpenCensusSelectionModal(false);
-                    }}>
-                      Cancel
-                    </Button>
-                    <Button size={"sm"} variant={"soft"} color="success" onClick={async () => {
-                      await handleCensusSelection(census);
-                      setOpenCensusSelectionModal(false);
-                      if (census) setIsCensusSelectionRequired(false);
-                      else setIsCensusSelectionRequired(true);
-                    }}>
-                      Submit
-                    </Button>
-                  </Stack>
-                ) : (
-                  <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
-                    <Button variant="outlined" onClick={() => {
-                      setShowCensusModForm(false);
-                      setNewCensusRDS(initialCensus);
-                    }}>Cancel</Button>
-                    <Button
-                      onClick={handleSubmitCensus}>{censusModalMode === 'add' ? 'Add Census' : 'Save Changes'}</Button>
-                  </Stack>
-                )}
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-          <Modal open={openPlotDeletionConfirmDialog} onClose={() => {
-          }}>
+          <Modal open={openCloseCensusModal} onClose={() => setOpenCloseCensusModal(false)}>
             <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
-                <Typography level='h3' color='danger'>Are you sure you want to delete this plot?</Typography>
+                <WarningRoundedIcon />
+                Close Census
               </DialogTitle>
+              <Divider />
               <DialogContent>
-                <Typography level='body-lg' color='warning'>You are attempting to delete the following plot:</Typography>
-                <Typography level='body-md'>Plot: {plotMarkedForDeletion?.plotName}</Typography>
-                <Typography
-                  level='body-md'>Location: {plotMarkedForDeletion?.locationName}, {plotMarkedForDeletion?.countryName}</Typography>
-                <Typography level='body-md'>Dimensions and
-                  Coordinates: {plotMarkedForDeletion?.dimensionX}x{plotMarkedForDeletion?.dimensionY},
-                  ({plotMarkedForDeletion?.globalX + ', ' + plotMarkedForDeletion?.globalY + ', ' + plotMarkedForDeletion?.globalZ})</Typography>
-                <Divider orientation='horizontal' sx={{ marginY: 2 }} />
-                <Typography level='body-lg' color='danger'>This action cannot be undone. Please click the Confirm button
-                  to continue
-                  , or the Cancel button to return to the Plot Selection Menu</Typography>
+                <Stack direction={"column"} spacing={2}>
+                  <Typography level={"title-sm"}>Start Date: {getOpenClosedCensusStartEndDate('open', census)?.toDateString()}</Typography>
+                  <Typography level={"title-sm"}>Select an end date for the current census:</Typography>
+                  <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for standardized handling</Typography>
+                  <DatePicker
+                    label="Closing Date (UTC)"
+                    value={moment(closeEndDate).utc()}
+                    onChange={(newValue) => {
+                      if (newValue) {
+                        setCloseEndDate(moment(newValue.toDate()).utc().toDate());
+                      } else {
+                        setCloseEndDate(null);
+                      }
+                    }}
+                  />
+                </Stack>
               </DialogContent>
               <DialogActions>
                 <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                  <Button size={"sm"} color={"warning"} variant="soft" onClick={() => {
-                    setOpenPlotDeletionConfirmDialog(false);
-                    setPlotMarkedForDeletion(initialPlot);
-                  }}>
+                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenCloseCensusModal(false)}>
                     Cancel
                   </Button>
-                  <Button size={"sm"} variant={"soft"} color="danger" onClick={async () => {
-                    setOpenPlotDeletionConfirmDialog(false);
-                    setOpenPlotSelectionModal(false);
-                    if (plotMarkedForDeletion === initialPlot) throw new Error("Plot marked for deletion is null for some reason?");
-                    await handleDeletePlot(plotMarkedForDeletion);
-                  }}>
-                    Confirm, Delete this Plot
+                  <Button size={"sm"} variant={"soft"} color="success" onClick={handleCloseCensus}>
+                    Submit
                   </Button>
-                </Stack>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-          <Modal open={openCensusCloseModal} onClose={() => {
-          }}>
-            <ModalDialog variant='outlined' role='alertdialog'>
-              <DialogTitle>
-                <Typography component={'div'} level='h3' color='danger'>Are you sure you want to close this
-                  census?</Typography>
-              </DialogTitle>
-              <DialogContent>
-                <Typography level='body-lg' color='warning'>You are attempting to close the following
-                  census:</Typography>
-                <Typography level='body-md'>Census: {censusMarkedForUpdate?.plotCensusNumber}</Typography>
-                <Typography level='body-md'>Starting: {dayjs(censusMarkedForUpdate?.startDate).toString()}</Typography>
-                <DatePicker
-                  label="Choose an ending date"
-                  value={censusMarkedForUpdate?.endDate ? dayjs(censusMarkedForUpdate.endDate) : undefined}
-                  onChange={(newValue) => {
-                    setCensusMarkedForUpdate(prev => {
-                      return {
-                        ...prev!,
-                        plotID: currentPlot?.plotID ?? 0,
-                        endDate: newValue ? newValue.toDate() : undefined
-                      };
-                    });
-                  }}
-                  shouldDisableDate={(date) => dayjs(date).isBefore(dayjs(censusMarkedForUpdate?.startDate))}
-                />
-              </DialogContent>
-              <DialogActions>
-                <Stack direction="row" spacing={2} divider={<Divider orientation='vertical' />}>
-                  <Button variant="outlined" onClick={() => {
-                    setOpenCensusCloseModal(false);
-                    setCensusMarkedForUpdate(undefined);
-                  }}>Cancel</Button>
-                  <Button onClick={async () => {
-                    const url = `/api/fixeddata/census/${currentSite?.schemaName}/censusID`;
-                    let response = await fetch(url, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ oldRow: undefined, newRow: censusMarkedForUpdate })
-                    });
-                    if (response.ok) {
-                      setOpenCensusCloseModal(false);
-                      setOpenCensusSelectionModal(false);
-                      setCensusMarkedForUpdate(undefined);
-                      setManualReset(true);
-                    } else {
-                      alert('Failed to process the census. Please try again');
-                    }
-                    setCensusMarkedForUpdate(undefined);
-                    setOpenCensusCloseModal(false);
-                  }}>Close Census</Button>
                 </Stack>
               </DialogActions>
             </ModalDialog>
@@ -1530,4 +1028,4 @@ export default function Sidebar(props: SidebarProps) {
       </Stack >
     </>
   );
-}  
+}
