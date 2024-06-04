@@ -1,3 +1,0 @@
-# Developer Documentation Hub
-
-Start typing here...
