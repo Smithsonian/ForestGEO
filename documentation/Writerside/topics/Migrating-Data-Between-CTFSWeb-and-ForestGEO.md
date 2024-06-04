@@ -1,3 +1,0 @@
-# Migrating Data Between CTFSWeb and ForestGEO
-
-Start typing here...

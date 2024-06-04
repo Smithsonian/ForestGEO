@@ -1,3 +1,0 @@
-# Preparing New Schema
-
-Start typing here...
