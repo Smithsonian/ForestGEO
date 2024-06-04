@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE instance-profile
+        SYSTEM "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd">
+
+<instance-profile id="j"
+                 name="joint_parsing_insertion_bash_script"
+                 start-page="joint-parsing-insertion-bash-script.md">
+
+    <toc-element topic="joint-parsing-insertion-bash-script.md"/>
+</instance-profile>
