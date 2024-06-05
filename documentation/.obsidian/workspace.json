@@ -1,0 +1,186 @@
+{
+  "main": {
+    "id": "c0ff7f859f989042",
+    "type": "split",
+    "children": [
+      {
+        "id": "7759ad0d2902c283",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0800373fde99a48c",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Selecting a Plot.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          },
+          {
+            "id": "d6efe90c6a73445d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Navigation Menu.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "784911af7bcecd13",
+    "type": "split",
+    "children": [
+      {
+        "id": "1f01a703e43bd948",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6cd39105a10d4d56",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical"
+              }
+            }
+          },
+          {
+            "id": "a2798680823726af",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              }
+            }
+          },
+          {
+            "id": "93d21ead003b199b",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {}
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "f0f88531dd78b5ac",
+    "type": "split",
+    "children": [
+      {
+        "id": "28a84e96010b6aa7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "73cee81858918f29",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Navigation Menu.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              }
+            }
+          },
+          {
+            "id": "11ac41851e7578db",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Navigation Menu.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              }
+            }
+          },
+          {
+            "id": "2d4c90a91aa49794",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true
+              }
+            }
+          },
+          {
+            "id": "0d2db528b1401002",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Navigation Menu.md"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false
+    }
+  },
+  "active": "d6efe90c6a73445d",
+  "lastOpenFiles": [
+    "Selecting a Plot.md",
+    "Navigation Menu.md",
+    "Selecting a Census.md",
+    "Selecting a Site.md",
+    "Logging into App.md",
+    "images/census 3 newer.png",
+    "images/census 3 copy.png",
+    "images/census 3 older.png",
+    "images/census 3.png",
+    "|300.md",
+    "Using the Sidebar.md",
+    "images/site selection dropdown.png",
+    "images/site selected.png",
+    "images/plot selection dropdown.png",
+    "images/plot selected.png",
+    "images/login screen.png",
+    "images/logged in screen.png",
+    "images",
+    "untitled folder",
+    "Welcome.md",
+    "Untitled"
+  ]
+}

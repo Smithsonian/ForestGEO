@@ -12,7 +12,7 @@ import {
 } from '@/components/processors/processorhelperfunctions';
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
-export async function GET(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
+export async function GET(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }): Promise<NextResponse<{ output: any[], deprecated?: any[], totalCount: number }>> {
   if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam] = params.slugs;
   if ((!schema || schema === 'undefined') || (!pageParam || pageParam === 'undefined') || (!pageSizeParam || pageSizeParam === 'undefined')) throw new Error("core slugs schema/page/pageSize not correctly received");
@@ -24,6 +24,8 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
   const plotCensusNumber = parseInt(plotCensusNumberParam);
   const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
   let conn: PoolConnection | null = null;
+  let updatedMeasurementsExist = false;
+  let censusIDs; let mostRecentCensusID: any; let pastCensusIDs: string | any[];
 
   try {
     conn = await getConn();
@@ -44,7 +46,6 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
           LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
         break;
-
       case 'quadrats':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS q.*
@@ -60,7 +61,6 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
           LIMIT ?, ?`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-
       case 'subquadrats':
         if (!quadratID || quadratID === 0) {
           throw new Error("QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route");
@@ -80,7 +80,6 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
           LIMIT ?, ?`;
         queryParams.push(quadratID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-
       case 'census':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
@@ -89,11 +88,21 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
           LIMIT ?, ?`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
-
       case 'coremeasurements':
       case 'measurementssummaryview':
       case 'stemdimensionsview':
-        paginatedQuery = `
+        // Retrieve multiple past CensusID for the given PlotCensusNumber
+        const censusQuery = `
+          SELECT CensusID
+          FROM ${schema}.census
+          WHERE PlotID = ?
+            AND PlotCensusNumber = ?
+          ORDER BY StartDate DESC
+          LIMIT 10
+        `;
+        const censusResults = await runQuery(conn, format(censusQuery, [plotID, plotCensusNumber]));
+        if (censusResults.length < 2) {
+          paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS *
           FROM ${schema}.${params.dataType} cm
           WHERE PlotID = ?
@@ -104,13 +113,24 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
                 AND c.PlotCensusNumber = ?
             )
           LIMIT ?, ?`;
-          // ${quadratID ? `AND cm.QuadratID = ?` : ''}
-        queryParams.push(plotID, plotCensusNumber);
-        // if (quadratID) {
-        //   queryParams.push(quadratID);
-        // }
-        queryParams.push(page * pageSize, pageSize);
-        break;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
+        } else {
+          updatedMeasurementsExist = true;
+          censusIDs = censusResults.map((c: any) => c.CensusID);
+          mostRecentCensusID = censusIDs[0];
+          pastCensusIDs = censusIDs.slice(1);
+          // Query to fetch paginated measurements from measurementssummaryview
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS *
+            FROM ${schema}.measurementssummaryview
+            WHERE PlotID = ?
+              AND CensusID IN (${censusIDs.map(() => '?').join(', ')})
+            LIMIT ?, ?
+          `;
+          queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
+          break;
+        }
       default:
         throw new Error(`Unknown dataType: ${params.dataType}`);
     }
@@ -121,12 +141,33 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
     }
 
     const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
+
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
-    const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-    const rows = mapper.mapData(paginatedResults);
-    return new NextResponse(JSON.stringify({ output: rows, totalCount: totalRows }), { status: 200 });
+
+    if (updatedMeasurementsExist) {
+      // Separate deprecated and non-deprecated rows
+      const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
+
+      // Ensure deprecated measurements are duplicates
+      const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemID']; // Define unique keys that should match
+      const outputKeys = paginatedResults.map((row: any) =>
+        uniqueKeys.map((key) => row[key]).join('|')
+      );
+      const filteredDeprecated = deprecated.filter((row: any) =>
+        outputKeys.includes(uniqueKeys.map((key) => row[key]).join('|'))
+      );
+      // Map data using the appropriate mapper
+      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
+      const deprecatedRows = mapper.mapData(filteredDeprecated);
+      const rows = mapper.mapData(paginatedResults);
+      return new NextResponse(JSON.stringify({ output: rows, deprecated: deprecatedRows, totalCount: totalRows }), { status: 200 });
+    } else {
+      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
+      const rows = mapper.mapData(paginatedResults);
+      return new NextResponse(JSON.stringify({ output: rows, deprecated: undefined, totalCount: totalRows }), { status: 200 });
+    }
   } catch (error: any) {
     if (conn) await conn.rollback();
     throw new Error(error);
