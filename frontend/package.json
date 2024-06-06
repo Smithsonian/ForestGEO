@@ -122,7 +122,7 @@
     "supertest": "^7.0.0",
     "tls": "^0.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
     "node-mocks-http": "^1.14.1",
     "react-joyride": "^2.8.2",
     "supertest": "^7.0.0",
