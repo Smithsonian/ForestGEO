@@ -1,6 +1,6 @@
 "use client";
 import * as React from 'react';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
@@ -54,6 +54,7 @@ import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config
 import moment from 'moment';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import Joyride, { CallBackProps, Status, STATUS, Step } from 'react-joyride';
+import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 // const initialSteps: Step[] = [
 //   {
@@ -98,7 +99,12 @@ interface MRTProps {
   isParentDataIncomplete: boolean;
 }
 
-function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean | undefined, setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined) {
+function MenuRenderToggle(
+  props: MRTProps,
+  siteConfigProps: SiteConfigProps,
+  menuOpen: boolean | undefined,
+  setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined
+) {
   const Icon = siteConfigProps.icon;
   const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
   let currentSite = useSiteContext();
@@ -149,7 +155,6 @@ export default function Sidebar(props: SidebarProps) {
   let currentCensus = useOrgCensusContext();
   let censusDispatch = useOrgCensusDispatch();
   let censusListContext = useOrgCensusListContext();
-  let censusListDispatch = useOrgCensusListDispatch();
   let siteListContext = useSiteListContext();
   let plotListContext = usePlotListContext();
   const { validity } = useDataValidityContext();
@@ -162,7 +167,6 @@ export default function Sidebar(props: SidebarProps) {
   const [site, setSite] = useState<Site>(currentSite);
   const router = useRouter();
   const pathname = usePathname();
-  const containerRef = React.useRef<HTMLElement>(null);
 
   const [measurementsToggle, setMeasurementsToggle] = useState(false);
   const [propertiesToggle, setPropertiesToggle] = useState(false);
@@ -172,13 +176,17 @@ export default function Sidebar(props: SidebarProps) {
   const [storedCensus, setStoredCensus] = useState<OrgCensus>();
   const [storedSite, setStoredSite] = useState<Site>();
 
-  const { coreDataLoaded, setManualReset, siteListLoaded, setCensusListLoaded } = props;
+  const { siteListLoaded, setCensusListLoaded } = props;
 
   const [openCloseCensusModal, setOpenCloseCensusModal] = useState(false);
   const [openReopenCensusModal, setOpenReopenCensusModal] = useState(false);
 
   const [reopenStartDate, setReopenStartDate] = useState<Date | null>(null);
   const [closeEndDate, setCloseEndDate] = useState<Date | null>(null);
+
+  const { isPulsing, triggerPulse } = useLockAnimation();
+  const reopenButtonRef = useRef(null);
+  const addButtonRef = useRef(null);
 
   /** this has been postponed and marked as a future completion task. the joyride is not critical to the usage of the application.
   const [run, setRun] = useState(false);
@@ -880,6 +888,9 @@ export default function Sidebar(props: SidebarProps) {
                                                 onClick={() => {
                                                   if (!isLinkDisabled) {
                                                     router.push((item.href + link.href));
+                                                    if (setToggle) {
+                                                      setToggle(false); // Close the menu
+                                                    }
                                                   }
                                                 }}>
                                                 <Badge
@@ -933,10 +944,26 @@ export default function Sidebar(props: SidebarProps) {
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             {census && census.dateRanges[0].endDate ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', width: '100%' }}>
-                <Button disabled={census === undefined} size="sm" variant="solid" color="success" onClick={() => setOpenReopenCensusModal(true)} sx={{ width: '100%', marginBottom: 0.5 }}>
+                <Button
+                  ref={reopenButtonRef}
+                  disabled={census === undefined}
+                  size="sm"
+                  variant="solid"
+                  color="success"
+                  onClick={() => setOpenReopenCensusModal(true)}
+                  sx={{ width: '100%', marginBottom: 0.5 }}
+                  className={isPulsing ? 'animate-pulse' : ''}
+                >
                   Reopen Census
                 </Button>
-                <Button size="sm" variant="solid" color="primary" sx={{ width: '100%' }}>
+                <Button
+                  ref={addButtonRef}
+                  size="sm"
+                  variant="solid"
+                  color="primary"
+                  sx={{ width: '100%' }}
+                  className={isPulsing ? 'animate-pulse' : ''}
+                >
                   Start New Census
                 </Button>
               </Box>

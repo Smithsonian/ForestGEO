@@ -96,6 +96,91 @@ export default function QuadratsDataGrid() {
       [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
     }));
   };
+
+  // const updatePersonnelInRows = useCallback((id: GridRowId, newPersonnel: PersonnelRDS[]) => {
+  //   setRows(rows => rows.map(row =>
+  //     row.id === id
+  //       ? {...row, personnel: newPersonnel.map(person => ({...person}))}
+  //       : row
+  //   ));
+  // }, []);
+
+  // const handlePersonnelChange = useCallback(
+  //   async (rowId: GridRowId, selectedPersonnel: PersonnelRDS[]) => {
+  //     console.log(rows);
+  //     const row = rows.find((row) => row.id === rowId);
+  //     const quadratId = row?.quadratID;
+  //     const personnelIds = selectedPersonnel.map(person => person.personnelID);
+  //     console.log('new personnel ids: ', personnelIds);
+
+  //     // Check if quadratID is valid and not equal to the initial row's quadratID
+  //     if (quadratId === undefined || quadratId === initialRows[0].quadratID) {
+  //       console.error("Invalid quadratID, personnel update skipped.");
+  //       setSnackbar({children: "Personnel update skipped due to invalid quadratID.", severity: 'error'});
+  //       return;
+  //     }
+
+  //     try {
+  //       const response = await fetch(`/api/formsearch/personnelblock?quadratID=${quadratId}&schema=${currentSite?.schemaName ?? ''}`, {
+  //         method: 'PUT',
+  //         headers: {
+  //           'Content-Type': 'application/json'
+  //         },
+  //         body: JSON.stringify(personnelIds)
+  //       });
+
+  //       if (!response.ok) {
+  //         setSnackbar({children: `Personnel updates failed!`, severity: 'error'});
+  //         throw new Error('Failed to update personnel');
+  //       }
+
+  //       // Handle successful response
+  //       const responseData = await response.json();
+  //       updatePersonnelInRows(rowId, selectedPersonnel);
+  //       setRefresh(true);
+  //       setSnackbar({children: `${responseData.message}`, severity: 'success'});
+  //     } catch (error) {
+  //       console.error("Error updating personnel:", error);
+  //     }
+  //   },
+  //   [rows, currentSite?.schemaName, setSnackbar, setRefresh, updatePersonnelInRows]
+  // );
+
+
+  const quadratsGridColumns: GridColDef[] = [...BaseQuadratsGridColumns,
+    // {
+    //   field: 'personnel',
+    //   headerName: 'Personnel',
+    //   flex: 1,
+    //   renderCell: (params) => (
+    //     <PersonnelAutocompleteMultiSelect
+    //       initialValue={params.row.personnel}
+    //       onChange={(newPersonnel) => handlePersonnelChange(params.id, newPersonnel)}
+    //       locked={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
+    //     />
+    //   ),
+    // },
+    // {
+    //   field: 'subquadrats',
+    //   headerName: 'Subquadrats',
+    //   flex: 1,
+    //   renderCell: (params) => (
+    //     <Box sx={{height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+    //       <Button
+    //         fullWidth
+    //         onClick={() => setIsSubquadratDialogOpen(true)}
+    //         disabled={!rowModesModel[params.id] || rowModesModel[params.id].mode !== GridRowModes.Edit}
+    //         size="md"
+    //       >
+    //         <Typography>
+    //           [ {subquadratList ? subquadratList.filter(subquadrat => subquadrat?.quadratID === params.row.quadratID).map(sq => sq?.subquadratName).join(', ') : ''} ]
+    //         </Typography>
+    //       </Button>
+    //     </Box>
+    //   ),
+    // }
+  ];
+
   return (
     <>
       <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
@@ -141,10 +226,32 @@ export default function QuadratsDataGrid() {
         setIsUploadModalOpen(false);
         setRefresh(true);
       }} formType={uploadFormType}/>
+      {/* <Modal
+        open={isSubquadratDialogOpen}
+        onClose={() => {
+        }}
+        aria-labelledby="upload-dialog-title"
+        sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
+      >
+        <ModalDialog
+          size="lg"
+          sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
+          role="alertdialog"
+        >
+          <IconButton
+            aria-label="close"
+            onClick={() => setIsSubquadratDialogOpen(false)}
+            sx={{position: 'absolute', top: 8, right: 8}}
+          >
+            <CloseIcon/>
+          </IconButton>
+          <SubquadratsDataGrid/>
+        </ModalDialog>
+      </Modal> */}
       <DataGridCommons
         locked={locked}
         gridType="quadrats"
-        gridColumns={BaseQuadratsGridColumns}
+        gridColumns={quadratsGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

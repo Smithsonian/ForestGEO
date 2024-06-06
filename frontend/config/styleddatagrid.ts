@@ -1,10 +1,7 @@
-/**
- * macros for sql table props:
- */
-import {DataGrid} from '@mui/x-data-grid';
-import {styled} from '@mui/material/styles';
+import { DataGrid } from '@mui/x-data-grid';
+import { styled } from '@mui/material/styles';
 
-export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
+export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
   border: 0,
   color:
     theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.85)',
@@ -28,7 +25,7 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   '& .MuiDataGrid-iconSeparator': {
     display: 'none',
   },
-  '& .MuiDataGrid-columnHeader, & .MuiDataGrid-cell': { // Removed the space before '.MuiDataGrid-cell'
+  '& .MuiDataGrid-columnHeader, & .MuiDataGrid-cell': {
     borderRight: `1px solid ${
       theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'
     }`,
@@ -44,5 +41,18 @@ export const StyledDataGrid = styled(DataGrid)(({theme}) => ({
   },
   '& .MuiPaginationItem-root': {
     borderRadius: 0,
+  },
+  '& .MuiSelect-select': {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 4px', // Adjust padding to reduce space
+  },
+  '& .MuiSelect-icon': {
+    fontSize: '12px', // Adjust icon size
+    marginLeft: '4px', // Adjust margin to reduce space between text and icon
+  },
+  '& .MuiSelect-root': {
+    fontSize: '12px', // Adjust font size as needed
+    padding: '4px 0', // Adjust padding to reduce space
   },
 }));

@@ -110,7 +110,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'Name',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 140,
+    minWidth: 140,
     align: 'left',
     type: 'string',
     editable: true
@@ -120,7 +120,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'X',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 125,
+    minWidth: 125,
     align: 'left',
     type: 'number',
     editable: true
@@ -130,14 +130,14 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'Y',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 125,
+    minWidth: 125,
     align: 'left',
     type: 'number',
     editable: true
   },
-  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', type: 'number', editable: true },
+  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, minWidth: 125, align: 'left', type: 'number', editable: true },
   {
-    field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, maxWidth: 125, align: 'left', type: 'singleSelect',
+    field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, minWidth: 125, align: 'left', type: 'singleSelect',
     valueOptions: unitSelectionOptions, editable: true
   },
   {
@@ -145,7 +145,7 @@ export const QuadratsGridColumns: GridColDef[] = [
     headerName: 'Shape',
     headerClassName: 'header',
     flex: 1,
-    maxWidth: 125,
+    minWidth: 125,
     align: 'left',
     type: 'string',
     editable: true

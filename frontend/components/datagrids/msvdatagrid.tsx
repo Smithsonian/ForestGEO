@@ -37,7 +37,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
-import { Stack, Typography } from "@mui/joy";
+import { Stack, Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
 import {
   computeMutation,
@@ -57,6 +57,8 @@ import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 import moment from 'moment';
+import { CellItemContainer } from './datagridcommons';
+import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 const errorMapping: { [key: string]: string[] } = {
   '1': ["attributes"],
@@ -184,9 +186,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
+  const [deprecatedRows, setDeprecatedRows] = useState<GridValidRowModel[]>([]); // new state to track deprecated rows
   const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
+  const [showDeprecatedRows, setShowDeprecatedRows] = useState<boolean>(true);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
 
@@ -197,6 +201,19 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
 
   const currentSite = useSiteContext();
+  const { triggerPulse } = useLockAnimation();
+
+  const handleShowDeprecatedRowsChange = (event: any) => {
+    setShowDeprecatedRows(event.target.checked);
+  };
+
+  const rowIsDeprecated = (rowId: GridRowId) => {
+    return deprecatedRows.some(depRow => depRow.id === rowId);
+  };
+
+  const handleLockedClick = () => {
+    triggerPulse();
+  };
 
   const extractErrorRows = () => {
     if (errorRowsForExport.length > 0) return;
@@ -426,6 +443,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
       console.log('output: ', data.output);
+      if (data.deprecated) setDeprecatedRows(data.deprecated);
       setRows(data.output.length > 0 ? data.output : []);
       setRowCount(data.totalCount);
 
@@ -579,6 +597,33 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (handleSelectQuadrat) handleSelectQuadrat(null);
   };
 
+  const getEnhancedCellAction = (type: string, icon: any, onClick: any) => {
+    return (
+      <CellItemContainer>
+        <Tooltip title={locked ? 'Actions disabled while census closed!' : ''} arrow placement="top">
+          <span
+            onClick={(e) => {
+              if (locked) {
+                handleLockedClick();
+                const iconElement = e.currentTarget.querySelector('svg');
+                if (iconElement) {
+                  iconElement.classList.add('animate-shake');
+                  setTimeout(() => {
+                    iconElement.classList.remove('animate-shake');
+                  }, 500);
+                }
+              } else {
+                onClick();
+              }
+            }}
+          >
+            <GridActionsCellItem icon={icon} label={type} />
+          </span>
+        </Tooltip>
+      </CellItemContainer>
+    );
+  };
+
   function getGridActionsColumn(): GridColDef {
     return {
       field: 'actions',
@@ -587,41 +632,20 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       width: 100,
       cellClassName: 'actions',
       getActions: ({ id }) => {
-        if (locked) return [];
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
 
         if (isInEditMode) {
           return [
-            <GridActionsCellItem
-              icon={<SaveIcon />}
-              label='Save'
-              key={'save'}
-              onClick={handleSaveClick(id)}
-            />,
-            <GridActionsCellItem
-              icon={<CancelIcon />}
-              label='Cancel'
-              key={'cancel'}
-              onClick={event => handleCancelClick(id, event)}
-            />
+            getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
+            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e)),
           ];
         }
 
         return [
-          <GridActionsCellItem
-            icon={<EditIcon />}
-            label='Edit'
-            key={'edit'}
-            onClick={handleEditClick(id)}
-          />,
-          <GridActionsCellItem
-            icon={<DeleteIcon />}
-            label='Delete'
-            key={'delete'}
-            onClick={handleDeleteClick(id)}
-          />
+          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)),
+          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id)),
         ];
-      }
+      },
     };
   }
 
@@ -746,18 +770,18 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   };
 
   const visibleRows = useMemo(() => {
-    if (showErrorRows && showValidRows) {
-      console.log('Showing all rows, including those with errors.');
-      return rows;
-    } else if (showValidRows && !showErrorRows) {
-      console.log('Filtering out rows with errors.');
-      return rows.filter(row => !rowHasError(row.id));
-    } else if (!showValidRows && showErrorRows) {
-      return rows.filter(row => rowHasError(row.id));
-    } else {
-      return [];
+    let filteredRows = rows;
+    if (!showValidRows) {
+      filteredRows = filteredRows.filter(row => rowHasError(row.id));
     }
-  }, [rows, showErrorRows, showValidRows, gridColumns]);
+    if (!showErrorRows) {
+      filteredRows = filteredRows.filter(row => !rowHasError(row.id));
+    }
+    if (!showDeprecatedRows) {
+      filteredRows = filteredRows.filter(row => !rowIsDeprecated(row.id));
+    }
+    return filteredRows;
+  }, [rows, showErrorRows, showValidRows, showDeprecatedRows]);
 
   const errorRowCount = useMemo(() => {
     return rows.filter(row => rowHasError(row.id)).length;
@@ -772,10 +796,14 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     }
   }, [errorRowCount]);
 
-  const getRowClassName = (params: GridRowParams) => {
-    if (!params.row.isValidated) {
-      if (rowHasError(params.id)) return 'error-row';
-      else return 'pending-validation';
+  const getRowClassName = (params: any) => {
+    const rowId = params.id;
+    if (rowIsDeprecated(rowId)) {
+      return 'deprecated';
+    } else if (rowHasError(rowId)) {
+      return 'error-row';
+    } else if (!params.row.isValidated) {
+      return 'pending-validation';
     } else {
       return 'validated';
     }
@@ -830,6 +858,13 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
                   onChange={handleShowValidRowsChange}
                 />
                 Show rows without errors: ({rows.length - errorRowCount})
+              </Typography>
+              <Typography>
+                <Checkbox
+                  checked={showDeprecatedRows}
+                  onChange={handleShowDeprecatedRowsChange}
+                />
+                Show deprecated rows: ({deprecatedRows.length})
               </Typography>
             </Stack>
 

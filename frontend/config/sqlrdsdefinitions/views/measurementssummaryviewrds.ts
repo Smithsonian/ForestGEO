@@ -147,31 +147,17 @@ export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummar
 
 export const MeasurementsSummaryGridColumns: GridColDef[] = [
   { field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 0.25, align: 'left' },
-  {
-    field: 'quadratName',
-    headerName: 'Quad',
-    headerClassName: 'header',
-    flex: 0.75,
-    align: 'left',
-    editable: true,
-  },
-  {
-    field: 'subquadratName',
-    headerName: 'Subquadrat',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: true
-  },
-  { field: 'speciesCode', headerName: 'SpC', headerClassName: 'header', flex: 0.75, align: 'left', editable: true },
-  { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemLocalX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemLocalY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemUnits', headerName: 'U', headerClassName: 'header', flex: 0.75, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
+  { field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 0.8, align: 'left', editable: true, },
+  { field: 'subquadratName', headerName: 'Subquadrat', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  { field: 'speciesCode', headerName: 'SpeciesCode', headerClassName: 'header', flex: 1.2, align: 'left', editable: true },
+  { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+  { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+  { field: 'stemLocalX', headerName: 'X', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+  { field: 'stemLocalY', headerName: 'Y', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+  { field: 'stemUnits', headerName: 'U', headerClassName: 'header', flex: 0.4, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
   { field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   {
-    field: 'measurementDate', headerName: 'Date', headerClassName: 'header', flex: 1,
+    field: 'measurementDate', headerName: 'Date', headerClassName: 'header', flex: 1.2,
     valueGetter: (value: any) => {
       // Check if the date is present and valid
       if (!value || !moment(value).isValid()) return '';
@@ -180,10 +166,10 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
     },
     editable: true
   },
-  { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'dbhUnits', headerName: 'U', headerClassName: 'header', flex: 0.75, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
-  { field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'homUnits', headerName: 'U', headerClassName: 'header', flex: 0.75, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
+  { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 0.8, align: 'left', editable: true },
+  { field: 'dbhUnits', headerName: 'U', headerClassName: 'header', flex: 0.4, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
+  { field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 0.5, align: 'left', editable: true },
+  { field: 'homUnits', headerName: 'U', headerClassName: 'header', flex: 0.4, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
   { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   // extraneous, set to invisible

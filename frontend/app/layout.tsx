@@ -7,6 +7,7 @@ import UserSelectionProvider from "@/app/contexts/userselectionprovider";
 import { LoadingProvider } from "@/app/contexts/loadingprovider";
 import { GlobalLoadingIndicator } from "@/styles/globalloadingindicator";
 import { DataValidityProvider } from "@/app/contexts/datavalidityprovider";
+import { LockAnimationProvider } from "./contexts/lockanimationcontext";
 
 export default function RootLayout({ children, }: Readonly<{ children: React.ReactNode; }>) {
   return (
@@ -21,9 +22,11 @@ export default function RootLayout({ children, }: Readonly<{ children: React.Rea
             <ListSelectionProvider>
               <UserSelectionProvider>
                 <DataValidityProvider>
-                  <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>
-                    {children}
-                  </Box>
+                  <LockAnimationProvider>
+                    <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>
+                      {children}
+                    </Box>
+                  </LockAnimationProvider>
                 </DataValidityProvider>
               </UserSelectionProvider>
             </ListSelectionProvider>

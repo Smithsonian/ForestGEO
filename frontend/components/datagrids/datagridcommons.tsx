@@ -32,8 +32,9 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import LockIcon from '@mui/icons-material/Lock';
 import Box from "@mui/joy/Box";
-import { Stack, Typography } from "@mui/joy";
+import { Stack, styled, Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
 import {
   computeMutation,
@@ -53,6 +54,7 @@ import { redirect } from 'next/navigation';
 import UpdateContextsFromIDB from '@/config/updatecontextsfromidb';
 import { UnifiedValidityFlags } from '@/config/macros';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -117,6 +119,14 @@ interface ConfirmationDialogProps {
   message: string;
 }
 
+export const CellItemContainer = styled('div')({
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  height: '100%',
+});
+
 /**
  * Function to determine if all entries in a column are null
  */
@@ -156,7 +166,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setPaginationModel,
     isNewRowAdded,
     setIsNewRowAdded,
-    shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
     locked = false,
     handleSelectQuadrat,
@@ -170,13 +179,18 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const currentQuadrat = useQuadratContext();
 
   const { triggerRefresh } = useDataValidityContext();
+  const { triggerPulse } = useLockAnimation();
+
+  const handleLockedClick = () => {
+    triggerPulse();
+  };
 
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
   });
 
-  const { data: session } = useSession();
+  useSession();
   const currentSite = useSiteContext();
 
   const openConfirmationDialog = (
@@ -451,6 +465,32 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
   };
+  const getEnhancedCellAction = (type: string, icon: any, onClick: any) => {
+    return (
+      <CellItemContainer>
+        <Tooltip title={locked ? 'Actions disabled while census closed!' : ''} arrow placement="top">
+          <span
+            onClick={(e) => {
+              if (locked) {
+                handleLockedClick();
+                const iconElement = e.currentTarget.querySelector('svg');
+                if (iconElement) {
+                  iconElement.classList.add('animate-shake');
+                  setTimeout(() => {
+                    iconElement.classList.remove('animate-shake');
+                  }, 500);
+                }
+              } else {
+                onClick();
+              }
+            }}
+          >
+            <GridActionsCellItem icon={icon} label={type} disabled={locked}/>
+          </span>
+        </Tooltip>
+      </CellItemContainer>
+    );
+  };
 
   function getGridActionsColumn(): GridColDef {
     return {
@@ -460,53 +500,27 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       width: 100,
       cellClassName: 'actions',
       getActions: ({ id }) => {
-        if (locked) return [];
-        // console.log('rowModesModel:', rowModesModel);
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
-        // console.log('Row ID:', id, 'Is in edit mode:', isInEditMode);
 
-        if (isInEditMode) {
+        if (isInEditMode && !locked) {
           return [
-            <GridActionsCellItem
-              icon={<SaveIcon />}
-              label='Save'
-              key={'save'}
-              onClick={handleSaveClick(id)}
-            />,
-            <GridActionsCellItem
-              icon={<CancelIcon />}
-              label='Cancel'
-              key={'cancel'}
-              onClick={event => handleCancelClick(id, event)}
-            />
+            getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
+            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e)),
           ];
         }
 
         return [
-          <GridActionsCellItem
-            icon={<EditIcon />}
-            label='Edit'
-            key={'edit'}
-            onClick={handleEditClick(id)}
-          />,
-          <GridActionsCellItem
-            icon={<DeleteIcon />}
-            label='Delete'
-            key={'delete'}
-            onClick={handleDeleteClick(id)}
-          />
+          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)),
+          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id)),
         ];
-      }
+      },
     };
   }
 
   const columns = useMemo(() => {
     const commonColumns = gridColumns;
-    if (locked) {
-      return commonColumns;
-    }
     return [...commonColumns, getGridActionsColumn()];
-  }, [gridColumns, locked, rowModesModel]);
+  }, [gridColumns, rowModesModel]);
 
   const filteredColumns = useMemo(() => {
     if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns);

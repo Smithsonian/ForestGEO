@@ -35,7 +35,6 @@ export default function PersonnelDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  let currentPlot = usePlotContext();
   const {data: session} = useSession();
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
