@@ -42,3 +42,10 @@ yarn-error.log*
 .idea/*
 /.swc/
 /public/
+/.fleet
+/.vscode
+/.idea
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

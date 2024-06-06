@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    const query = `SELECT * FROM ${schema}.Quadrats`;
+    const query = `SELECT * FROM ${schema}.quadrats`;
     const results = await runQuery(conn, query);
     return new NextResponse(JSON.stringify(generateHash(results)), {status: 200});
   } catch (error) {

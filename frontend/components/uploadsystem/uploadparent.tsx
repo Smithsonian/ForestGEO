@@ -1,34 +1,32 @@
 "use client";
 import React, {useEffect, useState} from "react";
+import {CMError} from "@/config/macros/uploadsystemmacros";
 import {
-  CMError,
+  ReviewProgress,
+  ReviewStates
+} from "@/config/macros/uploadsystemmacros";
+import {
   FileCollectionRowSet,
   FileRow,
   FileRowSet,
-  RequiredTableHeadersByFormType,
-  ReviewProgress,
-  ReviewStates,
-  TableHeadersByFormType
-} from "@/config/macros";
+  getTableHeaders,
+  RequiredTableHeadersByFormType, TableHeadersByFormType
+} from "@/config/macros/formdetails";
 import {FileWithPath} from "react-dropzone";
-import {useCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useSession} from "next-auth/react";
 import {parse, ParseResult} from "papaparse";
-import {Box, Tab, tabClasses, TabList, TabPanel, Tabs, Typography} from "@mui/joy";
-import UploadParseFiles from "@/components/uploadsystem/uploadparsefiles";
-import UploadReviewFiles from "@/components/uploadsystem/uploadreviewfiles";
-import UploadFireSQL from "@/components/uploadsystem/uploadfiresql";
-import UploadError from "@/components/uploadsystem/uploaderror";
-import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
-import UploadValidation from "@/components/uploadsystem/uploadvalidation";
-import UploadUpdateValidations from "@/components/uploadsystem/uploadupdatevalidations";
-import {Button} from "@mui/material";
-import UploadStart from "@/components/uploadsystem/uploadstart";
-import ListItemDecorator from "@mui/joy/ListItemDecorator";
-import ViewListIcon from '@mui/icons-material/ViewList';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
-import UploadFireAzure from "@/components/uploadsystem/uploadfireazure";
-import UploadComplete from "@/components/uploadsystem/uploadcomplete";
+import {Box, Typography} from "@mui/joy";
+import UploadParseFiles from "@/components/uploadsystem/segments/uploadparsefiles";
+import UploadReviewFiles from "@/components/uploadsystem/segments/uploadreviewfiles";
+import UploadFireSQL from "@/components/uploadsystem/segments/uploadfiresql";
+import UploadError from "@/components/uploadsystem/segments/uploaderror";
+import UploadValidation from "@/components/uploadsystem/segments/uploadvalidation";
+import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
+import UploadStart from "@/components/uploadsystem/segments/uploadstart";
+import UploadFireAzure from "@/components/uploadsystem/segments/uploadfireazure";
+import UploadComplete from "@/components/uploadsystem/segments/uploadcomplete";
+import moment from "moment";
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -47,20 +45,22 @@ export interface DetailedCMIDRow extends CMIDRow {
 }
 
 interface UploadParentProps {
-  setIsUploadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  onReset: () => void;
+  onReset: () => void; // closes the modal
   overrideUploadForm?: string;
 }
 
 export default function UploadParent(props: UploadParentProps) {
-  const {setIsUploadModalOpen, onReset, overrideUploadForm} = props;
+  const {onReset, overrideUploadForm} = props;
   /**
    * this will be the new parent upload function that will then pass data to child components being called within
    */
     // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState("");
   const [personnelRecording, setPersonnelRecording] = useState('');
-  const [unitOfMeasurement, setUnitOfMeasurement] = useState('');
+  const [coordUnit, setCoordUnit] = useState('');
+  const [dbhUnit, setDBHUnit] = useState('');
+  const [homUnit, setHOMUnit] = useState('');
+
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
   // dropped file storage
@@ -81,11 +81,10 @@ export default function UploadParent(props: UploadParentProps) {
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const [refreshFileList, setRefreshFileList] = useState(false);
   const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
   const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   let currentPlot = usePlotContext();
-  let currentCensus = useCensusContext();
+  let currentCensus = useOrgCensusContext();
   let currentSite = useSiteContext();
   if (!currentSite) throw new Error('site must be selected!');
   const {data: session} = useSession();
@@ -113,20 +112,26 @@ export default function UploadParent(props: UploadParentProps) {
     };
   }, [isDataUnsaved]); // Run the effect when isDataUnsaved changes
 
-  function areHeadersValid(actualHeaders: string[]): boolean {
+  function areHeadersValid(actualHeaders: string[]): { isValid: boolean, missingHeaders: string[] } {
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
     const requiredExpectedHeadersLower = requiredHeaders.map(header => header.label.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
-
-    return requiredExpectedHeadersLower.every(expectedHeader =>
-      actualHeadersLower.includes(expectedHeader));
+  
+    const missingHeaders = requiredExpectedHeadersLower.filter(expectedHeader =>
+      !actualHeadersLower.includes(expectedHeader)
+    );
+  
+    return {
+      isValid: missingHeaders.length === 0,
+      missingHeaders: missingHeaders.map(header => header.charAt(0).toUpperCase() + header.slice(1))
+    };
   }
 
   async function handleReturnToStart() {
     setDataViewActive(1);
     setAcceptedFiles([]);
     setParsedData({});
-    setErrors({})
+    setErrors({});
     setErrorRows({});
     setUploadForm('');
     setPersonnelRecording('');
@@ -192,80 +197,106 @@ export default function UploadParent(props: UploadParentProps) {
 
   // Function to parse a single file and update relevant states
   const parseFile = async (file: FileWithPath) => {
-    try {
-      const fileText = await file.text();
-      const isCSV = file.name.endsWith('.csv');
-      const delimiter = isCSV ? "," : "\t";
+  try {
+    const fileText = await file.text();
+    const isCSV = file.name.endsWith('.csv');
+    const delimiter = isCSV ? "," : "\t";
 
-      parse<FileRow>(fileText, {
-        delimiter: delimiter,
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: (h) => h.trim(),
-        complete: function (results: ParseResult<FileRow>) {
-          const expectedHeaders = TableHeadersByFormType[uploadForm];
-          const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+    parse<FileRow>(fileText, {
+      delimiter: delimiter,
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h) => h.trim(),
+      transform: (value, field) => {
+        if (uploadForm === 'measurements' && field === 'date') {
+          const regex = /(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/;
+          const match = value.match(regex);
 
-          if (!expectedHeaders || !requiredHeaders) {
-            console.error(`No headers defined for form type: ${uploadForm}`);
-            setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
-            return;
+          if (match) {
+            let normalizedDate;
+            if (match[1]) {
+              normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+            } else {
+              normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+            }
+
+            const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+            if (parsedDate.isValid()) {
+              return parsedDate.toDate();
+            } else {
+              console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+              return value;
+            }
+          } else {
+            console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+            return value;
+          }
+        }
+        return value;
+      },
+      complete: async (results: ParseResult<FileRow>) => {
+        const expectedHeaders = getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false);
+        const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
+
+        if (!expectedHeaders || !requiredHeaders) {
+          console.error(`No headers defined for form type: ${uploadForm}`);
+          setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
+          return;
+        }
+
+        const updatedFileRowSet: FileRowSet = {};
+        const fileErrors: FileRowSet = {};
+
+        for (const [index, row] of results.data.entries()) {
+          const rowId = `row-${index}`;
+          updatedFileRowSet[rowId] = row;
+
+          const rowErrors: FileRow = {};
+          let hasError = false;
+
+          for (const header of requiredHeaders) {
+            const value = row[header.label];
+            if (value === null || value === undefined || value === "" || value === "NULL") {
+              rowErrors[header.label] = "This field is required";
+              hasError = true;
+            }
           }
 
-          const updatedFileRowSet: FileRowSet = {};
-          let fileErrors: FileRowSet = {};
+          if (hasError) {
+            fileErrors[rowId] = rowErrors;
+          } 
+        }
 
-          results.data.forEach((row, index) => {
-            const rowId = `row-${index}`;
-            updatedFileRowSet[rowId] = row;
+        setParsedData(prevParsedData => ({
+          ...prevParsedData,
+          [file.name]: updatedFileRowSet,
+        }));
+        setErrorRows(prevErrorRows => ({
+          ...prevErrorRows,
+          [file.name]: updatedFileRowSet,
+        }));
+        setErrors(prevErrors => ({
+          ...prevErrors,
+          [file.name]: fileErrors
+        }));
 
-            let rowErrors: FileRow = {};
-            let hasError = false;
-
-            requiredHeaders.forEach((header) => {
-              const value = row[header.label];
-              if (value === null || value === undefined || value === "" || value === "NULL") {
-                rowErrors[header.label] = "This field is required";
-                hasError = true;
-              }
-            });
-
-            if (hasError) {
-              fileErrors[rowId] = rowErrors;
-            }
-          });
-          // Update states: parsedData, errorRows, errors
-          setParsedData(prevParsedData => ({
-            ...prevParsedData,
-            [file.name]: updatedFileRowSet,
-          }));
-          setErrorRows(prevErrorRows => ({
-            ...prevErrorRows,
-            [file.name]: updatedFileRowSet,
-          }));
-          setErrors(prevErrors => ({
-            ...prevErrors,
-            [file.name]: fileErrors
-          }));
-
-          // Update the headers collection
-          setAllFileHeaders(prevHeaders => ({
-            ...prevHeaders,
-            [file.name]: results.meta.fields || []
-          }));
-        },
-      });
-    } catch (error: any) {
-      const errorWithFile = {
-        message: error.message,
-        file: file.name,
-        originalError: error
-      };
-      setUploadError(errorWithFile);
-      setErrorComponent('UploadParseFiles');
-      setReviewState(ReviewStates.ERRORS);
-    }
-  };
+        setAllFileHeaders(prevHeaders => ({
+          ...prevHeaders,
+          [file.name]: results.meta.fields || []
+        }));
+      },
+    });
+  } catch (error: any) {
+    const errorWithFile = {
+      message: error.message,
+      file: file.name,
+      originalError: error
+    };
+    setUploadError(errorWithFile);
+    setErrorComponent('UploadParseFiles');
+    setReviewState(ReviewStates.ERRORS);
+  }
+};
 
   async function handleInitialSubmit() {
     setReviewState(ReviewStates.REVIEW);
@@ -300,8 +331,12 @@ export default function UploadParent(props: UploadParentProps) {
           setReviewState={setReviewState}
           personnelRecording={personnelRecording}
           setPersonnelRecording={setPersonnelRecording}
-          unitOfMeasurement={unitOfMeasurement}
-          setUnitOfMeasurement={setUnitOfMeasurement}
+          dbhUnit={dbhUnit}
+          setDBHUnit={setDBHUnit}
+          homUnit={homUnit}
+          setHOMUnit={setHOMUnit}
+          coordUnit={coordUnit}
+          setCoordUnit={setCoordUnit}
         />;
       case ReviewStates.UPLOAD_FILES:
         return <UploadParseFiles
@@ -314,9 +349,12 @@ export default function UploadParent(props: UploadParentProps) {
           handleInitialSubmit={handleInitialSubmit}
           handleAddFile={handleAddFile}
           handleRemoveFile={handleRemoveFile}
-          handleReplaceFile={handleReplaceFile}/>;
+          handleReplaceFile={handleReplaceFile} />;
       case ReviewStates.REVIEW:
         return <UploadReviewFiles
+          dbhUnit={dbhUnit}
+          homUnit={homUnit}
+          coordUnit={coordUnit}
           acceptedFiles={acceptedFiles}
           setAcceptedFiles={setAcceptedFiles}
           uploadForm={uploadForm}
@@ -347,13 +385,13 @@ export default function UploadParent(props: UploadParentProps) {
           personnelRecording={personnelRecording}
           acceptedFiles={acceptedFiles}
           uploadForm={uploadForm}
-          unitOfMeasurement={unitOfMeasurement}
+          dbhUnit={dbhUnit}
+          homUnit={homUnit}
+          coordUnit={coordUnit}
           parsedData={parsedData}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
-          schema={currentSite.schemaName}
+          schema={currentSite.schemaName || ''}
           uploadCompleteMessage={uploadCompleteMessage}
           setUploadCompleteMessage={setUploadCompleteMessage}
           setUploadError={setUploadError}
@@ -363,16 +401,12 @@ export default function UploadParent(props: UploadParentProps) {
       case ReviewStates.VALIDATE:
         return <UploadValidation
           setReviewState={setReviewState}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
-          schema={currentSite.schemaName}
+          schema={currentSite.schemaName || ''}
         />;
       case ReviewStates.UPDATE:
         return <UploadUpdateValidations
           setReviewState={setReviewState}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
-          schema={currentSite.schemaName}
+          schema={currentSite.schemaName || ''}
         />;
       case ReviewStates.UPLOAD_AZURE:
         return <UploadFireAzure
@@ -380,14 +414,12 @@ export default function UploadParent(props: UploadParentProps) {
           uploadForm={uploadForm}
           setReviewState={setReviewState}
           setIsDataUnsaved={setIsDataUnsaved}
-          currentPlot={currentPlot}
-          currentCensus={currentCensus}
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
           cmErrors={cmErrors}
-          user={session?.user?.name!} allRowToCMID={allRowToCMID}/>
+          user={session?.user?.name!} allRowToCMID={allRowToCMID} />;
       case ReviewStates.COMPLETE:
-        return <UploadComplete setIsUploadModalOpen={setIsUploadModalOpen} uploadForm={uploadForm}/>;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
       default:
         return (
           <UploadError
@@ -401,7 +433,7 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
     }
-  }
+  };
   return (
     <>
       {(currentCensus && currentPlot) && (
@@ -410,7 +442,10 @@ export default function UploadParent(props: UploadParentProps) {
             Drag and drop files into the box to upload them to storage
           </Typography>
           <Box sx={{mt: 5, mr: 5, width: '95%'}}>
-            <Tabs sx={{display: 'flex', flex: 1}} variant={"outlined"} aria-label={"File Hub Options"}
+            <Box sx={{display: 'flex', width: '100%', flex: 1}}>
+              {renderStateContent()}
+            </Box>
+            {/* <Tabs sx={{display: 'flex', flex: 1}} variant={"outlined"} aria-label={"File Hub Options"}
                   size={"lg"}
                   className={""}>
               <TabList sticky={"top"} variant="soft"
@@ -452,12 +487,10 @@ export default function UploadParent(props: UploadParentProps) {
               </TabPanel>
               <TabPanel value={1}>
                 <Box sx={{display: 'flex', width: '100%', flex: 1}}>
-
                   {renderStateContent()}
                 </Box>
               </TabPanel>
-            </Tabs>
-            <Button onClick={handleCancelUpload} sx={{marginY: 2}}>Cancel Upload</Button>
+            </Tabs> */}
           </Box>
         </Box>
       )}

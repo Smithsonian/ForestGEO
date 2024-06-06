@@ -1,8 +1,8 @@
 // NEXTAUTH ROUTE HANDLERS
-import NextAuth, {AzureADProfile} from "next-auth";
+import NextAuth, { AzureADProfile } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
-import {getAllowedSchemas, getAllSchemas, verifyEmail} from "@/components/processors/processorhelperfunctions";
-import {SitesRDS} from "@/config/sqlmacros";
+import { getAllowedSchemas, getAllSchemas, verifyEmail } from "@/components/processors/processorhelperfunctions";
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,
@@ -11,17 +11,17 @@ const handler = NextAuth({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
       tenantId: process.env.AZURE_AD_TENANT_ID!,
-      authorization: {params: {scope: "openid profile email user.Read"}},
+      authorization: { params: { scope: "openid profile email user.Read" } },
     }),
   ],
   session: {
     strategy: "jwt"
   },
   callbacks: {
-    async signIn({user, account, profile, email: signInEmail, credentials}) {
-      console.log('User object:', user); // Debugging
-      console.log('Profile object:', profile); // Debugging
-      console.log('Account object: ', account); // Debugging
+    async signIn({ user, account, profile, email: signInEmail, credentials }) {
+      // console.log('User object:', user); // Debugging
+      // console.log('Profile object:', profile); // Debugging
+      // console.log('Account object: ', account); // Debugging
       // Now using the extended AzureADProfile
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
@@ -30,35 +30,40 @@ const handler = NextAuth({
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        const {emailVerified, isAdmin} = await verifyEmail(userEmail);
+        const { emailVerified, isAdmin } = await verifyEmail(userEmail);
         if (!emailVerified) {
           throw new Error("User email not found.");
         }
-        console.log('verify email results: ', emailVerified, isAdmin);
+        // console.log('verify email results: ', emailVerified, isAdmin);
         user.isAdmin = isAdmin; // Add isAdmin property to the user object
-        console.log('user admin state: ', user.isAdmin);
+        // console.log('user admin state: ', user.isAdmin);
         user.email = userEmail;
-        console.log('getting all sites: ');
-        const allSites = await getAllSchemas();
-        const allowedSites = await getAllowedSchemas(userEmail);
+        // console.log('getting all sites: ');
+        let allSites = await getAllSchemas();
+        let allowedSites = await getAllowedSchemas(userEmail);
         if (!allowedSites || !allSites) {
           throw new Error("User does not have any allowed sites.");
         }
+
         user.sites = allowedSites;
+        // console.log('user sites: ', user.sites);
         user.allsites = allSites;
+        // console.log('all sites: ', user.allsites);
       }
       return true;
     },
 
-    async jwt({token, user}) {
+    async jwt({ token, user }) {
       if (user?.isAdmin !== undefined) token.isAdmin = user.isAdmin; // Persist admin status in the JWT token
       if (user?.sites !== undefined) token.sites = user.sites; // persist allowed sites in JWT token
       if (user?.allsites !== undefined) token.allsites = user.allsites;
-      console.log('jwt admin state: ', token.isAdmin);
+      // console.log('jwt admin state: ', token.isAdmin);
+      // console.log('jwt sites: ', token.sites);
+      // console.log('jwt all sites: ', token.allsites);
       return token;
     },
 
-    async session({session, token}) {
+    async session({ session, token }) {
       if (typeof token.isAdmin === 'boolean') {
         session.user.isAdmin = token.isAdmin;
       } else {
@@ -70,7 +75,9 @@ const handler = NextAuth({
       if (token && token.sites && Array.isArray(token.sites)) {
         session.user.sites = token.sites as SitesRDS[];
       }
-      console.log('session admin state: ', session.user.isAdmin);
+      // console.log('session admin state: ', session.user.isAdmin);
+      // console.log('session sites: ', session.user.sites);
+      // console.log('session all sites: ', session.user.allsites);
       return session;
     },
   },
@@ -79,4 +86,4 @@ const handler = NextAuth({
   }
 });
 
-export {handler as GET, handler as POST};
+export { handler as GET, handler as POST };

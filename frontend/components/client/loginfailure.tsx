@@ -13,7 +13,7 @@ const LoginFailed = () => {
     sessionStorage.clear();
     localStorage.clear();
     signOut({callbackUrl: '/login'}).catch(console.error);
-  }
+  };
 
   return (
     <Stack spacing={2} alignItems="center" justifyContent="center" sx={{width: '100%', mt: 4}}>

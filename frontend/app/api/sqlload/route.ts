@@ -1,7 +1,8 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, InsertUpdateProcessingProps} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
-import {FileRow, FileRowSet, HTTPResponses} from "@/config/macros";
+import {HTTPResponses} from "@/config/macros";
+import {FileRow, FileRowSet} from "@/config/macros/formdetails";
 import {insertOrUpdate} from "@/components/processors/processorhelperfunctions";
 
 export async function POST(request: NextRequest) {
@@ -24,18 +25,28 @@ export async function POST(request: NextRequest) {
   let censusIDParam = request.nextUrl.searchParams.get("census");
   if (!censusIDParam) throw new Error('no census id provided!');
   let censusID = parseInt(censusIDParam.trim());
-  // full name
-  let fullName = request.nextUrl.searchParams.get("user");
-  if (!fullName) throw new Error('no full name provided!');
-  fullName = fullName.trim();
+  // quadrat ID
+  let quadratIDParam = request.nextUrl.searchParams.get("quadrat");
+  if (!quadratIDParam) throw new Error("no quadrat ID provided");
+  let quadratID = parseInt(quadratIDParam.trim());
   // form type
   let formType = request.nextUrl.searchParams.get("formType");
   if (!formType) throw new Error('no formType provided!');
   formType = formType.trim();
-  // unit of measurement
-  let unitOfMeasurement = request.nextUrl.searchParams.get('uom');
-  if (!unitOfMeasurement) throw new Error('no unitOfMeasurement provided!');
-  unitOfMeasurement = unitOfMeasurement.trim();
+// full name
+  let fullName = request.nextUrl.searchParams.get("user") ?? undefined;
+  // if (!fullName) throw new Error('no full name provided!');
+  // fullName = fullName.trim();
+  // unit of measurement --> use has been incorporated into form
+  // let dbhUnit = request.nextUrl.searchParams.get('dbhUnit');
+  // if (!dbhUnit) throw new Error('no DBH unitOfMeasurement provided!');
+  // dbhUnit = dbhUnit.trim();
+  // let homUnit = request.nextUrl.searchParams.get('homUnit');
+  // if (!homUnit) throw new Error('no HOM unitOfMeasurement provided!');
+  // dbhUnit = dbhUnit.trim();
+  // let coordUnit = request.nextUrl.searchParams.get('coordUnit');
+  // if (!coordUnit) throw new Error('no Coordinate unitOfMeasurement provided!');
+  // dbhUnit = dbhUnit.trim();
 
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
@@ -77,6 +88,7 @@ export async function POST(request: NextRequest) {
   for (const rowId in fileRowSet) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
+    console.log('row for row ID: ', row);
     try {
       let props: InsertUpdateProcessingProps = {
         schema,
@@ -85,12 +97,17 @@ export async function POST(request: NextRequest) {
         rowData: row,
         plotID,
         censusID,
+        quadratID,
         fullName,
-        unitOfMeasurement
+        // dbhUnit: dbhUnit,
+        // homUnit: homUnit,
+        // coordUnit: coordUnit,
       };
       const coreMeasurementID = await insertOrUpdate(props);
-      if (formType === 'fixeddata_census' && coreMeasurementID) {
+      if (formType === 'measurements' && coreMeasurementID) {
         idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});
+      } else if (formType === 'measurements' && coreMeasurementID === undefined) {
+        throw new Error("CoreMeasurement insertion failure at row: " + row);
       }
     } catch (error) {
       if (error instanceof Error) {

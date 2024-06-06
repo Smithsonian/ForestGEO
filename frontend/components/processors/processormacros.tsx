@@ -1,31 +1,26 @@
-import {PoolConnection, PoolOptions} from 'mysql2/promise';
-import {booleanToBit, FileRow} from "@/config/macros";
+import {PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
+import {booleanToBit} from "@/config/macros";
+import {FileRow} from "@/config/macros/formdetails";
 
 import {processSpecies} from "@/components/processors/processspecies";
-import * as fs from "fs";
 import {NextRequest} from "next/server";
-import {processQuadrats} from "@/components/processors/processquadrats";
 import {processCensus} from "@/components/processors/processcensus";
 import {PoolMonitor} from "@/config/poolmonitor";
+import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
+import { GridValidRowModel } from '@mui/x-data-grid';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
   try {
     let i = 0;
-    console.log("Attempting to get SQL connection");
     conn = await getSqlConnection(i);
-    console.log("SQL connection obtained");
   } catch (error: any) {
     console.error("Error processing files:", error.message);
     throw new Error(error.message);
   }
   if (!conn) {
-    console.error("Container client or SQL connection is undefined.");
     throw new Error('conn empty');
   }
-  conn.on('release', () => {
-    console.log("Connection released back to pool");
-  });
   return conn;
 }
 
@@ -35,8 +30,8 @@ export interface SpecialProcessingProps {
   schema: string;
   plotID?: number;
   censusID?: number;
+  quadratID?: number;
   fullName?: string;
-  unitOfMeasurement?: string;
 }
 
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
@@ -46,11 +41,12 @@ export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | null>;
+  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | undefined>;
 };
+
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
-  "fixeddata_codes": {
+  "attributes": {
     tableName: "Attributes",
     columnMappings: {
       "code": "Code",
@@ -58,7 +54,7 @@ export const fileMappings: Record<string, FileMapping> = {
       "status": "Status"
     }
   },
-  "fixeddata_personnel": {
+  "personnel": {
     tableName: "Personnel",
     columnMappings: {
       "firstname": "FirstName",
@@ -66,68 +62,84 @@ export const fileMappings: Record<string, FileMapping> = {
       "role": "Role"
     }
   },
-  "fixeddata_species": {
+  "species": {
     tableName: "",
     columnMappings: {
       "spcode": "Species.SpeciesCode",
+      "family": "Family.Family",
       "genus": "Genus.GenusName",
       "species": "Species.SpeciesName",
+      "subspecies": "Species.SubspeciesName", // optional
       "IDLevel": "Species.IDLevel",
-      "family": "Species.Family",
-      "authority": "Species.Authority"
+      "authority": "Species.Authority",
+      "subauthority": "Species.SubspeciesAuthority", // optional
     },
     specialProcessing: processSpecies
   },
-  "fixeddata_quadrat": {
-    tableName: "",
+  "quadrats": {
+    tableName: "quadrats",
+    // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
     columnMappings: {
-      "quadrat": "Quadrats.QuadratName",
-      "dimx": "Quadrats.DimensionX",
-      "dimy": "Quadrats.DimensionY"
+      "quadrat": "QuadratName",
+      "startx": "StartX",
+      "starty": "StartY",
+      "dimx": "DimensionX",
+      "dimy": "DimensionY",
+      "unit": "Unit",
+      "quadratshape": "QuadratShape",
     },
-    specialProcessing: processQuadrats
   },
-  "fixeddata_census": {
-    tableName: "", // Multiple tables involved
+  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
+  "subquadrats": {
+    tableName: "subquadrats",
     columnMappings: {
-      "tag": "Trees.TreeTag",
-      "stemtag": "Stems.StemTag",
-      "spcode": "Species.SpeciesCode",
-      "quadrat": "Quadrats.QuadratName",
-      "lx": "Stems.StemQuadX",
-      "ly": "Stems.StemQuadY",
-      "dbh": "CoreMeasurements.MeasuredDBH",
-      "codes": "Attributes.Code",
-      "hom": "CoreMeasurement.MeasuredHOM",
-      "date": "CoreMeasurement.MeasurementDate",
-    },
+      "subquadrat": "SubquadratName",
+      "quadrat": "QuadratID",
+      "dimx": "DimensionX",
+      "dimy": "DimensionY",
+      "xindex": "X",
+      "yindex": "Y",
+      "unit": "Unit",
+      "orderindex": "Ordering",
+    }
+  },
+  "measurements": {
+    tableName: "", // Multiple tables involved
+    columnMappings: {},
     specialProcessing: processCensus
   },
 };
 const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER!, // better stored in an app setting such as process.env.DB_USER
-  password: process.env.AZURE_SQL_PASSWORD!, // better stored in an app setting such as process.env.DB_PASSWORD
-  host: process.env.AZURE_SQL_SERVER!, // better stored in an app setting such as process.env.DB_SERVER
+  user: process.env.AZURE_SQL_USER, // better stored in an app setting such as process.env.DB_USER
+  password: process.env.AZURE_SQL_PASSWORD, // better stored in an app setting such as process.env.DB_PASSWORD
+  host: process.env.AZURE_SQL_SERVER, // better stored in an app setting such as process.env.DB_SERVER
   port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
-  database: process.env.AZURE_SQL_DATABASE!, // better stored in an app setting such as process.env.DB_NAME
-  ssl: {ca: fs.readFileSync("DigiCertGlobalRootCA.crt.pem")}
-}
+  database: process.env.AZURE_SQL_CATALOG_SCHEMA,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+};
+// database: process.env.AZURE_SQL_SCHEMA!, // better stored in an app setting such as process.env.DB_NAME
 export const poolMonitor = new PoolMonitor(sqlConfig);
-// const pool = mysql.createPool(sqlConfig);
+// const pool = createPool(sqlConfig);
 
 // Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
+    console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
+    // const connection = await pool.getConnection();
     const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
+    console.log('Connection successful');
     return connection; // Resolve the connection when successful
   } catch (err) {
+    console.error(`Connection attempt ${tries + 1} failed:`, err);
     if (tries == 5) {
       console.error("!!! Cannot connect !!! Error:", err);
       throw err;
     } else {
-      console.log("Connection attempt failed --> trying again");
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait a bit before retrying
+      console.log("Retrying connection...");
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
   }
@@ -168,6 +180,7 @@ function transformRequestBody(requestBody: any) {
     CensusID: getValueOrDefault(requestBody.censusID),
     PlotID: getValueOrDefault(requestBody.plotID),
     QuadratID: getValueOrDefault(requestBody.quadratID),
+    SubQuadratID: getValueOrDefault(requestBody.subQuadratID),
     TreeID: getValueOrDefault(requestBody.treeID),
     StemID: getValueOrDefault(requestBody.stemID),
     PersonnelID: getValueOrDefault(requestBody.personnelID),
@@ -188,8 +201,8 @@ export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
   return transformRequestBody(requestBody);
 }
 
-export async function parseAttributeRequestBody(request: NextRequest, parseType: string) {
-  const requestBody = await request.json();
+export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
+  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
   switch (parseType) {
     case 'POST':
     case 'PATCH': {
@@ -203,82 +216,6 @@ export async function parseAttributeRequestBody(request: NextRequest, parseType:
       throw new Error("Invalid parse type -- attributes");
   }
 }
-
-export async function parseCensusRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    CensusID: requestBody.censusID,
-    PlotID: requestBody.plotID ?? null,
-    PlotCensusNumber: requestBody.plotCensusNumber ?? null,
-    StartDate: requestBody.startDate ? new Date(requestBody.startDate) : null,
-    EndDate: requestBody.endDate ? new Date(requestBody.endDate) : null,
-    Description: requestBody.description ?? null,
-  }
-}
-
-export async function parsePersonnelRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    PersonnelID: requestBody.personnelID,
-    FirstName: requestBody.firstName ?? null,
-    LastName: requestBody.lastName ?? null,
-    Role: requestBody.role ?? null,
-  };
-}
-
-export async function parseQuadratsRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    QuadratID: requestBody.quadratID,
-    PlotID: requestBody.plotID,
-    CensusID: requestBody.censusID,
-    QuadratName: requestBody.quadratName,
-    DimensionX: requestBody.dimensionX,
-    DimensionY: requestBody.dimensionY,
-    Area: requestBody.area,
-    QuadratShape: requestBody.quadratShape,
-    Personnel: requestBody.personnel
-  };
-}
-
-export async function parseSpeciesRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    SpeciesID: requestBody.speciesID,
-    GenusID: requestBody.genusID ?? null,
-    CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
-    ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
-    SpeciesName: requestBody.speciesName ?? null,
-    SpeciesCode: requestBody.speciesCode ?? null,
-    IDLevel: requestBody.idLevel ?? null,
-    Authority: requestBody.authority ?? null,
-    FieldFamily: requestBody.fieldFamily ?? null,
-    Description: requestBody.description ?? null,
-    ReferenceID: requestBody.referenceID ?? null,
-  };
-}
-
-export async function parseSubSpeciesRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return {
-    SubSpeciesID: requestBody.subSpeciesID,
-    SpeciesID: requestBody.speciesID ?? null,
-    SubSpeciesName: requestBody.subSpeciesName ?? null,
-    SubSpeciesCode: requestBody.subSpeciesCode ?? null,
-    CurrentTaxonFlag: booleanToBit(requestBody.currentTaxonFlag) ?? null,
-    ObsoleteTaxonFlag: booleanToBit(requestBody.obsoleteTaxonFlag) ?? null,
-    Authority: requestBody.authority ?? null,
-    InfraSpecificLevel: requestBody.infraSpecificLevel ?? null,
-  };
-}
-
-// New function to extract environment variables
-export function getSchema() {
-  const schema = process.env.AZURE_SQL_SCHEMA;
-  if (!schema) throw new Error("Environmental variable extraction for schema failed");
-  return schema;
-}
-
 export function getCatalogSchema() {
   const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
   if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
@@ -295,119 +232,46 @@ export type UpdateValidationResponse = {
   rowsValidated: any;
 }
 
-export interface ForestGEOMeasurementsSummaryResult {
-  CoreMeasurementID: any;
-  PlotID: any;
-  PlotName: any;
-  PlotCensusNumber: any;
-  StartDate: any;
-  EndDate: any;
-  QuadratName: any;
-  TreeTag: any;
-  StemTag: any;
-  StemQuadX: any;
-  StemQuadY: any;
-  StemQuadZ: any;
-  SpeciesName: any;
-  SubSpeciesName: any;
-  Genus: any;
-  Family: any;
-  PersonnelName: any;
-  MeasurementDate: any;
-  MeasuredDBH: any;
-  MeasuredHOM: any;
-  Description: any;
-  Attributes: any;
+export interface QueryConfig {
+  schema: string;
+  table: string;
+  joins?: {
+    table: string;
+    alias: string;
+    on: string;
+  }[];
+  conditionals?: string;
+  pagination: {
+    page: number;
+    pageSize: number;
+  };
+  extraParams?: any[];
 }
 
-export interface CoreMeasurementsResult {
-  CoreMeasurementID: any;
-  CensusID: any;
-  PlotID: any;
-  QuadratID: any;
-  TreeID: any;
-  StemID: any;
-  PersonnelID: any;
-  IsValidated: any;
-  MeasurementDate: any;
-  MeasuredDBH: any;
-  MeasuredHOM: any;
-  Description: any;
-  UserDefinedFields: any;
-}
+export function buildPaginatedQuery(config: QueryConfig): { query: string, params: any[] } {
+  const { schema, table, joins, conditionals, pagination, extraParams } = config;
+  const { page, pageSize } = pagination;
+  const startRow = page * pageSize;
+  let queryParams = extraParams || [];
 
-export interface CensusResult {
-  CensusID: any;
-  PlotID: any;
-  PlotCensusNumber: any;
-  StartDate: any;
-  EndDate: any;
-  Description: any;
-}
+  // Establish an alias for the primary table for consistency in joins and selections
+  const tableAlias = table[0].toLowerCase();  // Simple default alias based on first letter of table name
 
-export interface PlotsResult {
-  PlotID: any;
-  PlotName: any;
-  LocationName: any;
-  CountryName: any;
-  DimensionX: any;
-  DimensionY: any;
-  Area: any;
-  GlobalX: any;
-  GlobalY: any;
-  GlobalZ: any;
-  PlotX: any;
-  PlotY: any;
-  PlotZ: any;
-  PlotShape: any;
-  PlotDescription: any;
-}
+  // Build the base query with possible joins
+  let query = `SELECT SQL_CALC_FOUND_ROWS ${tableAlias}.* FROM ${schema}.${table} AS ${tableAlias}`;
+  if (joins) {
+    joins.forEach(join => {
+      query += ` LEFT JOIN ${schema}.${join.table} AS ${join.alias} ON ${join.on}`;
+    });
+  }
 
-export interface QuadratsResult {
-  QuadratID: any;
-  PlotID: any;
-  CensusID: any;
-  QuadratName: any;
-  DimensionX: any;
-  DimensionY: any;
-  Area: any;
-  QuadratShape: any;
-}
+  if (conditionals) {
+    query += ` WHERE ${conditionals}`;
+  }
 
-export interface PersonnelResult {
-  PersonnelID: any;
-  FirstName: any;
-  LastName: any;
-  Role: any;
-}
+  // Add LIMIT clause
+  query += ` LIMIT ?, ?`;
+  queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
 
-export interface SpeciesResult {
-  SpeciesID: any;
-  GenusID: any;
-  CurrentTaxonFlag: any;
-  ObsoleteTaxonFlag: any;
-  SpeciesName: any;
-  SpeciesCode: any;
-  IDLevel: any;
-  Authority: any;
-  FieldFamily: any;
-  Description: any;
-  ReferenceID: any;
-}
-
-export interface SubSpeciesResult {
-  SubSpeciesID: any;
-  SpeciesID: any;
-  CurrentTaxonFlag: any;
-  ObsoleteTaxonFlag: any;
-  SubSpeciesName: any;
-  SubSpeciesCode: any;
-  Authority: any;
-  InfraSpecificLevel: any;
-}
-
-export interface SitesResult {
-  SiteID: any;
-  SiteName: any;
-  SchemaName: any;
+  return { query, params: queryParams };
 }

@@ -12,7 +12,7 @@ const slides = [
   'background-2.jpg',
   'background-3.jpg',
   'background-4.jpg',
-]
+];
 
 export default function LoginPage() {
   const {data: _session, status} = useSession();
@@ -24,13 +24,14 @@ export default function LoginPage() {
     leave: {opacity: 0},
     config: {duration: 5000},
     onRest: (_a, _b, item) => {
-      if (index == item) {
-        setIndex(state => (state + 1) % slides.length)
+      if (index === item) {
+        setIndex(state => (state + 1) % slides.length);
       }
     },
     exitBeforeEnter: true,
-  })
+  });
 
+  // feedback received -- endless loop will consume too many resources and needs to be removed. Single loop through all slides should suffice.
   useEffect(() => {
     setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
   }, []);
@@ -44,12 +45,13 @@ export default function LoginPage() {
             style={{
               ...style,
               backgroundImage: `url(${slides[i]})`,
-            }}/>
+            }}
+            data-testid={`${slides[i]}`}/>
         ))}
         <UnauthenticatedSidebar/>
       </Box>
     );
-  } else if (status === "authenticated"){
+  } else if (status === "authenticated") {
     redirect('/dashboard');
   }
 }
