@@ -45,3 +45,5 @@ next-env.d.ts
 /frontend/scripts
 /frontend/sqlscripting
 /frontend/.vscode
+/documentation/.obsidian
+/documentation/.obsidian/*
