@@ -1,0 +1,57 @@
+"use client";
+
+import {UploadCompleteProps} from "@/config/macros/uploadsystemmacros";
+import Typography from "@mui/joy/Typography";
+import {Box} from "@mui/joy";
+import {redirect} from "next/navigation";
+import React, {useEffect, useState} from "react";
+import CircularProgress from "@mui/joy/CircularProgress";
+
+export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
+  const {uploadForm, handleCloseUploadModal} = props;
+  const [countdown, setCountdown] = useState(5);
+
+  // Effect for handling countdown and state transition
+  useEffect(() => {
+    let timer: number; // Declare timer as a number
+
+    if (countdown > 0) {
+      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
+      // Use 'window.setTimeout' and type assertion to treat the return as a number
+    } else if (countdown === 0) {
+      handleCloseUploadModal();
+    }
+    return () => clearTimeout(timer); // Clear timeout using the timer variable
+  }, [countdown, handleCloseUploadModal]);
+
+  const redirectLink = () => {
+    switch (uploadForm) {
+      case 'attributes':
+        return redirect('/fixeddatainput/attributes');
+      case 'personnel':
+        return redirect('/fixeddatainput/personnel');
+      case 'species':
+        return redirect('/fixeddatainput/species');
+      case 'quadrats':
+        return redirect('/fixeddatainput/quadrats');
+      case 'measurements':
+        return redirect('/measurementshub/summary');
+      case 'arcgis_files':
+        return redirect('/dashboard');
+      default:
+        return redirect('/dashboard');
+    }
+  };
+  return (
+    <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+      <Typography variant={"solid"} level={"h1"} color={"success"}>Upload Complete!</Typography>
+      {countdown > 0 && (
+        <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+          <CircularProgress/>
+          <Typography>{countdown} seconds remaining</Typography>
+        </Box>
+      )}
+      {countdown === 0 && redirectLink()}
+    </Box>
+  );
+}

@@ -50,7 +50,7 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
   }, [inputValue]);
 
   useEffect(() => {
-    if (inputValue) {
+    if (inputValue.length > 0) {
       refreshData();
     }
   }, [inputValue]);

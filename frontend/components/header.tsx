@@ -10,6 +10,7 @@ import {toggleSidebar} from '@/config/utils';
 export default function Header() {
   return (
     <Sheet
+      role="banner"
       sx={{
         display: {xs: 'flex', md: 'none'},
         alignItems: 'center',
@@ -37,6 +38,7 @@ export default function Header() {
         })}
       />
       <IconButton
+        role="button"
         onClick={() => toggleSidebar()}
         variant="outlined"
         color="neutral"

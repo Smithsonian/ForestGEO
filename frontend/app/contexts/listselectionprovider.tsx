@@ -1,75 +1,58 @@
+// ListSelectionProvider.tsx
 "use client";
-import React, {createContext, Dispatch, useContext, useEffect, useReducer} from 'react';
+import React, { createContext, Dispatch, useContext, useReducer } from 'react';
 import {
-  Census,
   createEnhancedDispatch,
   EnhancedDispatch,
   genericLoadReducer,
-  LoadAction,
-  Plot,
-  Quadrat
-} from "@/config/macros";
-import {getData} from "@/config/db";
-import {SitesRDS} from "@/config/sqlmacros";
+  LoadAction
+} from "@/config/macros/contextreducers";
+import { QuadratRDS } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { PlotRDS } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { SubquadratRDS } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
 
-export const PlotListContext = createContext<Plot[] | null>(null);
-export const QuadratListContext = createContext<Quadrat[] | null>(null);
-export const CensusListContext = createContext<Census[] | null>(null);
-export const FirstLoadContext = createContext<boolean | null>(null);
-export const SiteListContext = createContext<SitesRDS[] | null>(null);
-export const PlotListDispatchContext = createContext<EnhancedDispatch<Plot[]> | null>(null);
-export const QuadratListDispatchContext = createContext<EnhancedDispatch<Quadrat[]> | null>(null);
-export const CensusListDispatchContext = createContext<EnhancedDispatch<Census[]> | null>(null);
-export const SiteListDispatchContext = createContext<EnhancedDispatch<SitesRDS[]> | null>(null);
-export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | null>(null);
+// contexts
+export const PlotListContext = createContext<PlotRDS[] | undefined>([]);
+export const OrgCensusListContext = createContext<OrgCensus[] | undefined>([]);
+export const QuadratListContext = createContext<QuadratRDS[] | undefined>([]);
+export const SubquadratListContext = createContext<SubquadratRDS[] | undefined>([]);
+export const SiteListContext = createContext<SitesRDS[] | undefined>([]);
+export const FirstLoadContext = createContext<boolean | undefined>(false);
+// dispatches
+export const PlotListDispatchContext = createContext<EnhancedDispatch<PlotRDS[]> | undefined>(undefined);
+export const OrgCensusListDispatchContext = createContext<EnhancedDispatch<OrgCensus[]> | undefined>(undefined);
+export const QuadratListDispatchContext = createContext<EnhancedDispatch<QuadratRDS[]> | undefined>(undefined);
+export const SubquadratListDispatchContext = createContext<EnhancedDispatch<SubquadratRDS[]> | undefined>(undefined);
+export const SiteListDispatchContext = createContext<EnhancedDispatch<SitesRDS[]> | undefined>(undefined);
+export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | undefined>(undefined);
 
-export function ListSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
-  const [plotList, plotListDispatch] =
-    useReducer<React.Reducer<Plot[] | null, LoadAction<Plot[]>>>(genericLoadReducer, []);
+export function ListSelectionProvider({ children }: Readonly<{ children: React.ReactNode }>) {
+  const [plotList, plotListDispatch] = useReducer<React.Reducer<PlotRDS[] | undefined, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
+
+  const [orgCensusList, orgCensusListDispatch] =
+    useReducer<React.Reducer<OrgCensus[] | undefined, LoadAction<OrgCensus[]>>>(genericLoadReducer, []);
 
   const [quadratList, quadratListDispatch] =
-    useReducer<React.Reducer<Quadrat[] | null, LoadAction<Quadrat[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<QuadratRDS[] | undefined, LoadAction<QuadratRDS[]>>>(genericLoadReducer, []);
 
-  const [censusList, censusListDispatch] =
-    useReducer<React.Reducer<Census[] | null, LoadAction<Census[]>>>(genericLoadReducer, []);
+  const [subquadratList, subquadratListDispatch] =
+    useReducer<React.Reducer<SubquadratRDS[] | undefined, LoadAction<SubquadratRDS[]>>>(genericLoadReducer, []);
 
   const [siteList, siteListDispatch] =
-    useReducer<React.Reducer<SitesRDS[] | null, LoadAction<SitesRDS[]>>>(genericLoadReducer, []);
+    useReducer<React.Reducer<SitesRDS[] | undefined, LoadAction<SitesRDS[]>>>(genericLoadReducer, []);
 
   const [firstLoad, firstLoadDispatch] = useReducer(
     firstLoadReducer,
     true
-  )
+  );
 
   const enhancedPlotListDispatch = createEnhancedDispatch(plotListDispatch, 'plotList');
+  const enhancedOrgCensusListDispatch = createEnhancedDispatch(orgCensusListDispatch, 'censusList');
   const enhancedQuadratListDispatch = createEnhancedDispatch(quadratListDispatch, 'quadratList');
-  const enhancedCensusListDispatch = createEnhancedDispatch(censusListDispatch, 'censusList');
+  const enhancedSubquadratListDispatch = createEnhancedDispatch(subquadratListDispatch, 'subquadratList');
   const enhancedSiteListDispatch = createEnhancedDispatch(siteListDispatch, 'siteList');
-
-
-  useEffect(() => {
-    const fetchData = async () => {
-      const plotListData: Plot[] | undefined = await getData('plotList');
-      if (plotListData) await enhancedPlotListDispatch({plotList: plotListData});
-
-      const quadratListData: Quadrat[] | undefined = await getData('quadratList');
-      if (quadratListData) await enhancedQuadratListDispatch({quadratList: quadratListData});
-
-      const censusListData: Census[] | undefined = await getData('censusList');
-      if (censusListData) await enhancedCensusListDispatch({censusList: censusListData});
-
-      const siteListData: SitesRDS[] | undefined = await getData('siteList');
-      if (siteListData) await enhancedSiteListDispatch({siteList: siteListData});
-    };
-
-    fetchData().catch(console.error);
-
-    // // Set up polling
-    // const interval = setInterval(fetchData, 10000); // Poll every 10 seconds
-    //
-    // return () => clearInterval(interval);
-  }, []);
-
 
   return (
     <SiteListContext.Provider value={siteList}>
@@ -78,15 +61,19 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
           <PlotListDispatchContext.Provider value={enhancedPlotListDispatch}>
             <QuadratListContext.Provider value={quadratList}>
               <QuadratListDispatchContext.Provider value={enhancedQuadratListDispatch}>
-                <CensusListContext.Provider value={censusList}>
-                  <CensusListDispatchContext.Provider value={enhancedCensusListDispatch}>
-                    <FirstLoadContext.Provider value={firstLoad}>
-                      <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
-                        {children}
-                      </FirstLoadDispatchContext.Provider>
-                    </FirstLoadContext.Provider>
-                  </CensusListDispatchContext.Provider>
-                </CensusListContext.Provider>
+                <SubquadratListContext.Provider value={subquadratList}>
+                  <SubquadratListDispatchContext.Provider value={enhancedSubquadratListDispatch}>
+                    <OrgCensusListContext.Provider value={orgCensusList}>
+                      <OrgCensusListDispatchContext.Provider value={enhancedOrgCensusListDispatch}>
+                        <FirstLoadContext.Provider value={firstLoad}>
+                          <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
+                            {children}
+                          </FirstLoadDispatchContext.Provider>
+                        </FirstLoadContext.Provider>
+                      </OrgCensusListDispatchContext.Provider>
+                    </OrgCensusListContext.Provider>
+                  </SubquadratListDispatchContext.Provider>
+                </SubquadratListContext.Provider>
               </QuadratListDispatchContext.Provider>
             </QuadratListContext.Provider>
           </PlotListDispatchContext.Provider>
@@ -109,14 +96,6 @@ export function useFirstLoadDispatch() {
   return useContext(FirstLoadDispatchContext);
 }
 
-export function usePlotListContext() {
-  return useContext(PlotListContext);
-}
-
-export function usePlotListDispatch() {
-  return useContext(PlotListDispatchContext);
-}
-
 export function useQuadratListContext() {
   return useContext(QuadratListContext);
 }
@@ -125,12 +104,20 @@ export function useQuadratListDispatch() {
   return useContext(QuadratListDispatchContext);
 }
 
-export function useCensusListContext() {
-  return useContext(CensusListContext);
+export function useSubquadratListContext() {
+  return useContext(SubquadratListContext);
 }
 
-export function useCensusListDispatch() {
-  return useContext(CensusListDispatchContext);
+export function useSubquadratListDispatch() {
+  return useContext(SubquadratListDispatchContext);
+}
+
+export function useOrgCensusListContext() {
+  return useContext(OrgCensusListContext);
+}
+
+export function useOrgCensusListDispatch() {
+  return useContext(OrgCensusListDispatchContext);
 }
 
 export function useSiteListContext() {
@@ -139,4 +126,11 @@ export function useSiteListContext() {
 
 export function useSiteListDispatch() {
   return useContext(SiteListDispatchContext);
+}
+
+export function usePlotListContext() {
+  return useContext(PlotListContext);
+}
+export function usePlotListDispatch() {
+  return useContext(PlotListDispatchContext);
 }

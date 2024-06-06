@@ -24,7 +24,7 @@ export default function DashboardPage() {
     "options, the status column should be left blank.";
   const quadratNote = "NOTE: The x and y coordinates (“startx” and “starty”) refer to the distance in meters between\n" +
     "the quadrat under question and lowest, left-most corner of the entire plot (or\n" +
-    "wherever your plot origin, or 0,0 coordinates are)."
+    "wherever your plot origin, or 0,0 coordinates are).";
   const censusNote1 = "NOTE: Each of the multiple stems should be included in these files. You may indicate in the codes\n" +
     "field which one is the main stem (if the tree has only one stem, you do not have to include the main\n" +
     "stem code). The rest of the information should be repeated for each multiple stem. Make sure that\n" +
@@ -36,8 +36,7 @@ export default function DashboardPage() {
   return (
     <Box sx={{display: 'flex', flexGrow: 1, width: '85%', flexDirection: 'column', marginBottom: 5}}>
       <Typography level={"body-lg"} sx={{paddingBottom: '1em'}}>Please use this guide to navigate through this
-        app&apos;s key features
-        and functionalities.</Typography>
+        app&apos;s key features and functionalities.</Typography>
       <Typography level="h3">Understanding the Sidebar</Typography>
       <Typography level="body-lg" sx={{paddingBottom: '1em'}}>
         The sidebar is intended to provide you with quick and easy access to the different features this app provides.
@@ -54,8 +53,7 @@ export default function DashboardPage() {
               <Avatar color={"primary"}>
                 <TravelExploreIcon/>
               </Avatar>
-              <Typography level={"title-lg"}>Required Selections to Use the App -
-                Site</Typography>
+              <Typography level={"title-lg"}>Select a Site</Typography>
             </Box>
           </AccordionSummary>
           <AccordionDetails>
@@ -81,15 +79,16 @@ export default function DashboardPage() {
               <Avatar color={"primary"}>
                 <PlotLogo/>
               </Avatar>
-              <Typography level={"title-lg"}>Required Selections to Use the App -
-                Plot</Typography>
+              <Typography level={"title-lg"}>Select a Plot</Typography>
             </Box>
           </AccordionSummary>
           <AccordionDetails>
             <Typography level={"body-lg"}>
               Following the same format as the Site, clicking on the Select Plot link will open a dialog box to allow
-              you to select a plot -- <br/> please note that the list of selectable plots will be restricted by access,
-              so you will only be able to see plots you have been added to.
+              you to select a plot
+              <br />
+              If you have administrator access, you will be able to click on Add New Plot or Edit/Delete Plot (within the selection menu) to make 
+              changes to or add plots that are missing or incorrect.
               <Tooltip color={"warning"} title={"Please contact an administrator if you cannot access the plot\n" +
                 "          you are working on."}>
                 <IconButton>
@@ -105,8 +104,7 @@ export default function DashboardPage() {
               <Avatar color={"primary"}>
                 <CensusLogo/>
               </Avatar>
-              <Typography level={"title-lg"}>Required Selections to Use the App -
-                Census</Typography>
+              <Typography level={"title-lg"}>Select a Census</Typography>
             </Box>
           </AccordionSummary>
           <AccordionDetails>
@@ -118,6 +116,9 @@ export default function DashboardPage() {
               chronological descending order. <br/>
               Unlike the Site and Plot selections, Census selections are not restricted by access, so you should be able
               to select any available censuses.
+              <br />
+              If you have admin access, you will be able to close, edit, or delete censuses while the menu is open. Currently,
+              There is not (yet) functionality to reopen prior censuses, but if you need to open a new census, please use the Add New Census button!
             </Typography>
           </AccordionDetails>
         </Accordion>
@@ -369,28 +370,6 @@ export default function DashboardPage() {
                 </Accordion>
               </AccordionGroup>
             </Typography>
-          </AccordionDetails>
-        </Accordion>
-        <Accordion disabled>
-          <AccordionSummary>
-            <Typography level={"title-lg"}>
-              Manual Input Forms (CTFSWeb)
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <Typography level={"body-lg"}>
-              This form is available as a backstop to census file upload, in case it does not work for any reason or
-              your file is corrupted. This form will enable you to submit census information in the same format as the
-              census.txt form provided by CTFSWeb. <br/>
-              Please take advantage of the autocompletion functionality the form provides in order to more efficiently
-              add information.
-            </Typography>
-            <Tooltip color={"warning"} title={"Note: The census form relies on successful input of fixed data (" +
-              "attributes, personnel, quadrats, species)."}>
-              <IconButton>
-                <WarningIcon fontSize={"small"}/>
-              </IconButton>
-            </Tooltip>
           </AccordionDetails>
         </Accordion>
       </AccordionGroup>

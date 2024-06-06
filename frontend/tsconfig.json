@@ -1,10 +1,11 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es2017",
     "lib": [
       "dom",
       "dom.iterable",
-      "esnext"
+      "esnext",
+      "es2015"
     ],
     "allowJs": true,
     "skipLibCheck": true,
@@ -27,14 +28,16 @@
       "@/*": [
         "./*"
       ]
-    }
+    },
+    "types": ["vitest/globals", "node"]
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "build/types/**/*.ts"
+    "build/types/**/*.ts",
+    "./vitest.setup.ts"
   ],
   "exclude": [
     "node_modules"
