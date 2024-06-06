@@ -189,7 +189,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
-  const [deprecatedRows, setDeprecatedRows] = useState<GridValidRowModel[]>([]);
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -427,7 +426,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
       console.log('output: ', data.output);
-      if (data.deprecated) setDeprecatedRows(data.deprecated); // may not have any
       setRows(data.output.length > 0 ? data.output : []);
       setRowCount(data.totalCount);
 
@@ -747,11 +745,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     return gridColumns.some(column => cellHasError(column.field, rowId));
   };
 
-  const rowIsDeprecated = (rowId: GridRowId) => {
-    if (!rows || rows.length === 0) return false;
-    return deprecatedRows.map((row) => row.id).includes(rowId);
-  };
-
   const visibleRows = useMemo(() => {
     if (showErrorRows && showValidRows) {
       console.log('Showing all rows, including those with errors.');
@@ -780,13 +773,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   }, [errorRowCount]);
 
   const getRowClassName = (params: GridRowParams) => {
-    if (rowIsDeprecated(params.id)) return 'deprecated-row';
     if (!params.row.isValidated) {
       if (rowHasError(params.id)) return 'error-row';
+      else return 'pending-validation';
     } else {
       return 'validated';
     }
-    return '';
   };
 
   useEffect(() => {
