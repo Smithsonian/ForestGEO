@@ -20,7 +20,7 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     (getConn as jest.Mock).mockResolvedValue(conn);
     (runQuery as jest.Mock).mockResolvedValue([]);
 
-    const { req, res } = createMocks({
+    const { req } = createMocks({
       method: 'GET',
       url: 'http://localhost/api/cmprevalidation/attributes/schema/1/1',
     });
@@ -41,7 +41,7 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     (getConn as jest.Mock).mockResolvedValue(conn);
     (runQuery as jest.Mock).mockResolvedValue([[1]]);
 
-    const { req, res } = createMocks({
+    const { req } = createMocks({
       method: 'GET',
       url: 'http://localhost/api/cmprevalidation/attributes/schema/1/1',
     });
@@ -53,44 +53,48 @@ describe('GET /api/cmprevalidation/[dataType]/[[...slugs]]', () => {
     expect(response.status).toBe(HTTPResponses.OK);
   });
 
-  it('should return 500 if there is a database error', async () => {
+  it('should return 412 if there is a database error', async () => {
     (getConn as jest.Mock).mockRejectedValue(new Error('Database error'));
 
-    const { req, res } = createMocks({
+    const { req } = createMocks({
       method: 'GET',
       url: 'http://localhost/api/cmprevalidation/attributes/schema/1/1',
     });
 
     const mockReq = new NextRequest(req.url);
 
-    await expect(GET(mockReq, { params: { dataType: 'attributes', slugs: ['schema', '1', '1'] } }))
-      .rejects
-      .toThrow('Database error');
+    const response = await GET(mockReq, { params: { dataType: 'attributes', slugs: ['schema', '1', '1'] } });
+
+    expect(response.status).toBe(HTTPResponses.PRECONDITION_VALIDATION_FAILURE);
   });
 
   it('should return 400 if slugs are missing', async () => {
-    const { req, res } = createMocks({
+    const { req } = createMocks({
       method: 'GET',
       url: 'http://localhost/api/cmprevalidation/attributes',
     });
 
     const mockReq = new NextRequest(req.url);
 
-    await expect(GET(mockReq, { params: { dataType: 'attributes', slugs: [] } }))
-      .rejects
-      .toThrow('incorrect slugs provided');
+    try {
+      await GET(mockReq, { params: { dataType: 'attributes', slugs: [] } });
+    } catch (e) {
+      expect((e as Error).message).toBe('incorrect slugs provided');
+    }
   });
 
   it('should return 400 if slugs are incorrect', async () => {
-    const { req, res } = createMocks({
+    const { req } = createMocks({
       method: 'GET',
       url: 'http://localhost/api/cmprevalidation/attributes/schema',
     });
 
     const mockReq = new NextRequest(req.url);
 
-    await expect(GET(mockReq, { params: { dataType: 'attributes', slugs: ['schema'] } }))
-      .rejects
-      .toThrow('incorrect slugs provided');
+    try {
+      await GET(mockReq, { params: { dataType: 'attributes', slugs: ['schema'] } });
+    } catch (e) {
+      expect((e as Error).message).toBe('incorrect slugs provided');
+    }
   });
 });
