@@ -27,3 +27,7 @@ Correspondingly, this references the next date range of measurement collection f
 
 ### Censuses must be closed before new censuses can be open
 ### Censuses must be open when making modifications
+
+Once you've picked all three, you should see the following:
+
+![[all picked.png]]
