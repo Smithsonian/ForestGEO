@@ -16,8 +16,6 @@
     "bswin": "npm run build ; npm run start",
     "bdwin": "npm run build ; npm run dev",
     "clean": "rm -rf .next node_modules build; npm install",
-    "cleanbuild": "rm -rf .next node_modules build; npm install; next build",
-    "post-update": "echo \"codesandbox preview only, need an update\" && yarn upgrade --latest",
     "test": "vitest run --pool=forks"
   },
   "dependencies": {
