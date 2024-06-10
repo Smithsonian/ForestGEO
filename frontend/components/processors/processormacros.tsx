@@ -6,8 +6,8 @@ import {processSpecies} from "@/components/processors/processspecies";
 import {NextRequest} from "next/server";
 import {processCensus} from "@/components/processors/processcensus";
 import {PoolMonitor} from "@/config/poolmonitor";
-import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
-import { GridValidRowModel } from '@mui/x-data-grid';
+import {AttributesResult} from '@/config/sqlrdsdefinitions/tables/attributerds';
+import {GridValidRowModel} from '@mui/x-data-grid';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
@@ -202,7 +202,7 @@ export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
 }
 
 export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
-  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
+  const {newRow: requestBody}: { newRow: GridValidRowModel } = await request.json();
   switch (parseType) {
     case 'POST':
     case 'PATCH': {
@@ -216,6 +216,7 @@ export async function parseAttributeRequestBody(request: NextRequest, parseType:
       throw new Error("Invalid parse type -- attributes");
   }
 }
+
 export function getCatalogSchema() {
   const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
   if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
@@ -249,8 +250,8 @@ export interface QueryConfig {
 }
 
 export function buildPaginatedQuery(config: QueryConfig): { query: string, params: any[] } {
-  const { schema, table, joins, conditionals, pagination, extraParams } = config;
-  const { page, pageSize } = pagination;
+  const {schema, table, joins, conditionals, pagination, extraParams} = config;
+  const {page, pageSize} = pagination;
   const startRow = page * pageSize;
   let queryParams = extraParams || [];
 
@@ -273,5 +274,5 @@ export function buildPaginatedQuery(config: QueryConfig): { query: string, param
   query += ` LIMIT ?, ?`;
   queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
 
-  return { query, params: queryParams };
+  return {query, params: queryParams};
 }

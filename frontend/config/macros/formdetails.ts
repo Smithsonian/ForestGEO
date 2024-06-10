@@ -27,7 +27,7 @@ export function getTableHeaders(formType: string, usesSubquadrats: boolean): { l
   if (formType === "measurements") {
     return TableHeadersByFormType["measurements"].map(header => {
       if (header.label === "subquadrat") {
-        return { label: usesSubquadrats ? "subquadrat" : "quadrat" };
+        return {label: usesSubquadrats ? "subquadrat" : "quadrat"};
       }
       return header;
     });

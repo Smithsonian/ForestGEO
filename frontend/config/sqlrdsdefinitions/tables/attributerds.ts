@@ -1,6 +1,6 @@
 import {GridColDef} from '@mui/x-data-grid';
-import { IDataMapper } from "../../datamapper";
-import { FileRow, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import {IDataMapper} from "../../datamapper";
+import {FileRow, RowValidationErrors, ValidationFunction} from '@/config/macros/formdetails';
 
 // attributes table column character limits
 const ATTRIBUTES_CODE_LIMIT = 10;

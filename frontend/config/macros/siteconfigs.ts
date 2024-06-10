@@ -13,7 +13,7 @@ import SchemaIcon from '@mui/icons-material/Schema';
 import PlaceIcon from '@mui/icons-material/Place';
 import FilterIcon from '@mui/icons-material/Filter';
 import React from "react";
-import { UnifiedValidityFlags } from '../macros';
+import {UnifiedValidityFlags} from '../macros';
 
 export type SiteConfigProps = {
   label: string;

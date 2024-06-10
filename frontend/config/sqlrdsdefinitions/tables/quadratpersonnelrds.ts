@@ -1,5 +1,5 @@
-import { IDataMapper } from "@/config/datamapper";
-import { GridColDef } from "@mui/x-data-grid";
+import {IDataMapper} from "@/config/datamapper";
+import {GridColDef} from "@mui/x-data-grid";
 
 export interface QuadratPersonnelRDS {
   id?: number;

@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { POST } from '@/app/api/filehandlers/storageload/route';
-import { HTTPResponses } from '@/config/macros';
-import { getContainerClient, uploadValidFileAsBuffer } from '@/config/macros/azurestorage';
-import { createMocks } from 'node-mocks-http';
-import { NextRequest } from 'next/server';
+import {describe, it, expect, vi, beforeEach} from 'vitest';
+import {POST} from '@/app/api/filehandlers/storageload/route';
+import {HTTPResponses} from '@/config/macros';
+import {getContainerClient, uploadValidFileAsBuffer} from '@/config/macros/azurestorage';
+import {createMocks} from 'node-mocks-http';
+import {NextRequest} from 'next/server';
 
 vi.mock('@/config/macros/azurestorage', () => ({
   getContainerClient: vi.fn(),
@@ -16,7 +16,7 @@ describe('POST /api/filehandlers/storageload', () => {
   });
 
   const createMockRequest = (url: string, formData: FormData) => {
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'POST',
       url: url,
       headers: {
@@ -24,9 +24,9 @@ describe('POST /api/filehandlers/storageload', () => {
       }
     });
 
-    if (formData.get('file') === null){ 
+    if (formData.get('file') === null) {
       console.log('createMockRequest: received empty formData: ', formData);
-      return new NextRequest(req.url!, { method: 'POST' });
+      return new NextRequest(req.url!, {method: 'POST'});
     }
     req.formData = async () => formData;
 
@@ -37,7 +37,7 @@ describe('POST /api/filehandlers/storageload', () => {
 
     const body = `------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name="file"; filename="testfile.txt"\r\nContent-Type: text/plain\r\n\r\ntest content\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW--`;
 
-    return new NextRequest(req.url!, { method: 'POST', headers, body });
+    return new NextRequest(req.url!, {method: 'POST', headers, body});
   };
 
   it('should return 500 if container client creation fails', async () => {
@@ -72,7 +72,7 @@ describe('POST /api/filehandlers/storageload', () => {
   });
 
   it('should return 200 if file upload is successful', async () => {
-    const mockUploadResponse = { requestId: '12345', _response: { status: 200 } };
+    const mockUploadResponse = {requestId: '12345', _response: {status: 200}};
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue({});
     (uploadValidFileAsBuffer as ReturnType<typeof vi.fn>).mockResolvedValue(mockUploadResponse);
 

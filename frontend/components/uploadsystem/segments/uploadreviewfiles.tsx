@@ -10,16 +10,20 @@ import {
   Grid,
   Pagination
 } from "@mui/material";
-import { Box, Checkbox, Modal, ModalDialog, Stack, Typography } from "@mui/joy";
-import { DisplayParsedDataGridInline } from "@/components/uploadsystemhelpers/displayparseddatagrid";
+import {Box, Checkbox, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
+import {DisplayParsedDataGridInline} from "@/components/uploadsystemhelpers/displayparseddatagrid";
 import Divider from "@mui/joy/Divider";
-import React, { useState, useEffect } from "react";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadReviewFilesProps } from "@/config/macros/uploadsystemmacros";
-import { FileCollectionRowSet, RequiredTableHeadersByFormType, TableHeadersByFormType } from "@/config/macros/formdetails";
-import { FileWithPath } from "react-dropzone";
-import { DropzoneLogic } from "@/components/uploadsystemhelpers/dropzone";
-import { FileList } from "@/components/uploadsystemhelpers/filelist";
+import React, {useState, useEffect} from "react";
+import {ReviewStates} from "@/config/macros/uploadsystemmacros";
+import {UploadReviewFilesProps} from "@/config/macros/uploadsystemmacros";
+import {
+  FileCollectionRowSet,
+  RequiredTableHeadersByFormType,
+  TableHeadersByFormType
+} from "@/config/macros/formdetails";
+import {FileWithPath} from "react-dropzone";
+import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
+import {FileList} from "@/components/uploadsystemhelpers/filelist";
 import CircularProgress from "@mui/joy/CircularProgress";
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
@@ -80,7 +84,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   };
 
   const handleApproveClick = async () => {
-    const { isValid, missingHeaders } = areHeadersValid(currentFileHeaders);
+    const {isValid, missingHeaders} = areHeadersValid(currentFileHeaders);
     setMissingHeaders(missingHeaders);
 
     if (!isValid) {
@@ -129,7 +133,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     return requiredHeadersTrimmed.map((header) => {
       const isChecked = currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase());
       return (
-        <Box key={header} sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
+        <Box key={header} sx={{display: 'flex', flex: 1, alignItems: 'center'}}>
           <Checkbox
             size={"lg"}
             disabled
@@ -137,7 +141,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
             label={header}
             color={isChecked ? "success" : "danger"}
           />
-          <Divider orientation={"vertical"} sx={{ marginX: 2 }} />
+          <Divider orientation={"vertical"} sx={{marginX: 2}}/>
         </Box>
       );
     });
@@ -147,44 +151,47 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     if (currentFileHeaders.length === 0) {
       return false;
     }
-    const { isValid } = areHeadersValid(currentFileHeaders);
+    const {isValid} = areHeadersValid(currentFileHeaders);
     return isValid || missingHeaders.length > 0;
   };
 
   return (
     <>
-      <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+      <Box sx={{display: 'flex', flex: 1, flexDirection: 'column'}}>
         {reuploadInProgress ? (
-          <CircularProgress />
+          <CircularProgress/>
         ) : (
           <>
-            <Button variant="contained" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)} sx={{ mb: 2, width: 'fit-content' }}>
+            <Button variant="contained" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)}
+                    sx={{mb: 2, width: 'fit-content'}}>
               Back
             </Button>
             <Grid container spacing={2}>
-              <Grid item xs={4} />
+              <Grid item xs={4}/>
               <Grid item xs={4}>
-                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center' }}>
-                  <Button variant="contained" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)} sx={{ width: 'fit-content' }}>
+                <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+                  <Button variant="contained" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)}
+                          sx={{width: 'fit-content'}}>
                     Remove Current File
                   </Button>
-                  <Box sx={{ display: 'flex', flexDirection: 'row', mb: 2 }}>
-                    <Divider orientation={"vertical"} sx={{ marginX: 2 }} />
+                  <Box sx={{display: 'flex', flexDirection: 'row', mb: 2}}>
+                    <Divider orientation={"vertical"} sx={{marginX: 2}}/>
                     {currentFileHeaders.length > 0 ? (
                       renderHeaderCheckboxes()
                     ) : (
                       <Typography>No file selected or file has no headers.</Typography>
                     )}
                   </Box>
-                  <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
+                  <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive}
+                            setDataViewActive={setDataViewActive}/>
                 </Box>
               </Grid>
-              <Grid item xs={4} />
+              <Grid item xs={4}/>
               <Grid item xs={12}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', mr: 10 }}>
+                <Box sx={{display: 'flex', flexDirection: 'column', mr: 10}}>
                   {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && currentFileHeaders.length > 0 ? (
                     <>
-                      <Typography level={"title-md"} color={"primary"} sx={{ marginBottom: 1 }}>
+                      <Typography level={"title-md"} color={"primary"} sx={{marginBottom: 1}}>
                         Form: {uploadForm}
                       </Typography>
                       <Typography level={"title-sm"}>
@@ -203,26 +210,30 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     </>
                   ) : (
                     <Typography level="body-lg" bgcolor="error">
-                      The selected file is missing required headers or the headers cannot be read. Please check the file and re-upload.<br />
-                      Your file&apos;s headers were: {currentFileHeaders.join(', ')}<br />
+                      The selected file is missing required headers or the headers cannot be read. Please check the file
+                      and re-upload.<br/>
+                      Your file&apos;s headers were: {currentFileHeaders.join(', ')}<br/>
                       The expected headers were {expectedHeaders.join(', ')}
                     </Typography>
                   )}
                 </Box>
-                <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={(_, page) => setDataViewActive(page)} />
-                <Button onClick={() => setIsReuploadDialogOpen(true)} variant={"outlined"} color="primary" sx={{ marginTop: 2 }}>
+                <Pagination count={acceptedFiles.length} page={dataViewActive}
+                            onChange={(_, page) => setDataViewActive(page)}/>
+                <Button onClick={() => setIsReuploadDialogOpen(true)} variant={"outlined"} color="primary"
+                        sx={{marginTop: 2}}>
                   Re-upload Corrected File
                 </Button>
               </Grid>
-              <Grid item xs={4} />
+              <Grid item xs={4}/>
               <Grid item xs={4}>
-                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center' }}>
-                  <Button variant={"contained"} disabled={!isFileUploadAllowed() || requireReupload} onClick={handleApproveClick} sx={{ width: 'fit-content' }}>
+                <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
+                  <Button variant={"contained"} disabled={!isFileUploadAllowed() || requireReupload}
+                          onClick={handleApproveClick} sx={{width: 'fit-content'}}>
                     Confirm Changes
                   </Button>
                 </Box>
               </Grid>
-              <Grid item xs={4} />
+              <Grid item xs={4}/>
               <Modal open={isReuploadDialogOpen || requireReupload} onClose={() => setIsReuploadDialogOpen(false)}>
                 <Box>
                   <DialogTitle>{requireReupload ? "Headers Missing or Corrupted" : "Re-upload Corrected File"}</DialogTitle>
@@ -232,22 +243,25 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                         ? "The selected file is missing required headers or the headers cannot be read. Please upload a corrected version of the file."
                         : `Please upload the corrected version of the file: ${currentFileName}`}
                     </DialogContentText>
-                    <DropzoneLogic onChange={handleReUploadFileChange} />
+                    <DropzoneLogic onChange={handleReUploadFileChange}/>
                   </DialogContent>
                   <DialogActions>
                     {!requireReupload && <Button onClick={() => setIsReuploadDialogOpen(false)}>Close</Button>}
                   </DialogActions>
                 </Box>
               </Modal>
-              <Dialog open={confirmationDialogOpen} onClose={handleCancel} aria-labelledby="alert-dialog-title" aria-describedby="alert-dialog-description">
+              <Dialog open={confirmationDialogOpen} onClose={handleCancel} aria-labelledby="alert-dialog-title"
+                      aria-describedby="alert-dialog-description">
                 <DialogTitle id="alert-dialog-title">{"Do your files look correct?"}</DialogTitle>
                 <DialogContent>
                   <DialogContentText id="alert-dialog-description">
                     {missingHeaders.length > 0 ? (
                       <>
-                        The following required headers are missing: {missingHeaders.join(', ')}.<br />
-                        You can still proceed with the upload, but consider re-uploading the files with the required headers.<br />
-                        If you would like to re-upload a corrected file, you can do so by clicking &quot;Re-upload Corrected File&quot;.
+                        The following required headers are missing: {missingHeaders.join(', ')}.<br/>
+                        You can still proceed with the upload, but consider re-uploading the files with the required
+                        headers.<br/>
+                        If you would like to re-upload a corrected file, you can do so by clicking &quot;Re-upload
+                        Corrected File&quot;.
                       </>
                     ) : (
                       "Please press Confirm to upload your files to storage."

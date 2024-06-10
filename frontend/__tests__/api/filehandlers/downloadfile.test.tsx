@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GET } from '@/app/api/filehandlers/downloadfile/route';
-import { getContainerClient } from '@/config/macros/azurestorage';
-import { createMocks } from 'node-mocks-http';
-import { NextRequest } from 'next/server';
+import {describe, it, expect, vi, beforeEach} from 'vitest';
+import {GET} from '@/app/api/filehandlers/downloadfile/route';
+import {getContainerClient} from '@/config/macros/azurestorage';
+import {createMocks} from 'node-mocks-http';
+import {NextRequest} from 'next/server';
 import {
   BlobServiceClient,
   BlobSASPermissions,
@@ -31,7 +31,7 @@ describe('GET /api/filehandlers/downloadfile', () => {
   });
 
   it('should return 400 if container name, filename, or storage connection string is missing', async () => {
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadfile'
     });
@@ -48,7 +48,7 @@ describe('GET /api/filehandlers/downloadfile', () => {
     process.env.AZURE_STORAGE_CONNECTION_STRING = 'test-connection-string';
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadfile?container=testContainer&filename=testFile'
     });
@@ -80,7 +80,7 @@ describe('GET /api/filehandlers/downloadfile', () => {
       toString: () => 'sastoken'
     });
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadfile?container=testContainer&filename=testFile'
     });
@@ -98,7 +98,7 @@ describe('GET /api/filehandlers/downloadfile', () => {
 
     (getContainerClient as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Test error'));
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadfile?container=testContainer&filename=testFile'
     });

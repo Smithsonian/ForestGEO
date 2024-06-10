@@ -1,4 +1,4 @@
-import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
+import {Pool, PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
 
 export class PoolMonitor {
   private pool: Pool;

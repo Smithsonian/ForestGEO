@@ -3,7 +3,7 @@ import React, {useEffect, useState} from "react";
 import {Box, Typography} from "@mui/material";
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadUpdateValidationsProps} from "@/config/macros/uploadsystemmacros";
-import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const {

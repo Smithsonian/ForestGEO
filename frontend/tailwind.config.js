@@ -24,26 +24,26 @@ module.exports = {
       },
       keyframes: {
         shake: {
-          '0%, 100%': { transform: 'translateX(0)' },
-          '20%, 60%': { transform: 'translateX(-10px)' },
-          '40%, 80%': { transform: 'translateX(10px)' },
+          '0%, 100%': {transform: 'translateX(0)'},
+          '20%, 60%': {transform: 'translateX(-10px)'},
+          '40%, 80%': {transform: 'translateX(10px)'},
         },
         pulse: {
-          '0%': { transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(0, 128, 0, 0.7)' },
-          '70%': { transform: 'scale(1.05)', boxShadow: '0 0 0 10px rgba(0, 128, 0, 0)' },
-          '100%': { transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(0, 128, 0, 0)' },
+          '0%': {transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(0, 128, 0, 0.7)'},
+          '70%': {transform: 'scale(1.05)', boxShadow: '0 0 0 10px rgba(0, 128, 0, 0)'},
+          '100%': {transform: 'scale(1)', boxShadow: '0 0 0 0 rgba(0, 128, 0, 0)'},
         },
         rainbowColor: {
-          '0%': { color: 'red' },
-          '20%': { color: 'orange' },
-          '40%': { color: 'yellow' },
-          '60%': { color: 'green' },
-          '80%': { color: 'blue' },
-          '100%': { color: 'purple' },
+          '0%': {color: 'red'},
+          '20%': {color: 'orange'},
+          '40%': {color: 'yellow'},
+          '60%': {color: 'green'},
+          '80%': {color: 'blue'},
+          '100%': {color: 'purple'},
         },
         rotate: {
-          '0%': { transform: 'rotate(0deg)' },
-          '100%': { transform: 'rotate(360deg)' },
+          '0%': {transform: 'rotate(0deg)'},
+          '100%': {transform: 'rotate(360deg)'},
         },
       },
       animation: {
@@ -70,7 +70,7 @@ module.exports = {
   darkMode: "class",
   variants: {},
   plugins: [
-    plugin(function ({ addUtilities }) {
+    plugin(function ({addUtilities}) {
       addUtilities({
         '.fullWidthAutoComplete': {
           width: '100%',

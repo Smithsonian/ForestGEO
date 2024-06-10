@@ -1,6 +1,6 @@
 import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
 import {IDataMapper, parseDate} from "../../datamapper";
-import {bitToBoolean} from "@/config/macros";
+import {bitToBoolean, ColumnStates} from "@/config/macros";
 
 export type AllTaxonomiesViewRDS = {
   id?: number;
@@ -104,6 +104,14 @@ export class AllTaxonomiesViewMapper implements IDataMapper<AllTaxonomiesViewRes
   }
 }
 
+export function getAllTaxonomiesViewHCs(): ColumnStates {
+  return {
+    familyID: false,
+    genusID: false,
+    referenceID: false,
+  };
+}
+
 export const AllTaxonomiesViewGridColumns: GridColDef[] = [
   {
     field: 'speciesID',
@@ -116,11 +124,20 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
   },
   {
     field: 'speciesCode',
-    headerName: 'SpCode',
+    headerName: 'Species Code',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
     type: 'string',
+    editable: true
+  },
+  {
+    field: 'familyID',
+    headerName: 'Family ID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
     editable: true
   },
   {
@@ -133,8 +150,26 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
     editable: true
   },
   {
+    field: 'genusID',
+    headerName: 'Genus ID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
     field: 'genus',
     headerName: 'Genus',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusAuthority',
+    headerName: 'Genus Auth',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -160,8 +195,8 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'genusAuthority',
-    headerName: 'Genus Auth',
+    field: 'speciesIDLevel',
+    headerName: 'Species ID Level',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -175,6 +210,60 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesAuthority',
+    headerName: 'Subspecies Auth',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'currentTaxonFlag',
+    headerName: 'Current Taxon Flag',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'boolean',
+    editable: true
+  },
+  {
+    field: 'obsoleteTaxonFlag',
+    headerName: 'Obsolete Taxon Flag',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'boolean',
+    editable: true
+  },
+  {
+    field: 'fieldFamily',
+    headerName: 'Field Family',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesDescription',
+    headerName: 'Species Description',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'referenceID',
+    headerName: 'Reference ID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
     editable: true
   },
   {
@@ -205,4 +294,3 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
     editable: true
   },
 ];
-

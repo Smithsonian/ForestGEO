@@ -1,9 +1,9 @@
 'use client';
-import React, { useEffect, useState } from "react";
-import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
-import { Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses } from "@mui/material";
+import React, {useEffect, useState} from "react";
+import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import { MeasurementsSummaryGridColumns } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
   IconButton,
@@ -21,8 +21,8 @@ import {
   Stack,
   Switch,
 } from "@mui/joy";
-import Select, { SelectOption } from "@mui/joy/Select";
-import { useSession } from "next-auth/react";
+import Select, {SelectOption} from "@mui/joy/Select";
+import {useSession} from "next-auth/react";
 import {
   useOrgCensusContext,
   usePlotContext,
@@ -30,18 +30,18 @@ import {
   useQuadratDispatch,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import { randomId } from "@mui/x-data-grid-generator";
+import {randomId} from "@mui/x-data-grid-generator";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
+import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
 import Option from '@mui/joy/Option';
 import MeasurementSummaryGrid from "@/components/datagrids/msvdatagrid";
-import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
-import { UnifiedValidityFlags } from "@/config/macros";
+import {useDataValidityContext} from "@/app/contexts/datavalidityprovider";
+import {UnifiedValidityFlags} from "@/config/macros";
 
-const LargeTooltip = styled(({ className, ...props }: TooltipProps) => (
-  <Tooltip {...props} classes={{ popper: className }} />
-))(({ theme }) => ({
+const LargeTooltip = styled(({className, ...props}: TooltipProps) => (
+  <Tooltip {...props} classes={{popper: className}}/>
+))(({theme}) => ({
   [`& .${tooltipClasses.tooltip}`]: {
     fontSize: 16,
     maxWidth: 600, // Increase maxWidth to give more space for text
@@ -55,7 +55,7 @@ interface ChecklistProgress {
 }
 
 export default function SummaryPage() {
-  const { data: session } = useSession();
+  const {data: session} = useSession();
   const [quadrat, setQuadrat] = useState<Quadrat>();
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
   let currentPlot = usePlotContext();
@@ -64,7 +64,7 @@ export default function SummaryPage() {
   let quadratListContext = useQuadratListContext();
   let currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
-  const { validity, recheckValidityIfNeeded } = useDataValidityContext();
+  const {validity, recheckValidityIfNeeded} = useDataValidityContext();
   const [progressDialogOpen, setProgressDialogOpen] = useState(false);
   const [isUploadAllowed, setIsUploadAllowed] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -81,7 +81,7 @@ export default function SummaryPage() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      coreMeasurementID: 0,
+      coreMeasurementID: null,
       plotID: null,
       plotName: null,
       censusID: null,
@@ -127,7 +127,7 @@ export default function SummaryPage() {
 
   useEffect(() => {
     const verifyPreconditions = async () => {
-      setIsUploadAllowed(!Object.values(validity).includes(false));
+      setIsUploadAllowed(!Object.entries(validity).filter(item => item[0] !== 'subquadrats').map(item => item[1]).includes(false));
     };
 
     if (progressDialogOpen) {
@@ -171,7 +171,7 @@ export default function SummaryPage() {
       isNew: true,
     };
     setRows(oldRows => [...oldRows, newRow]);
-    setRowModesModel(oldModel => ({ ...oldModel, [id]: { mode: GridRowModes.Edit } }));
+    setRowModesModel(oldModel => ({...oldModel, [id]: {mode: GridRowModes.Edit}}));
   };
 
   const handleCloseGlobalError = () => {
@@ -191,18 +191,18 @@ export default function SummaryPage() {
     }
   };
 
-  const checklistItems: (keyof UnifiedValidityFlags)[] = ['attributes', 'species', 'personnel', 'quadrats', 'subquadrats'];
+  const checklistItems: (keyof UnifiedValidityFlags)[] = ['attributes', 'species', 'personnel', 'quadrats'];
 
   const ProgressDialog = () => (
     <Modal
       open={progressDialogOpen}
       onClose={() => {
       }}
-      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}
     >
       <ModalDialog
         size="lg"
-        sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
+        sx={{width: '100%', maxHeight: '100vh', overflow: 'auto'}}
         role="alertdialog"
       >
         <DialogTitle>Pre-Validation Systems Check</DialogTitle>
@@ -230,17 +230,17 @@ export default function SummaryPage() {
                 : progressData.message;
 
               return (
-                <ListItem sx={{ alignItems: 'center', display: 'flex', flexDirection: 'row' }} key={item}>
-                  <ListItemContent sx={{ minWidth: '160px', mr: 2, my: 'auto' }}>
+                <ListItem sx={{alignItems: 'center', display: 'flex', flexDirection: 'row'}} key={item}>
+                  <ListItemContent sx={{minWidth: '160px', mr: 2, my: 'auto'}}>
                     <Typography level={'body-md'}>{progressData.message}</Typography>
                   </ListItemContent>
                   <LargeTooltip title={tooltipMessage} placement="top" arrow>
-                    <Box sx={{ width: '100%', maxWidth: 'calc(100% - 180px)', my: 'auto' }}>
+                    <Box sx={{width: '100%', maxWidth: 'calc(100% - 180px)', my: 'auto'}}>
                       <LinearProgress
                         variant="determinate"
                         value={progressData.progress}
                         color={isValid ? 'primary' : 'error'}
-                        sx={{ width: '100%', height: 8 }}
+                        sx={{width: '100%', height: 8}}
                       />
                     </Box>
                   </LargeTooltip>
@@ -287,7 +287,7 @@ export default function SummaryPage() {
   const handleQuadratSelection = async (selectedQuadrat: Quadrat | undefined) => {
     setQuadrat(selectedQuadrat);
     if (quadratDispatch) {
-      await quadratDispatch({ quadrat: selectedQuadrat });
+      await quadratDispatch({quadrat: selectedQuadrat});
     }
   };
 
@@ -314,7 +314,7 @@ export default function SummaryPage() {
         <Option value="">None</Option>
         {quadratList?.map((item) => (
           <Option value={item?.quadratName} key={item?.quadratName}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
               <Typography level="body-lg">{item?.quadratName}</Typography>
             </Box>
           </Option>
@@ -327,7 +327,7 @@ export default function SummaryPage() {
         disabled={!currentPlot?.usesSubquadrats}
       >Confirm</Button>
       {!validity['quadrats'] && (
-        <Alert severity="warning" sx={{ mt: 2 }}>
+        <Alert severity="warning" sx={{mt: 2}}>
           <Typography level="body-lg" color="warning">No quadrats exist to be selected.</Typography>
         </Alert>
       )}
@@ -342,7 +342,7 @@ export default function SummaryPage() {
       };
       const response = await fetch(`/api/fixeddata/plots?schema=${currentSite?.schemaName ?? ''}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(updatedPlot)
       });
       if (!response.ok) setGlobalError('Toggling subquadrats usage failed!');
@@ -360,30 +360,34 @@ export default function SummaryPage() {
           <Alert onClose={handleCloseGlobalError} severity="error">{globalError}</Alert>
         </Snackbar>
       )}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <ProgressDialog />
+      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+        <ProgressDialog/>
         <Box sx={{
           width: '100%', display: 'flex', justifyContent: 'space-between',
           alignItems: 'center', backgroundColor: 'warning.main', borderRadius: '4px', p: 2
         }}>
           <Stack direction="column">
-            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
-              <Box sx={{ flex: 1, display: 'flex', justifyContent: 'left', flexDirection: 'column', marginTop: 2 }}>
+            <Box sx={{display: 'flex', flexDirection: 'column', flexGrow: 1}}>
+              <Box sx={{flex: 1, display: 'flex', justifyContent: 'left', flexDirection: 'column', marginTop: 2}}>
                 {currentPlot?.usesSubquadrats ? (
                   <Box sx={{display: 'flex', flexDirection: 'row'}}>
-                    <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot has been set to accept subquadrats. <br />
+                    <Typography level={"title-md"} sx={{color: "#ffa726"}}>Note: This plot has been set to accept
+                      subquadrats. <br/>
                       Please ensure you select a quadrat before proceeding.</Typography>
-                    <QuadratSelectionMenu />
+                    <QuadratSelectionMenu/>
                   </Box>
                 ) : (
-                  <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot does not accept subquadrats. <br />
-                    Please ensure that you use quadrat names when submitting new measurements instead of subquadrat names</Typography>
+                  <Typography level={"title-md"} sx={{color: "#ffa726"}}>Note: This plot does not accept
+                    subquadrats. <br/>
+                    Please ensure that you use quadrat names when submitting new measurements instead of subquadrat
+                    names</Typography>
                 )}
                 {session?.user.isAdmin ? (
                   <Stack direction="column">
-                    <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>Note: ADMINISTRATOR VIEW</Typography>
+                    <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
                     <Stack direction="row" spacing={4}>
-                      <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Please use the toggle to change this setting if it is incorrect</Typography>
+                      <Typography level={"title-md"} sx={{color: "#ffa726"}}>Please use the toggle to change this
+                        setting if it is incorrect</Typography>
                       <Switch
                         checked={useSubquadrats}
                         onChange={(event) => setUseSubquadrats(event.target.checked)}
@@ -400,14 +404,15 @@ export default function SummaryPage() {
                       />
                     </Stack>
                   </Stack>
-                  
+
                 ) : (
-                  <Typography level={"title-md"} sx={{ color: "#ffa726" }}>If this setting is inaccurate, please contact an administrator.</Typography>
+                  <Typography level={"title-md"} sx={{color: "#ffa726"}}>If this setting is inaccurate, please contact
+                    an administrator.</Typography>
                 )}
               </Box>
             </Box>
           </Stack>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
             <Button onClick={() => setProgressDialogOpen(true)} variant="solid" color="primary">Upload</Button>
           </Box>
         </Box>

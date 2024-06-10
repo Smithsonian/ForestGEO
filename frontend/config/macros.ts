@@ -5,7 +5,11 @@
  */
 import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css';
-import { GridColDef, GridValidRowModel } from "@mui/x-data-grid";
+import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+
+export type ColumnStates = {
+  [key: string]: boolean;
+}
 
 
 export type ValidationErrorID = number;

@@ -1,5 +1,5 @@
 "use client";
-import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import React, {Dispatch, SetStateAction, useEffect, useMemo, useState} from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -37,8 +37,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
-import { Stack, Tooltip, Typography } from "@mui/joy";
-import { StyledDataGrid } from "@/config/styleddatagrid";
+import {Stack, Tooltip, Typography} from "@mui/joy";
+import {StyledDataGrid} from "@/config/styleddatagrid";
 import {
   computeMutation,
   createDeleteQuery,
@@ -46,19 +46,19 @@ import {
   createPostPatchQuery,
   getGridID,
 } from "@/config/datagridhelpers";
-import { CMError } from "@/config/macros/uploadsystemmacros";
+import {CMError} from "@/config/macros/uploadsystemmacros";
 import {
   useOrgCensusContext,
   usePlotContext,
   useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import { saveAs } from 'file-saver';
-import { redirect } from 'next/navigation';
-import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
+import {saveAs} from 'file-saver';
+import {redirect} from 'next/navigation';
+import {CoreMeasurementsRDS} from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 import moment from 'moment';
-import { CellItemContainer } from './datagridcommons';
-import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import {CellItemContainer} from './datagridcommons';
+import {useLockAnimation} from '@/app/contexts/lockanimationcontext';
 
 const errorMapping: { [key: string]: string[] } = {
   '1': ["attributes"],
@@ -88,17 +88,17 @@ interface EditToolbarCustomProps {
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
 export function EditToolbar(props: EditToolbarProps) {
-  const { handleAddNewRow, handleRefresh, locked = false } = props;
+  const {handleAddNewRow, handleRefresh, locked = false} = props;
 
   return (
     <GridToolbarContainer>
-      <GridToolbar />
+      <GridToolbar/>
       {!locked && (
-        <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
+        <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
           Add Row
         </Button>
       )}
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
+      <Button color="primary" startIcon={<RefreshIcon/>} onClick={handleRefresh}>
         Refresh
       </Button>
     </GridToolbarContainer>
@@ -198,10 +198,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
 
-  const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
+  const [pendingAction, setPendingAction] = useState<PendingAction>({actionType: '', actionId: null});
 
   const currentSite = useSiteContext();
-  const { triggerPulse } = useLockAnimation();
+  const {triggerPulse} = useLockAnimation();
 
   const handleShowDeprecatedRowsChange = (event: any) => {
     setShowDeprecatedRows(event.target.checked);
@@ -254,7 +254,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       csvContent += `${rowValues},"${errorDescriptions}"\r\n`;
     });
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([csvContent], {type: "text/csv;charset=utf-8;"});
     saveAs(blob, `validation_errors_${currentPlot?.plotName}.csv`);
   };
 
@@ -306,7 +306,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     actionType: 'save' | 'delete',
     actionId: GridRowId
   ) => {
-    setPendingAction({ actionType, actionId });
+    setPendingAction({actionType, actionId});
     setIsDialogOpen(true);
   };
 
@@ -323,12 +323,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     ) {
       await performDeleteAction(pendingAction.actionId);
     }
-    setPendingAction({ actionType: '', actionId: null });
+    setPendingAction({actionType: '', actionId: null});
   };
 
   const handleCancelAction = () => {
     setIsDialogOpen(false);
-    setPendingAction({ actionType: '', actionId: null });
+    setPendingAction({actionType: '', actionId: null});
   };
 
   const performSaveAction = async (id: GridRowId) => {
@@ -336,7 +336,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     console.log('save confirmed');
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.View }
+      [id]: {mode: GridRowModes.View}
     }));
     const row = rows.find(row => row.id === id);
     if (row?.isNew) {
@@ -362,13 +362,13 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ oldRow: undefined, newRow: rows.find(row => row.id === id)! })
+      body: JSON.stringify({oldRow: undefined, newRow: rows.find(row => row.id === id)!})
     });
     if (!response.ok)
-      setSnackbar({ children: 'Error: Deletion failed', severity: 'error' });
+      setSnackbar({children: 'Error: Deletion failed', severity: 'error'});
     else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
-      setSnackbar({ children: 'Row successfully deleted', severity: 'success' });
+      setSnackbar({children: 'Row successfully deleted', severity: 'success'});
       setRows(rows.filter(row => row.id !== id));
       await fetchPaginatedData(paginationModel.page);
     }
@@ -413,10 +413,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setNewLastPage(calculatedNewLastPage);
 
     if (isNewPageNeeded) {
-      await setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
+      await setPaginationModel({...paginationModel, page: calculatedNewLastPage});
       addNewRowToGrid();
     } else {
-      setPaginationModel({ ...paginationModel, page: existingLastPage });
+      setPaginationModel({...paginationModel, page: existingLastPage});
       addNewRowToGrid();
     }
   };
@@ -438,7 +438,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       currentQuadrat?.quadratID
     );
     try {
-      const response = await fetch(paginatedQuery, { method: 'GET' });
+      const response = await fetch(paginatedQuery, {method: 'GET'});
       const data = await response.json();
       console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
@@ -454,7 +454,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      setSnackbar({ children: 'Error fetching data', severity: 'error' });
+      setSnackbar({children: 'Error fetching data', severity: 'error'});
     } finally {
       setRefresh(false);
     }
@@ -508,25 +508,25 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
         if (oldRow.isNew) {
           response = await fetch(fetchProcessQuery, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({oldRow: oldRow, newRow: newRow})
           });
           responseJSON = await response.json();
           if (response.status > 299 || response.status < 200)
             throw new Error(responseJSON.message || 'Insertion failed');
-          setSnackbar({ children: `New row added!`, severity: 'success' });
+          setSnackbar({children: `New row added!`, severity: 'success'});
         } else {
           const mutation = computeMutation('measurementssummaryview', newRow, oldRow);
           if (mutation) {
             response = await fetch(fetchProcessQuery, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({oldRow: oldRow, newRow: newRow})
             });
             responseJSON = await response.json();
             if (response.status > 299 || response.status < 200)
               throw new Error(responseJSON.message || 'Update failed');
-            setSnackbar({ children: `Row updated!`, severity: 'success' });
+            setSnackbar({children: `Row updated!`, severity: 'success'});
           }
         }
         // if (['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes('measurementssummaryview')) triggerRefresh(['measurementssummaryview' as keyof RefreshFixedDataFlags]);
@@ -538,7 +538,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
         return newRow;
       } catch (error: any) {
-        setSnackbar({ children: error.message, severity: 'error' });
+        setSnackbar({children: error.message, severity: 'error'});
         throw error;
       }
     },
@@ -571,7 +571,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (row && handleSelectQuadrat) {
       handleSelectQuadrat(row.quadratID);
     }
-    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
+    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
   };
 
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
@@ -586,12 +586,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
         const newPage =
           paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
-        setPaginationModel({ ...paginationModel, page: newPage });
+        setPaginationModel({...paginationModel, page: newPage});
       }
     } else {
       setRowModesModel(oldModel => ({
         ...oldModel,
-        [id]: { mode: GridRowModes.View, ignoreModifications: true }
+        [id]: {mode: GridRowModes.View, ignoreModifications: true}
       }));
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
@@ -617,7 +617,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
               }
             }}
           >
-            <GridActionsCellItem icon={icon} label={type} />
+            <GridActionsCellItem icon={icon} label={type}/>
           </span>
         </Tooltip>
       </CellItemContainer>
@@ -631,19 +631,19 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       headerName: 'Actions',
       width: 100,
       cellClassName: 'actions',
-      getActions: ({ id }) => {
+      getActions: ({id}) => {
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
 
         if (isInEditMode) {
           return [
-            getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
-            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e)),
+            getEnhancedCellAction('Save', <SaveIcon/>, handleSaveClick(id)),
+            getEnhancedCellAction('Cancel', <CancelIcon/>, (e: any) => handleCancelClick(id, e)),
           ];
         }
 
         return [
-          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)),
-          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id)),
+          getEnhancedCellAction('Edit', <EditIcon/>, handleEditClick(id)),
+          getEnhancedCellAction('Delete', <DeleteIcon/>, handleDeleteClick(id)),
         ];
       },
     };
@@ -725,7 +725,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             {cellError ? (
               <>
                 <Typography
-                  sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}
+                  sx={{whiteSpace: 'normal', lineHeight: 'normal'}}
                 >
                   {cellValue}
                 </Typography>
@@ -744,7 +744,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
                 </Typography>
               </>
             ) : (
-              <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+              <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
                 {cellValue}
               </Typography>
             )}
@@ -842,7 +842,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
           }
         }}
       >
-        <Box sx={{ width: '100%', flexDirection: 'column' }}>
+        <Box sx={{width: '100%', flexDirection: 'column'}}>
           <Stack direction={'row'} justifyContent="space-between">
             <Stack direction='row'>
               <Typography>
@@ -881,7 +881,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             Note: The Grid is filtered by your selected Plot and Plot ID
           </Typography>
           <StyledDataGrid
-            sx={{ width: '100%' }}
+            sx={{width: '100%'}}
             rows={visibleRows}
             columns={filteredColumns}
             editMode='row'
@@ -896,6 +896,22 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             paginationModel={paginationModel}
             rowCount={rowCount}
             pageSizeOptions={[paginationModel.pageSize]}
+            initialState={{
+              columns: {
+                columnVisibilityModel: {
+                  plotID: false,
+                  plotName: false,
+                  censusID: false,
+                  quadratID: false,
+                  subquadratID: false,
+                  speciesID: false,
+                  treeID: false,
+                  stemID: false,
+                  personnelID: false,
+                  isValidated: false,
+                }
+              },
+            }}
             slots={{
               toolbar: EditToolbar
             }}
@@ -914,11 +930,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
         {!!snackbar && (
           <Snackbar
             open
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
             onClose={handleCloseSnackbar}
             autoHideDuration={6000}
           >
-            <Alert {...snackbar} onClose={handleCloseSnackbar} />
+            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
           </Snackbar>
         )}
         <ConfirmationDialog
@@ -938,7 +954,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
 // ConfirmationDialog component with TypeScript types
 const ConfirmationDialog: React.FC<ConfirmationDialogProps> = (props) => {
-  const { isOpen, onConfirm, onCancel, message } = props;
+  const {isOpen, onConfirm, onCancel, message} = props;
   return (
     <Dialog open={isOpen} onClose={onCancel}>
       <DialogTitle>Confirm Action</DialogTitle>

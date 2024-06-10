@@ -1,10 +1,10 @@
-import { booleanToBit } from '@/config/macros';
-import { runQuery, SpecialProcessingProps } from '@/components/processors/processormacros';
-import { getPersonnelIDByName } from './processorhelperfunctions';
+import {booleanToBit} from '@/config/macros';
+import {runQuery, SpecialProcessingProps} from '@/components/processors/processormacros';
+import {getPersonnelIDByName} from './processorhelperfunctions';
 import moment from 'moment';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
-  const { connection, rowData, schema, plotID, censusID, quadratID, fullName } = props;
+  const {connection, rowData, schema, plotID, censusID, quadratID, fullName} = props;
   if (!plotID || !censusID || !quadratID || !fullName) throw new Error("Process Census: Missing plotID, censusID, quadratID or full name");
 
   try {

@@ -10,7 +10,7 @@ import {UploadValidationProps} from "@/config/macros/uploadsystemmacros";
 import {ValidationResponse} from "@/components/processors/processormacros";
 import CircularProgress from "@mui/joy/CircularProgress";
 import {useLoading} from '@/app/contexts/loadingprovider';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import {useOrgCensusContext, usePlotContext} from '@/app/contexts/userselectionprovider';
 // Define the type for validation messages
 type ValidationMessages = {
   [key: string]: string;

@@ -1,12 +1,13 @@
-import { GridSelections } from '../macros';
-import { CensusMapper, CensusRDS, CensusResult } from './tables/censusrds';
-import { format } from "mysql2/promise";
+import {GridSelections} from '../macros';
+import {CensusMapper, CensusRDS, CensusResult} from './tables/censusrds';
+import {format} from "mysql2/promise";
 
 interface CensusDateRange {
   censusID: number;
   startDate: Date | undefined;
   endDate: Date | undefined
 }
+
 interface OrgCensusRDS {
   plotID: number;
   plotCensusNumber: number;
@@ -29,7 +30,7 @@ function collapseCensusDataToGridSelections(orgCensusList: OrgCensus[]): GridSel
       const dateRangeStr = `(${dateRange.startDate?.toISOString() || ''}-${dateRange.endDate?.toISOString() || ''})`;
       const label = `${orgCensus.plotCensusNumber}-${dateRange.censusID}-${dateRangeStr}`;
       const value = dateRange.censusID;
-      result.push({ label, value });
+      result.push({label, value});
     });
   });
 
@@ -85,14 +86,14 @@ class OrgCensusToCensusResultMapper {
           plotID: censusRDS.plotID!,
           plotCensusNumber,
           censusIDs: [censusID],
-          dateRanges: [{ censusID, startDate, endDate }],
+          dateRanges: [{censusID, startDate, endDate}],
           description
         };
         uniqueCensusMap.set(plotCensusNumber, existingCensus);
       } else {
         // Insert the new date range at the start
         existingCensus.censusIDs.unshift(censusID);
-        existingCensus.dateRanges.unshift({ censusID, startDate, endDate });
+        existingCensus.dateRanges.unshift({censusID, startDate, endDate});
 
         // Sort dateRanges by startDate in descending order
         existingCensus.dateRanges.sort((a, b) => {
@@ -151,7 +152,7 @@ class OrgCensusToCensusResultMapper {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ newRow: updatedCensusRDS })
+      body: JSON.stringify({newRow: updatedCensusRDS})
     });
     // need to trigger site reload
   }
@@ -178,9 +179,29 @@ class OrgCensusToCensusResultMapper {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ newRow: newCensusRDS })
+      body: JSON.stringify({newRow: newCensusRDS})
     });
     // trigger reload 
+  }
+
+  async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, startDate: Date, description?: string): Promise<void> {
+    const newCensusRDS: CensusRDS = {
+      censusID: 0, // This will be replaced with the actual ID after the POST request
+      plotID,
+      plotCensusNumber,
+      startDate,
+      endDate: undefined,
+      description
+    };
+    // Perform the POST request
+    await fetch(`/api/fixeddata/census/${schema}/censusID`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({newRow: newCensusRDS})
+    });
+    // trigger reload
   }
 }
 
@@ -193,5 +214,5 @@ async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<Or
   return orgCensusMapper.demapData(censusResultList);
 }
 
-export { OrgCensusToCensusResultMapper, createAndUpdateCensusList, collapseCensusDataToGridSelections };
-export type { OrgCensusRDS };
+export {OrgCensusToCensusResultMapper, createAndUpdateCensusList, collapseCensusDataToGridSelections};
+export type {OrgCensusRDS};

@@ -1,9 +1,9 @@
-import { GridColDef, GridValidRowModel } from '@mui/x-data-grid';
-import { IDataMapper } from "../../datamapper";
-import { bitToBoolean, booleanToBit } from '../../macros';
-import { Templates } from '@/config/datagridhelpers';
-import { NextRequest } from 'next/server';
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import {GridColDef, GridValidRowModel} from '@mui/x-data-grid';
+import {IDataMapper} from "../../datamapper";
+import {bitToBoolean, booleanToBit} from '../../macros';
+import {Templates} from '@/config/datagridhelpers';
+import {NextRequest} from 'next/server';
+import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 
 export type SpeciesRDS = {
   id?: number;
@@ -133,16 +133,81 @@ export const speciesFields = [
 
 export const SpeciesGridColumns: GridColDef[] = [
   // { field: 'id', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', maxWidth: 50},
-  { field: 'speciesCode', headerName: 'SpCode', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true,  maxWidth: 125 },
+  {
+    field: 'speciesCode',
+    headerName: 'SpCode',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true,
+    maxWidth: 125
+  },
   // {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
   // { field: 'currentTaxonFlag', headerName: 'Current?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
   // { field: 'obsoleteTaxonFlag', headerName: 'Obsolete?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
-  { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'subSpeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'idLevel', headerName: 'IDLevel', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'speciesAuthority', headerName: 'SpeciesAuth', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'subspeciesAuthority', headerName: 'SubspeciesAuth', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'fieldFamily', headerName: 'FieldFamily', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
+  {
+    field: 'speciesName',
+    headerName: 'Species',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subSpeciesName',
+    headerName: 'Subspecies',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'idLevel',
+    headerName: 'IDLevel',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesAuthority',
+    headerName: 'SpeciesAuth',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesAuthority',
+    headerName: 'SubspeciesAuth',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'fieldFamily',
+    headerName: 'FieldFamily',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
   // {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
 ];

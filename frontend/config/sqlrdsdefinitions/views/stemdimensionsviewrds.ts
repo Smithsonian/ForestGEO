@@ -1,5 +1,6 @@
 import {GridColDef, GridValidRowModel} from '@mui/x-data-grid';
 import {IDataMapper, parseDate} from "../../datamapper";
+import {ColumnStates} from '@/config/macros';
 
 export type StemDimensionsViewRDS = {
   id?: number;
@@ -157,17 +158,59 @@ export class StemDimensionsMapper implements IDataMapper<StemDimensionsViewResul
   }
 }
 
+export function getStemDimensionsViewHCs(): ColumnStates {
+  return {
+    treeID: false,
+    subquadratID: false,
+    quadratID: false,
+    censusID: false,
+    plotCensusNumber: false,
+    startDate: false,
+    endDate: false,
+    plotID: false,
+    plotName: false,
+  };
+}
+
 export const StemDimensionsGridColumns: GridColDef[] = [
   {field: 'stemID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemTag', headerName: 'Stem Tag', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'treeTag', headerName: 'Tree Tag', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemLocalX', headerName: 'Stem Local X', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemLocalY', headerName: 'Stem Local Y', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemUnits', headerName: 'Stem Units', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratID', headerName: 'Subquadrat ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratName', headerName: 'Subquadrat Name', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratDimensionX', headerName: 'Subquadrat Dim X', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratDimensionY', headerName: 'Subquadrat Dim Y', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratX', headerName: 'Subquadrat X', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratY', headerName: 'Subquadrat Y', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subquadratUnits', headerName: 'Subquadrat Units', headerClassName: 'header', flex: 1, align: 'left'},
+  {
+    field: 'subquadratOrderPosition',
+    headerName: 'Subquadrat Order Position',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left'
+  },
+  {field: 'quadratID', headerName: 'Quadrat ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratName', headerName: 'Quadrat Name', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratDimensionX', headerName: 'QDimX', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratDimensionY', headerName: 'QDimY', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'quadratUnits', headerName: 'Quadrat Units', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'censusID', headerName: 'Census ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotCensusNumber', headerName: 'Plot Census Number', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'startDate', headerName: 'Start Date', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'endDate', headerName: 'End Date', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotID', headerName: 'Plot ID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'plotName', headerName: 'Plot', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'locationName', headerName: 'Location', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'countryName', headerName: 'Country', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'quadratDimensionX', headerName: 'QDimX', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'quadratDimensionY', headerName: 'QDimY', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemQuadX', headerName: 'SQuadX', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemQuadY', headerName: 'SQuadY', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotDimensionX', headerName: 'Plot Dim X', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotDimensionY', headerName: 'Plot Dim Y', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotGlobalX', headerName: 'Plot Global X', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotGlobalY', headerName: 'Plot Global Y', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotGlobalZ', headerName: 'Plot Global Z', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'plotUnits', headerName: 'Plot Units', headerClassName: 'header', flex: 1, align: 'left'},
 ];

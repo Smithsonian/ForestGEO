@@ -8,12 +8,18 @@ import {Box, Typography} from "@mui/material";
 import {Stack} from "@mui/joy";
 import {LinearProgressWithLabel} from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
-import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
-                                                           acceptedFiles, uploadForm, setIsDataUnsaved, user, setUploadError,
-                                                           setErrorComponent, setReviewState,
-                                                           allRowToCMID, cmErrors,
+                                                           acceptedFiles,
+                                                           uploadForm,
+                                                           setIsDataUnsaved,
+                                                           user,
+                                                           setUploadError,
+                                                           setErrorComponent,
+                                                           setReviewState,
+                                                           allRowToCMID,
+                                                           cmErrors,
                                                          }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);

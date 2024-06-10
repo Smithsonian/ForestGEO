@@ -391,8 +391,8 @@ export class ViewFullTableMapper implements IDataMapper<ViewFullTableResult, Vie
   }
 }
 
-
 export const ViewFullTableGridColumns: GridColDef[] = [
+  {field: 'id', headerName: 'ID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'coreMeasurementID', headerName: 'Core Measurement ID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'measurementDate', headerName: 'Measurement Date', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'measuredDBH', headerName: 'Measured DBH', headerClassName: 'header', flex: 1, align: 'left'},

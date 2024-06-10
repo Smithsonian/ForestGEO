@@ -1,14 +1,14 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { PersonnelRDS } from './personnelrds';
-import MapperFactory, { IDataMapper } from "../../datamapper";
-import { unitSelectionOptions } from '@/config/macros';
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import {GridColDef} from '@mui/x-data-grid';
+import {PersonnelRDS} from './personnelrds';
+import MapperFactory, {IDataMapper} from "../../datamapper";
+import {ColumnStates, unitSelectionOptions} from '@/config/macros';
+import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 
 export type QuadratRDS = {
   id?: number;
   quadratID?: number;
   plotID?: number;
-  // censusID?: number;
+  censusID?: number;
   quadratName?: string;
   startX?: number;
   startY?: number;
@@ -17,8 +17,18 @@ export type QuadratRDS = {
   area?: number;
   unit?: string;
   quadratShape?: string;
-  // personnel?: PersonnelRDS[];
 };
+
+// export const quadratConfig: DataConfig<QuadratRDS> = {
+//   schema: "schema",
+//   tableName: "quadrats",
+//   uniqueField: "quadratName",
+//   selectQuery: "SELECT * FROM quadrats WHERE PlotID = ? AND CensusID IN (SELECT CensusID from ",
+//   insertQuery: `
+//     INSERT INTO quadrats (quadratName, plotID, CensusID, startX, startY, dimensionX, dimensionY, area, unit, quadratShape, plotCensusNumber) 
+//     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+//   `,
+// };
 
 export interface QuadratRaw {
   quadratID: number;
@@ -31,7 +41,7 @@ export type Quadrat = QuadratRDS | undefined;
 export interface QuadratsResult {
   QuadratID: any;
   PlotID: any;
-  // CensusID: any;
+  CensusID: any;
   QuadratName: any;
   StartX: any;
   StartY: any;
@@ -59,7 +69,7 @@ export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratRDS> {
       id: index + indexOffset,
       quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
       plotID: item.PlotID != null ? Number(item.PlotID) : undefined,
-      // censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
+      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
       quadratName: item.QuadratName != null ? String(item.QuadratName) : undefined,
       startX: item.StartX != null ? Number(item.StartX) : undefined,
       startY: item.StartY != null ? Number(item.StartY) : undefined,
@@ -76,7 +86,7 @@ export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratRDS> {
     return results.map(quadrat => ({
       QuadratID: quadrat.quadratID !== undefined ? Number(quadrat.quadratID) : null,
       PlotID: quadrat.plotID !== undefined ? Number(quadrat.plotID) : null,
-      // CensusID: quadrat.censusID !== undefined ? Number(quadrat.censusID) : null,
+      CensusID: quadrat.censusID !== undefined ? Number(quadrat.censusID) : null,
       QuadratName: quadrat.quadratName !== undefined ? String(quadrat.quadratName) : null,
       StartX: quadrat.startX !== undefined ? Number(quadrat.startX) : null,
       StartY: quadrat.startY !== undefined ? Number(quadrat.startY) : null,
@@ -93,6 +103,8 @@ export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratRDS> {
 
 export const quadratsFields = [
   'quadratName',
+  'startX',
+  'startY',
   'dimensionX',
   'dimensionY',
   'area',
@@ -100,52 +112,86 @@ export const quadratsFields = [
   'quadratShape',
 ];
 
+export function getQuadratHCs(): ColumnStates {
+  return {
+    plotID: false,
+    censusID: false
+  };
+}
 
 export const QuadratsGridColumns: GridColDef[] = [
-  { field: 'quadratID', headerName: 'ID', headerClassName: 'header', maxWidth: 50, align: 'left', editable: false },
-  // {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left',},
-  // {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'quadratID', headerName: '#', headerClassName: 'header', flex: 0.2, align: 'left', editable: false},
+  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 0.4, align: 'left',},
+  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 0.55, align: 'left',},
   {
     field: 'quadratName',
-    headerName: 'Name',
+    headerName: 'Quadrat Name',
     headerClassName: 'header',
     flex: 1,
-    minWidth: 140,
     align: 'left',
     type: 'string',
     editable: true
   },
   {
-    field: 'dimensionX',
+    field: 'startX',
     headerName: 'X',
     headerClassName: 'header',
-    flex: 1,
-    minWidth: 125,
+    flex: 0.3,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'startY',
+    headerName: 'Y',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'dimensionX',
+    headerName: 'DimX',
+    headerClassName: 'header',
+    flex: 0.3,
     align: 'left',
     type: 'number',
     editable: true
   },
   {
     field: 'dimensionY',
-    headerName: 'Y',
+    headerName: 'DimY',
     headerClassName: 'header',
-    flex: 1,
-    minWidth: 125,
+    flex: 0.3,
     align: 'left',
     type: 'number',
     editable: true
   },
-  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, minWidth: 125, align: 'left', type: 'number', editable: true },
   {
-    field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, minWidth: 125, align: 'left', type: 'singleSelect',
-    valueOptions: unitSelectionOptions, editable: true
+    field: 'area',
+    headerName: 'Area',
+    headerClassName: 'header',
+    flex: 0.5,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'unit',
+    headerName: 'Unit',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'left',
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions,
+    editable: true
   },
   {
     field: 'quadratShape',
-    headerName: 'Shape',
+    headerName: 'Quadrat Shape',
     headerClassName: 'header',
-    flex: 1,
-    minWidth: 125,
+    flex: 0.75,
     align: 'left',
     type: 'string',
     editable: true

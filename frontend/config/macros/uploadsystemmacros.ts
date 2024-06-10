@@ -9,17 +9,11 @@ export interface UploadStartProps {
   // state vars
   uploadForm: string;
   personnelRecording: string;
-  dbhUnit: string;
-  homUnit: string;
-  coordUnit: string;
   // state setters
   setUploadForm: Dispatch<SetStateAction<string>>;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  setDBHUnit: Dispatch<SetStateAction<string>>;
-  setHOMUnit: Dispatch<SetStateAction<string>>;
-  setCoordUnit: Dispatch<SetStateAction<string>>;
 }
 
 export interface UploadParseFilesProps {

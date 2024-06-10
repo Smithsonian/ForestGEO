@@ -1,16 +1,15 @@
 "use client";
-import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
-import React, {useCallback, useEffect, useState} from "react";
-import {QuadratsGridColumns as BaseQuadratsGridColumns, Quadrat} from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import React, {useEffect, useState} from "react";
+import {QuadratsGridColumns as BaseQuadratsGridColumns} from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import {
   useOrgCensusContext,
   usePlotContext,
-  useQuadratDispatch,
 } from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {Box, Button, IconButton, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
@@ -18,15 +17,15 @@ export default function QuadratsDataGrid() {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      quadratID: 0,
-      plotID: 0,
-      censusID: 0,
-      quadratName: '',
-      dimensionX: 0,
-      dimensionY: 0,
-      area: 0,
-      unit: '',
-      quadratShape: '',
+      quadratID: null,
+      plotID: null,
+      censusID: null,
+      quadratName: null,
+      dimensionX: null,
+      dimensionY: null,
+      area: null,
+      unit: null,
+      quadratShape: null,
     },
   ];
   const [rows, setRows] = React.useState(initialRows);
@@ -44,31 +43,18 @@ export default function QuadratsDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  // const [censusOptions, setCensusOptions] = useState<GridSelections[]>([]);
   const {data: session} = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [uploadFormType, setUploadFormType] = useState<'quadrats' | 'subquadrats'>('quadrats');
+  const [uploadFormType, setUploadFormType] = useState<'quadrats'>('quadrats');
 
   let currentPlot = usePlotContext();
   let currentCensus = useOrgCensusContext();
-  let quadratDispatch = useQuadratDispatch();
 
   useEffect(() => {
     if (currentCensus !== undefined) {
       setLocked(currentCensus.dateRanges[0].endDate !== undefined); // if the end date is not undefined, then grid should be locked
     }
   }, [currentCensus]);
-
-  const handleSelectQuadrat = useCallback((quadratID: number | null) => {
-    // we want to select a quadrat contextually when using this grid FOR subquadrats selection
-    // however, this information should not be retained, as the user might select a different quadrat or change quadrat information
-    // thus, we add the `| null` to the function and ensure that the context is properly reset when the user is done making changes or cancels their changes.
-    if (quadratID === null) quadratDispatch && quadratDispatch({quadrat: undefined}).catch(console.error); // dispatches are asynchronous
-    else {
-      const selectedQuadrat = rows.find(row => row.quadratID === quadratID) as Quadrat; // GridValidRowModel needs to be cast to Quadrat
-      if (selectedQuadrat && quadratDispatch) quadratDispatch({quadrat: selectedQuadrat}).catch(console.error);
-    }
-  }, [rows, quadratDispatch]);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -129,12 +115,6 @@ export default function QuadratsDataGrid() {
           }} color={'primary'}>
             Upload Quadrats
           </Button>
-          {/* <Button onClick={() => {
-            setIsUploadModalOpen(true);
-            setUploadFormType('subquadrats');
-          }} color={'neutral'}>
-            Upload Subquadrats
-          </Button> */}
         </Box>
       </Box>
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
@@ -162,7 +142,6 @@ export default function QuadratsDataGrid() {
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
-        handleSelectQuadrat={handleSelectQuadrat}
       />
     </>
   );
