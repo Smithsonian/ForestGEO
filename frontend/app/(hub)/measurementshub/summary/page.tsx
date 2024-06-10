@@ -2,7 +2,7 @@
 import React, {useEffect, useState} from "react";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
-import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import {MeasurementsSummaryGridColumnsA} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
   ListItemContent,
@@ -423,7 +423,7 @@ export default function SummaryPage() {
       />
       <MeasurementSummaryGrid
         locked={!validity['quadrats']}
-        gridColumns={MeasurementsSummaryGridColumns}
+        gridColumns={MeasurementsSummaryGridColumnsA}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

@@ -10,7 +10,8 @@
   "scripts": {
     "preinstall": "npx npm-force-resolutions",
     "dev": "next dev",
-    "build": "eslint '**/*.{ts,tsx}' --fix && next build",
+    "lint": "eslint '**/*.{ts,tsx}' --fix",
+    "build": "npm run lint && next build",
     "start": "node build/standalone/server.js -p 8080",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",

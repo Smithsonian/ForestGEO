@@ -67,6 +67,8 @@ import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import BlockIcon from '@mui/icons-material/Block';
 import { CensusDateRange, OrgCensusRDS } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { unitSelectionOptions } from '@/config/macros';
+import { MeasurementsSummaryGridColumnsB, MeasurementsSummaryGridColumnsC, MeasurementsSummaryGridColumnsD } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 
 const errorMapping: { [key: string]: string[] } = {
   '1': ["attributes"],
@@ -255,7 +257,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
         />
       ))}
     </FormGroup>
-  );  
+  );
 
   const handleShowDeprecatedRowsChange = (event: any) => {
     setShowDeprecatedRows(event.target.checked);
@@ -267,7 +269,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   const validationStatusColumn: GridColDef = {
     field: 'isValidated',
-    headerName: '?',
+    headerName: '',
     headerAlign: 'center',
     align: 'center',
     width: 50,
@@ -279,19 +281,58 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       const isValidated = params.row.isValidated;
 
       if (isDeprecated) {
-        return <BlockIcon color="action" />;
+        return (
+          <Tooltip title="Deprecated" size="md">
+            <BlockIcon color="action" />
+          </Tooltip>
+        );
       } else if (validationError) {
-        return <ErrorIcon color="error" />;
+        return (
+          <Tooltip title="Failed Validation" size="md">
+            <ErrorIcon color="error" />
+          </Tooltip>
+        );
       } else if (isPendingValidation) {
-        return <HourglassEmptyIcon color="disabled" />;
+        return (
+          <Tooltip title="Pending" size="md">
+            <HourglassEmptyIcon color="disabled" />
+          </Tooltip>
+        );
       } else if (isValidated) {
-        return <CheckIcon color="success" />;
+        return (
+          <Tooltip title="Passed Validation" size="md">
+            <CheckIcon color="success" />
+          </Tooltip>
+        );
       } else {
         return null;
       }
     },
   };
-
+  const measurementDateColumn: GridColDef = {
+    field: 'measurementDate',
+    headerName: 'Date',
+    headerClassName: 'header',
+    flex: 0.8,
+    sortable: true,
+    editable: true,
+    type: 'date',
+    renderHeader: () => <Box flexDirection={'column'}>
+      <Typography level='title-lg'>Date</Typography>
+      <Typography level='body-xs'>YYYY-MM-DD</Typography>
+    </Box>,
+    valueFormatter: (value) => {
+      console.log('params: ', value);
+      // Check if the date is present and valid
+      if (!value || !moment(value).utc().isValid()) {
+        console.log('value: ', value);
+        console.log('moment-converted: ', moment(value).utc().format('YYYY-MM-DD'));
+        return '';
+      }
+      // Format the date as a dash-separated set of numbers
+      return moment(value).utc().format('YYYY-MM-DD');
+    },
+  };
   const handleLockedClick = () => {
     triggerPulse();
   };
@@ -302,6 +343,42 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     fetchErrorRows().then(fetchedRows => {
       setErrorRowsForExport(fetchedRows);
     });
+  };
+
+  const stemUnitsColumn: GridColDef = {
+    field: 'stemUnits',
+    headerName: 'U',
+    headerClassName: 'header',
+    flex: 0.4,
+    renderHeader: () => <Typography level='body-xs'>U</Typography>,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  };
+
+  const dbhUnitsColumn: GridColDef = {
+    field: 'dbhUnits',
+    headerName: 'U',
+    headerClassName: 'header',
+    flex: 0.4,
+    renderHeader: () => <Typography level='body-xs'>U</Typography>,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  };
+
+  const homUnitsColumn: GridColDef = {
+    field: 'homUnits',
+    headerName: 'U',
+    headerClassName: 'header',
+    flex: 0.4,
+    renderHeader: () => <Typography level='body-xs'>U</Typography>,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
   };
 
   const fetchErrorRows = async () => {
@@ -857,9 +934,16 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const columns = useMemo(() => {
     const commonColumns = modifiedColumns;
     if (locked) {
-      return [validationStatusColumn, ...commonColumns];
+      return [validationStatusColumn, 
+        measurementDateColumn, ...commonColumns, 
+        ...MeasurementsSummaryGridColumnsB, dbhUnitsColumn, 
+        ...MeasurementsSummaryGridColumnsC, homUnitsColumn, ...MeasurementsSummaryGridColumnsD];
     }
-    return [validationStatusColumn, ...commonColumns, getGridActionsColumn()];
+    return [validationStatusColumn,
+      measurementDateColumn, ...commonColumns,
+      stemUnitsColumn, ...MeasurementsSummaryGridColumnsB, 
+      dbhUnitsColumn, ...MeasurementsSummaryGridColumnsC, 
+      homUnitsColumn, ...MeasurementsSummaryGridColumnsD, getGridActionsColumn()];
   }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
@@ -1028,7 +1112,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             }}
             autoHeight
             getRowHeight={() => 'auto'}
-            getRowClassName={getRowClassName}
+          // getRowClassName={getRowClassName}
           />
         </Box>
         {!!snackbar && (
