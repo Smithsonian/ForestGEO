@@ -39,8 +39,8 @@ const handler = NextAuth({
         // console.log('user admin state: ', user.isAdmin);
         user.email = userEmail;
         // console.log('getting all sites: ');
-        let allSites = await getAllSchemas();
-        let allowedSites = await getAllowedSchemas(userEmail);
+        const allSites = await getAllSchemas();
+        const allowedSites = await getAllowedSchemas(userEmail);
         if (!allowedSites || !allSites) {
           throw new Error("User does not have any allowed sites.");
         }

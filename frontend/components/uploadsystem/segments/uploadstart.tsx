@@ -2,7 +2,7 @@
 
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadStartProps} from "@/config/macros/uploadsystemmacros";
-import {Box, Button, ListSubheader, Stack, Tooltip, Typography} from "@mui/joy";
+import {Box, Button, Stack, Tooltip, Typography} from "@mui/joy";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
 import Select, {SelectOption} from "@mui/joy/Select";
@@ -20,9 +20,9 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     setReviewState,
   } = props;
   const [finish, setFinish] = useState<boolean>(false);
-  let quadratListContext = useQuadratListContext();
-  let currentQuadrat = useQuadratContext();
-  let currentPlot = usePlotContext();
+  const quadratListContext = useQuadratListContext();
+  const currentQuadrat = useQuadratContext();
+  const currentPlot = usePlotContext();
   console.log('current quadrat: ', currentQuadrat);
   const [quadrat, setQuadrat] = useState<Quadrat>();
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);

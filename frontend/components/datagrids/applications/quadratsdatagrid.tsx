@@ -47,8 +47,8 @@ export default function QuadratsDataGrid() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormType, setUploadFormType] = useState<'quadrats'>('quadrats');
 
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   useEffect(() => {
     if (currentCensus !== undefined) {

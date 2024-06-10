@@ -3,7 +3,6 @@ import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
 import {PersonnelGridColumns} from '@/config/sqlrdsdefinitions/tables/personnelrds';
-import {usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {useSession} from "next-auth/react";

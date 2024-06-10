@@ -1,6 +1,6 @@
 import {IDataMapper} from "@/config/datamapper";
 import {bitToBoolean, ColumnStates} from "@/config/macros";
-import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+import {GridColDef} from "@mui/x-data-grid";
 
 export type StemTaxonomiesViewRDS = {
   id?: number;

@@ -102,7 +102,7 @@ export async function GET(request: NextRequest, {params}: {
           WHERE PlotID = ?
             AND PlotCensusNumber = ?
           ORDER BY StartDate DESC
-          LIMIT 10
+          LIMIT 30
         `;
         const censusResults = await runQuery(conn, format(censusQuery, [plotID, plotCensusNumber]));
         if (censusResults.length < 2) {
@@ -201,7 +201,7 @@ export async function POST(request: NextRequest, {params}: { params: { dataType:
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const newRowData = mapper.demapData([newRow])[0];
-    let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+    const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
     if (params.dataType.includes('view')) {
       let queryConfig;
@@ -246,7 +246,7 @@ export async function PATCH(request: NextRequest, {params}: { params: { dataType
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
-  let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const {newRow, oldRow} = await request.json();
   try {
     conn = await getConn();
@@ -302,7 +302,7 @@ export async function DELETE(request: NextRequest, {params}: { params: { dataTyp
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
-  let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const {newRow} = await request.json();
   try {
     conn = await getConn();

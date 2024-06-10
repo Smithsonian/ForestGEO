@@ -5,7 +5,6 @@ import {createMocks} from 'node-mocks-http';
 import {NextRequest} from 'next/server';
 import {
   BlobServiceClient,
-  BlobSASPermissions,
   generateBlobSASQueryParameters,
   StorageSharedKeyCredential
 } from '@azure/storage-blob';

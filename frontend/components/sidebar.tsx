@@ -1,20 +1,20 @@
 "use client";
 import * as React from 'react';
-import {Dispatch, SetStateAction, useEffect, useRef, useState} from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
 import List from '@mui/joy/List';
 import ListItem from '@mui/joy/ListItem';
-import ListItemButton, {listItemButtonClasses} from '@mui/joy/ListItemButton';
+import ListItemButton, { listItemButtonClasses } from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import {LoginLogout} from "@/components/loginlogout";
-import {siteConfigNav, validityMapping} from "@/config/macros/siteconfigs";
-import {SiteConfigProps} from "@/config/macros/siteconfigs";
-import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { LoginLogout } from "@/components/loginlogout";
+import { siteConfigNav, validityMapping } from "@/config/macros/siteconfigs";
+import { SiteConfigProps } from "@/config/macros/siteconfigs";
+import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -23,43 +23,39 @@ import {
   useSiteContext,
   useSiteDispatch
 } from "@/app/contexts/userselectionprovider";
-import {usePathname, useRouter} from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Button,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Link,
   Modal,
   ModalDialog,
   SelectOption,
   Stack,
   Badge,
   Tooltip,
-  TextField,
 } from "@mui/joy";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import {
   useOrgCensusListContext,
-  useOrgCensusListDispatch,
   usePlotListContext,
   useSiteListContext
 } from "@/app/contexts/listselectionprovider";
-import {useSession} from "next-auth/react";
-import {SlideToggle, TransitionComponent} from "@/components/client/clientmacros";
+import { useSession } from "next-auth/react";
+import { TransitionComponent } from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import {CensusLogo, PlotLogo} from "@/components/icons";
-import {RainbowIcon} from '@/styles/rainbowicon';
-import {useDataValidityContext} from '@/app/contexts/datavalidityprovider';
-import {OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper} from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { CensusLogo, PlotLogo } from "@/components/icons";
+import { RainbowIcon } from '@/styles/rainbowicon';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import moment from 'moment';
-import {DatePicker} from '@mui/x-date-pickers/DatePicker';
-import Joyride, {CallBackProps, Status, STATUS, Step} from 'react-joyride';
-import {useLockAnimation} from '@/app/contexts/lockanimationcontext';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 // const initialSteps: Step[] = [
 //   {
@@ -77,7 +73,7 @@ export interface SimpleTogglerProps {
   renderToggle: any;
 }
 
-export function SimpleToggler({isOpen, renderToggle, children,}: Readonly<SimpleTogglerProps>) {
+export function SimpleToggler({ isOpen, renderToggle, children, }: Readonly<SimpleTogglerProps>) {
   return (
     <React.Fragment>
       {renderToggle}
@@ -111,10 +107,10 @@ function MenuRenderToggle(
   setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined
 ) {
   const Icon = siteConfigProps.icon;
-  const {plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete} = props;
-  let currentSite = useSiteContext();
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
+  const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -131,14 +127,14 @@ function MenuRenderToggle(
           badgeContent={isParentDataIncomplete ? '!' : undefined}
           invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
         >
-          <Icon/>
+          <Icon />
         </Badge>
       </Tooltip>
       <ListItemContent>
         <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
       </ListItemContent>
       <KeyboardArrowDownIcon
-        sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
+        sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }}
       />
     </ListItemButton>
   );
@@ -152,17 +148,17 @@ interface SidebarProps {
 }
 
 export default function Sidebar(props: SidebarProps) {
-  const {data: session} = useSession();
-  let currentSite = useSiteContext();
-  let siteDispatch = useSiteDispatch();
-  let currentPlot = usePlotContext();
-  let plotDispatch = usePlotDispatch();
-  let currentCensus = useOrgCensusContext();
-  let censusDispatch = useOrgCensusDispatch();
-  let censusListContext = useOrgCensusListContext();
-  let siteListContext = useSiteListContext();
-  let plotListContext = usePlotListContext();
-  const {validity} = useDataValidityContext();
+  const { data: session } = useSession();
+  const currentSite = useSiteContext();
+  const siteDispatch = useSiteDispatch();
+  const currentPlot = usePlotContext();
+  const plotDispatch = usePlotDispatch();
+  const currentCensus = useOrgCensusContext();
+  const censusDispatch = useOrgCensusDispatch();
+  const censusListContext = useOrgCensusListContext();
+  const siteListContext = useSiteListContext();
+  const plotListContext = usePlotListContext();
+  const { validity } = useDataValidityContext();
   const isAllValiditiesTrue = Object.entries(validity)
     .filter(([key]) => key !== 'subquadrats')
     .every(([, value]) => value);
@@ -181,7 +177,7 @@ export default function Sidebar(props: SidebarProps) {
   const [storedCensus, setStoredCensus] = useState<OrgCensus>();
   const [storedSite, setStoredSite] = useState<Site>();
 
-  const {siteListLoaded, setCensusListLoaded} = props;
+  const { siteListLoaded, setCensusListLoaded } = props;
 
   const [openCloseCensusModal, setOpenCloseCensusModal] = useState(false);
   const [openReopenCensusModal, setOpenReopenCensusModal] = useState(false);
@@ -191,7 +187,7 @@ export default function Sidebar(props: SidebarProps) {
   const [closeEndDate, setCloseEndDate] = useState<Date | null>(null);
   const [newStartDate, setNewStartDate] = useState<Date | null>(null);
 
-  const {isPulsing, triggerPulse} = useLockAnimation();
+  const { isPulsing, triggerPulse } = useLockAnimation();
   const reopenButtonRef = useRef(null);
   const addButtonRef = useRef(null);
 
@@ -309,9 +305,14 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   const handleOpenNewCensus = async () => {
-    if (newStartDate === null || plot === undefined) throw new Error("new census start date was not set OR plot is undefined");
+    if ((site === undefined || site.schemaName === undefined) || newStartDate === null || (plot === undefined || plot.plotID === undefined)) throw new Error("new census start date was not set OR plot is undefined");
+    const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
+    const highestPlotCensusNumber = validCensusListContext.length > 0
+      ? validCensusListContext.reduce((max, census) =>
+        census.plotCensusNumber > max ? census.plotCensusNumber : max, validCensusListContext[0].plotCensusNumber)
+      : 1;
     const mapper = new OrgCensusToCensusResultMapper();
-    await mapper.startNewCensus(site?.schemaName || '', plot.plotID!, census ? census.plotCensusNumber + 1 : 1, newStartDate, census ? census.description : undefined);
+    await mapper.startNewCensus(site.schemaName, plot.plotID, highestPlotCensusNumber + 1, newStartDate, census ? census.description : undefined);
     setCensusListLoaded(false);
     setOpenNewCensusModal(false);
     setNewStartDate(null);
@@ -373,7 +374,7 @@ export default function Sidebar(props: SidebarProps) {
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     setSite(selectedSite);
     if (siteDispatch) {
-      await siteDispatch({site: selectedSite});
+      await siteDispatch({ site: selectedSite });
     }
     if (selectedSite === undefined) {
       await handlePlotSelection(undefined);
@@ -383,7 +384,7 @@ export default function Sidebar(props: SidebarProps) {
   const handlePlotSelection = async (selectedPlot: Plot) => {
     setPlot(selectedPlot);
     if (plotDispatch) {
-      await plotDispatch({plot: selectedPlot});
+      await plotDispatch({ plot: selectedPlot });
     }
     if (selectedPlot === undefined) {
       await handleCensusSelection(undefined);
@@ -393,7 +394,7 @@ export default function Sidebar(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
     setCensus(selectedCensus);
     if (censusDispatch) {
-      await censusDispatch({census: selectedCensus});
+      await censusDispatch({ census: selectedCensus });
     }
   };
 
@@ -441,7 +442,7 @@ export default function Sidebar(props: SidebarProps) {
         {selectedPlot ? (
           <Stack direction="column" alignItems="start">
             <Typography level='body-md'>{`Plot: ${selectedPlot?.plotName}`}</Typography>
-            <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <Typography level="body-sm" color={"primary"}>
                 &mdash; Quadrats: {selectedPlot.numQuadrats}
               </Typography>
@@ -494,10 +495,10 @@ export default function Sidebar(props: SidebarProps) {
 
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
-    {toggle: undefined, setToggle: undefined},
-    {toggle: measurementsToggle, setToggle: setMeasurementsToggle},
-    {toggle: propertiesToggle, setToggle: setPropertiesToggle},
-    {toggle: formsToggle, setToggle: setFormsToggle}
+    { toggle: undefined, setToggle: undefined },
+    { toggle: measurementsToggle, setToggle: setMeasurementsToggle },
+    { toggle: propertiesToggle, setToggle: setPropertiesToggle },
+    { toggle: formsToggle, setToggle: setFormsToggle }
   ];
 
   const renderCensusOptions = () => (
@@ -520,7 +521,7 @@ export default function Sidebar(props: SidebarProps) {
     >
       <List>
         <Option value={""}>None</Option>
-        <Divider orientation={"horizontal"}/>
+        <Divider orientation={"horizontal"} />
         {censusListContext?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map((item) => (
           <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
             <Box sx={{
@@ -529,15 +530,15 @@ export default function Sidebar(props: SidebarProps) {
               alignItems: "center",
               width: "100%"
             }}>
-              <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
+              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
                 <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
                 {item?.dateRanges?.map((dateRange, index) => (
                   <React.Fragment key={index}>
                     <Stack direction={"row"}>
-                      <Typography level="body-sm" color={"neutral"} sx={{paddingLeft: '1em'}}>
+                      <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em' }}>
                         {`${dateRange.startDate ? new Date(dateRange.startDate).toDateString() : 'undefined'}`}
                       </Typography>
-                      <Typography level="body-sm" color={"neutral"} sx={{paddingLeft: '1em', paddingRight: '1em'}}>
+                      <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
                         &lt;===&gt;
                       </Typography>
                       <Typography level="body-sm" color={"neutral"}>
@@ -577,9 +578,9 @@ export default function Sidebar(props: SidebarProps) {
             alignItems: "center",
             width: "100%"
           }}>
-            <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <Typography level="body-md">{item?.plotName}</Typography>
-              <Typography level="body-sm" color={"primary"} sx={{paddingLeft: "1em"}}>
+              <Typography level="body-sm" color={"primary"} sx={{ paddingLeft: "1em" }}>
                 Quadrats: {item?.numQuadrats}
               </Typography>
             </Box>
@@ -591,22 +592,22 @@ export default function Sidebar(props: SidebarProps) {
   const renderSiteOptions = () => {
     const allowedSites = siteListContext?.filter(site =>
       session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort((a, b) => {
-      const nameA = a.siteName?.toLowerCase() ?? '';
-      const nameB = b.siteName?.toLowerCase() ?? '';
-      if (nameA < nameB) return -1;
-      if (nameA > nameB) return 1;
-      return 0;
-    });
+        const nameA = a.siteName?.toLowerCase() ?? '';
+        const nameB = b.siteName?.toLowerCase() ?? '';
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });
     ;
 
     const otherSites = siteListContext?.filter(site =>
       !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID)).sort((a, b) => {
-      const nameA = a.siteName?.toLowerCase() ?? '';
-      const nameB = b.siteName?.toLowerCase() ?? '';
-      if (nameA < nameB) return -1;
-      if (nameA > nameB) return 1;
-      return 0;
-    });
+        const nameA = a.siteName?.toLowerCase() ?? '';
+        const nameB = b.siteName?.toLowerCase() ?? '';
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });
     ;
 
     return (
@@ -632,8 +633,8 @@ export default function Sidebar(props: SidebarProps) {
           </ListItem>
           <Option key="none" value="">None</Option>
         </List>
-        <ListDivider role="none"/>
-        <List sx={{'--ListItemDecorator-size': '28px'}}>
+        <ListDivider role="none" />
+        <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="allowed-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
@@ -645,8 +646,8 @@ export default function Sidebar(props: SidebarProps) {
             </Option>
           ))}
         </List>
-        <ListDivider role="none"/>
-        <List sx={{'--ListItemDecorator-size': '28px'}}>
+        <ListDivider role="none" />
+        <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="other-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
@@ -678,7 +679,7 @@ export default function Sidebar(props: SidebarProps) {
           },
         }}
       /> */}
-      <Stack direction={"row"} sx={{display: 'flex', width: 'fit-content'}}>
+      <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
           className="Sidebar"
           sx={{
@@ -707,51 +708,51 @@ export default function Sidebar(props: SidebarProps) {
               },
             })}
           />
-          <Box sx={{flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1}}>
-            <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'flex-start'}}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
               <Stack direction={"column"}>
                 <Typography level="h1">
-                  <Box sx={{display: 'flex', alignItems: 'center'}}>
-                    <Box sx={{marginRight: 1.5}}>
-                      <RainbowIcon/>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Box sx={{ marginRight: 1.5 }}>
+                      <RainbowIcon />
                     </Box>
                     ForestGEO
                   </Box>
                   {session?.user.isAdmin && (
-                    <Typography level="h1" color='danger' sx={{marginLeft: 0.5}}>(Admin)</Typography>
+                    <Typography level="h1" color='danger' sx={{ marginLeft: 0.5 }}>(Admin)</Typography>
                   )}
                 </Typography>
               </Stack>
-              <Divider orientation='horizontal' sx={{my: 0.75}}/>
-              <Box sx={{display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
-                <Avatar sx={{marginRight: 1}}>
-                  <TravelExploreIcon/>
+              <Divider orientation='horizontal' sx={{ my: 0.75 }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                <Avatar sx={{ marginRight: 1 }}>
+                  <TravelExploreIcon />
                 </Avatar>
-                <Box sx={{flexGrow: 1}}>
+                <Box sx={{ flexGrow: 1 }}>
                   {renderSiteOptions()}
                 </Box>
               </Box>
               {(site !== undefined) && (
                 <>
-                  <Box sx={{display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
-                    <Avatar size={"sm"} sx={{marginRight: 1}}>
-                      <PlotLogo/>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                    <Avatar size={"sm"} sx={{ marginRight: 1 }}>
+                      <PlotLogo />
                     </Avatar>
-                    <Box sx={{flexGrow: 1, marginLeft: '0.5em', alignItems: 'center'}}>
+                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center' }}>
                       {renderPlotOptions()}
                     </Box>
                   </Box>
                   {plot !== undefined && (
                     <>
-                      <Box sx={{display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
-                        <Avatar size={"sm"} sx={{marginRight: 1}}>
-                          <CensusLogo/>
+                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                        <Avatar size={"sm"} sx={{ marginRight: 1 }}>
+                          <CensusLogo />
                         </Avatar>
-                        <Box sx={{flexGrow: 1, marginLeft: '0.5em', alignItems: 'center'}}>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center' }}>
                           {renderCensusOptions()}
                         </Box>
                       </Box>
-                      <Divider orientation='horizontal' sx={{marginTop: 2}}/>
+                      <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
                     </>
                   )}
                 </>
@@ -785,7 +786,7 @@ export default function Sidebar(props: SidebarProps) {
                 >
                   {siteConfigNav.map((item, index: number) => {
                     const Icon = item.icon;
-                    const {toggle, setToggle} = toggleArray[index];
+                    const { toggle, setToggle } = toggleArray[index];
                     const delay = (index) * 200;
 
                     const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
@@ -824,26 +825,26 @@ export default function Sidebar(props: SidebarProps) {
 
                       return (
                         <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
-                                             style={{transitionDelay: `${delay}ms`}} direction="down">
+                          style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem>
                             {(site !== undefined && plot !== undefined && census !== undefined) ? (
                               <Tooltip title={getTooltipMessage(item.href, isDataIncomplete)} arrow>
-                                <Box sx={{display: 'flex', flex: 1}}>
-                                  <ListItemButton selected={pathname === item.href} sx={{flex: 1}}
-                                                  disabled={(plot === undefined || census === undefined || isLinkDisabled)}
-                                                  color={pathname === item.href ? 'primary' : undefined}
-                                                  onClick={() => {
-                                                    if (!isLinkDisabled) {
-                                                      router.push(item.href);
-                                                    }
-                                                  }}>
+                                <Box sx={{ display: 'flex', flex: 1 }}>
+                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
+                                    disabled={(plot === undefined || census === undefined || isLinkDisabled)}
+                                    color={pathname === item.href ? 'primary' : undefined}
+                                    onClick={() => {
+                                      if (!isLinkDisabled) {
+                                        router.push(item.href);
+                                      }
+                                    }}>
                                     <Badge
                                       color="danger"
                                       variant={isLinkDisabled ? 'solid' : 'soft'}
                                       badgeContent={isLinkDisabled ? '!' : undefined}
                                       invisible={!isLinkDisabled}
                                     >
-                                      <Icon/>
+                                      <Icon />
                                     </Badge>
                                     <ListItemContent>
                                       <Typography level={"title-sm"}>{item.label}</Typography>
@@ -852,16 +853,16 @@ export default function Sidebar(props: SidebarProps) {
                                 </Box>
                               </Tooltip>
                             ) : (
-                              <Box sx={{display: 'flex', flex: 1}}>
-                                <ListItemButton selected={pathname === item.href} sx={{flex: 1}}
-                                                disabled={(plot === undefined || census === undefined || isLinkDisabled)}
-                                                color={pathname === item.href ? 'primary' : undefined}
-                                                onClick={() => {
-                                                  if (!isLinkDisabled) {
-                                                    router.push(item.href);
-                                                  }
-                                                }}>
-                                  <Icon/>
+                              <Box sx={{ display: 'flex', flex: 1 }}>
+                                <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
+                                  disabled={(plot === undefined || census === undefined || isLinkDisabled)}
+                                  color={pathname === item.href ? 'primary' : undefined}
+                                  onClick={() => {
+                                    if (!isLinkDisabled) {
+                                      router.push(item.href);
+                                    }
+                                  }}>
+                                  <Icon />
                                   <ListItemContent>
                                     <Typography level={"title-sm"}>{item.label}</Typography>
                                   </ListItemContent>
@@ -872,7 +873,7 @@ export default function Sidebar(props: SidebarProps) {
                         </TransitionComponent>
                       );
                     } else {
-                      let isParentDataIncomplete = item.expanded.some(subItem => {
+                      const isParentDataIncomplete = item.expanded.some(subItem => {
                         // Skip validity check for subquadrats
                         if (subItem.href === '/subquadrats') {
                           return false;
@@ -883,7 +884,7 @@ export default function Sidebar(props: SidebarProps) {
                       });
                       return (
                         <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
-                                             style={{transitionDelay: `${delay}ms`}} direction="down">
+                          style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem nested>
                             <SimpleToggler
                               renderToggle={MenuRenderToggle({
@@ -893,7 +894,7 @@ export default function Sidebar(props: SidebarProps) {
                               }, item, toggle, setToggle)}
                               isOpen={!!toggle}
                             >
-                              <List sx={{gap: 0.75}} size={"sm"}>
+                              <List sx={{ gap: 0.75 }} size={"sm"}>
                                 {item.expanded.map((link, subIndex) => {
                                   // Skip rendering for subquadrats
                                   if (link.href === '/subquadrats') {
@@ -901,36 +902,36 @@ export default function Sidebar(props: SidebarProps) {
                                   }
                                   const SubIcon = link.icon;
                                   const delay = (subIndex + 1) * 200;
-                                  let dataValidityKey = validityMapping[link.href];
-                                  let isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
+                                  const dataValidityKey = validityMapping[link.href];
+                                  const isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
 
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle}
-                                                         style={{transitionDelay: `${delay}ms`}} direction="down">
-                                      <ListItem sx={{marginTop: 0.75}}>
+                                      style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                      <ListItem sx={{ marginTop: 0.75 }}>
                                         {(site !== undefined && plot !== undefined && census !== undefined) ? (
                                           <Tooltip title={tooltipMessage} arrow>
-                                            <Box sx={{display: 'flex', flex: 1}}>
-                                              <ListItemButton sx={{flex: 1}}
-                                                              selected={pathname == (item.href + link.href)}
-                                                              disabled={plot === undefined || census === undefined || isLinkDisabled}
-                                                              onClick={() => {
-                                                                if (!isLinkDisabled) {
-                                                                  router.push((item.href + link.href));
-                                                                  if (setToggle) {
-                                                                    setToggle(false); // Close the menu
-                                                                  }
-                                                                }
-                                                              }}>
+                                            <Box sx={{ display: 'flex', flex: 1 }}>
+                                              <ListItemButton sx={{ flex: 1 }}
+                                                selected={pathname == (item.href + link.href)}
+                                                disabled={plot === undefined || census === undefined || isLinkDisabled}
+                                                onClick={() => {
+                                                  if (!isLinkDisabled) {
+                                                    router.push((item.href + link.href));
+                                                    if (setToggle) {
+                                                      setToggle(false); // Close the menu
+                                                    }
+                                                  }
+                                                }}>
                                                 <Badge
                                                   color={link.href === '/summary' ? "warning" : "danger"}
                                                   variant={link.href === '/summary' ? (!isAllValiditiesTrue ? 'solid' : 'soft') : (isDataIncomplete ? 'solid' : 'soft')}
                                                   badgeContent={link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : (isDataIncomplete ? '!' : undefined)}
                                                   invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
                                                 >
-                                                  <SubIcon/>
+                                                  <SubIcon />
                                                 </Badge>
                                                 <ListItemContent>
                                                   <Typography level={"title-sm"}>{link.label}</Typography>
@@ -939,16 +940,16 @@ export default function Sidebar(props: SidebarProps) {
                                             </Box>
                                           </Tooltip>
                                         ) : (
-                                          <Box sx={{display: 'flex', flex: 1}}>
-                                            <ListItemButton sx={{flex: 1}}
-                                                            selected={pathname == (item.href + link.href)}
-                                                            disabled={plot === undefined || census === undefined || isLinkDisabled}
-                                                            onClick={() => {
-                                                              if (!isLinkDisabled) {
-                                                                router.push((item.href + link.href));
-                                                              }
-                                                            }}>
-                                              <SubIcon/>
+                                          <Box sx={{ display: 'flex', flex: 1 }}>
+                                            <ListItemButton sx={{ flex: 1 }}
+                                              selected={pathname == (item.href + link.href)}
+                                              disabled={plot === undefined || census === undefined || isLinkDisabled}
+                                              onClick={() => {
+                                                if (!isLinkDisabled) {
+                                                  router.push((item.href + link.href));
+                                                }
+                                              }}>
+                                              <SubIcon />
                                               <ListItemContent>
                                                 <Typography level={"title-sm"}>{link.label}</Typography>
                                               </ListItemContent>
@@ -971,8 +972,8 @@ export default function Sidebar(props: SidebarProps) {
             </Box>
           </Box>
 
-          <Divider orientation={"horizontal"} sx={{mb: 2}}/>
-          <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
+          <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             {site && plot && (
               <>
                 {!census && censusListContext?.length === 0 ? (
@@ -988,7 +989,7 @@ export default function Sidebar(props: SidebarProps) {
                       size="sm"
                       variant="solid"
                       color="primary"
-                      sx={{width: '100%'}}
+                      sx={{ width: '100%' }}
                       onClick={() => setOpenNewCensusModal(true)}
                       className={isPulsing ? 'animate-pulse' : ''}
                     >
@@ -1012,7 +1013,7 @@ export default function Sidebar(props: SidebarProps) {
                           variant="solid"
                           color="success"
                           onClick={() => setOpenReopenCensusModal(true)}
-                          sx={{width: '100%', marginBottom: 0.5}}
+                          sx={{ width: '100%', marginBottom: 0.5 }}
                           className={isPulsing ? 'animate-pulse' : ''}
                         >
                           Reopen Census
@@ -1022,7 +1023,7 @@ export default function Sidebar(props: SidebarProps) {
                           size="sm"
                           variant="solid"
                           color="primary"
-                          sx={{width: '100%'}}
+                          sx={{ width: '100%' }}
                           onClick={() => setOpenNewCensusModal(true)}
                           className={isPulsing ? 'animate-pulse' : ''}
                         >
@@ -1038,7 +1039,7 @@ export default function Sidebar(props: SidebarProps) {
                         width: '100%'
                       }}>
                         <Button disabled={census === undefined} size="sm" variant="solid" color="danger"
-                                onClick={() => setOpenCloseCensusModal(true)} sx={{width: '100%'}}>
+                          onClick={() => setOpenCloseCensusModal(true)} sx={{ width: '100%' }}>
                           Close Census
                         </Button>
                       </Box>
@@ -1048,16 +1049,16 @@ export default function Sidebar(props: SidebarProps) {
               </>
             )}
           </Box>
-          <Divider orientation={"horizontal"} sx={{mb: 2, mt: 2}}/>
-          <LoginLogout/>
+          <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
+          <LoginLogout />
           <Modal open={openReopenCensusModal} onClose={() => {
           }}>
             <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
-                <WarningRoundedIcon/>
+                <WarningRoundedIcon />
                 Reopen Census
               </DialogTitle>
-              <Divider/>
+              <Divider />
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level="title-sm">The most recent census ended
@@ -1079,7 +1080,7 @@ export default function Sidebar(props: SidebarProps) {
                 </Stack>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenReopenCensusModal(false)}>
                     Cancel
                   </Button>
@@ -1094,10 +1095,10 @@ export default function Sidebar(props: SidebarProps) {
           }}>
             <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
-                <WarningRoundedIcon/>
+                <WarningRoundedIcon />
                 Start New Census
               </DialogTitle>
-              <Divider/>
+              <Divider />
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
                   {censusListContext && censusListContext?.length > 0 && (
@@ -1121,7 +1122,7 @@ export default function Sidebar(props: SidebarProps) {
                 </Stack>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenNewCensusModal(false)}>
                     Cancel
                   </Button>
@@ -1136,10 +1137,10 @@ export default function Sidebar(props: SidebarProps) {
           }}>
             <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
-                <WarningRoundedIcon/>
+                <WarningRoundedIcon />
                 Close Census
               </DialogTitle>
-              <Divider/>
+              <Divider />
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Start
@@ -1161,7 +1162,7 @@ export default function Sidebar(props: SidebarProps) {
                 </Stack>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenCloseCensusModal(false)}>
                     Cancel
                   </Button>

@@ -158,15 +158,15 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
 }
 
 export const MeasurementsSummaryGridColumns: GridColDef[] = [
-  {field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 0.25, align: 'left'},
-  {field: 'plotID', headerName: 'Plot ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  {field: 'plotName', headerName: 'Plot Name', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  {field: 'censusID', headerName: 'Census ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  {field: 'quadratID', headerName: 'Quadrat ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 0.8, align: 'left', editable: true},
+  {field: 'coreMeasurementID', headerName: '#', headerAlign: 'center', headerClassName: 'header', flex: 0.25, align: 'left'},
+  {field: 'plotID', headerName: 'Plot ID', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'plotName', headerName: 'Plot Name', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'censusID', headerName: 'Census ID', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'quadratID', headerName: 'Quadrat ID', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'quadratName', headerName: 'Quadrat', headerAlign: 'center', headerClassName: 'header', flex: 0.8, align: 'left', editable: true},
   {
     field: 'subquadratID',
-    headerName: 'Subquadrat ID',
+    headerName: 'Subquadrat ID', headerAlign: 'center',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -174,27 +174,27 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
   },
   {
     field: 'subquadratName',
-    headerName: 'Subquadrat',
+    headerName: 'Subquadrat', headerAlign: 'center',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
     editable: true
   },
-  {field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'speciesID', headerName: 'Species ID', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
   {
     field: 'speciesCode',
-    headerName: 'Species Code',
+    headerName: 'Species Code', headerAlign: 'center',
     headerClassName: 'header',
     flex: 1.2,
     align: 'left',
     editable: true
   },
-  {field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  {field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
-  {field: 'stemID', headerName: 'Stem ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
-  {field: 'stemLocalX', headerName: 'X', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
-  {field: 'stemLocalY', headerName: 'Y', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
+  {field: 'treeID', headerName: 'Tree ID', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'treeTag', headerName: 'Tree', headerAlign: 'center', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
+  {field: 'stemID', headerName: 'Stem ID', headerAlign: 'center', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'stemTag', headerName: 'Stem', headerAlign: 'center', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
+  {field: 'stemLocalX', headerName: 'X', headerAlign: 'center', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
+  {field: 'stemLocalY', headerName: 'Y', headerAlign: 'center', headerClassName: 'header', flex: 0.7, align: 'left', editable: true},
   {
     field: 'stemUnits',
     headerName: 'U',
@@ -208,7 +208,7 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
   {field: 'personnelID', headerName: 'Personnel ID', headerClassName: 'header', flex: 1, align: 'left', editable: true},
   {field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true},
   {
-    field: 'measurementDate', headerName: 'Date', headerClassName: 'header', flex: 1.2,
+    field: 'measurementDate', headerName: 'Date', headerClassName: 'header', flex: 1.2, sortable: true,
     valueGetter: (value: any) => {
       // Check if the date is present and valid
       if (!value || !moment(value).isValid()) return '';
@@ -239,7 +239,6 @@ export const MeasurementsSummaryGridColumns: GridColDef[] = [
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
   },
-  {field: 'isValidated', headerName: 'Validated', headerClassName: 'header', flex: 1, align: 'left', editable: true},
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true},
   {field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true}
 ];

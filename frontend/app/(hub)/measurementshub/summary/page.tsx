@@ -2,11 +2,9 @@
 import React, {useEffect, useState} from "react";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
-import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {MeasurementsSummaryGridColumns} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
-  IconButton,
   ListItemContent,
   ListItem,
   List,
@@ -19,7 +17,6 @@ import {
   DialogActions,
   Snackbar,
   Stack,
-  Switch,
 } from "@mui/joy";
 import Select, {SelectOption} from "@mui/joy/Select";
 import {useSession} from "next-auth/react";
@@ -58,11 +55,11 @@ export default function SummaryPage() {
   const {data: session} = useSession();
   const [quadrat, setQuadrat] = useState<Quadrat>();
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let currentSite = useSiteContext();
-  let quadratListContext = useQuadratListContext();
-  let currentQuadrat = useQuadratContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
+  const quadratListContext = useQuadratListContext();
+  const currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
   const {validity, recheckValidityIfNeeded} = useDataValidityContext();
   const [progressDialogOpen, setProgressDialogOpen] = useState(false);
@@ -336,7 +333,7 @@ export default function SummaryPage() {
 
   useEffect(() => {
     const updateUseSubquadrats = async () => {
-      let updatedPlot = {
+      const updatedPlot = {
         ...currentPlot,
         usesSubquadrats: useSubquadrats,
       };
@@ -384,7 +381,7 @@ export default function SummaryPage() {
                 )}
                 {session?.user.isAdmin ? (
                   <Stack direction="column">
-                    <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
+                    {/* <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
                     <Stack direction="row" spacing={4}>
                       <Typography level={"title-md"} sx={{color: "#ffa726"}}>Please use the toggle to change this
                         setting if it is incorrect</Typography>
@@ -402,9 +399,8 @@ export default function SummaryPage() {
                           },
                         }}
                       />
-                    </Stack>
+                    </Stack> */}
                   </Stack>
-
                 ) : (
                   <Typography level={"title-md"} sx={{color: "#ffa726"}}>If this setting is inaccurate, please contact
                     an administrator.</Typography>

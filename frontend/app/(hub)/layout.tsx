@@ -9,9 +9,6 @@ import Divider from "@mui/joy/Divider";
 import {useLoading} from "@/app/contexts/loadingprovider";
 import {getAllSchemas} from "@/components/processors/processorhelperfunctions";
 import {
-  useOrgCensusDispatch,
-  usePlotDispatch,
-  useQuadratDispatch,
   useSiteContext,
   usePlotContext,
   useOrgCensusContext,
@@ -30,7 +27,6 @@ import {
 } from "@/app/contexts/listselectionprovider";
 import {createAndUpdateCensusList} from "@/config/sqlrdsdefinitions/orgcensusrds";
 import {siteConfig} from "@/config/macros/siteconfigs";
-import {CensusRDS} from "@/config/sqlrdsdefinitions/tables/censusrds";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), {ssr: false});
 const Header = dynamic(() => import('@/components/header'), {ssr: false});
@@ -92,7 +88,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
   const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
 
-  let pathname = usePathname();
+  const pathname = usePathname();
 
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && (quadratListLoaded || subquadratListLoaded);
 
@@ -101,7 +97,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     if (censusListContext !== undefined && censusListContext.length > 0) return {success: true};
 
     setLoading(true, 'Loading raw census data');
-    let response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
+    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
     const censusRDSLoad = await response.json();
     setLoading(false);
 
@@ -120,8 +116,8 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     if (plotListContext !== undefined && plotListContext.length > 0) return {success: true};
 
     setLoading(true, "Loading plot list information...");
-    let plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
-    let plotsData = await plotsResponse.json();
+    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+    const plotsData = await plotsResponse.json();
     if (!plotsData) return {success: false, message: 'Failed to load plots data'};
     setLoading(false);
 
@@ -142,8 +138,8 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     if (quadratListContext !== undefined && quadratListContext.length > 0) return {success: true};
 
     setLoading(true, "Loading quadrat list information...");
-    let quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
-    let quadratsData = await quadratsResponse.json();
+    const quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
+    const quadratsData = await quadratsResponse.json();
     if (!quadratsData) return {success: false, message: 'Failed to load quadrats data'};
     setLoading(false);
 
@@ -164,8 +160,8 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     if (subquadratListContext !== undefined && subquadratListContext.length > 0) return {success: true};
 
     setLoading(true, "Loading subquadrat list information...");
-    let subquadratResponse = await fetch(`/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`);
-    let subquadratData = await subquadratResponse.json();
+    const subquadratResponse = await fetch(`/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`);
+    const subquadratData = await subquadratResponse.json();
     if (!subquadratData) return {success: false, message: 'Failed to load subquadrats data'};
     setLoading(false);
 
@@ -182,7 +178,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     setLoading(true, 'Loading Sites...');
     try {
       if (session && !siteListLoaded) {
-        let sites = session?.user?.allsites ?? [];
+        const sites = session?.user?.allsites ?? [];
         if (sites.length === 0) {
           throw new Error("Session sites undefined");
         } else {

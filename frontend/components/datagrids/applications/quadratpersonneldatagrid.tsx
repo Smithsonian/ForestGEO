@@ -10,7 +10,6 @@ import DataGridCommons from "../datagridcommons";
 import {
   useOrgCensusContext,
   usePlotContext,
-  useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
 import {useDataValidityContext} from "@/app/contexts/datavalidityprovider";
@@ -42,10 +41,10 @@ export default function QuadratPersonnelDataGrid() {
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
   const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
 
-  let currentSite = useSiteContext();
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let {validity} = useDataValidityContext();
+  const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const {validity} = useDataValidityContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();

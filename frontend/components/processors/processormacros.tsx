@@ -1,4 +1,4 @@
-import {PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
+import {PoolConnection, PoolOptions} from 'mysql2/promise';
 import {booleanToBit} from "@/config/macros";
 import {FileRow} from "@/config/macros/formdetails";
 
@@ -12,7 +12,7 @@ import {GridValidRowModel} from '@mui/x-data-grid';
 export async function getConn() {
   let conn: PoolConnection | null = null;
   try {
-    let i = 0;
+    const i = 0;
     conn = await getSqlConnection(i);
   } catch (error: any) {
     console.error("Error processing files:", error.message);
@@ -253,7 +253,7 @@ export function buildPaginatedQuery(config: QueryConfig): { query: string, param
   const {schema, table, joins, conditionals, pagination, extraParams} = config;
   const {page, pageSize} = pagination;
   const startRow = page * pageSize;
-  let queryParams = extraParams || [];
+  const queryParams = extraParams || [];
 
   // Establish an alias for the primary table for consistency in joins and selections
   const tableAlias = table[0].toLowerCase();  // Simple default alias based on first letter of table name

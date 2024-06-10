@@ -1,4 +1,3 @@
-import {booleanToBit} from '@/config/macros';
 import {runQuery, SpecialProcessingProps} from '@/components/processors/processormacros';
 import {getPersonnelIDByName} from './processorhelperfunctions';
 import moment from 'moment';

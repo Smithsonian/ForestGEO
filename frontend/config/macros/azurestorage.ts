@@ -14,7 +14,7 @@ export async function getContainerClient(containerName: string) {
   if (!blobServiceClient) console.error("blob service client creation failed");
   else console.error("blob service client created & connected");
   // attempt connection to pre-existing container --> additional check to see if container was found
-  let containerClient = blobServiceClient.getContainerClient(containerName);
+  const containerClient = blobServiceClient.getContainerClient(containerName);
   console.log(containerClient.url);
   if (!(await containerClient.createIfNotExists())) console.error("container client createifnotexists failure");
   else {

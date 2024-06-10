@@ -30,8 +30,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({
   // Add new state for countdown timer
   const [countdown, setCountdown] = useState(5);
   const {setLoading} = useLoading();
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   const defaultMinMaxValues: Record<string, { min?: number, max?: number }> = {
     'ValidateScreenMeasuredDiameterMinMax': {min: undefined, max: undefined},

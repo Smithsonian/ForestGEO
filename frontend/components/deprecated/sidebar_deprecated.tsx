@@ -46,7 +46,6 @@ import {
   usePlotListContext,
   useSiteListContext
 } from "@/app/contexts/listselectionprovider";
-import {getData, setData} from "@/config/db";
 import {useSession} from "next-auth/react";
 import {SlideToggle, TransitionComponent} from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
@@ -93,9 +92,9 @@ interface MRTProps {
 function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean | undefined, setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined) {
   const Icon = siteConfigProps.icon;
   const {plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete} = props;
-  let currentSite = useSiteContext();
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -134,16 +133,16 @@ interface SidebarProps {
 
 export default function SidebarDeprecated(props: SidebarProps) {
   const {data: session} = useSession();
-  let currentSite = useSiteContext();
-  let siteDispatch = useSiteDispatch();
-  let currentPlot = usePlotContext();
-  let plotDispatch = usePlotDispatch();
-  let currentCensus = useOrgCensusContext();
-  let censusDispatch = useOrgCensusDispatch();
-  let censusListContext = useOrgCensusListContext();
-  let censusListDispatch = useOrgCensusListDispatch();
-  let siteListContext = useSiteListContext();
-  let plotListContext = usePlotListContext();
+  const currentSite = useSiteContext();
+  const siteDispatch = useSiteDispatch();
+  const currentPlot = usePlotContext();
+  const plotDispatch = usePlotDispatch();
+  const currentCensus = useOrgCensusContext();
+  const censusDispatch = useOrgCensusDispatch();
+  const censusListContext = useOrgCensusListContext();
+  const censusListDispatch = useOrgCensusListDispatch();
+  const siteListContext = useSiteListContext();
+  const plotListContext = usePlotListContext();
   const {validity} = useDataValidityContext();
   const isAllValiditiesTrue = Object.values(validity).every(Boolean);
 
@@ -596,7 +595,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                           </TransitionComponent>
                         );
                       } else {
-                        let isParentDataIncomplete = item.expanded.some(subItem => {
+                        const isParentDataIncomplete = item.expanded.some(subItem => {
                           const dataKey = validityMapping[subItem.href];
                           return dataKey !== undefined && !validity[dataKey];
                         });
@@ -616,8 +615,8 @@ export default function SidebarDeprecated(props: SidebarProps) {
                                   {item.expanded.map((link, subIndex) => {
                                     const SubIcon = link.icon;
                                     const delay = (subIndex + 1) * 200;
-                                    let dataValidityKey = validityMapping[link.href];
-                                    let isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
+                                    const dataValidityKey = validityMapping[link.href];
+                                    const isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
                                     const isLinkDisabled = getDisabledState(link.href);
                                     const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
 

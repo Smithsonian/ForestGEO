@@ -18,19 +18,19 @@ export async function GET(_request: NextRequest, {params}: { params: { dataType:
       case 'attributes':
       case 'personnel':
       case 'species':
-        let baseQuery = `SELECT 1 FROM ${schema}.${params.dataType} LIMIT 1`; // Check if the table has any row
+        const baseQuery = `SELECT 1 FROM ${schema}.${params.dataType} LIMIT 1`; // Check if the table has any row
         const baseResults = await runQuery(connection, baseQuery);
         if (connection) connection.release();
         if (baseResults.length === 0) return new NextResponse(null, {status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE});
         break;
       case 'quadrats':
-        let query = `SELECT 1 FROM ${schema}.${params.dataType} WHERE PlotID = ${plotID} AND CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotCensusNumber = ${plotCensusNumber})`; // Check if the table has any row
+        const query = `SELECT 1 FROM ${schema}.${params.dataType} WHERE PlotID = ${plotID} AND CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotCensusNumber = ${plotCensusNumber})`; // Check if the table has any row
         const results = await runQuery(connection, query);
         if (connection) connection.release();
         if (results.length === 0) return new NextResponse(null, {status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE});
         break;
       case 'subquadrats':
-        let subquadratsQuery = `SELECT 1
+        const subquadratsQuery = `SELECT 1
                                 FROM ${schema}.${params.dataType} s
                                 JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
                                 WHERE q.PlotID = ${plotID}
@@ -41,7 +41,7 @@ export async function GET(_request: NextRequest, {params}: { params: { dataType:
         break;
       case 'quadratpersonnel':
         // Validation for quadrats table
-        let quadratsQuery = `SELECT 1
+        const quadratsQuery = `SELECT 1
                              FROM ${schema}.quadrats
                              WHERE PlotID = ${plotID}
                                AND CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
@@ -50,7 +50,7 @@ export async function GET(_request: NextRequest, {params}: { params: { dataType:
         if (quadratsResults.length === 0) return new NextResponse(null, {status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE});
 
         // Validation for personnel table
-        let personnelQuery = `SELECT 1 FROM ${schema}.personnel LIMIT 1`;
+        const personnelQuery = `SELECT 1 FROM ${schema}.personnel LIMIT 1`;
         const personnelResults = await runQuery(connection, personnelQuery);
         if (connection) connection.release();
         if (personnelResults.length === 0) return new NextResponse(null, {status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE});

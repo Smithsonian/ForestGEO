@@ -13,8 +13,8 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [ellipsis, setEllipsis] = useState('');
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   const updateValidations = async () => {
     setIsUpdateValidationComplete(false);

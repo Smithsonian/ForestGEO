@@ -17,7 +17,7 @@ import DataGridCommons from "../datagrids/datagridcommons";
 import {Typography} from "@mui/joy";
 
 export default function SubquadratsDataGrid() {
-  let currentQuadrat = useQuadratContext();
+  const currentQuadrat = useQuadratContext();
   const initialRows: GridRowsProp = [
     {
       id: 0,

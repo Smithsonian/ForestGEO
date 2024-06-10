@@ -8,7 +8,6 @@ import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {useSession} from "next-auth/react";
 import {Box, Typography} from "@mui/joy";
-import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
 export default function StemTreeDetailsPage() {
   const initialRows: GridRowsProp = [
@@ -47,7 +46,7 @@ export default function StemTreeDetailsPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  let currentPlot = usePlotContext();
+  const currentPlot = usePlotContext();
   const {data: session} = useSession();
   // Function to fetch paginated data
   const addNewRowToGrid = () => {

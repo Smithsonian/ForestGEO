@@ -29,9 +29,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                                                     setReviewState,
                                                     setAllRowToCMID,
                                                   }) => {
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let currentQuadrat = useQuadratContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentQuadrat = useQuadratContext();
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);

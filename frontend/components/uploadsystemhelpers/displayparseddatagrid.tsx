@@ -5,14 +5,12 @@ import React, {Dispatch, SetStateAction, useState, useEffect} from 'react';
 import {FileWithPath} from 'react-dropzone';
 import '@/styles/validationtable.css';
 import moment from 'moment';
-import {DataGrid, GridCellParams, GridColDef, GridRowModel, GridRowsProp} from '@mui/x-data-grid';
+import { GridCellParams, GridColDef, GridRowModel, GridRowsProp} from '@mui/x-data-grid';
 import {StyledDataGrid} from '@/config/styleddatagrid';
 import {
   FileErrors,
   FileRow,
-  RequiredTableHeadersByFormType,
   FileCollectionRowSet,
-  TableHeadersByFormType,
   RowValidationErrors,
   ValidationFunction,
   getTableHeaders
@@ -86,7 +84,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
   } = props;
   const singleFileData = parsedData[fileName] || {};
 
-  let currentPlot = usePlotContext();
+  const currentPlot = usePlotContext();
 
   const tableHeaders = getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [];
   const [validRows, setValidRows] = useState<GridRowsProp>([]);

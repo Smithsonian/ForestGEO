@@ -1,8 +1,6 @@
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import React, {Dispatch, SetStateAction} from "react";
 import {FileWithPath} from "react-dropzone";
-import {CensusRDS} from "../sqlrdsdefinitions/tables/censusrds";
-import {Plot} from "../sqlrdsdefinitions/tables/plotrds";
 import {FileCollectionRowSet} from "./formdetails";
 
 export interface UploadStartProps {

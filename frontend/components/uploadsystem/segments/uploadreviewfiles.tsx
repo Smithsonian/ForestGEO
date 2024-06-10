@@ -10,17 +10,14 @@ import {
   Grid,
   Pagination
 } from "@mui/material";
-import {Box, Checkbox, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
+import {Box, Checkbox, Modal, Typography} from "@mui/joy";
 import {DisplayParsedDataGridInline} from "@/components/uploadsystemhelpers/displayparseddatagrid";
 import Divider from "@mui/joy/Divider";
 import React, {useState, useEffect} from "react";
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadReviewFilesProps} from "@/config/macros/uploadsystemmacros";
-import {
-  FileCollectionRowSet,
-  RequiredTableHeadersByFormType,
-  TableHeadersByFormType
-} from "@/config/macros/formdetails";
+
+
 import {FileWithPath} from "react-dropzone";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
 import {FileList} from "@/components/uploadsystemhelpers/filelist";

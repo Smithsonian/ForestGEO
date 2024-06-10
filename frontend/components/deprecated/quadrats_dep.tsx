@@ -1,5 +1,5 @@
 "use client";
-import {GridColDef, GridRowId, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
+import {GridColDef, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useCallback, useEffect, useState} from "react";
 import {QuadratsGridColumns as BaseQuadratsGridColumns, Quadrat} from '@/config/sqlrdsdefinitions/tables/quadratrds';
@@ -10,7 +10,7 @@ import {
 } from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {Box, Button, IconButton, Modal, ModalDialog, Stack, Typography} from "@mui/joy";
+import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 
@@ -49,9 +49,9 @@ export default function QuadratsDataGrid() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormType, setUploadFormType] = useState<'quadrats' | 'subquadrats'>('quadrats');
 
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let quadratDispatch = useQuadratDispatch();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const quadratDispatch = useQuadratDispatch();
 
   useEffect(() => {
     if (currentCensus !== undefined) {

@@ -14,7 +14,7 @@ import {
   Typography
 } from "@mui/joy";
 import {UploadParseFilesProps} from "@/config/macros/uploadsystemmacros";
-import {getTableHeaders, TableHeadersByFormType} from "@/config/macros/formdetails";
+import {getTableHeaders} from "@/config/macros/formdetails";
 import {Button, Grid} from "@mui/material";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";
 import {FileList} from "@/components/uploadsystemhelpers/filelist";
@@ -32,7 +32,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
-  let currentPlot = usePlotContext();
+  const currentPlot = usePlotContext();
 
   const handleFileChange = async (newFiles: FileWithPath[]) => {
     for (const file of newFiles) {

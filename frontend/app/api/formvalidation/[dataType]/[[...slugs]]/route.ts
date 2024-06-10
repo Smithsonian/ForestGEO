@@ -18,9 +18,9 @@ export async function GET(request: NextRequest, {params}: { params: { dataType: 
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    let query = `SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1`;
-    let formatted = format(query, [`${schema}.${params.dataType}`, columnName, value]);
-    let results = await runQuery(conn, formatted);
+    const query = `SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1`;
+    const formatted = format(query, [`${schema}.${params.dataType}`, columnName, value]);
+    const results = await runQuery(conn, formatted);
     if (results.length === 0) return new NextResponse(null, {status: 404});
     return new NextResponse(null, {status: 200});
   } catch (error: any) {

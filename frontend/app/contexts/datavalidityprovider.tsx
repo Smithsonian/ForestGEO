@@ -53,7 +53,7 @@ export const DataValidityProvider = ({children}: { children: React.ReactNode }) 
   const checkDataValidity = useCallback(async (type?: keyof UnifiedValidityFlags) => {
     if (!currentSite || !currentPlot || !currentCensus) return;
     setLoading(true, 'Pre-validation in progress...');
-    let url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.plotCensusNumber}`;
+    const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.plotCensusNumber}`;
     let response;
     try {
       response = await fetch(url, {method: 'GET'});

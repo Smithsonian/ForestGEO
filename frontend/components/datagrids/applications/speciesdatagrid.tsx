@@ -58,7 +58,7 @@ export default function SpeciesDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
-  let currentPlot = usePlotContext();
+  const currentPlot = usePlotContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();

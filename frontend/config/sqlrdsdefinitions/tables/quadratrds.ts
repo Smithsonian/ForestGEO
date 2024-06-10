@@ -1,6 +1,5 @@
 import {GridColDef} from '@mui/x-data-grid';
-import {PersonnelRDS} from './personnelrds';
-import MapperFactory, {IDataMapper} from "../../datamapper";
+import {IDataMapper} from "../../datamapper";
 import {ColumnStates, unitSelectionOptions} from '@/config/macros';
 import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 

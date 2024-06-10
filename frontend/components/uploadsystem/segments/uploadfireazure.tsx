@@ -30,8 +30,8 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [countdown, setCountdown] = useState(5);
   const [startCountdown, setStartCountdown] = useState(false);
 
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors
@@ -49,7 +49,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const uploadToStorage = useCallback(async (file: FileWithPath) => {
     try {
       setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`);
-      let formData = new FormData();
+      const formData = new FormData();
       formData.append(file.name, file);
       if (uploadForm === 'measurements') {
         const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);

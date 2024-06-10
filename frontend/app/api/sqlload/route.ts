@@ -18,23 +18,23 @@ export async function POST(request: NextRequest) {
   if (!fileName) throw new Error('no file name provided!');
   fileName = fileName.trim();
   // plot ID
-  let plotIDParam = request.nextUrl.searchParams.get("plot");
+  const plotIDParam = request.nextUrl.searchParams.get("plot");
   if (!plotIDParam) throw new Error('no plot id provided!');
-  let plotID = parseInt(plotIDParam.trim());
+  const plotID = parseInt(plotIDParam.trim());
   // census ID
-  let censusIDParam = request.nextUrl.searchParams.get("census");
+  const censusIDParam = request.nextUrl.searchParams.get("census");
   if (!censusIDParam) throw new Error('no census id provided!');
-  let censusID = parseInt(censusIDParam.trim());
+  const censusID = parseInt(censusIDParam.trim());
   // quadrat ID
-  let quadratIDParam = request.nextUrl.searchParams.get("quadrat");
+  const quadratIDParam = request.nextUrl.searchParams.get("quadrat");
   if (!quadratIDParam) throw new Error("no quadrat ID provided");
-  let quadratID = parseInt(quadratIDParam.trim());
+  const quadratID = parseInt(quadratIDParam.trim());
   // form type
   let formType = request.nextUrl.searchParams.get("formType");
   if (!formType) throw new Error('no formType provided!');
   formType = formType.trim();
 // full name
-  let fullName = request.nextUrl.searchParams.get("user") ?? undefined;
+  const fullName = request.nextUrl.searchParams.get("user") ?? undefined;
   // if (!fullName) throw new Error('no full name provided!');
   // fullName = fullName.trim();
   // unit of measurement --> use has been incorporated into form
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
   try {
-    let i = 0;
+    const i = 0;
     connection = await getConn();
   } catch (error) {
     if (error instanceof Error) {
@@ -84,13 +84,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
+  const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
   for (const rowId in fileRowSet) {
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
     console.log('row for row ID: ', row);
     try {
-      let props: InsertUpdateProcessingProps = {
+      const props: InsertUpdateProcessingProps = {
         schema,
         connection,
         formType,

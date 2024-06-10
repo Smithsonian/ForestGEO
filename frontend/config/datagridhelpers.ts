@@ -2,7 +2,7 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import {GridRowModel, GridToolbarProps, GridValidRowModel} from '@mui/x-data-grid';
+import {GridRowModel, GridToolbarProps} from '@mui/x-data-grid';
 import {coreMeasurementsFields} from './sqlrdsdefinitions/tables/coremeasurementsrds';
 import {attributesFields} from './sqlrdsdefinitions/tables/attributerds';
 import {censusFields} from './sqlrdsdefinitions/tables/censusrds';

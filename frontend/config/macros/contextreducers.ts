@@ -1,6 +1,5 @@
 // contextreducers.ts
 import {Dispatch} from "react";
-import {setData} from "../db";
 
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | undefined }) => Promise<void>;

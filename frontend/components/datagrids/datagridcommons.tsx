@@ -32,12 +32,10 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import LockIcon from '@mui/icons-material/Lock';
 import Box from "@mui/joy/Box";
-import {Stack, styled, Tooltip, Typography} from "@mui/joy";
+import { styled, Tooltip, Typography} from "@mui/joy";
 import {StyledDataGrid} from "@/config/styleddatagrid";
 import {
-  computeMutation,
   createDeleteQuery,
   createFetchQuery,
   createPostPatchQuery,
@@ -340,7 +338,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const fetchPaginatedData = async (pageToFetch: number) => {
     // console.log('fetchPaginatedData triggered');
     setLoading(true, "Loading data...");
-    let paginatedQuery = createFetchQuery(
+    const paginatedQuery = createFetchQuery(
       currentSite?.schemaName ?? '',
       gridType,
       pageToFetch,
@@ -402,13 +400,12 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     }
 
     try {
-      let response, responseJSON;
-      response = await fetch(fetchProcessQuery, {
+      const response = await fetch(fetchProcessQuery, {
         method: oldRow.isNew ? 'POST' : 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({oldRow: oldRow, newRow: newRow})
       });
-      responseJSON = await response.json();
+      const responseJSON = await response.json();
       if (!response.ok) {
         setSnackbar({children: `Error: ${responseJSON.message}`, severity: 'error'});
         return Promise.reject(responseJSON.row); // Return the problematic row

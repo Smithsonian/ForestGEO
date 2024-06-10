@@ -1,8 +1,6 @@
-import {GridColDef, GridValidRowModel} from '@mui/x-data-grid';
+import {GridColDef} from '@mui/x-data-grid';
 import {IDataMapper} from "../../datamapper";
-import {bitToBoolean, booleanToBit} from '../../macros';
-import {Templates} from '@/config/datagridhelpers';
-import {NextRequest} from 'next/server';
+import {bitToBoolean} from '../../macros';
 import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 
 export type SpeciesRDS = {

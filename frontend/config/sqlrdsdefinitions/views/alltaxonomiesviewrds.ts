@@ -1,4 +1,4 @@
-import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+import {GridColDef} from "@mui/x-data-grid";
 import {IDataMapper, parseDate} from "../../datamapper";
 import {bitToBoolean, ColumnStates} from "@/config/macros";
 

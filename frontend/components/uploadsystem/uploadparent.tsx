@@ -10,7 +10,7 @@ import {
   FileRow,
   FileRowSet,
   getTableHeaders,
-  RequiredTableHeadersByFormType, TableHeadersByFormType
+  RequiredTableHeadersByFormType
 } from "@/config/macros/formdetails";
 import {FileWithPath} from "react-dropzone";
 import {useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
@@ -83,9 +83,9 @@ export default function UploadParent(props: UploadParentProps) {
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
   const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
   const [cmErrors, setCMErrors] = useState<CMError[]>([]);
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
   if (!currentSite) throw new Error('site must be selected!');
   const {data: session} = useSession();
 
@@ -410,7 +410,7 @@ export default function UploadParent(props: UploadParentProps) {
           setUploadError={setUploadError}
           setErrorComponent={setErrorComponent}
           cmErrors={cmErrors}
-          user={session?.user?.name!} allRowToCMID={allRowToCMID}/>;
+          user={session?.user?.name ? session?.user?.name : ''} allRowToCMID={allRowToCMID}/>;
       case ReviewStates.COMPLETE:
         return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm}/>;
       default:

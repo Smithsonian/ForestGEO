@@ -1,6 +1,5 @@
 import {GridSelections} from '../macros';
 import {CensusMapper, CensusRDS, CensusResult} from './tables/censusrds';
-import {format} from "mysql2/promise";
 
 interface CensusDateRange {
   censusID: number;
@@ -187,11 +186,11 @@ class OrgCensusToCensusResultMapper {
   async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, startDate: Date, description?: string): Promise<void> {
     const newCensusRDS: CensusRDS = {
       censusID: 0, // This will be replaced with the actual ID after the POST request
-      plotID,
-      plotCensusNumber,
-      startDate,
+      plotID: plotID,
+      plotCensusNumber: plotCensusNumber,
+      startDate: startDate,
       endDate: undefined,
-      description
+      description: description
     };
     // Perform the POST request
     await fetch(`/api/fixeddata/census/${schema}/censusID`, {
@@ -215,4 +214,4 @@ async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<Or
 }
 
 export {OrgCensusToCensusResultMapper, createAndUpdateCensusList, collapseCensusDataToGridSelections};
-export type {OrgCensusRDS};
+export type {CensusDateRange, OrgCensusRDS};
