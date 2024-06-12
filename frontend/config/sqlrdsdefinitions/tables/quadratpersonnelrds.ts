@@ -7,6 +7,13 @@ export interface QuadratPersonnelRDS {
   personnelID?: number;
 }
 
+export const initialQuadratPersonnelRDSRow: QuadratPersonnelRDS = {
+  id: 0,
+  quadratPersonnelID: 0,
+  quadratID: 0,
+  personnelID: 0,
+};
+
 export interface QuadratPersonnelResult {
   QuadratPersonnelID: any;
   QuadratID: any;

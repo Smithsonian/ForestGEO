@@ -1,8 +1,8 @@
 "use client";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
-import React, {useEffect, useState} from "react";
-import {QuadratsGridColumns as BaseQuadratsGridColumns} from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import React, { useState} from "react";
+import {QuadratsGridColumns as BaseQuadratsGridColumns, initialQuadratRDSRow} from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import {
   useOrgCensusContext,
   usePlotContext,
@@ -12,26 +12,12 @@ import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
+import Link from 'next/link';
 
 export default function QuadratsDataGrid() {
-  const initialRows: GridRowsProp = [
-    {
-      id: 0,
-      quadratID: null,
-      plotID: null,
-      censusID: null,
-      quadratName: null,
-      dimensionX: null,
-      dimensionY: null,
-      area: null,
-      unit: null,
-      quadratShape: null,
-    },
-  ];
-  const [rows, setRows] = React.useState(initialRows);
+  const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
-  const [locked, setLocked] = useState(false);
   const [snackbar, setSnackbar] = React.useState<Pick<
     AlertProps,
     'children' | 'severity'
@@ -50,28 +36,17 @@ export default function QuadratsDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
 
-  useEffect(() => {
-    if (currentCensus !== undefined) {
-      setLocked(currentCensus.dateRanges[0].endDate !== undefined); // if the end date is not undefined, then grid should be locked
-    }
-  }, [currentCensus]);
-
   const addNewRowToGrid = () => {
     const id = randomId();
     const nextQuadratID = (rows.length > 0
       ? rows.reduce((max, row) => Math.max(row.quadratID, max), 0)
       : 0) + 1;
     const newRow = {
+      ...initialQuadratRDSRow,
       id: id,
       quadratID: nextQuadratID,
       plotID: currentPlot ? currentPlot.id : 0,
       censusID: currentCensus ? currentCensus.dateRanges[0].censusID : 0,
-      quadratName: '',
-      dimensionX: 0,
-      dimensionY: 0,
-      area: 0,
-      unit: '',
-      quadratShape: '',
       isNew: true,
     };
     // Add the new row to the state
@@ -115,6 +90,10 @@ export default function QuadratsDataGrid() {
           }} color={'primary'}>
             Upload Quadrats
           </Button>
+          {/* Link to Quadrat Personnel Data Grid */}
+          <Link href="/fixeddatainput/quadratpersonnel" passHref>
+            <Button variant="solid" color="primary" sx={{ml: 2}}>View Quadrat Personnel</Button>
+          </Link>
         </Box>
       </Box>
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
@@ -122,7 +101,6 @@ export default function QuadratsDataGrid() {
         setRefresh(true);
       }} formType={uploadFormType}/>
       <DataGridCommons
-        locked={locked}
         gridType="quadrats"
         gridColumns={BaseQuadratsGridColumns}
         rows={rows}

@@ -26,6 +26,13 @@ export type AttributesRDS = {
   status?: string;
 };
 
+export const initialAttributesRDSRow = {
+  id: 0,
+  code: '',
+  description: '',
+  status: '',
+};
+
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
 
 export interface AttributesResult {

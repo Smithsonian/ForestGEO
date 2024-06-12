@@ -1,13 +1,13 @@
 "use client";
-import React, {useEffect, useCallback, useRef, useState} from "react";
-import {subtitle, title} from "@/config/primitives";
-import {useSession} from "next-auth/react";
-import {redirect, usePathname} from "next/navigation";
+import React, { useEffect, useCallback, useRef, useState } from "react";
+import { subtitle, title } from "@/config/primitives";
+import { useSession } from "next-auth/react";
+import { redirect, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
-import {Box} from "@mui/joy";
+import { Box } from "@mui/joy";
 import Divider from "@mui/joy/Divider";
-import {useLoading} from "@/app/contexts/loadingprovider";
-import {getAllSchemas} from "@/components/processors/processorhelperfunctions";
+import { useLoading } from "@/app/contexts/loadingprovider";
+import { getAllSchemas } from "@/components/processors/processorhelperfunctions";
 import {
   useSiteContext,
   usePlotContext,
@@ -28,39 +28,39 @@ import {
 import {createAndUpdateCensusList} from "@/config/sqlrdsdefinitions/orgcensusrds";
 import {siteConfig} from "@/config/macros/siteconfigs";
 
-const Sidebar = dynamic(() => import('@/components/sidebar'), {ssr: false});
-const Header = dynamic(() => import('@/components/header'), {ssr: false});
+const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
+const Header = dynamic(() => import('@/components/header'), { ssr: false });
 
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
-      return <Box><h3 className={title({color: "cyan"})} key={endpoint}>Dashboard - ForestGEO Application User
+      return <Box><h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User
         Guide</h3></Box>;
     case '/measurementshub/summary':
-      return <Box><h3 className={title({color: "green"})} key={endpoint}>Measurements Summary</h3></Box>;
+      return <Box><h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3></Box>;
     case '/measurementshub/validationhistory':
-      return <Box><h3 className={title({color: "green"})} key={endpoint}>Validation History</h3></Box>;
+      return <Box><h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3></Box>;
     case '/fixeddatainput/attributes':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data Hub - Attributes</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data Hub - Attributes</h3></Box>;
     case '/fixeddatainput/census':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data - Census</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Census</h3></Box>;
     case '/fixeddatainput/personnel':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data - Personnel</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Personnel</h3></Box>;
     case '/fixeddatainput/quadrats':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data - Quadrats</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Quadrats</h3></Box>;
     case '/fixeddatainput/subquadrats':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data - Subquadrats</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Subquadrats</h3></Box>;
     case '/fixeddatainput/quadratpersonnel':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data - QuadratPersonnel</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - QuadratPersonnel</h3></Box>;
     case '/fixeddatainput/alltaxonomies':
-      return <Box><h3 className={title({color: "sky"})} key={endpoint}>Supporting Data - All Taxonomies</h3></Box>;
+      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - All Taxonomies</h3></Box>;
     default:
       return <></>;
   }
 }
 
-export default function HubLayout({children}: { children: React.ReactNode }) {
-  const {setLoading} = useLoading();
+export default function HubLayout({ children }: { children: React.ReactNode }) {
+  const { setLoading } = useLoading();
 
   const censusListDispatch = useOrgCensusListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
@@ -77,7 +77,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
@@ -93,8 +93,8 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && (quadratListLoaded || subquadratListLoaded);
 
   const loadCensusData = useCallback(async () => {
-    if (!currentPlot) return {success: false, message: 'Plot must be selected to load census data'};
-    if (censusListContext !== undefined && censusListContext.length > 0) return {success: true};
+    if (!currentPlot) return { success: false, message: 'Plot must be selected to load census data' };
+    if (censusListContext !== undefined && censusListContext.length > 0) return { success: true };
 
     setLoading(true, 'Loading raw census data');
     const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
@@ -104,30 +104,30 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     setLoading(true, 'Converting raw census data...');
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     if (censusListDispatch) {
-      censusListDispatch({censusList});
+      censusListDispatch({ censusList });
     }
     setLoading(false);
     setCensusListLoaded(true);
-    return {success: true};
+    return { success: true };
   }, [censusListContext, censusListDispatch, currentPlot, currentSite, setLoading]);
 
   const loadPlotsData = useCallback(async () => {
-    if (!currentSite) return {success: false, message: 'Site must be selected to load plot data'};
-    if (plotListContext !== undefined && plotListContext.length > 0) return {success: true};
+    if (!currentSite) return { success: false, message: 'Site must be selected to load plot data' };
+    if (plotListContext !== undefined && plotListContext.length > 0) return { success: true };
 
     setLoading(true, "Loading plot list information...");
     const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
     const plotsData = await plotsResponse.json();
-    if (!plotsData) return {success: false, message: 'Failed to load plots data'};
+    if (!plotsData) return { success: false, message: 'Failed to load plots data' };
     setLoading(false);
 
     setLoading(true, "Dispatching plot list information...");
     if (plotListDispatch) {
-      await plotListDispatch({plotList: plotsData});
-    } else return {success: false, message: 'Failed to dispatch plots data'};
+      await plotListDispatch({ plotList: plotsData });
+    } else return { success: false, message: 'Failed to dispatch plots data' };
     setLoading(false);
     setPlotListLoaded(true);
-    return {success: true};
+    return { success: true };
   }, [plotListContext, plotListDispatch, currentSite, setLoading]);
 
   const loadQuadratsData = useCallback(async () => {
@@ -135,21 +135,21 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
       success: false,
       message: 'Plot and Census must be selected to load quadrat data'
     };
-    if (quadratListContext !== undefined && quadratListContext.length > 0) return {success: true};
+    if (quadratListContext !== undefined && quadratListContext.length > 0) return { success: true };
 
     setLoading(true, "Loading quadrat list information...");
     const quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
     const quadratsData = await quadratsResponse.json();
-    if (!quadratsData) return {success: false, message: 'Failed to load quadrats data'};
+    if (!quadratsData) return { success: false, message: 'Failed to load quadrats data' };
     setLoading(false);
 
     setLoading(true, "Dispatching quadrat list information...");
     if (quadratListDispatch) {
-      await quadratListDispatch({quadratList: quadratsData});
-    } else return {success: false, message: 'Failed to dispatch quadrats data'};
+      await quadratListDispatch({ quadratList: quadratsData });
+    } else return { success: false, message: 'Failed to dispatch quadrats data' };
     setLoading(false);
     setQuadratListLoaded(true);
-    return {success: true};
+    return { success: true };
   }, [quadratListContext, quadratListDispatch, currentPlot, currentCensus, currentSite, setLoading]);
 
   const loadSubquadratsData = useCallback(async () => {
@@ -157,21 +157,21 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
       success: false,
       message: 'Plot, Census, and Quadrat must be selected to load subquadrat data'
     };
-    if (subquadratListContext !== undefined && subquadratListContext.length > 0) return {success: true};
+    if (subquadratListContext !== undefined && subquadratListContext.length > 0) return { success: true };
 
     setLoading(true, "Loading subquadrat list information...");
     const subquadratResponse = await fetch(`/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`);
     const subquadratData = await subquadratResponse.json();
-    if (!subquadratData) return {success: false, message: 'Failed to load subquadrats data'};
+    if (!subquadratData) return { success: false, message: 'Failed to load subquadrats data' };
     setLoading(false);
 
     setLoading(true, "Dispatching subquadrat list information...");
     if (subquadratListDispatch) {
-      await subquadratListDispatch({subquadratList: subquadratData});
-    } else return {success: false, message: 'Failed to dispatch subquadrat list'};
+      await subquadratListDispatch({ subquadratList: subquadratData });
+    } else return { success: false, message: 'Failed to dispatch subquadrat list' };
     setLoading(false);
     setSubquadratListLoaded(true);
-    return {success: true};
+    return { success: true };
   }, [subquadratListContext, subquadratListDispatch, currentPlot, currentCensus, currentQuadrat, currentSite, setLoading]);
 
   const fetchSiteList = useCallback(async () => {
@@ -202,16 +202,16 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!plotListLoaded && plotListDispatch) {
-      plotListDispatch({plotList: undefined}).catch(console.error);
+      plotListDispatch({ plotList: undefined }).catch(console.error);
     }
     if (!censusListLoaded && censusListDispatch) {
-      censusListDispatch({censusList: undefined}).catch(console.error);
+      censusListDispatch({ censusList: undefined }).catch(console.error);
     }
     if (!quadratListLoaded && quadratListDispatch) {
-      quadratListDispatch({quadratList: undefined}).catch(console.error);
+      quadratListDispatch({ quadratList: undefined }).catch(console.error);
     }
     if (!subquadratListLoaded && subquadratListDispatch) {
-      subquadratListDispatch({subquadratList: undefined}).catch(console.error);
+      subquadratListDispatch({ subquadratList: undefined }).catch(console.error);
     }
   }, [plotListLoaded, censusListLoaded, quadratListLoaded, subquadratListLoaded]);
 
@@ -269,7 +269,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
     <>
       <Box
         className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'}`}
-        sx={{position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1000}}
+        sx={{ position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1000 }}
       >
         <Sidebar
           setCensusListLoaded={setCensusListLoaded}
@@ -278,7 +278,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
           setManualReset={setManualReset}
         />
       </Box>
-      <Header/>
+      <Header />
       <Box
         component="main"
         className="MainContent"
@@ -306,7 +306,7 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
         }}>
           {renderSwitch(usePathname())}
         </Box>
-        <Divider orientation={"horizontal"} sx={{my: '5px'}}/>
+        <Divider orientation={"horizontal"} sx={{ my: '5px' }} />
         <Box
           sx={{
             display: 'flex',
@@ -322,23 +322,23 @@ export default function HubLayout({children}: { children: React.ReactNode }) {
             </>
           )}
         </Box>
-        <Divider orientation={"horizontal"}/>
+        <Divider orientation={"horizontal"} />
         <Box mt={1}
-             sx={{
-               display: 'flex',
-               alignItems: 'center',
-               alignSelf: 'center',
-               flexDirection: 'row',
-               position: 'relative',
-               left: 'calc(-1 * var(--Sidebar-width) / 2)',
-               transition: 'top 0.3s ease-in-out', // Transition for vertical movement only
-             }}>
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            alignSelf: 'center',
+            flexDirection: 'row',
+            position: 'relative',
+            left: 'calc(-1 * var(--Sidebar-width) / 2)',
+            transition: 'top 0.3s ease-in-out', // Transition for vertical movement only
+          }}>
           <Box>
-            <h1 className={title({color: "violet"})}>{siteConfig.name}&nbsp;</h1>
+            <h1 className={title({ color: "violet" })}>{siteConfig.name}&nbsp;</h1>
           </Box>
-          <Divider orientation={"vertical"} sx={{marginRight: 2}}/>
+          <Divider orientation={"vertical"} sx={{ marginRight: 2 }} />
           <Box>
-            <p className={subtitle({color: "cyan"})}>{siteConfig.description}</p>
+            <p className={subtitle({ color: "cyan" })}>{siteConfig.description}</p>
           </Box>
         </Box>
       </Box>

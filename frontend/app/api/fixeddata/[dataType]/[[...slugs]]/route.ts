@@ -10,6 +10,7 @@ import {
   AllTaxonomiesViewQueryConfig,
   StemTaxonomiesViewQueryConfig,
 } from '@/components/processors/processorhelperfunctions';
+import { HTTPResponses } from "@/config/macros";
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
 export async function GET(request: NextRequest, {params}: {
@@ -289,21 +290,21 @@ export async function PATCH(request: NextRequest, {params}: { params: { dataType
 
 // Define mappings for views to base tables and primary keys
 const viewToTableMappings: Record<string, { table: string, primaryKey: string }> = {
-  'alltaxonomiesview': {table: 'species', primaryKey: 'SpeciesID'},
-  'stemdimensionsview': {table: 'stems', primaryKey: 'StemID'},
-  'stemtaxonomiesview': {table: 'stems', primaryKey: 'StemID'},
-  'measurementssummaryview': {table: 'coremeasurements', primaryKey: 'CoreMeasurementID'},
+  'alltaxonomiesview': { table: 'species', primaryKey: 'SpeciesID' },
+  'stemdimensionsview': { table: 'stems', primaryKey: 'StemID' },
+  'stemtaxonomiesview': { table: 'stems', primaryKey: 'StemID' },
+  'measurementssummaryview': { table: 'coremeasurements', primaryKey: 'CoreMeasurementID' },
 };
 
 // slugs: schema, gridID
 // body: full data row, only need first item from it this time though
-export async function DELETE(request: NextRequest, {params}: { params: { dataType: string, slugs?: string[] } }) {
+export async function DELETE(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const {newRow} = await request.json();
+  const { newRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
@@ -315,23 +316,28 @@ export async function DELETE(request: NextRequest, {params}: { params: { dataTyp
       const viewConfig = viewToTableMappings[params.dataType];
       if (!viewConfig) throw new Error(`No table mapping found for view ${params.dataType}`);
 
-      const {[viewConfig.primaryKey]: primaryKeyValue} = deleteRowData;
+      const { [viewConfig.primaryKey]: primaryKeyValue } = deleteRowData;
       if (!primaryKeyValue) throw new Error(`Primary key value missing for ${viewConfig.primaryKey} in view ${params.dataType}`);
 
       const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${viewConfig.table}`, viewConfig.primaryKey, primaryKeyValue]);
       await runQuery(conn, deleteQuery);
       await conn.commit();
-      return NextResponse.json({message: "Delete successful"}, {status: 200});
+      return NextResponse.json({ message: "Delete successful" }, { status: 200 });
     }
     // Handle deletion for tables
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const deleteRowData = mapper.demapData([newRow])[0];
-    const {[demappedGridID]: gridIDKey, ...remainingProperties} = deleteRowData;
+    const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);
     await conn.commit();
-    return NextResponse.json({message: "Delete successful"}, {status: 200});
+    return NextResponse.json({ message: "Delete successful" }, { status: 200 });
   } catch (error: any) {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
+      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
+      return NextResponse.json({ message: "Foreign key conflict detected", referencingTable }, { status: HTTPResponses.FOREIGN_KEY_CONFLICT });
+    }
     return handleError(error, conn, newRow);
   } finally {
     if (conn) conn.release();

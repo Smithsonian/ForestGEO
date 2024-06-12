@@ -26,6 +26,30 @@ export type AllTaxonomiesViewRDS = {
   citation?: string;
 }
 
+export const initialAllTaxonomiesViewRDSRow = {
+  id: 0,
+  speciesID: 0,
+  speciesCode: '',
+  familyID: 0,
+  family: '',
+  genusID: 0,
+  genus: '',
+  genusAuthority: '',
+  speciesName: '',
+  subspeciesName: '',
+  speciesIDLevel: '',
+  speciesAuthority: '',
+  subspeciesAuthority: '',
+  currentTaxonFlag: undefined,
+  obsoleteTaxonFlag: undefined,
+  fieldFamily: '',
+  speciesDescription: '',
+  referenceID: 0,
+  publicationTitle: '',
+  dateOfPublication: undefined,
+  citation: '',
+};
+
 export interface AllTaxonomiesViewResult {
   SpeciesID: any;
   SpeciesCode: any;

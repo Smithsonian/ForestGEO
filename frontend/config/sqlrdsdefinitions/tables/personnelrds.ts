@@ -9,7 +9,13 @@ export interface PersonnelRDS {
   lastName?: string;
   role?: string;
 }
-
+export const initialPersonnelRDSRow = {
+  id: 0,
+  personnelID: 0,
+  firstName: '',
+  lastName: '',
+  role: '',
+};
 export interface PersonnelResult {
   PersonnelID: any;
   FirstName: any;

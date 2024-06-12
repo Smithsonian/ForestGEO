@@ -1,5 +1,5 @@
 "use client";
-import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -10,8 +10,6 @@ import {
   GridRowModel,
   GridRowModes,
   GridRowModesModel,
-  GridRowsProp,
-  GridSortDirection,
   GridSortModel,
   GridToolbar,
   GridToolbarContainer,
@@ -21,7 +19,6 @@ import {
 } from '@mui/x-data-grid';
 import {
   Alert,
-  AlertProps,
   Button,
   Checkbox,
   Dialog,
@@ -60,7 +57,6 @@ import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 import moment from 'moment';
-import { CellItemContainer } from './datagridcommons';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -68,32 +64,8 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import BlockIcon from '@mui/icons-material/Block';
 import { CensusDateRange, OrgCensusRDS } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { unitSelectionOptions } from '@/config/macros';
-import { MeasurementsSummaryGridColumnsB, MeasurementsSummaryGridColumnsC, MeasurementsSummaryGridColumnsD } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
-
-const errorMapping: { [key: string]: string[] } = {
-  '1': ["attributes"],
-  '2': ["measuredDBH"],
-  '3': ["measuredHOM"],
-  '4': ["treeTag", "stemTag"],
-  '5': ["treeTag", "stemTag", "quadratName"],
-  '6': ["stemQuadX", "stemQuadY"],
-  '7': ["speciesName"],
-  '8': ["measurementDate"],
-  '9': ["treeTag", "stemTag", "plotCensusNumber"],
-  '10': ["treeTag", "stemTag", "plotCensusNumber"],
-  '11': ["quadratName"],
-  '12': ["speciesName"],
-  '13': ["measuredDBH"],
-  '14': ["measuredDBH"],
-  '15': ["treeTag"],
-  '16': ["quadratName"],
-};
-
-interface EditToolbarCustomProps {
-  handleAddNewRow?: () => void;
-  handleRefresh?: () => Promise<void>;
-  locked?: boolean;
-}
+import { gridColumnsArrayMSVRDS } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { MeasurementSummaryGridProps, sortRowsByMeasurementDate, PendingAction, CellItemContainer, errorMapping, filterColumns, ConfirmationDialogProps, EditToolbarCustomProps } from './datagridmacros';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
@@ -114,65 +86,6 @@ export function EditToolbar(props: EditToolbarProps) {
     </GridToolbarContainer>
   );
 }
-
-export interface MeasurementSummaryGridProps {
-  gridColumns: GridColDef[];
-  rows: GridRowsProp;
-  setRows: Dispatch<SetStateAction<GridRowsProp>>;
-  rowCount: number;
-  setRowCount: Dispatch<SetStateAction<number>>;
-  rowModesModel: GridRowModesModel;
-  setRowModesModel: Dispatch<SetStateAction<GridRowModesModel>>;
-  snackbar: Pick<AlertProps, "children" | "severity"> | null;
-  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, "children" | "severity"> | null>>;
-  refresh: boolean;
-  setRefresh: Dispatch<SetStateAction<boolean>>;
-  paginationModel: { pageSize: number; page: number };
-  setPaginationModel: Dispatch<SetStateAction<{ pageSize: number; page: number }>>;
-  isNewRowAdded: boolean;
-  setIsNewRowAdded: Dispatch<SetStateAction<boolean>>;
-  shouldAddRowAfterFetch: boolean;
-  setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
-  addNewRowToGrid: () => void;
-  locked?: boolean;
-  handleSelectQuadrat?: (quadratID: number | null) => void;
-}
-
-// Define types for the new states and props
-type PendingAction = {
-  actionType: 'save' | 'delete' | '';
-  actionId: GridRowId | null;
-};
-
-interface ConfirmationDialogProps {
-  isOpen: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-  message: string;
-}
-
-/**
- * Function to determine if all entries in a column are null
- */
-function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === null || row[field] === undefined);
-}
-
-/**
- * Function to filter out columns where all entries are null, except the actions column.
- */
-function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || col.field === 'subquadrats' || col.field === "isValidated" || !allValuesAreNull(rows, col.field));
-}
-
-const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
-  return rows.slice().sort((a, b) => {
-    const dateA = new Date(a.measurementDate).getTime();
-    const dateB = new Date(b.measurementDate).getTime();
-    return direction === 'asc' ? dateA - dateB : dateB - dateA;
-  });
-};
-
 /**
  * Renders custom UI components for measurement summary view.
  *
@@ -199,7 +112,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setIsNewRowAdded,
     shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
-    locked = false,
     handleSelectQuadrat,
   } = props;
 
@@ -212,6 +124,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
+  const [locked, setLocked] = useState(false);
+  const [a, b, c, d] = gridColumnsArrayMSVRDS;
   const handleSortModelChange = (newModel: GridSortModel) => {
     setSortModel(newModel);
 
@@ -934,16 +848,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const columns = useMemo(() => {
     const commonColumns = modifiedColumns;
     if (locked) {
-      return [validationStatusColumn, 
-        measurementDateColumn, ...commonColumns, 
-        ...MeasurementsSummaryGridColumnsB, dbhUnitsColumn, 
-        ...MeasurementsSummaryGridColumnsC, homUnitsColumn, ...MeasurementsSummaryGridColumnsD];
+      return [validationStatusColumn, measurementDateColumn, ...commonColumns, ...b, dbhUnitsColumn, ...c, homUnitsColumn, ...d];
     }
     return [validationStatusColumn,
-      measurementDateColumn, ...commonColumns,
-      stemUnitsColumn, ...MeasurementsSummaryGridColumnsB, 
-      dbhUnitsColumn, ...MeasurementsSummaryGridColumnsC, 
-      homUnitsColumn, ...MeasurementsSummaryGridColumnsD, getGridActionsColumn()];
+      measurementDateColumn, ...commonColumns, stemUnitsColumn, ...b, dbhUnitsColumn, ...c, homUnitsColumn, ...d, getGridActionsColumn()];
   }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
@@ -971,6 +879,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     return rows.filter(row => rowHasError(row.id)).length;
   }, [rows, gridColumns]);
 
+
+  useEffect(() => {
+    if (currentCensus !== undefined) {
+      setLocked(currentCensus.dateRanges[0].endDate !== undefined); // if the end date is not undefined, then grid should be locked
+    }
+  }, [currentCensus]);
   useEffect(() => {
     if (errorRowCount > 0) {
       setSnackbar({
@@ -1101,7 +1015,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
               },
             }}
             slots={{
-              toolbar: EditToolbar
+              toolbar: EditToolbar,
             }}
             slotProps={{
               toolbar: {

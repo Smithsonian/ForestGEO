@@ -190,6 +190,50 @@ export default function Sidebar(props: SidebarProps) {
   const { isPulsing, triggerPulse } = useLockAnimation();
   const reopenButtonRef = useRef(null);
   const addButtonRef = useRef(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
+
+  useEffect(() => {
+    const updateSidebarWidth = () => {
+      if (sidebarRef.current) {
+        const sidebarElements = sidebarRef.current.querySelectorAll('*');
+        let maxWidth = 340; // Minimum width
+
+        sidebarElements.forEach(element => {
+          if (sidebarRef.current) {
+            const elementRect = element.getBoundingClientRect();
+            const sidebarRect = sidebarRef.current.getBoundingClientRect();
+            const elementWidth = elementRect.right - sidebarRect.left;
+
+            if (elementWidth > maxWidth) {
+              maxWidth = elementWidth;
+            }
+          }
+        });
+
+        setSidebarWidth(maxWidth + 10);
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateSidebarWidth();
+    });
+
+    if (sidebarRef.current) {
+      const sidebarElements = sidebarRef.current.querySelectorAll('*');
+      sidebarElements.forEach(element => {
+        resizeObserver.observe(element);
+      });
+    }
+
+    // Initial calculation
+    updateSidebarWidth();
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [site, plot, census]);
+
 
   /** this has been postponed and marked as a future completion task. the joyride is not critical to the usage of the application.
    const [run, setRun] = useState(false);
@@ -310,7 +354,7 @@ export default function Sidebar(props: SidebarProps) {
     const highestPlotCensusNumber = validCensusListContext.length > 0
       ? validCensusListContext.reduce((max, census) =>
         census.plotCensusNumber > max ? census.plotCensusNumber : max, validCensusListContext[0].plotCensusNumber)
-      : 1;
+      : 0;
     const mapper = new OrgCensusToCensusResultMapper();
     await mapper.startNewCensus(site.schemaName, plot.plotID, highestPlotCensusNumber + 1, newStartDate, census ? census.description : undefined);
     setCensusListLoaded(false);
@@ -415,15 +459,15 @@ export default function Sidebar(props: SidebarProps) {
       <>
         {selectedSite ? (
           <Stack direction={"column"} alignItems={'start'}>
-            <Typography level='body-lg'>{`Site: ${selectedSite?.siteName}`}</Typography>
+            <Typography level='body-lg' className="sidebar-item">{`Site: ${selectedSite?.siteName}`}</Typography>
             <Stack direction={"column"} alignItems={'start'}>
-              <Typography level="body-sm" color={"primary"}>
+              <Typography level="body-sm" color={"primary"} className="sidebar-item">
                 &mdash; Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
           </Stack>
         ) : (
-          <Typography level='body-lg'>Select a Site</Typography>
+          <Typography level='body-lg' className="sidebar-item">Select a Site</Typography>
         )}
       </>
     );
@@ -441,15 +485,15 @@ export default function Sidebar(props: SidebarProps) {
       <>
         {selectedPlot ? (
           <Stack direction="column" alignItems="start">
-            <Typography level='body-md'>{`Plot: ${selectedPlot?.plotName}`}</Typography>
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <Typography level='body-md' className="sidebar-item">{`Plot: ${selectedPlot?.plotName}`}</Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }} className="sidebar-item">
               <Typography level="body-sm" color={"primary"}>
                 &mdash; Quadrats: {selectedPlot.numQuadrats}
               </Typography>
             </Box>
           </Stack>
         ) : (
-          <Typography>Select a Plot</Typography>
+          <Typography className="sidebar-item">Select a Plot</Typography>
         )}
       </>
     );
@@ -468,14 +512,14 @@ export default function Sidebar(props: SidebarProps) {
       <>
         {selectedCensus ? (
           <Stack direction={"column"} alignItems={'start'}>
-            <Typography level='body-md'>{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
+            <Typography level='body-md' className="sidebar-item">{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
             <Stack direction={"column"} alignItems={'start'}>
-              <Typography color={(!census) ? "danger" : "primary"} level="body-sm">
+              <Typography color={(!census) ? "danger" : "primary"} level="body-sm" className="sidebar-item">
                 {(census !== undefined) && (
                   <>{(census.dateRanges[0]?.startDate) ? `\u2014 Starting: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : ''}</>
                 )}
               </Typography>
-              <Typography color={(!census) ? "danger" : "primary"} level="body-sm">
+              <Typography color={(!census) ? "danger" : "primary"} level="body-sm" className="sidebar-item">
                 {(census !== undefined) && (
                   <>{(census.dateRanges[0]?.endDate) ? `\u2014 Ending ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : `\u2014 Ongoing`}</>
                 )}
@@ -483,7 +527,7 @@ export default function Sidebar(props: SidebarProps) {
             </Stack>
           </Stack>
         ) : (
-          <Typography>Select a Census</Typography>
+          <Typography className="sidebar-item">Select a Census</Typography>
         )}
       </>
     );
@@ -504,7 +548,7 @@ export default function Sidebar(props: SidebarProps) {
   const renderCensusOptions = () => (
     <Select
       placeholder="Select a Census"
-      className="census-select"
+      className="census-select sidebar-item"
       name="None"
       required
       autoFocus
@@ -529,8 +573,8 @@ export default function Sidebar(props: SidebarProps) {
               justifyContent: "space-between",
               alignItems: "center",
               width: "100%"
-            }}>
-              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            }} className="sidebar-item">
+              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }} >
                 <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
                 {item?.dateRanges?.map((dateRange, index) => (
                   <React.Fragment key={index}>
@@ -577,7 +621,7 @@ export default function Sidebar(props: SidebarProps) {
             justifyContent: "space-between",
             alignItems: "center",
             width: "100%"
-          }}>
+          }} className="sidebar-item">
             <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               <Typography level="body-md">{item?.plotName}</Typography>
               <Typography level="body-sm" color={"primary"} sx={{ paddingLeft: "1em" }}>
@@ -608,11 +652,11 @@ export default function Sidebar(props: SidebarProps) {
         if (nameA > nameB) return 1;
         return 0;
       });
-    ;
+
 
     return (
       <Select
-        className='site-select'
+        className='site-select sidebar-item'
         placeholder="Select a Site"
         name="None"
         required
@@ -626,7 +670,7 @@ export default function Sidebar(props: SidebarProps) {
         }}
       >
         <List>
-          <ListItem sticky>
+          <ListItem sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
               Deselect Site (will trigger app reset!):
             </Typography>
@@ -635,7 +679,7 @@ export default function Sidebar(props: SidebarProps) {
         </List>
         <ListDivider role="none" />
         <List sx={{ '--ListItemDecorator-size': '28px' }}>
-          <ListItem id="allowed-sites-group" sticky>
+          <ListItem id="allowed-sites-group" sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
             </Typography>
@@ -648,7 +692,7 @@ export default function Sidebar(props: SidebarProps) {
         </List>
         <ListDivider role="none" />
         <List sx={{ '--ListItemDecorator-size': '28px' }}>
-          <ListItem id="other-sites-group" sticky>
+          <ListItem id="other-sites-group" sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
             </Typography>
@@ -661,6 +705,7 @@ export default function Sidebar(props: SidebarProps) {
         </List>
       </Select>
     );
+
   };
 
   return (
@@ -681,13 +726,14 @@ export default function Sidebar(props: SidebarProps) {
       /> */}
       <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
+          ref={sidebarRef}
           className="Sidebar"
           sx={{
             position: 'sticky',
             top: 0,
             left: 0,
             height: '100vh',
-            width: 'calc(var(--Sidebar-width))',
+            width: `${sidebarWidth}px`,
             p: 2,
             flexShrink: 0,
             display: 'flex',
@@ -701,15 +747,15 @@ export default function Sidebar(props: SidebarProps) {
           <GlobalStyles
             styles={(theme) => ({
               ':root': {
-                '--Sidebar-width': '340px',
+                '--Sidebar-width': `${sidebarWidth}px`,
                 [theme.breakpoints.up('lg')]: {
-                  '--Sidebar-width': '340px',
+                  '--Sidebar-width': `${sidebarWidth}px`,
                 },
               },
             })}
           />
           <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Stack direction={"column"}>
                 <Typography level="h1">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -826,7 +872,7 @@ export default function Sidebar(props: SidebarProps) {
                       return (
                         <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
                           style={{ transitionDelay: `${delay}ms` }} direction="down">
-                          <ListItem>
+                          <ListItem className="sidebar-item">
                             {(site !== undefined && plot !== undefined && census !== undefined) ? (
                               <Tooltip title={getTooltipMessage(item.href, isDataIncomplete)} arrow>
                                 <Box sx={{ display: 'flex', flex: 1 }}>
@@ -885,7 +931,7 @@ export default function Sidebar(props: SidebarProps) {
                       return (
                         <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
                           style={{ transitionDelay: `${delay}ms` }} direction="down">
-                          <ListItem nested>
+                          <ListItem nested className="sidebar-item">
                             <SimpleToggler
                               renderToggle={MenuRenderToggle({
                                 plotSelectionRequired: plot === undefined,
@@ -910,7 +956,7 @@ export default function Sidebar(props: SidebarProps) {
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle}
                                       style={{ transitionDelay: `${delay}ms` }} direction="down">
-                                      <ListItem sx={{ marginTop: 0.75 }}>
+                                      <ListItem sx={{ marginTop: 0.75 }} className="sidebar-item">
                                         {(site !== undefined && plot !== undefined && census !== undefined) ? (
                                           <Tooltip title={tooltipMessage} arrow>
                                             <Box sx={{ display: 'flex', flex: 1 }}>
@@ -973,7 +1019,7 @@ export default function Sidebar(props: SidebarProps) {
           </Box>
 
           <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }} className="sidebar-item">
             {site && plot && (
               <>
                 {!census && censusListContext?.length === 0 ? (

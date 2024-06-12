@@ -1,8 +1,7 @@
-// NEXTAUTH ROUTE HANDLERS
-import NextAuth, {AzureADProfile} from "next-auth";
+import NextAuth, { AzureADProfile } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
-import {getAllowedSchemas, getAllSchemas, verifyEmail} from "@/components/processors/processorhelperfunctions";
-import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { getAllowedSchemas, getAllSchemas, verifyEmail } from "@/components/processors/processorhelperfunctions";
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,
@@ -11,18 +10,15 @@ const handler = NextAuth({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
       tenantId: process.env.AZURE_AD_TENANT_ID!,
-      authorization: {params: {scope: "openid profile email user.Read"}},
+      authorization: { params: { scope: "openid profile email user.Read" } },
     }),
   ],
   session: {
-    strategy: "jwt"
+    strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 24 hours (you can adjust this value as needed)
   },
   callbacks: {
-    async signIn({user, account, profile, email: signInEmail, credentials}) {
-      // console.log('User object:', user); // Debugging
-      // console.log('Profile object:', profile); // Debugging
-      // console.log('Account object: ', account); // Debugging
-      // Now using the extended AzureADProfile
+    async signIn({ user, account, profile, email: signInEmail, credentials }) {
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
       if (typeof userEmail !== 'string') {
@@ -30,13 +26,11 @@ const handler = NextAuth({
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        const {emailVerified, isAdmin} = await verifyEmail(userEmail);
+        const { emailVerified, isAdmin } = await verifyEmail(userEmail);
         if (!emailVerified) {
           throw new Error("User email not found.");
         }
-        // console.log('verify email results: ', emailVerified, isAdmin);
         user.isAdmin = isAdmin; // Add isAdmin property to the user object
-        // console.log('user admin state: ', user.isAdmin);
         user.email = userEmail;
         // console.log('getting all sites: ');
         const allSites = await getAllSchemas();
@@ -46,14 +40,13 @@ const handler = NextAuth({
         }
 
         user.sites = allowedSites;
-        // console.log('user sites: ', user.sites);
         user.allsites = allSites;
         // console.log('all sites: ', user.allsites);
       }
       return true;
     },
 
-    async jwt({token, user}) {
+    async jwt({ token, user }) {
       if (user?.isAdmin !== undefined) token.isAdmin = user.isAdmin; // Persist admin status in the JWT token
       if (user?.sites !== undefined) token.sites = user.sites; // persist allowed sites in JWT token
       if (user?.allsites !== undefined) token.allsites = user.allsites;
@@ -63,7 +56,7 @@ const handler = NextAuth({
       return token;
     },
 
-    async session({session, token}) {
+    async session({ session, token }) {
       if (typeof token.isAdmin === 'boolean') {
         session.user.isAdmin = token.isAdmin;
       } else {
@@ -86,4 +79,4 @@ const handler = NextAuth({
   }
 });
 
-export {handler as GET, handler as POST};
+export { handler as GET, handler as POST };

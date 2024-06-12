@@ -1,5 +1,5 @@
 "use client";
-import React, {Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState} from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
   GridColDef,
@@ -9,7 +9,6 @@ import {
   GridRowModel,
   GridRowModes,
   GridRowModesModel,
-  GridRowsProp,
   GridToolbar,
   GridToolbarContainer,
   GridToolbarProps,
@@ -17,13 +16,7 @@ import {
 } from '@mui/x-data-grid';
 import {
   Alert,
-  AlertProps,
   Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
   Snackbar
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -33,8 +26,8 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
-import { styled, Tooltip, Typography} from "@mui/joy";
-import {StyledDataGrid} from "@/config/styleddatagrid";
+import { Tooltip, Typography } from "@mui/joy";
+import { StyledDataGrid } from "@/config/styleddatagrid";
 import {
   createDeleteQuery,
   createFetchQuery,
@@ -42,102 +35,39 @@ import {
   getColumnVisibilityModel,
   getGridID,
 } from "@/config/datagridhelpers";
-import {useSession} from "next-auth/react";
+import { useSession } from "next-auth/react";
 import {
   useOrgCensusContext,
   usePlotContext,
   useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import {redirect} from 'next/navigation';
-import {UnifiedValidityFlags} from '@/config/macros';
-import {useDataValidityContext} from '@/app/contexts/datavalidityprovider';
-import {useLockAnimation} from '@/app/contexts/lockanimationcontext';
-import {useLoading} from '@/app/contexts/loadingprovider';
-
-interface EditToolbarCustomProps {
-  handleAddNewRow?: () => void;
-  handleRefresh?: () => Promise<void>;
-  locked?: boolean;
-}
+import { redirect } from 'next/navigation';
+import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import { useLoading } from '@/app/contexts/loadingprovider';
+import { EditToolbarCustomProps, DataGridCommonProps, PendingAction, CellItemContainer, filterColumns } from './datagridmacros';
+import ReEnterDataModal from './reentrydatamodal';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
 export function EditToolbar(props: EditToolbarProps) {
-  const {handleAddNewRow, handleRefresh, locked = false} = props;
+  const { handleAddNewRow, handleRefresh, locked = false } = props;
 
   return (
     <GridToolbarContainer>
-      <GridToolbar/>
+      <GridToolbar />
       {!locked && (
-        <Button color="primary" startIcon={<AddIcon/>} onClick={handleAddNewRow}>
+        <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
           Add Row
         </Button>
       )}
-      <Button color="primary" startIcon={<RefreshIcon/>} onClick={handleRefresh}>
+      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
         Refresh
       </Button>
     </GridToolbarContainer>
   );
-}
-
-export interface DataGridCommonProps {
-  gridType: string;
-  gridColumns: GridColDef[];
-  rows: GridRowsProp;
-  setRows: Dispatch<SetStateAction<GridRowsProp>>;
-  rowCount: number;
-  setRowCount: Dispatch<SetStateAction<number>>;
-  rowModesModel: GridRowModesModel;
-  setRowModesModel: Dispatch<SetStateAction<GridRowModesModel>>;
-  snackbar: Pick<AlertProps, "children" | "severity"> | null;
-  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, "children" | "severity"> | null>>;
-  refresh: boolean;
-  setRefresh: Dispatch<SetStateAction<boolean>>;
-  paginationModel: { pageSize: number, page: number };
-  setPaginationModel: Dispatch<SetStateAction<{ pageSize: number, page: number }>>;
-  isNewRowAdded: boolean;
-  setIsNewRowAdded: Dispatch<SetStateAction<boolean>>;
-  shouldAddRowAfterFetch: boolean;
-  setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
-  addNewRowToGrid: () => void;
-  locked?: boolean;
-  handleSelectQuadrat?: (quadratID: number | null) => void;
-}
-
-// Define types for the new states and props
-type PendingAction = {
-  actionType: 'save' | 'delete' | '';
-  actionId: GridRowId | null;
-};
-
-interface ConfirmationDialogProps {
-  isOpen: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-  message: string;
-}
-
-export const CellItemContainer = styled('div')({
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  height: '100%',
-});
-
-/**
- * Function to determine if all entries in a column are null
- */
-function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === null || row[field] === undefined);
-}
-
-/**
- * Function to filter out columns where all entries are null, except the actions column.
- */
-function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || !allValuesAreNull(rows, col.field));
 }
 
 /**
@@ -167,21 +97,25 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     isNewRowAdded,
     setIsNewRowAdded,
     setShouldAddRowAfterFetch,
-    locked = false,
     handleSelectQuadrat,
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [locked, setLocked] = useState(false);
+
+  const [reentryData, setReentryData] = useState<GridRowModel | null>(null);
+  const [currentRow, setCurrentRow] = useState<GridRowModel | null>(null);
+  const [editedRows, setEditedRows] = useState<Record<GridRowId, GridRowModel>>({});
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
 
-  const {setLoading} = useLoading();
+  const { setLoading } = useLoading();
 
-  const {triggerRefresh} = useDataValidityContext();
-  const {triggerPulse} = useLockAnimation();
+  const { triggerRefresh } = useDataValidityContext();
+  const { triggerPulse } = useLockAnimation();
 
   const handleLockedClick = () => {
     triggerPulse();
@@ -199,29 +133,35 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     actionType: 'save' | 'delete',
     actionId: GridRowId
   ) => {
-    setPendingAction({actionType, actionId});
-    setIsDialogOpen(true);
+    setPendingAction({ actionType, actionId });
+    const row = rows.find(row => String(row.id) === String(actionId));
+    console.log('openConfirmationDialog: row: ', row);
+    if (row && actionType === 'save') {
+      setReentryData({ ...row });
+      setIsDialogOpen(true);
+    } else if (row && actionType === 'delete') {
+      setIsDialogOpen(true);
+    } else {
+      throw new Error('unexpected error. pending action state received invalid action type.');
+    }
   };
 
   const handleConfirmAction = async () => {
     setIsDialogOpen(false);
-    if (
-      pendingAction.actionType === 'save' &&
-      pendingAction.actionId !== null
-    ) {
-      await performSaveAction(pendingAction.actionId);
-    } else if (
-      pendingAction.actionType === 'delete' &&
-      pendingAction.actionId !== null
-    ) {
+    if (pendingAction.actionType === 'save' && pendingAction.actionId !== null) {
+      if (reentryData && currentRow) {
+        await performSaveAction(pendingAction.actionId);
+        setReentryData(null);
+      }
+    } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
       await performDeleteAction(pendingAction.actionId);
     }
-    setPendingAction({actionType: '', actionId: null});
+    setPendingAction({ actionType: '', actionId: null });
   };
 
   const handleCancelAction = () => {
     setIsDialogOpen(false);
-    setPendingAction({actionType: '', actionId: null});
+    setPendingAction({ actionType: '', actionId: null });
   };
 
   const performSaveAction = async (id: GridRowId) => {
@@ -230,7 +170,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     // console.log('save confirmed');
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.View}
+      [id]: { mode: GridRowModes.View }
     }));
     // console.log('Updated rowModesModel:', rowModesModel);
     const row = rows.find(row => String(row.id) === String(id));
@@ -269,14 +209,19 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({oldRow: undefined, newRow: rows.find(row => String(row.id) === String(id))!})
+      body: JSON.stringify({ oldRow: undefined, newRow: rows.find(row => String(row.id) === String(id))! })
     });
     setLoading(false);
     if (!response.ok) {
-      setSnackbar({children: 'Error: Deletion failed', severity: 'error'});
+      const error = await response.json();
+      if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
+        setSnackbar({ children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`, severity: 'error' });
+      } else {
+        setSnackbar({ children: `Error: ${error.message || 'Deletion failed'}`, severity: 'error' });
+      }
     } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
-      setSnackbar({children: 'Row successfully deleted', severity: 'success'});
+      setSnackbar({ children: 'Row successfully deleted', severity: 'success' });
       setRows(rows.filter(row => String(row.id) !== String(id)));
       triggerRefresh([gridType as keyof UnifiedValidityFlags]);
       await fetchPaginatedData(paginationModel.page);
@@ -323,10 +268,10 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     // console.log('newRowCount:', newRowCount, 'calculatedNewLastPage:', calculatedNewLastPage, 'isNewPageNeeded:', isNewPageNeeded);
 
     if (isNewPageNeeded) {
-      setPaginationModel({...paginationModel, page: calculatedNewLastPage});
+      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
       addNewRowToGrid();
     } else {
-      setPaginationModel({...paginationModel, page: existingLastPage});
+      setPaginationModel({ ...paginationModel, page: existingLastPage });
       addNewRowToGrid();
     }
   };
@@ -348,7 +293,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       currentQuadrat?.quadratID
     );
     try {
-      const response = await fetch(paginatedQuery, {method: 'GET'});
+      const response = await fetch(paginatedQuery, { method: 'GET' });
       const data = await response.json();
       // console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
@@ -363,11 +308,17 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       // console.log('Data validity refresh triggered for gridType:', gridType);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setSnackbar({children: 'Error fetching data', severity: 'error'});
+      setSnackbar({ children: 'Error fetching data', severity: 'error' });
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (currentCensus !== undefined) {
+      setLocked(currentCensus.dateRanges[0].endDate !== undefined); // if the end date is not undefined, then grid should be locked
+    }
+  }, [currentCensus]);
 
   useEffect(() => {
     if (!isNewRowAdded) {
@@ -402,15 +353,15 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     try {
       const response = await fetch(fetchProcessQuery, {
         method: oldRow.isNew ? 'POST' : 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({oldRow: oldRow, newRow: newRow})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
       });
       const responseJSON = await response.json();
       if (!response.ok) {
-        setSnackbar({children: `Error: ${responseJSON.message}`, severity: 'error'});
+        setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
         return Promise.reject(responseJSON.row); // Return the problematic row
       }
-      setSnackbar({children: oldRow.isNew ? 'New row added!' : 'Row updated!', severity: 'success'});
+      setSnackbar({ children: oldRow.isNew ? 'New row added!' : 'Row updated!', severity: 'success' });
       if (oldRow.isNew) {
         setIsNewRowAdded(false);
         setShouldAddRowAfterFetch(false);
@@ -418,7 +369,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       }
       return newRow;
     } catch (error: any) {
-      setSnackbar({children: `Error: ${error.message}`, severity: 'error'});
+      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
       return Promise.reject(newRow);
     } finally {
       setLoading(false);
@@ -428,6 +379,14 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     // console.log('New Row Modes Model:', newRowModesModel);
     setRowModesModel(newRowModesModel);
+
+    const rowInEditMode = Object.entries(newRowModesModel).find(([id, mode]) => mode.mode === GridRowModes.Edit);
+    if (rowInEditMode) {
+      const [id] = rowInEditMode;
+      const row = rows.find(row => String(row.id) === String(id));
+      console.log('handleRowModesModelChange triggered on row: ', row);
+      setCurrentRow(row ? { ...row } : null);
+    }
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -444,13 +403,15 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleEditClick = (id: GridRowId) => () => {
     if (locked) return;
     const row = rows.find(row => String(row.id) === String(id));
+    console.log('handleEditClick row: ', row);
+    setCurrentRow({ ...row });
     if (row && handleSelectQuadrat) {
       handleSelectQuadrat(row.quadratID);
     }
     // console.log('Edit Click - Before Set:', rowModesModel);
     setRowModesModel((prevModel) => ({
       ...prevModel,
-      [id]: {mode: GridRowModes.Edit},
+      [id]: { mode: GridRowModes.Edit },
     }));
     // console.log('Edit Click - After Set:', rowModesModel);
   };
@@ -460,18 +421,19 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     event?.preventDefault();
     // console.log('Cancel clicked for row ID:', id);
     const row = rows.find(row => String(row.id) === String(id));
+    setCurrentRow(null);
     if (row?.isNew) {
       // console.log('New row cancelled, removing from rows');
       setRows(oldRows => oldRows.filter(row => row.id !== id));
       setIsNewRowAdded(false);
       if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
         const newPage = paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
-        setPaginationModel({...paginationModel, page: newPage});
+        setPaginationModel({ ...paginationModel, page: newPage });
       }
     } else {
       setRowModesModel((prevModel) => ({
         ...prevModel,
-        [id]: {mode: GridRowModes.View, ignoreModifications: true},
+        [id]: { mode: GridRowModes.View, ignoreModifications: true },
       }));
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
@@ -496,7 +458,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
               }
             }}
           >
-            <GridActionsCellItem icon={icon} label={type} disabled={locked}/>
+            <GridActionsCellItem icon={icon} label={type} disabled={locked} />
           </span>
         </Tooltip>
       </CellItemContainer>
@@ -510,19 +472,19 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       headerName: 'Actions',
       width: 100,
       cellClassName: 'actions',
-      getActions: ({id}) => {
+      getActions: ({ id }) => {
         const isInEditMode = rowModesModel[id]?.mode === 'edit';
 
         if (isInEditMode && !locked) {
           return [
-            getEnhancedCellAction('Save', <SaveIcon/>, handleSaveClick(id)),
-            getEnhancedCellAction('Cancel', <CancelIcon/>, (e: any) => handleCancelClick(id, e)),
+            getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
+            getEnhancedCellAction('Cancel', <CancelIcon />, (e: any) => handleCancelClick(id, e)),
           ];
         }
 
         return [
-          getEnhancedCellAction('Edit', <EditIcon/>, handleEditClick(id)),
-          getEnhancedCellAction('Delete', <DeleteIcon/>, handleDeleteClick(id)),
+          getEnhancedCellAction('Edit', <EditIcon />, handleEditClick(id)),
+          getEnhancedCellAction('Delete', <DeleteIcon />, handleDeleteClick(id)),
         ];
       },
     };
@@ -553,12 +515,12 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
           }
         }}
       >
-        <Box sx={{width: '100%', flexDirection: 'column'}}>
+        <Box sx={{ width: '100%', flexDirection: 'column' }}>
           <Typography level={'title-lg'}>
             Note: The Grid is filtered by your selected Plot and Plot ID
           </Typography>
           <StyledDataGrid
-            sx={{width: '100%'}}
+            sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
             editMode='row'
@@ -569,7 +531,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             processRowUpdate={processRowUpdate}
             onProcessRowUpdateError={(error) => {
               console.error('Row update error:', error);
-              setSnackbar({children: 'Error updating row', severity: 'error'});
+              setSnackbar({ children: 'Error updating row', severity: 'error' });
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
@@ -605,47 +567,24 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         {!!snackbar && (
           <Snackbar
             open
-            anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
             onClose={handleCloseSnackbar}
             autoHideDuration={6000}
           >
-            <Alert {...snackbar} onClose={handleCloseSnackbar}/>
+            <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
-        <ConfirmationDialog
-          isOpen={isDialogOpen}
-          onConfirm={handleConfirmAction}
-          onCancel={handleCancelAction}
-          message={
-            pendingAction.actionType === 'save'
-              ? 'Are you sure you want to save changes?'
-              : 'Are you sure you want to delete this row?'
-          }
-        />
+        {isDialogOpen && currentRow && (
+          <ReEnterDataModal
+            row={currentRow}
+            reEnterData={reentryData}
+            setReEnterData={setReentryData}
+            handleClose={handleCancelAction}
+            handleSave={handleConfirmAction}
+            columns={gridColumns}
+          />
+        )}
       </Box>
     );
   }
 }
-
-// ConfirmationDialog component with TypeScript types
-const ConfirmationDialog: React.FC<ConfirmationDialogProps> = (props) => {
-  const {isOpen, onConfirm, onCancel, message} = props;
-  return (
-    <Dialog open={isOpen} onClose={onCancel}>
-      <DialogTitle>Confirm Action</DialogTitle>
-      <DialogContent>
-        <DialogContentText>
-          {message}
-        </DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel} color="primary">
-          Cancel
-        </Button>
-        <Button onClick={onConfirm} color="primary">
-          Confirm
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-};

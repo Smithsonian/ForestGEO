@@ -24,6 +24,28 @@ export type StemTaxonomiesViewRDS = {
   speciesIDLevel?: string;
   speciesFieldFamily?: string;
 }
+export const initialStemTaxonomiesViewRDSRow: StemTaxonomiesViewRDS = {
+  id: 0,
+  stemID: 0,
+  stemTag: '',
+  treeID: 0,
+  treeTag: '',
+  speciesID: 0,
+  speciesCode: '',
+  familyID: 0,
+  family: '',
+  genusID: 0,
+  genus: '',
+  speciesName: '',
+  subspeciesName: '',
+  currentTaxonFlag: undefined,
+  obsoleteTaxonFlag: undefined,
+  genusAuthority: '',
+  speciesAuthority: '',
+  subspeciesAuthority: '',
+  speciesIDLevel: '',
+  speciesFieldFamily: ''
+};
 
 export interface StemTaxonomiesViewResult {
   StemID: any;

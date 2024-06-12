@@ -29,6 +29,21 @@ export type QuadratRDS = {
 //   `,
 // };
 
+export const initialQuadratRDSRow: QuadratRDS = {
+  id: 0,
+  quadratID: 0,
+  plotID: 0,
+  censusID: 0,
+  quadratName: '',
+  startX: 0,
+  startY: 0,
+  dimensionX: 0,
+  dimensionY: 0,
+  area: 0,
+  unit: 'm',
+  quadratShape: '',
+};
+
 export interface QuadratRaw {
   quadratID: number;
   plotID: number;

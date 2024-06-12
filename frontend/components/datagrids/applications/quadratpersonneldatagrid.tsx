@@ -1,6 +1,6 @@
 "use client";
 
-import {Box, Typography} from "@mui/joy";
+import {Box, Typography, Button} from "@mui/joy";
 import {AlertProps} from "@mui/material";
 import {GridColDef, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
@@ -14,15 +14,11 @@ import {
 } from "@/app/contexts/userselectionprovider";
 import {useDataValidityContext} from "@/app/contexts/datavalidityprovider";
 import {GridSelections} from "@/config/macros";
+import { initialQuadratPersonnelRDSRow } from "@/config/sqlrdsdefinitions/tables/quadratpersonnelrds";
+import { useRouter } from 'next/navigation';
 
 export default function QuadratPersonnelDataGrid() {
-  const initialRows: GridRowsProp = [{
-    id: 0,
-    quadratPersonnelID: 0,
-    quadratID: 0,
-    personnelID: 0,
-  }];
-  const [rows, setRows] = useState(initialRows);
+  const [rows, setRows] = useState([initialQuadratPersonnelRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);  // total number of rows
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = useState<Pick<
@@ -37,6 +33,7 @@ export default function QuadratPersonnelDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const {data: session} = useSession();
+  const router = useRouter();
 
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
   const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
@@ -52,10 +49,9 @@ export default function QuadratPersonnelDataGrid() {
       ? rows.reduce((max, row) => Math.max(row.quadratPersonnelID, max), 0)
       : 0) + 1;
     const newRow = {
+      ...initialQuadratPersonnelRDSRow,
       id: id,
       quadratPersonnelID: nextQuadratPersonnelID + 1,
-      quadratID: null,
-      personnelID: null,
       isNew: true,
     };
     // Add the new row to the state
@@ -140,11 +136,13 @@ export default function QuadratPersonnelDataGrid() {
               </Typography>
             )}
           </Box>
-
+          {/* Back Button */}
+          <Button onClick={() => router.back()} variant="solid" color="primary">
+            Back to Previous Grid
+          </Button>
         </Box>
       </Box>
       <DataGridCommons
-        locked={!validity['quadratpersonnel']}
         gridType="quadratpersonnel"
         gridColumns={QuadratPersonnelGridColumns}
         rows={rows}

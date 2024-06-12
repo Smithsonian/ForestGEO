@@ -23,6 +23,7 @@ export enum HTTPResponses {
   SQL_CONNECTION_FAILURE = 408, // Custom code, example
   INVALID_REQUEST = 400,
   PRECONDITION_VALIDATION_FAILURE = 412,
+  FOREIGN_KEY_CONFLICT = 555,
   NOT_FOUND, // Custom code, example
 }
 

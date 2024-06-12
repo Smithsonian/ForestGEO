@@ -1,17 +1,17 @@
-// attributes datagrid
+// stemtaxonomiesview datagrid
 "use client";
 import {GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {AttributeGridColumns, initialAttributesRDSRow} from '@/config/sqlrdsdefinitions/tables/attributerds';
 import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
+import { initialStemTaxonomiesViewRDSRow, StemTaxonomiesViewGridColumns } from "@/config/sqlrdsdefinitions/views/stemtaxonomiesviewrds";
 
-export default function AttributesDataGrid() {
-  const [rows, setRows] = useState([initialAttributesRDSRow] as GridRowsProp);
+export default function StemTaxonomiesViewDataGrid() {
+  const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = React.useState<Pick<
@@ -27,11 +27,16 @@ export default function AttributesDataGrid() {
 
   const addNewRowToGrid = () => {
     const id = randomId();
-    const newRow = {...initialAttributesRDSRow, id, isNew: true};
+    const newRow = {
+      ...initialStemTaxonomiesViewRDSRow,
+      id,
+      isNew: true,
+    };
+
     setRows(oldRows => [...oldRows ?? [], newRow]);
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: 'edit', fieldToFocus: 'code'},
+      [id]: {mode: 'edit', fieldToFocus: 'stemTag'},
     }));
     console.log('attributes addnewrowtogrid triggered');
   };
@@ -65,11 +70,11 @@ export default function AttributesDataGrid() {
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
         setIsUploadModalOpen(false);
         setRefresh(true);
-      }} formType={"attributes"}/>
+      }} formType={"species"}/>
 
       <DataGridCommons
-        gridType="attributes"
-        gridColumns={AttributeGridColumns}
+        gridType="stemtaxonomiesview"
+        gridColumns={StemTaxonomiesViewGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

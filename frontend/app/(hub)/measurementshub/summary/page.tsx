@@ -2,7 +2,7 @@
 import React, {useEffect, useState} from "react";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses} from "@mui/material";
-import {MeasurementsSummaryGridColumnsA} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import {gridColumnsArrayMSVRDS, initialMeasurementsSummaryViewRDSRow} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {
   Box,
   ListItemContent,
@@ -23,7 +23,6 @@ import {useSession} from "next-auth/react";
 import {
   useOrgCensusContext,
   usePlotContext,
-  useQuadratContext,
   useQuadratDispatch,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
@@ -59,7 +58,6 @@ export default function SummaryPage() {
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   const quadratListContext = useQuadratListContext();
-  const currentQuadrat = useQuadratContext();
   const quadratDispatch = useQuadratDispatch();
   const {validity, recheckValidityIfNeeded} = useDataValidityContext();
   const [progressDialogOpen, setProgressDialogOpen] = useState(false);
@@ -75,41 +73,7 @@ export default function SummaryPage() {
     }
   }, [currentPlot, quadratListContext]);
 
-  const initialRows: GridRowsProp = [
-    {
-      id: 0,
-      coreMeasurementID: null,
-      plotID: null,
-      plotName: null,
-      censusID: null,
-      censusStartDate: null,
-      censusEndDate: null,
-      quadratID: null,
-      quadratName: '',
-      subquadratID: null,
-      subquadratName: '',
-      stemID: null,
-      stemTag: '',
-      speciesID: null,
-      speciesCode: '',
-      treeID: null,
-      treeTag: '',
-      stemLocalX: 0,
-      stemLocalY: 0,
-      stemUnits: '',
-      personnelID: 0,
-      personnelName: '',
-      measurementDate: null,
-      measuredDBH: 0,
-      dbhUnits: '',
-      measuredHOM: 0,
-      homUnits: '',
-      description: '',
-      attributes: [],
-    }
-  ];
-
-  const [rows, setRows] = React.useState(initialRows);
+  const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
@@ -136,6 +100,7 @@ export default function SummaryPage() {
     const id = randomId();
     // Define new row structure based on MeasurementsSummaryRDS type
     const newRow = {
+      ...initialMeasurementsSummaryViewRDSRow,
       id: id,
       coreMeasurementID: 0,
       plotID: currentPlot?.plotID,
@@ -143,28 +108,6 @@ export default function SummaryPage() {
       censusID: currentCensus?.dateRanges[0].censusID,
       censusStartDate: currentCensus?.dateRanges[0]?.startDate,
       censusEndDate: currentCensus?.dateRanges[0]?.endDate,
-      quadratID: null,
-      quadratName: null,
-      subquadratID: null,
-      subquadratName: null,
-      speciesID: 0,
-      speciesCode: '',
-      treeID: 0,
-      treeTag: '',
-      stemID: 0,
-      stemTag: '',
-      stemLocalX: 0,
-      stemLocalY: 0,
-      stemUnits: '',
-      personnelID: 0,
-      personnelName: '',
-      measurementDate: undefined,
-      measuredDBH: 0,
-      dbhUnits: '',
-      measuredHOM: 0,
-      homUnits: '',
-      description: '',
-      attributes: [],
       isNew: true,
     };
     setRows(oldRows => [...oldRows, newRow]);
@@ -422,8 +365,7 @@ export default function SummaryPage() {
         formType={"measurements"}
       />
       <MeasurementSummaryGrid
-        locked={!validity['quadrats']}
-        gridColumns={MeasurementsSummaryGridColumnsA}
+        gridColumns={gridColumnsArrayMSVRDS[0]}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

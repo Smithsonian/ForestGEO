@@ -8,35 +8,10 @@ import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import {AllTaxonomiesViewGridColumns} from "@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds";
+import {AllTaxonomiesViewGridColumns, initialAllTaxonomiesViewRDSRow} from "@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds";
 
 export default function AllTaxonomiesViewDataGrid() {
-  const initialRows: GridRowsProp = [
-    {
-      id: 0,
-      speciesID: 0,
-      speciesCode: '',
-      familyID: 0,
-      family: '',
-      genusID: 0,
-      genus: '',
-      genusAuthority: '',
-      speciesName: '',
-      subspeciesName: '',
-      speciesIDLevel: '',
-      speciesAuthority: '',
-      subspeciesAuthority: '',
-      currentTaxonFlag: null,
-      obsoleteTaxonFlag: null,
-      fieldFamily: '',
-      speciesDescription: '',
-      referenceID: 0,
-      publicationTitle: '',
-      dateOfPublication: null,
-      citation: '',
-    }
-  ];
-  const [rows, setRows] = useState(initialRows);
+  const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = React.useState<Pick<
@@ -53,35 +28,17 @@ export default function AllTaxonomiesViewDataGrid() {
   const addNewRowToGrid = () => {
     const id = randomId();
     const newRow = {
+      ...initialAllTaxonomiesViewRDSRow,
       id,
-      speciesID: 0,
-      speciesCode: '',
-      familyID: 0,
-      family: '',
-      genusID: 0,
-      genus: '',
-      genusAuthority: '',
-      speciesName: '',
-      subspeciesName: '',
-      speciesIDLevel: '',
-      speciesAuthority: '',
-      subspeciesAuthority: '',
-      currentTaxonFlag: null,
-      obsoleteTaxonFlag: null,
-      fieldFamily: '',
-      speciesDescription: '',
-      referenceID: 0,
-      publicationTitle: '',
-      dateOfPublication: null,
-      citation: '',
       isNew: true,
     };
+
     setRows(oldRows => [...oldRows ?? [], newRow]);
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: 'edit', fieldToFocus: 'code'},
+      [id]: {mode: 'edit', fieldToFocus: 'speciesCode'},
     }));
-    console.log('attributes addnewrowtogrid triggered');
+    console.log('alltaxonomiesview addnewrowtogrid triggered');
   };
 
   return (
