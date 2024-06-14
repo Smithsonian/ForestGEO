@@ -1,6 +1,6 @@
 import {IDataMapper} from "@/config/datamapper";
-import {bitToBoolean} from "@/config/macros";
-import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+import {bitToBoolean, ColumnStates} from "@/config/macros";
+import {GridColDef} from "@mui/x-data-grid";
 
 export type StemTaxonomiesViewRDS = {
   id?: number;
@@ -24,6 +24,28 @@ export type StemTaxonomiesViewRDS = {
   speciesIDLevel?: string;
   speciesFieldFamily?: string;
 }
+export const initialStemTaxonomiesViewRDSRow: StemTaxonomiesViewRDS = {
+  id: 0,
+  stemID: 0,
+  stemTag: '',
+  treeID: 0,
+  treeTag: '',
+  speciesID: 0,
+  speciesCode: '',
+  familyID: 0,
+  family: '',
+  genusID: 0,
+  genus: '',
+  speciesName: '',
+  subspeciesName: '',
+  currentTaxonFlag: undefined,
+  obsoleteTaxonFlag: undefined,
+  genusAuthority: '',
+  speciesAuthority: '',
+  subspeciesAuthority: '',
+  speciesIDLevel: '',
+  speciesFieldFamily: ''
+};
 
 export interface StemTaxonomiesViewResult {
   StemID: any;
@@ -98,17 +120,43 @@ export class StemTaxonomiesMapper implements IDataMapper<StemTaxonomiesViewResul
   }
 }
 
+export function getStemTaxonomiesViewHCs(): ColumnStates {
+  return {
+    treeID: false,
+    speciesID: false,
+    familyID: false,
+    genusID: false,
+    quadratName: false,
+    plotName: false,
+    locationName: false,
+    countryName: false,
+    quadratDimensionX: false,
+    quadratDimensionY: false,
+    stemQuadX: false,
+    stemQuadY: false,
+    stemDescription: false,
+  };
+}
+
 export const StemTaxonomiesViewGridColumns: GridColDef[] = [
-  {field: 'stemID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'stemID', headerName: '#', headerClassName: 'header', flex: 0.1, align: 'left'},
   {field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left'},
   {field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'quadratName', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'plotName', headerName: 'Plot', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'locationName', headerName: 'Location', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'countryName', headerName: 'Country', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'quadratDimensionX', headerName: 'QDimX', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'quadratDimensionY', headerName: 'QDimY', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemQuadX', headerName: 'SQuadX', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemQuadY', headerName: 'SQuadY', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'stemDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesCode', headerName: 'Species Code', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'genusID', headerName: 'Genus ID', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subspeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'currentTaxonFlag', headerName: 'CTF', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'obsoleteTaxonFlag', headerName: 'OTF', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'genusAuthority', headerName: 'Genus Authority', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesAuthority', headerName: 'Species Authority', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'subspeciesAuthority', headerName: 'Subspecies Authority', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesIDLevel', headerName: 'Species ID Level', headerClassName: 'header', flex: 1, align: 'left'},
+  {field: 'speciesFieldFamily', headerName: 'Species Field Family', headerClassName: 'header', flex: 1, align: 'left'},
 ];
+

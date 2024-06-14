@@ -1,15 +1,16 @@
 "use client";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useOrgCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
-import { UnifiedValidityFlags } from "@/config/macros";
-import { useLoading } from "./loadingprovider";
+import React, {createContext, useCallback, useContext, useEffect, useState} from "react";
+import {useOrgCensusContext, usePlotContext, useSiteContext} from "./userselectionprovider";
+import {UnifiedValidityFlags} from "@/config/macros";
+import {useLoading} from "./loadingprovider";
+import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from "./listselectionprovider";
+import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusrds";
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
   personnel: false,
   species: false,
   quadrats: false,
-  subquadrats: false,
   quadratpersonnel: false,
 };
 
@@ -20,9 +21,12 @@ const DataValidityContext = createContext<{
   recheckValidityIfNeeded: () => Promise<void>;
 }>({
   validity: initialValidityState,
-  setValidity: () => { },
-  triggerRefresh: () => { },
-  recheckValidityIfNeeded: async () => { },
+  setValidity: () => {
+  },
+  triggerRefresh: () => {
+  },
+  recheckValidityIfNeeded: async () => {
+  },
 });
 
 const debounce = (func: (...args: any[]) => void, wait: number) => {
@@ -33,7 +37,7 @@ const debounce = (func: (...args: any[]) => void, wait: number) => {
   };
 };
 
-export const DataValidityProvider = ({ children }: { children: React.ReactNode }) => {
+export const DataValidityProvider = ({children}: { children: React.ReactNode }) => {
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
   const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
 
@@ -44,23 +48,23 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const currentCensus = useOrgCensusContext();
 
   const setValidity = useCallback((type: keyof UnifiedValidityFlags, value: boolean) => {
-    setValidityState(prev => ({ ...prev, [type]: value }));
+    setValidityState(prev => ({...prev, [type]: value}));
   }, []);
 
   const checkDataValidity = useCallback(async (type?: keyof UnifiedValidityFlags) => {
     if (!currentSite || !currentPlot || !currentCensus) return;
     setLoading(true, 'Pre-validation in progress...');
-    let url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.plotCensusNumber}`;
+    const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.id}/${currentCensus.plotCensusNumber}`;
     let response;
     try {
-      response = await fetch(url, { method: 'GET' });
+      response = await fetch(url, {method: 'GET'});
     } catch (error) {
       console.error(error);
-      response = { ok: false };
+      response = {ok: false};
     }
     setValidity(type as keyof UnifiedValidityFlags, response.ok);
     setLoading(false);
-  }, [currentSite, currentPlot, currentCensus, setValidity]);
+  }, [currentSite, currentPlot, currentCensus, setValidity, validity]);
 
   const recheckValidityIfNeeded = useCallback(async () => {
     if ((Object.values(validity).some(flag => !flag)) || refreshNeeded) {
@@ -99,7 +103,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   }, [setValidity]);
 
   return (
-    <DataValidityContext.Provider value={{ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }}>
+    <DataValidityContext.Provider value={{validity, setValidity, triggerRefresh, recheckValidityIfNeeded}}>
       {children}
     </DataValidityContext.Provider>
   );

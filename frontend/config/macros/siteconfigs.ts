@@ -1,17 +1,14 @@
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import DataObjectIcon from '@mui/icons-material/DataObject';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
 import CloudCircleIcon from '@mui/icons-material/CloudCircle';
 import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
 import DescriptionIcon from '@mui/icons-material/Description';
-import GridOnIcon from '@mui/icons-material/GridOn';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
-import BugReportIcon from '@mui/icons-material/BugReport';
 import SchemaIcon from '@mui/icons-material/Schema';
+import FilterIcon from '@mui/icons-material/FilterList';
 import PlaceIcon from '@mui/icons-material/Place';
-import FilterIcon from '@mui/icons-material/Filter';
 import React from "react";
 import { UnifiedValidityFlags } from '../macros';
 
@@ -44,7 +41,6 @@ export const validityMapping: ValidityMapping = {
   '/personnel': 'personnel',
   '/alltaxonomies': 'species',
   '/quadrats': 'quadrats',
-  '/subquadrats': 'subquadrats',
   '/quadratpersonnel': 'quadratpersonnel'
 };
 
@@ -82,6 +78,7 @@ export const siteConfigNav: SiteConfigProps[] = [
       },
     ],
   },
+
   {
     label: "Supporting Data Views",
     href: "/fixeddatainput",
@@ -112,30 +109,30 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: WidgetsIcon,
       },
-      {
-        label: 'QuadratPersonnel',
-        href: '/quadratpersonnel',
-        tip: '',
-        icon: WidgetsIcon,
-      },
+      // {
+      //   label: 'QuadratPersonnel',
+      //   href: '/quadratpersonnel',
+      //   tip: '',
+      //   icon: WidgetsIcon,
+      // },
       // {
       //   label: 'Species',
       //   href: '/species',
       //   tip: '',
       //   icon: BugReportIcon,
       // },
-      // {
-      //   label: "View Stem Taxonomies",
-      //   href: "/stemtaxonomies",
-      //   tip: '',
-      //   icon: FilterIcon
-      // },
-      // {
-      //   label: "View Stem Dimensions",
-      //   href: "/stemdimensions",
-      //   tip: '',
-      //   icon: PlaceIcon
-      // },
+      {
+        label: "View Stem Taxonomies",
+        href: "/stemtaxonomies",
+        tip: '',
+        icon: FilterIcon
+      },
+      {
+        label: "View Stem Dimensions",
+        href: "/stemdimensions",
+        tip: '',
+        icon: PlaceIcon
+      },
       {
         label: "View All Taxonomies",
         href: "/alltaxonomies",

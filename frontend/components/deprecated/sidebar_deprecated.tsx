@@ -1,20 +1,20 @@
 "use client";
 import * as React from 'react';
-import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import {Dispatch, SetStateAction, useEffect, useState} from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Box from '@mui/joy/Box';
 import Divider from '@mui/joy/Divider';
 import List from '@mui/joy/List';
 import ListItem from '@mui/joy/ListItem';
-import ListItemButton, { listItemButtonClasses } from '@mui/joy/ListItemButton';
+import ListItemButton, {listItemButtonClasses} from '@mui/joy/ListItemButton';
 import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import { LoginLogout } from "@/components/loginlogout";
-import { siteConfigNav, validityMapping } from "@/config/macros/siteconfigs";
-import { SiteConfigProps } from "@/config/macros/siteconfigs";
-import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import {LoginLogout} from "@/components/loginlogout";
+import {siteConfigNav, validityMapping} from "@/config/macros/siteconfigs";
+import {SiteConfigProps} from "@/config/macros/siteconfigs";
+import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -23,7 +23,7 @@ import {
   useSiteContext,
   useSiteDispatch
 } from "@/app/contexts/userselectionprovider";
-import { usePathname, useRouter } from "next/navigation";
+import {usePathname, useRouter} from "next/navigation";
 import {
   Button,
   DialogActions,
@@ -40,17 +40,21 @@ import {
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import { useOrgCensusListContext, useOrgCensusListDispatch, usePlotListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
-import { getData, setData } from "@/config/db";
-import { useSession } from "next-auth/react";
-import { SlideToggle, TransitionComponent } from "@/components/client/clientmacros";
+import {
+  useOrgCensusListContext,
+  useOrgCensusListDispatch,
+  usePlotListContext,
+  useSiteListContext
+} from "@/app/contexts/listselectionprovider";
+import {useSession} from "next-auth/react";
+import {SlideToggle, TransitionComponent} from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
-import { CensusLogo, PlotLogo } from "@/components/icons";
-import { RainbowIcon } from '@/styles/rainbowicon';
-import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import {CensusLogo, PlotLogo} from "@/components/icons";
+import {RainbowIcon} from '@/styles/rainbowicon';
+import {useDataValidityContext} from '@/app/contexts/datavalidityprovider';
+import {OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper} from '@/config/sqlrdsdefinitions/orgcensusrds';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -58,7 +62,7 @@ export interface SimpleTogglerProps {
   renderToggle: any;
 }
 
-export function SimpleToggler({ isOpen, renderToggle, children, }: Readonly<SimpleTogglerProps>) {
+export function SimpleToggler({isOpen, renderToggle, children,}: Readonly<SimpleTogglerProps>) {
   return (
     <React.Fragment>
       {renderToggle}
@@ -87,10 +91,10 @@ interface MRTProps {
 
 function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, menuOpen: boolean | undefined, setMenuOpen: Dispatch<SetStateAction<boolean>> | undefined) {
   const Icon = siteConfigProps.icon;
-  const { plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete } = props;
-  let currentSite = useSiteContext();
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
+  const {plotSelectionRequired, censusSelectionRequired, pathname, isParentDataIncomplete} = props;
+  const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
@@ -107,14 +111,14 @@ function MenuRenderToggle(props: MRTProps, siteConfigProps: SiteConfigProps, men
           badgeContent={isParentDataIncomplete ? '!' : undefined}
           invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
         >
-          <Icon />
+          <Icon/>
         </Badge>
       </Tooltip>
       <ListItemContent>
         <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
       </ListItemContent>
       <KeyboardArrowDownIcon
-        sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }}
+        sx={{transform: menuOpen ? 'rotate(180deg)' : 'none'}}
       />
     </ListItemButton>
   );
@@ -128,18 +132,18 @@ interface SidebarProps {
 }
 
 export default function SidebarDeprecated(props: SidebarProps) {
-  const { data: session } = useSession();
-  let currentSite = useSiteContext();
-  let siteDispatch = useSiteDispatch();
-  let currentPlot = usePlotContext();
-  let plotDispatch = usePlotDispatch();
-  let currentCensus = useOrgCensusContext();
-  let censusDispatch = useOrgCensusDispatch();
-  let censusListContext = useOrgCensusListContext();
-  let censusListDispatch = useOrgCensusListDispatch();
-  let siteListContext = useSiteListContext();
-  let plotListContext = usePlotListContext();
-  const { validity } = useDataValidityContext();
+  const {data: session} = useSession();
+  const currentSite = useSiteContext();
+  const siteDispatch = useSiteDispatch();
+  const currentPlot = usePlotContext();
+  const plotDispatch = usePlotDispatch();
+  const currentCensus = useOrgCensusContext();
+  const censusDispatch = useOrgCensusDispatch();
+  const censusListContext = useOrgCensusListContext();
+  const censusListDispatch = useOrgCensusListDispatch();
+  const siteListContext = useSiteListContext();
+  const plotListContext = usePlotListContext();
+  const {validity} = useDataValidityContext();
   const isAllValiditiesTrue = Object.values(validity).every(Boolean);
 
   const [plot, setPlot] = useState<Plot>(currentPlot);
@@ -161,7 +165,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
   const [isPlotSelectionRequired, setIsPlotSelectionRequired] = useState(true);
   const [isCensusSelectionRequired, setIsCensusSelectionRequired] = useState(true);
 
-  const { coreDataLoaded, setManualReset, siteListLoaded, setCensusListLoaded } = props;
+  const {coreDataLoaded, setManualReset, siteListLoaded, setCensusListLoaded} = props;
 
   const [openSiteSelectionModal, setOpenSiteSelectionModal] = useState(false);
   const [openPlotSelectionModal, setOpenPlotSelectionModal] = useState(false);
@@ -252,7 +256,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     setSite(selectedSite);
     if (siteDispatch) {
-      await siteDispatch({ site: selectedSite });
+      await siteDispatch({site: selectedSite});
     }
     if (selectedSite === undefined) {
       await handlePlotSelection(undefined);
@@ -262,7 +266,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
   const handlePlotSelection = async (selectedPlot: Plot) => {
     setPlot(selectedPlot);
     if (plotDispatch) {
-      await plotDispatch({ plot: selectedPlot });
+      await plotDispatch({plot: selectedPlot});
     }
     if (selectedPlot === undefined) {
       await handleCensusSelection(undefined);
@@ -272,7 +276,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
     setCensus(selectedCensus);
     if (censusDispatch) {
-      await censusDispatch({ census: selectedCensus });
+      await censusDispatch({census: selectedCensus});
     }
   };
 
@@ -312,10 +316,10 @@ export default function SidebarDeprecated(props: SidebarProps) {
 
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
-    { toggle: undefined, setToggle: undefined },
-    { toggle: measurementsToggle, setToggle: setMeasurementsToggle },
-    { toggle: propertiesToggle, setToggle: setPropertiesToggle },
-    { toggle: formsToggle, setToggle: setFormsToggle }
+    {toggle: undefined, setToggle: undefined},
+    {toggle: measurementsToggle, setToggle: setMeasurementsToggle},
+    {toggle: propertiesToggle, setToggle: setPropertiesToggle},
+    {toggle: formsToggle, setToggle: setFormsToggle}
   ];
 
   const renderSiteOptions = () => {
@@ -349,8 +353,9 @@ export default function SidebarDeprecated(props: SidebarProps) {
           </ListItem>
           <Option key="none" value="">None</Option>
         </List>
-        <ListDivider role="none" />
-        <List className="site-allowed-site-list-4" aria-labelledby="allowed-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
+        <ListDivider role="none"/>
+        <List className="site-allowed-site-list-4" aria-labelledby="allowed-sites-group"
+              sx={{'--ListItemDecorator-size': '28px'}}>
           <ListItem id="allowed-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
@@ -362,8 +367,9 @@ export default function SidebarDeprecated(props: SidebarProps) {
             </Option>
           ))}
         </List>
-        <ListDivider role="none" />
-        <List className="site-not-allowed-site-list-5" aria-labelledby="other-sites-group" sx={{ '--ListItemDecorator-size': '28px' }}>
+        <ListDivider role="none"/>
+        <List className="site-not-allowed-site-list-5" aria-labelledby="other-sites-group"
+              sx={{'--ListItemDecorator-size': '28px'}}>
           <ListItem id="other-sites-group" sticky>
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
@@ -381,7 +387,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
 
   return (
     <>
-      <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
+      <Stack direction={"row"} sx={{display: 'flex', width: 'fit-content'}}>
         <Box
           className="Sidebar"
           sx={{
@@ -410,22 +416,22 @@ export default function SidebarDeprecated(props: SidebarProps) {
               },
             })}
           />
-          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'left', flexDirection: 'column' }}>
+          <Box sx={{flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1}}>
+            <Box sx={{display: 'flex', alignItems: 'left', flexDirection: 'column'}}>
               <Stack direction={"column"}>
                 <Typography level="h1">
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Box sx={{ marginRight: 1.5 }}>
-                      <RainbowIcon />
+                  <Box sx={{display: 'flex', alignItems: 'center'}}>
+                    <Box sx={{marginRight: 1.5}}>
+                      <RainbowIcon/>
                     </Box>
                     ForestGEO
                   </Box>
                   {session?.user.isAdmin && (
-                    <Typography level="h1" color='danger' sx={{ marginLeft: 0.5 }}>(Admin)</Typography>
+                    <Typography level="h1" color='danger' sx={{marginLeft: 0.5}}>(Admin)</Typography>
                   )}
                 </Typography>
               </Stack>
-              <Divider orientation='horizontal' sx={{ my: 0.75 }} />
+              <Divider orientation='horizontal' sx={{my: 0.75}}/>
               <Link className="site-selection-1" component={"button"} onClick={() => {
                 if (siteListLoaded) {
                   setOpenSiteSelectionModal(true);
@@ -436,7 +442,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                 display: 'flex', alignItems: 'center', paddingBottom: '0.25em', width: '100%', textAlign: 'left'
               }}>
                 <Avatar>
-                  <TravelExploreIcon />
+                  <TravelExploreIcon/>
                 </Avatar>
                 <Typography
                   color={!currentSite?.siteName ? "danger" : "success"}
@@ -455,49 +461,49 @@ export default function SidebarDeprecated(props: SidebarProps) {
                 display: 'flex', alignItems: 'center', paddingBottom: '0.75em', width: '100%', textAlign: 'left'
               }}>
                 <Avatar size={"sm"}>
-                  <PlotLogo />
+                  <PlotLogo/>
                 </Avatar>
                 <Typography color={!plot?.plotName ? "danger" : "success"}
-                  level="h3"
-                  sx={{ marginLeft: 1, display: 'flex', flexGrow: 1 }}>
+                            level="h3"
+                            sx={{marginLeft: 1, display: 'flex', flexGrow: 1}}>
                   {plot !== undefined ? `Plot: ${plot.plotName}` : "Select Plot"}
                 </Typography>
               </Link>
               <SlideToggle
                 isOpen={!isPlotSelectionRequired}>
-                <Box className="census-selection-12" sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Box className="census-selection-12" sx={{display: 'flex', flexDirection: 'column'}}>
                   <Link component={"button"} onClick={() => {
                     setOpenCensusSelectionModal(true);
                   }}
-                    sx={{ display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left' }}>
+                        sx={{display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left'}}>
                     <Avatar size={"sm"}>
-                      <CensusLogo />
+                      <CensusLogo/>
                     </Avatar>
                     <Typography color={(!census) ? "danger" : "success"}
-                      level="h4"
-                      sx={{ marginLeft: 1 }}>
+                                level="h4"
+                                sx={{marginLeft: 1}}>
                       {census !== undefined ? `Census: ${census.plotCensusNumber}` : 'Select Census'}
                     </Typography>
                   </Link>
                   <Box
-                    sx={{ marginLeft: '2.5em' }}>
+                    sx={{marginLeft: '2.5em'}}>
                     <Typography color={(!census) ? "danger" : "primary"}
-                      level="body-md"
-                      sx={{ textAlign: 'left', paddingLeft: '1em' }}>
+                                level="body-md"
+                                sx={{textAlign: 'left', paddingLeft: '1em'}}>
                       {(census !== undefined) && (
                         <>{(census.dateRanges[0]?.startDate) ? `Starting: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : ''}</>
                       )}
                     </Typography>
                     <Typography color={(!census) ? "danger" : "primary"}
-                      level="body-md"
-                      sx={{ textAlign: 'left', paddingLeft: '1em' }}>
+                                level="body-md"
+                                sx={{textAlign: 'left', paddingLeft: '1em'}}>
                       {(census !== undefined) && (
                         <>{(census.dateRanges[0]?.endDate) ? `Ending ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : `Ongoing`}</>
                       )}
                     </Typography>
                   </Box>
                 </Box>
-                <Divider orientation='horizontal' sx={{ marginTop: 2 }} />
+                <Divider orientation='horizontal' sx={{marginTop: 2}}/>
                 <Box
                   sx={{
                     minHeight: 0,
@@ -520,7 +526,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                   >
                     {siteConfigNav.map((item, index: number) => {
                       const Icon = item.icon;
-                      const { toggle, setToggle } = toggleArray[index];
+                      const {toggle, setToggle} = toggleArray[index];
                       const delay = (index) * 200;
 
                       const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
@@ -559,25 +565,25 @@ export default function SidebarDeprecated(props: SidebarProps) {
 
                         return (
                           <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
-                            style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                               style={{transitionDelay: `${delay}ms`}} direction="down">
                             <ListItem>
                               <Tooltip title={getTooltipMessage(item.href, isDataIncomplete)} arrow>
-                                <Box sx={{ display: 'flex', flex: 1 }}>
-                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
-                                    disabled={isPlotSelectionRequired || isCensusSelectionRequired || isLinkDisabled}
-                                    color={pathname === item.href ? 'primary' : undefined}
-                                    onClick={() => {
-                                      if (!isLinkDisabled) {
-                                        router.push(item.href);
-                                      }
-                                    }}>
+                                <Box sx={{display: 'flex', flex: 1}}>
+                                  <ListItemButton selected={pathname === item.href} sx={{flex: 1}}
+                                                  disabled={isPlotSelectionRequired || isCensusSelectionRequired || isLinkDisabled}
+                                                  color={pathname === item.href ? 'primary' : undefined}
+                                                  onClick={() => {
+                                                    if (!isLinkDisabled) {
+                                                      router.push(item.href);
+                                                    }
+                                                  }}>
                                     <Badge
                                       color="danger"
                                       variant={isLinkDisabled ? 'solid' : 'soft'}
                                       badgeContent={isLinkDisabled ? '!' : undefined}
                                       invisible={!isLinkDisabled}
                                     >
-                                      <Icon />
+                                      <Icon/>
                                     </Badge>
                                     <ListItemContent>
                                       <Typography level={"title-sm"}>{item.label}</Typography>
@@ -589,13 +595,13 @@ export default function SidebarDeprecated(props: SidebarProps) {
                           </TransitionComponent>
                         );
                       } else {
-                        let isParentDataIncomplete = item.expanded.some(subItem => {
+                        const isParentDataIncomplete = item.expanded.some(subItem => {
                           const dataKey = validityMapping[subItem.href];
                           return dataKey !== undefined && !validity[dataKey];
                         });
                         return (
                           <TransitionComponent key={item.href} in={!isPlotSelectionRequired}
-                            style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                               style={{transitionDelay: `${delay}ms`}} direction="down">
                             <ListItem nested>
                               <SimpleToggler
                                 renderToggle={MenuRenderToggle({
@@ -605,36 +611,36 @@ export default function SidebarDeprecated(props: SidebarProps) {
                                 }, item, toggle, setToggle)}
                                 isOpen={!!toggle}
                               >
-                                <List sx={{ gap: 0.75 }} size={"sm"}>
+                                <List sx={{gap: 0.75}} size={"sm"}>
                                   {item.expanded.map((link, subIndex) => {
                                     const SubIcon = link.icon;
                                     const delay = (subIndex + 1) * 200;
-                                    let dataValidityKey = validityMapping[link.href];
-                                    let isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
+                                    const dataValidityKey = validityMapping[link.href];
+                                    const isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
                                     const isLinkDisabled = getDisabledState(link.href);
                                     const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
 
                                     return (
                                       <TransitionComponent key={link.href} in={!!toggle}
-                                        style={{ transitionDelay: `${delay}ms` }} direction="down">
-                                        <ListItem sx={{ marginTop: 0.75 }}>
+                                                           style={{transitionDelay: `${delay}ms`}} direction="down">
+                                        <ListItem sx={{marginTop: 0.75}}>
                                           <Tooltip title={tooltipMessage} arrow>
-                                            <Box sx={{ display: 'flex', flex: 1 }}>
-                                              <ListItemButton sx={{ flex: 1 }}
-                                                selected={pathname == (item.href + link.href)}
-                                                disabled={isPlotSelectionRequired || isCensusSelectionRequired || isLinkDisabled}
-                                                onClick={() => {
-                                                  if (!isLinkDisabled) {
-                                                    router.push((item.href + link.href));
-                                                  }
-                                                }}>
+                                            <Box sx={{display: 'flex', flex: 1}}>
+                                              <ListItemButton sx={{flex: 1}}
+                                                              selected={pathname == (item.href + link.href)}
+                                                              disabled={isPlotSelectionRequired || isCensusSelectionRequired || isLinkDisabled}
+                                                              onClick={() => {
+                                                                if (!isLinkDisabled) {
+                                                                  router.push((item.href + link.href));
+                                                                }
+                                                              }}>
                                                 <Badge
                                                   color={link.href === '/summary' ? "warning" : "danger"}
                                                   variant={link.href === '/summary' ? (!isAllValiditiesTrue ? 'solid' : 'soft') : (isDataIncomplete ? 'solid' : 'soft')}
                                                   badgeContent={link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : (isDataIncomplete ? '!' : undefined)}
                                                   invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
                                                 >
-                                                  <SubIcon />
+                                                  <SubIcon/>
                                                 </Badge>
                                                 <ListItemContent>
                                                   <Typography level={"title-sm"}>{link.label}</Typography>
@@ -658,39 +664,53 @@ export default function SidebarDeprecated(props: SidebarProps) {
               </SlideToggle>
             </SlideToggle>
           </Box>
-          <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <Divider orientation={"horizontal"} sx={{mb: 2}}/>
+          <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center'}}>
             {census && census.dateRanges[0].endDate ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', width: '100%' }}>
-                <Button disabled={census === undefined} size="sm" variant="solid" color="success" onClick={() => setOpenReopenCensusModal(true)} sx={{ width: '100%', marginBottom: 0.5 }}>
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                flexDirection: 'column',
+                width: '100%'
+              }}>
+                <Button disabled={census === undefined} size="sm" variant="solid" color="success"
+                        onClick={() => setOpenReopenCensusModal(true)} sx={{width: '100%', marginBottom: 0.5}}>
                   Reopen Census
                 </Button>
-                <Button size="sm" variant="solid" color="primary" sx={{ width: '100%' }}>
+                <Button size="sm" variant="solid" color="primary" sx={{width: '100%'}}>
                   Start New Census
                 </Button>
               </Box>
             ) : (
-              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexDirection: 'column', width: '100%' }}>
-                <Button disabled={census === undefined} size="sm" variant="solid" color="danger" onClick={() => setOpenCloseCensusModal(true)} sx={{ width: '100%' }}>
+              <Box sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                flexDirection: 'column',
+                width: '100%'
+              }}>
+                <Button disabled={census === undefined} size="sm" variant="solid" color="danger"
+                        onClick={() => setOpenCloseCensusModal(true)} sx={{width: '100%'}}>
                   Close Census
                 </Button>
               </Box>
             )}
           </Box>
-          <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
-          <LoginLogout />
+          <Divider orientation={"horizontal"} sx={{mb: 2, mt: 2}}/>
+          <LoginLogout/>
           <Modal open={openSiteSelectionModal} onClose={() => {
             setSite(currentSite);
             setOpenSiteSelectionModal(false);
           }}>
             <ModalDialog variant="outlined" role="alertdialog" className="site-selection-modal-2">
               <DialogTitle>
-                <WarningRoundedIcon />
+                <WarningRoundedIcon/>
                 Site Selection
               </DialogTitle>
-              <Divider />
-              <DialogContent sx={{ width: 750 }}>
-                <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
+              <Divider/>
+              <DialogContent sx={{width: 750}}>
+                <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
                   <Stack direction={"column"} spacing={2}>
                     <Typography level={"title-sm"}>Select Site:</Typography>
                     {renderSiteOptions()}
@@ -698,7 +718,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                 </Box>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                     setSite(currentSite);
                     setOpenSiteSelectionModal(false);
@@ -725,12 +745,12 @@ export default function SidebarDeprecated(props: SidebarProps) {
           }}>
             <ModalDialog variant="outlined" role="alertdialog" className="plot-selection-modal-7">
               <DialogTitle>
-                <WarningRoundedIcon />
+                <WarningRoundedIcon/>
                 Plot Selection
               </DialogTitle>
-              <Divider />
-              <DialogContent sx={{ width: 750 }}>
-                <Box sx={{ display: 'inline-block', alignItems: 'center' }} ref={containerRef}>
+              <Divider/>
+              <DialogContent sx={{width: 750}}>
+                <Box sx={{display: 'inline-block', alignItems: 'center'}} ref={containerRef}>
                   <Stack direction={"column"} spacing={2}>
                     <Typography level={"title-sm"}>Select Plot:</Typography>
                     <Select
@@ -755,12 +775,12 @@ export default function SidebarDeprecated(props: SidebarProps) {
                             alignItems: "center",
                             width: "100%"
                           }}>
-                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                            <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
                               <Typography level="body-lg">{item?.plotName}</Typography>
-                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
+                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: "1em"}}>
                                 Quadrats: {item?.numQuadrats}
                               </Typography>
-                              <Typography level="body-md" color={"primary"} sx={{ paddingLeft: "1em" }}>
+                              <Typography level="body-md" color={"primary"} sx={{paddingLeft: "1em"}}>
                                 ID: {item?.plotID}
                               </Typography>
                             </Box>
@@ -772,7 +792,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                 </Box>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                     setPlot(currentPlot);
                     setOpenPlotSelectionModal(false);
@@ -799,11 +819,11 @@ export default function SidebarDeprecated(props: SidebarProps) {
           }}>
             <ModalDialog variant="outlined" role="alertdialog" className="census-selection-modal-13">
               <DialogTitle>
-                <WarningRoundedIcon />
+                <WarningRoundedIcon/>
                 Census Selection
               </DialogTitle>
-              <Divider />
-              <DialogContent sx={{ width: 750 }}>
+              <Divider/>
+              <DialogContent sx={{width: 750}}>
                 <Stack direction={"column"} spacing={2}>
                   <Stack direction="column">
                     <Typography level={"title-lg"}>Select Census:</Typography>
@@ -828,7 +848,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                   >
                     <List>
                       <Option value={""}>None</Option>
-                      <Divider orientation={"horizontal"} />
+                      <Divider orientation={"horizontal"}/>
                       {censusListContext?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map((item) => (
                         <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
                           <Box sx={{
@@ -837,15 +857,16 @@ export default function SidebarDeprecated(props: SidebarProps) {
                             alignItems: "center",
                             width: "100%"
                           }}>
-                            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                            <Box sx={{display: "flex", flexDirection: "column", alignItems: "flex-start"}}>
                               <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
                               {item?.dateRanges?.map((dateRange, index) => (
                                 <React.Fragment key={index}>
                                   <Stack direction={"row"}>
-                                    <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em' }}>
+                                    <Typography level="body-sm" color={"neutral"} sx={{paddingLeft: '1em'}}>
                                       {`${dateRange.startDate ? new Date(dateRange.startDate).toDateString() : 'undefined'}`}
                                     </Typography>
-                                    <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
+                                    <Typography level="body-sm" color={"neutral"}
+                                                sx={{paddingLeft: '1em', paddingRight: '1em'}}>
                                       &lt;===&gt;
                                     </Typography>
                                     <Typography level="body-sm" color={"neutral"}>
@@ -863,7 +884,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
                 </Stack>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => {
                     setCensus(currentCensus);
                     if (census) setIsCensusSelectionRequired(false);
@@ -887,18 +908,18 @@ export default function SidebarDeprecated(props: SidebarProps) {
           <Modal open={openReopenCensusModal} onClose={() => setOpenReopenCensusModal(false)}>
             <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
-                <WarningRoundedIcon />
+                <WarningRoundedIcon/>
                 Reopen Census
               </DialogTitle>
-              <Divider />
+              <Divider/>
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Select a start date for the new census:</Typography>
-                  <input type="date" onChange={(e) => setReopenStartDate(new Date(e.target.value))} />
+                  <input type="date" onChange={(e) => setReopenStartDate(new Date(e.target.value))}/>
                 </Stack>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenReopenCensusModal(false)}>
                     Cancel
                   </Button>
@@ -912,18 +933,18 @@ export default function SidebarDeprecated(props: SidebarProps) {
           <Modal open={openCloseCensusModal} onClose={() => setOpenCloseCensusModal(false)}>
             <ModalDialog variant="outlined" role="alertdialog">
               <DialogTitle>
-                <WarningRoundedIcon />
+                <WarningRoundedIcon/>
                 Close Census
               </DialogTitle>
-              <Divider />
+              <Divider/>
               <DialogContent>
                 <Stack direction={"column"} spacing={2}>
                   <Typography level={"title-sm"}>Select an end date for the current census:</Typography>
-                  <input type="date" onChange={(e) => setCloseEndDate(new Date(e.target.value))} />
+                  <input type="date" onChange={(e) => setCloseEndDate(new Date(e.target.value))}/>
                 </Stack>
               </DialogContent>
               <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
+                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"}/>}>
                   <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenCloseCensusModal(false)}>
                     Cancel
                   </Button>
@@ -935,7 +956,7 @@ export default function SidebarDeprecated(props: SidebarProps) {
             </ModalDialog>
           </Modal>
         </Box>
-      </Stack >
+      </Stack>
     </>
   );
 }

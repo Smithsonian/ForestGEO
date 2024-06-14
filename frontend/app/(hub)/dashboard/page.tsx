@@ -86,8 +86,9 @@ export default function DashboardPage() {
             <Typography level={"body-lg"}>
               Following the same format as the Site, clicking on the Select Plot link will open a dialog box to allow
               you to select a plot
-              <br />
-              If you have administrator access, you will be able to click on Add New Plot or Edit/Delete Plot (within the selection menu) to make 
+              <br/>
+              If you have administrator access, you will be able to click on Add New Plot or Edit/Delete Plot (within
+              the selection menu) to make
               changes to or add plots that are missing or incorrect.
               <Tooltip color={"warning"} title={"Please contact an administrator if you cannot access the plot\n" +
                 "          you are working on."}>
@@ -116,9 +117,11 @@ export default function DashboardPage() {
               chronological descending order. <br/>
               Unlike the Site and Plot selections, Census selections are not restricted by access, so you should be able
               to select any available censuses.
-              <br />
-              If you have admin access, you will be able to close, edit, or delete censuses while the menu is open. Currently,
-              There is not (yet) functionality to reopen prior censuses, but if you need to open a new census, please use the Add New Census button!
+              <br/>
+              If you have admin access, you will be able to close, edit, or delete censuses while the menu is open.
+              Currently,
+              There is not (yet) functionality to reopen prior censuses, but if you need to open a new census, please
+              use the Add New Census button!
             </Typography>
           </AccordionDetails>
         </Accordion>

@@ -1,7 +1,6 @@
-import {GridColDef} from "@mui/x-data-grid";
-import moment from "moment";
-import {IDataMapper, parseDate} from "../../datamapper";
-import { bitToBoolean, booleanToBit, unitSelectionOptions } from "@/config/macros";
+import { GridColDef } from "@mui/x-data-grid";
+import { IDataMapper, parseDate } from "../../datamapper";
+import { bitToBoolean, booleanToBit, ColumnStates } from "@/config/macros";
 import { ValidationFunction, RowValidationErrors } from "@/config/macros/formdetails";
 
 export const validateMeasurementsRow: ValidationFunction = (row) => {
@@ -46,6 +45,37 @@ export type MeasurementsSummaryRDS = {
   isValidated?: boolean;
   description?: string;
   attributes?: string;
+};
+
+export const initialMeasurementsSummaryViewRDSRow = {
+  id: 0,
+  coreMeasurementID: 0,
+  plotID: 0,
+  plotName: '',
+  censusID: 0,
+  quadratID: 0,
+  quadratName: '',
+  subquadratID: 0,
+  subquadratName: '',
+  speciesID: 0,
+  speciesCode: '',
+  treeID: 0,
+  treeTag: '',
+  stemID: 0,
+  stemTag: '',
+  stemLocalX: 0,
+  stemLocalY: 0,
+  stemUnits: '',
+  personnelID: 0,
+  personnelName: '',
+  measurementDate: null,
+  measuredDBH: 0,
+  dbhUnits: '',
+  measuredHOM: 0,
+  homUnits: '',
+  isValidated: null,
+  description: '',
+  attributes: '',
 };
 
 export interface MeasurementsSummaryResult {
@@ -145,56 +175,66 @@ export class MeasurementsSummaryMapper implements IDataMapper<MeasurementsSummar
   }
 }
 
-export const MeasurementsSummaryGridColumns: GridColDef[] = [
-  { field: 'coreMeasurementID', headerName: '#', headerClassName: 'header', flex: 0.25, align: 'left' },
-  {
-    field: 'quadratName',
-    headerName: 'Quad',
-    headerClassName: 'header',
-    flex: 0.75,
-    align: 'left',
-    editable: true,
-  },
-  {
-    field: 'subquadratName',
-    headerName: 'Subquadrat',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: true
-  },
-  { field: 'speciesCode', headerName: 'SpC', headerClassName: 'header', flex: 0.75, align: 'left', editable: true },
-  { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemLocalX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemLocalY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemUnits', headerName: 'U', headerClassName: 'header', flex: 0.75, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
-  { field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  {
-    field: 'measurementDate', headerName: 'Date', headerClassName: 'header', flex: 1,
-    valueGetter: (value: any) => {
-      // Check if the date is present and valid
-      if (!value || !moment(value).isValid()) return '';
-      // Format the date
-      return new Date(value).toDateString();
+export function getMeasurementsSummaryViewHCs(): ColumnStates {
+  return {
+    plotID: false,
+    censusID: false,
+    quadratID: false,
+    subquadratID: false,
+    treeID: false,
+    stemID: false,
+    personnelID: false,
+  };
+}
+
+export const gridColumnsArrayMSVRDS: GridColDef[][] = [
+  [
+    { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
+    { field: 'plotID', headerName: 'Plot ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'plotName', headerName: 'Plot Name', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'censusID', headerName: 'Census ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'quadratID', headerName: 'Quadrat ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'quadratName', headerName: 'Quadrat', headerAlign: 'left', headerClassName: 'header', flex: 0.8, align: 'left', editable: true },
+    {
+      field: 'subquadratID',
+      headerName: 'Subquadrat ID', headerAlign: 'left',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
     },
-    editable: true
-  },
-  { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'dbhUnits', headerName: 'U', headerClassName: 'header', flex: 0.75, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
-  { field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'homUnits', headerName: 'U', headerClassName: 'header', flex: 0.75, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions, },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // extraneous, set to invisible
-  // { field: 'plotID', headerName: 'Plot ID', headerClassName: 'header', flex: 1, align: 'left', editable: true, },
-  // { field: 'plotName', headerName: 'Plot Name', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'censusID', headerName: 'Census ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'quadratID', headerName: 'Quadrat ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'subquadratID', headerName: 'Subquadrat ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'stemID', headerName: 'Stem ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'personnelID', headerName: 'Personnel ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  // { field: 'isValidated', headerName: 'Validated', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    {
+      field: 'subquadratName',
+      headerName: 'Subquadrat', headerAlign: 'left',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      editable: true
+    },
+    { field: 'speciesID', headerName: 'Species ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    {
+      field: 'speciesCode',
+      headerName: 'Species Code', headerAlign: 'left',
+      headerClassName: 'header',
+      flex: 1.2,
+      align: 'left',
+      editable: true
+    },
+    { field: 'treeID', headerName: 'Tree ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'treeTag', headerName: 'Tree', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+    { field: 'stemID', headerName: 'Stem ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'stemTag', headerName: 'Stem', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+    { field: 'stemLocalX', headerName: 'X', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+    { field: 'stemLocalY', headerName: 'Y', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true }
+  ],
+  [
+    { field: 'personnelID', headerName: 'Personnel ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 0.8, align: 'left', editable: true }
+  ],
+  [{ field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 0.5, align: 'left', editable: true }],
+  [
+    { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+    { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true }
+  ]
 ];

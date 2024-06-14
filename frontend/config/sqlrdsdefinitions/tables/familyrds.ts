@@ -1,5 +1,5 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper } from '../../datamapper';
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper} from '../../datamapper';
 
 export type FamilyRDS = {
   id?: number;
@@ -34,7 +34,7 @@ export class FamilyMapper implements IDataMapper<FamilyResult, FamilyRDS> {
 }
 
 export const FamilyGridColumns: GridColDef[] = [
-  { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
 ];

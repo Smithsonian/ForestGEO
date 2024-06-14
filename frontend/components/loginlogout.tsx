@@ -57,12 +57,12 @@ export const LoginLogout = () => {
         <Box sx={{minWidth: 0, flex: 1}}>
           <Typography level="title-sm">
             <Skeleton loading={status == "loading"}>
-              {session?.user?.name!}
+              {session?.user?.name ? session.user.name : ''}
             </Skeleton>
           </Typography>
           <Typography level="body-xs">
             <Skeleton loading={status == "loading"}>
-              {session?.user?.email!}
+              {session?.user?.email ? session?.user?.email : ''}
             </Skeleton>
           </Typography>
         </Box>

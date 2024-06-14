@@ -1,6 +1,6 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper } from "../../datamapper";
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper} from "../../datamapper";
+import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 
 export interface PersonnelRDS {
   id?: number;
@@ -9,7 +9,13 @@ export interface PersonnelRDS {
   lastName?: string;
   role?: string;
 }
-
+export const initialPersonnelRDSRow = {
+  id: 0,
+  personnelID: 0,
+  firstName: '',
+  lastName: '',
+  role: '',
+};
 export interface PersonnelResult {
   PersonnelID: any;
   FirstName: any;
@@ -63,8 +69,8 @@ export class PersonnelMapper implements IDataMapper<PersonnelResult, PersonnelRD
 export const personnelFields = ['firstName', 'lastName', 'role'];
 
 export const PersonnelGridColumns: GridColDef[] = [
-  { field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  { field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: true},
 ];
