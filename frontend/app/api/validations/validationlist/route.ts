@@ -20,7 +20,6 @@ export async function GET(): Promise<NextResponse<ValidationMessages>> {
 
     const validationMessages: ValidationMessages = results.reduce((acc, {ProcedureName, Description}) => {
       acc[ProcedureName] = Description;
-      console.log('validation created: ', acc);
       return acc;
     }, {} as ValidationMessages);
 

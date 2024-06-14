@@ -14,7 +14,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     // Fetch the necessary foreign key IDs
     let speciesID: number | null = null;
     if (rowData.spcode) {
-      let query = `SELECT SpeciesID FROM ${schema}.species WHERE SpeciesCode = ?`;
+      const query = `SELECT SpeciesID FROM ${schema}.species WHERE SpeciesCode = ?`;
       const rows = await runQuery(connection, query, [rowData.spcode]);
       if (rows.length === 0) throw new Error(`SpeciesCode ${rowData.spcode} not found.`);
       console.log('SpeciesCode found:', rowData.spcode);
@@ -23,7 +23,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     let quadratIDFromDB: number | null = null;
     if (rowData.quadrat) {
-      let query = `SELECT QuadratID FROM ${schema}.quadrats WHERE QuadratName = ?`;
+      const query = `SELECT QuadratID FROM ${schema}.quadrats WHERE QuadratName = ?`;
       const rows = await runQuery(connection, query, [rowData.quadrat]);
       if (rows.length === 0) throw new Error(`QuadratName ${rowData.quadrat} not found.`);
       console.log('QuadratName found:', rowData.quadrat);
@@ -32,7 +32,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     let subquadratID: number | null = null;
     if (rowData.subquadrat) {
-      let query = `SELECT SubquadratID FROM ${schema}.subquadrats WHERE SubquadratName = ?`;
+      const query = `SELECT SubquadratID FROM ${schema}.subquadrats WHERE SubquadratName = ?`;
       const rows = await runQuery(connection, query, [rowData.subquadrat]);
       if (rows.length > 0) subquadratID = rows[0].SubquadratID;
       console.log('SubquadratName not found:', rowData.subquadrat);

@@ -158,7 +158,7 @@ export default function DashboardPage() {
               <AccordionDetails>
                 <Typography level={"body-lg"}>
                   The Measurements Hub contains two primary links &em; the View Measurements link and the View Uploaded Files link. <br />
-                  You can use the View Measurements link to review uploaded information once it's been inserted, and you can use the
+                  You can use the View Measurements link to review uploaded information once it&apos;s been inserted, and you can use the
                   View Uploaded Files link to review past loaded files for the respective plot &amp; census combination you are adding data to, as well as
                   delete or download them. <br /> <br />
                   The View Measurements link and upload system will be disabled until you successfully populate all of the supporting data views.

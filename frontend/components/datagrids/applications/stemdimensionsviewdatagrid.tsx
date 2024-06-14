@@ -113,7 +113,7 @@ export default function StemDimensionsViewDataGrid() {
 
           {/* Upload Button */}
           <Button onClick={() => {
-              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
               else alert('census must be opened before upload allowed');
             }} variant="solid" color="primary">Upload</Button>
         </Box>

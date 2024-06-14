@@ -353,7 +353,7 @@ export default function SummaryPage() {
           </Stack>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Button onClick={() => {
-              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
               else alert('census must be opened before upload allowed');
             }} variant="solid" color="primary">Upload</Button>
           </Box>

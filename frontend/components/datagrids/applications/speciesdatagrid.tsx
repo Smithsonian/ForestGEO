@@ -3,7 +3,7 @@ import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
 import {SpeciesGridColumns} from '@/config/sqlrdsdefinitions/tables/speciesrds';
-import {useOrgCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {useSession} from "next-auth/react";
@@ -115,7 +115,7 @@ export default function SpeciesDataGrid() {
 
           {/* Upload Button */}
           <Button onClick={() => {
-              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
               else alert('census must be opened before upload allowed');
             }} variant="solid" color="primary">Upload</Button>
         </Box>

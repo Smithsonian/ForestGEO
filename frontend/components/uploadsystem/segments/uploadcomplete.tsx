@@ -73,7 +73,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       await quadratListDispatch({ quadratList: quadratsData });
     } else return;
     setLoading(false);
-  }
+  };
 
   // Effect for handling countdown and state transition
   useEffect(() => {
