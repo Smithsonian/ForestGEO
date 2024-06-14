@@ -10,8 +10,8 @@ import Option from '@mui/joy/Option';
 import FinalizeSelectionsButton from "../../client/finalizeselectionsbutton";
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
-import {usePlotContext, useQuadratContext, useQuadratDispatch} from "@/app/contexts/userselectionprovider";
+import {useQuadratListContext, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {useOrgCensusContext, usePlotContext, useQuadratContext, useQuadratDispatch, useSiteContext} from "@/app/contexts/userselectionprovider";
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const {
@@ -21,6 +21,9 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   } = props;
   const [finish, setFinish] = useState<boolean>(false);
   const quadratListContext = useQuadratListContext();
+  const quadratListDispatch = useQuadratListDispatch();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
   const currentQuadrat = useQuadratContext();
   const currentPlot = usePlotContext();
   console.log('current quadrat: ', currentQuadrat);
@@ -48,13 +51,32 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     }
     setFinish(false);
   };
+  useEffect(() => {
+    if (quadratDispatch) quadratDispatch({quadrat: undefined}); // deselect quadrat at start of execution
+  }, []);
 
   useEffect(() => {
-    if (currentPlot) {
+    const loadQuadratsData = async () => {
+      if (!currentPlot || !currentCensus) return;
+      if (quadratListContext !== undefined && quadratListContext.length > 0) return { success: true };
+  
+      const quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
+      const quadratsData = await quadratsResponse.json();
+      if (!quadratsData) return;
+  
+      if (quadratListDispatch) {
+        await quadratListDispatch({ quadratList: quadratsData });
+      } else return ;
+      return ;
+    };
+    if (currentPlot && currentCensus && currentSite) {
       // ensure that selectable list is restricted by selected plot
-      setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
+      // need to re-pull quadrats to be sure:
+      loadQuadratsData().then(() => {
+        setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
+      }).catch(console.error);
     }
-  }, [currentPlot]);
+  }, [currentSite, currentPlot, currentCensus]);
 
   useEffect(() => {
     if (finish) setReviewState(ReviewStates.UPLOAD_FILES);
