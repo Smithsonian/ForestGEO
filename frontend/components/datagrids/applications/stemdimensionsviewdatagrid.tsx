@@ -10,6 +10,7 @@ import { useSession } from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import { gridColumnsArraySDVRDS, initialStemDimensionsViewRDSRow } from "@/config/sqlrdsdefinitions/views/stemdimensionsviewrds";
 import { unitSelectionOptions } from "@/config/macros";
+import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
 
 export default function StemDimensionsViewDataGrid() {
   const [rows, setRows] = useState([initialStemDimensionsViewRDSRow] as GridRowsProp);
@@ -25,6 +26,7 @@ export default function StemDimensionsViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const { data: session } = useSession();
+  const currentCensus = useOrgCensusContext();
   const [a, b, c, d] = gridColumnsArraySDVRDS;
 
   const addNewRowToGrid = () => {
@@ -110,7 +112,10 @@ export default function StemDimensionsViewDataGrid() {
 
 
           {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+          <Button onClick={() => {
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              else alert('census must be opened before upload allowed');
+            }} variant="solid" color="primary">Upload</Button>
         </Box>
       </Box>
 

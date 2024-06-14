@@ -9,6 +9,7 @@ import { useSession } from "next-auth/react";
 import { Box, Button, Stack, Typography } from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import Link from 'next/link';
+import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);
@@ -27,6 +28,7 @@ export default function PersonnelDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const { data: session } = useSession();
+  const currentCensus = useOrgCensusContext();
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -78,7 +80,10 @@ export default function PersonnelDataGrid() {
 
           {/* Upload Button */}
           <Stack direction='column'>
-            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+            <Button onClick={() => {
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              else alert('census must be opened before upload allowed');
+            }} variant="solid" color="primary">Upload</Button>
             {/* Link to Quadrat Personnel Data Grid */}
             <Link href="/fixeddatainput/quadratpersonnel" passHref>
               <Button variant="solid" color="primary" sx={{ ml: 2 }}>View Quadrat Personnel</Button>

@@ -352,7 +352,10 @@ export default function SummaryPage() {
             </Box>
           </Stack>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button onClick={() => setProgressDialogOpen(true)} variant="solid" color="primary">Upload</Button>
+            <Button onClick={() => {
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              else alert('census must be opened before upload allowed');
+            }} variant="solid" color="primary">Upload</Button>
           </Box>
         </Box>
       </Box>

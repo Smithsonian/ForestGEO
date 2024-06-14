@@ -9,6 +9,7 @@ import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import { initialStemTaxonomiesViewRDSRow, StemTaxonomiesViewGridColumns } from "@/config/sqlrdsdefinitions/views/stemtaxonomiesviewrds";
+import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
 
 export default function StemTaxonomiesViewDataGrid() {
   const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);
@@ -24,6 +25,7 @@ export default function StemTaxonomiesViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
+  const currentCensus = useOrgCensusContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -63,7 +65,10 @@ export default function StemTaxonomiesViewDataGrid() {
 
 
           {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+          <Button onClick={() => {
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              else alert('census must be opened before upload allowed');
+            }} variant="solid" color="primary">Upload</Button>
         </Box>
       </Box>
 
