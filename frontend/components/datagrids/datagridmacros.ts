@@ -1,6 +1,6 @@
 import styled from "@emotion/styled";
 import { AlertProps } from "@mui/material";
-import { GridColDef, GridRowsProp, GridRowModesModel, GridRowId, GridSortDirection } from "@mui/x-data-grid";
+import { GridColDef, GridRowsProp, GridRowModesModel, GridRowId, GridSortDirection, GridRowModel } from "@mui/x-data-grid";
 import { Dispatch, SetStateAction } from "react";
 
 export interface EditToolbarCustomProps {
@@ -30,6 +30,7 @@ export interface DataGridCommonProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
+  initialRow?: GridRowModel;
 }
 
 // Define types for the new states and props
@@ -122,4 +123,20 @@ export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSor
     const dateB = new Date(b.measurementDate).getTime();
     return direction === 'asc' ? dateA - dateB : dateB - dateA;
   });
+};
+
+export const areRowsDifferent = (row1: GridRowModel | null, row2: GridRowModel | null): boolean => {
+  if (!row1 || !row2) {
+    return true; // Consider them different if either row is null
+  }
+
+  const keys = Object.keys(row1);
+
+  for (const key of keys) {
+    if (row1[key] !== row2[key]) {
+      return true; // If any value differs, the rows are different
+    }
+  }
+
+  return false; // All values are identical
 };

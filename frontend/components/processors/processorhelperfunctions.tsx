@@ -35,6 +35,7 @@ export async function getPersonnelIDByName(
     const rows = await runQuery(connection, query, [firstName.trim(), lastName.trim()]);
 
     if (rows.length > 0) {
+      console.log('getpersonnelidbyname: ', rows);
       return rows[0].PersonnelID as number;
     }
     return null; // No matching personnel found
@@ -58,6 +59,8 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       await mapping.specialProcessing({...subProps, schema});
     } else {
       const columns = Object.keys(mapping.columnMappings);
+      if (columns.includes('plotID')) rowData['plotID'] = subProps.plotID?.toString() ?? null;
+      if (columns.includes('censusID')) rowData['censusID'] = subProps.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
       const values = columns.map(fileColumn => rowData[fileColumn]);
@@ -67,7 +70,6 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
         UPDATE
           ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
       `;
-
       try {
         // Execute the query using the provided connection
         await connection.beginTransaction();

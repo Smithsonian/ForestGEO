@@ -109,7 +109,7 @@ export async function GET(request: NextRequest, {params}: {
         if (censusResults.length < 2) {
           paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS *
-          FROM ${schema}.${params.dataType} cm
+          FROM ${schema}.${params.dataType} 
           WHERE PlotID = ?
             AND CensusID IN (
               SELECT c.CensusID

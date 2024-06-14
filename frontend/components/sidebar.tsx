@@ -187,6 +187,8 @@ export default function Sidebar(props: SidebarProps) {
   const [closeEndDate, setCloseEndDate] = useState<Date | null>(null);
   const [newStartDate, setNewStartDate] = useState<Date | null>(null);
 
+  const { triggerRefresh } = useDataValidityContext();
+
   const { isPulsing, triggerPulse } = useLockAnimation();
   const reopenButtonRef = useRef(null);
   const addButtonRef = useRef(null);
@@ -705,7 +707,35 @@ export default function Sidebar(props: SidebarProps) {
         </List>
       </Select>
     );
+  };
 
+  const shouldApplyTooltip = (item: SiteConfigProps, linkHref?: string): boolean => {
+    if (linkHref) {
+      // Check for sub-links
+      switch (linkHref) {
+        case '/summary':
+          return !isAllValiditiesTrue;
+        case '/subquadrats':
+          return !validity['quadrats'];
+        case '/quadratpersonnel':
+          return !(validity['quadrats'] && validity['personnel']);
+        default:
+          const dataKey = validityMapping[linkHref];
+          return dataKey !== undefined && !validity[dataKey];
+      }
+    } else {
+      // Check for main links
+      switch (item.href) {
+        case '/summary':
+          return !isAllValiditiesTrue;
+        case '/subquadrats':
+          return !validity['quadrats'];
+        case '/quadratpersonnel':
+          return !(validity['quadrats'] && validity['personnel']);
+        default:
+          return false;
+      }
+    }
   };
 
   return (
@@ -867,29 +897,20 @@ export default function Sidebar(props: SidebarProps) {
 
                     if (item.expanded.length === 0) {
                       const isLinkDisabled = getDisabledState(item.href);
-                      const isDataIncomplete = isLinkDisabled;
+                      const isDataIncomplete = shouldApplyTooltip(item);
 
                       return (
-                        <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
-                          style={{ transitionDelay: `${delay}ms` }} direction="down">
+                        <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined} style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem className="sidebar-item">
-                            {(site !== undefined && plot !== undefined && census !== undefined) ? (
-                              <Tooltip title={getTooltipMessage(item.href, isDataIncomplete)} arrow>
+                            {site !== undefined && plot !== undefined && census !== undefined ? (
+                              <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }}>
-                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
-                                    disabled={(plot === undefined || census === undefined || isLinkDisabled)}
-                                    color={pathname === item.href ? 'primary' : undefined}
-                                    onClick={() => {
-                                      if (!isLinkDisabled) {
-                                        router.push(item.href);
-                                      }
-                                    }}>
-                                    <Badge
-                                      color="danger"
-                                      variant={isLinkDisabled ? 'solid' : 'soft'}
-                                      badgeContent={isLinkDisabled ? '!' : undefined}
-                                      invisible={!isLinkDisabled}
-                                    >
+                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }} disabled={plot === undefined || census === undefined || isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
+                                    if (!isLinkDisabled) {
+                                      router.push(item.href);
+                                    }
+                                  }}>
+                                    <Badge color="danger" variant={isDataIncomplete ? 'solid' : 'soft'} badgeContent={isDataIncomplete ? '!' : undefined} invisible={!isDataIncomplete}>
                                       <Icon />
                                     </Badge>
                                     <ListItemContent>
@@ -900,14 +921,11 @@ export default function Sidebar(props: SidebarProps) {
                               </Tooltip>
                             ) : (
                               <Box sx={{ display: 'flex', flex: 1 }}>
-                                <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }}
-                                  disabled={(plot === undefined || census === undefined || isLinkDisabled)}
-                                  color={pathname === item.href ? 'primary' : undefined}
-                                  onClick={() => {
-                                    if (!isLinkDisabled) {
-                                      router.push(item.href);
-                                    }
-                                  }}>
+                                <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }} disabled={plot === undefined || census === undefined || isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
+                                  if (!isLinkDisabled) {
+                                    router.push(item.href);
+                                  }
+                                }}>
                                   <Icon />
                                   <ListItemContent>
                                     <Typography level={"title-sm"}>{item.label}</Typography>
@@ -920,63 +938,47 @@ export default function Sidebar(props: SidebarProps) {
                       );
                     } else {
                       const isParentDataIncomplete = item.expanded.some(subItem => {
-                        // Skip validity check for subquadrats
-                        if (subItem.href === '/subquadrats') {
-                          return false;
-                        }
-
                         const dataKey = validityMapping[subItem.href];
                         return dataKey !== undefined && !validity[dataKey];
                       });
+
                       return (
                         <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined}
                           style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem nested className="sidebar-item">
-                            <SimpleToggler
-                              renderToggle={MenuRenderToggle({
-                                plotSelectionRequired: plot === undefined,
-                                censusSelectionRequired: census === undefined,
-                                pathname, isParentDataIncomplete
-                              }, item, toggle, setToggle)}
-                              isOpen={!!toggle}
-                            >
+                            <SimpleToggler renderToggle={MenuRenderToggle({
+                              plotSelectionRequired: plot === undefined,
+                              censusSelectionRequired: census === undefined,
+                              pathname, isParentDataIncomplete
+                            }, item, toggle, setToggle)}
+                              isOpen={!!toggle}>
                               <List sx={{ gap: 0.75 }} size={"sm"}>
                                 {item.expanded.map((link, subIndex) => {
-                                  // Skip rendering for subquadrats
-                                  if (link.href === '/subquadrats') {
-                                    return null;
-                                  }
                                   const SubIcon = link.icon;
                                   const delay = (subIndex + 1) * 200;
-                                  const dataValidityKey = validityMapping[link.href];
-                                  const isDataIncomplete = dataValidityKey ? !validity[dataValidityKey] : false;
+                                  const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
 
                                   return (
-                                    <TransitionComponent key={link.href} in={!!toggle}
-                                      style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                    <TransitionComponent key={link.href} in={!!toggle} style={{ transitionDelay: `${delay}ms` }} direction="down">
                                       <ListItem sx={{ marginTop: 0.75 }} className="sidebar-item">
-                                        {(site !== undefined && plot !== undefined && census !== undefined) ? (
-                                          <Tooltip title={tooltipMessage} arrow>
+                                        {site !== undefined && plot !== undefined && census !== undefined ? (
+                                          <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }}>
-                                              <ListItemButton sx={{ flex: 1 }}
-                                                selected={pathname == (item.href + link.href)}
-                                                disabled={plot === undefined || census === undefined || isLinkDisabled}
-                                                onClick={() => {
+                                              <ListItemButton sx={{ flex: 1 }} selected={pathname == (item.href + link.href)}
+                                                disabled={plot === undefined || census === undefined || isLinkDisabled} onClick={() => {
                                                   if (!isLinkDisabled) {
-                                                    router.push((item.href + link.href));
+                                                    router.push(item.href + link.href);
                                                     if (setToggle) {
                                                       setToggle(false); // Close the menu
                                                     }
                                                   }
                                                 }}>
-                                                <Badge
-                                                  color={link.href === '/summary' ? "warning" : "danger"}
+                                                <Badge color={link.href === '/summary' ? "warning" : "danger"}
                                                   variant={link.href === '/summary' ? (!isAllValiditiesTrue ? 'solid' : 'soft') : (isDataIncomplete ? 'solid' : 'soft')}
                                                   badgeContent={link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : (isDataIncomplete ? '!' : undefined)}
-                                                  invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
-                                                >
+                                                  invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}>
                                                   <SubIcon />
                                                 </Badge>
                                                 <ListItemContent>
@@ -987,12 +989,10 @@ export default function Sidebar(props: SidebarProps) {
                                           </Tooltip>
                                         ) : (
                                           <Box sx={{ display: 'flex', flex: 1 }}>
-                                            <ListItemButton sx={{ flex: 1 }}
-                                              selected={pathname == (item.href + link.href)}
-                                              disabled={plot === undefined || census === undefined || isLinkDisabled}
-                                              onClick={() => {
+                                            <ListItemButton sx={{ flex: 1 }} selected={pathname == (item.href + link.href)}
+                                              disabled={plot === undefined || census === undefined || isLinkDisabled} onClick={() => {
                                                 if (!isLinkDisabled) {
-                                                  router.push((item.href + link.href));
+                                                  router.push(item.href + link.href);
                                                 }
                                               }}>
                                               <SubIcon />
@@ -1095,6 +1095,9 @@ export default function Sidebar(props: SidebarProps) {
               </>
             )}
           </Box>
+          {site && plot && census && (
+            <Button onClick={() => triggerRefresh()}>Reload Prevalidation</Button>
+          )}
           <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
           <Modal open={openReopenCensusModal} onClose={() => {

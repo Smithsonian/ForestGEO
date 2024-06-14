@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const containerClient = await getContainerClient(containerName);
+    const containerClient = await getContainerClient(containerName.toLowerCase());
     if (!containerClient) {
       return new NextResponse('Failed to get container client', {status: 400});
     }

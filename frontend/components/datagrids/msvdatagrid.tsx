@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -21,11 +21,6 @@ import {
   Alert,
   Button,
   Checkbox,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
   FormControlLabel,
   FormGroup,
   Snackbar
@@ -40,7 +35,6 @@ import Box from "@mui/joy/Box";
 import { Stack, Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
 import {
-  computeMutation,
   createDeleteQuery,
   createFetchQuery,
   createPostPatchQuery,
@@ -63,29 +57,27 @@ import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import BlockIcon from '@mui/icons-material/Block';
 import { CensusDateRange, OrgCensusRDS } from '@/config/sqlrdsdefinitions/orgcensusrds';
-import { unitSelectionOptions } from '@/config/macros';
+import { HTTPResponses, unitSelectionOptions } from '@/config/macros';
 import { gridColumnsArrayMSVRDS } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
-import { MeasurementSummaryGridProps, sortRowsByMeasurementDate, PendingAction, CellItemContainer, errorMapping, filterColumns, ConfirmationDialogProps, EditToolbarCustomProps } from './datagridmacros';
+import { MeasurementSummaryGridProps, sortRowsByMeasurementDate, PendingAction, CellItemContainer, errorMapping, filterColumns, EditToolbarCustomProps } from './datagridmacros';
+import ConfirmationDialog from './confirmationdialog';
+import ReEnterDataModal from './reentrydatamodal';
+import { useLoading } from '@/app/contexts/loadingprovider';
+import { useSession } from 'next-auth/react';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-export function EditToolbar(props: EditToolbarProps) {
-  const { handleAddNewRow, handleRefresh, locked = false } = props;
-
-  return (
-    <GridToolbarContainer>
-      <GridToolbar />
-      {!locked && (
-        <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow}>
-          Add Row
-        </Button>
-      )}
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
-        Refresh
-      </Button>
-    </GridToolbarContainer>
-  );
-}
+const EditToolbar = ({ handleAddNewRow, handleRefresh, locked }: EditToolbarProps) => (
+  <GridToolbarContainer>
+    <GridToolbar />
+    <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
+      Add Row
+    </Button>
+    <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
+      Refresh
+    </Button>
+  </GridToolbarContainer>
+);
 /**
  * Renders custom UI components for measurement summary view.
  *
@@ -115,17 +107,40 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     handleSelectQuadrat,
   } = props;
 
+  // states from datagridcommons:
   const [newLastPage, setNewLastPage] = useState<number | null>(null); // new state to track the new last page
+  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [promiseArguments, setPromiseArguments] = useState<{ resolve: (value: GridRowModel) => void, reject: (reason?: any) => void, newRow: GridRowModel, oldRow: GridRowModel } | null>(null);
+
+  // custom states -- msvdatagrid
   const [deprecatedRows, setDeprecatedRows] = useState<GridValidRowModel[]>([]); // new state to track deprecated rows
   const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
   const [showDeprecatedRows, setShowDeprecatedRows] = useState<boolean>(true);
-  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
-  const [locked, setLocked] = useState(false);
+  const [selectedDateRanges, setSelectedDateRanges] = useState<number[]>([]);
+
+  // context pulls and definitions
+  const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentQuadrat = useQuadratContext();
+  const { setLoading } = useLoading();
+  const { triggerPulse } = useLockAnimation();
+  const handleLockedClick = () => triggerPulse();
+
+  // column destructuring -- applying custom formats to columns
   const [a, b, c, d] = gridColumnsArrayMSVRDS;
+
+  // use the session
+  useSession();
+
+  // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
     setSortModel(newModel);
 
@@ -137,22 +152,9 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       }
     }
   };
-
-  const currentPlot = usePlotContext();
-  const currentCensus = useOrgCensusContext();
-  const currentQuadrat = useQuadratContext();
-
-  const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
-
-  const currentSite = useSiteContext();
-  const { triggerPulse } = useLockAnimation();
-
-  const [selectedDateRanges, setSelectedDateRanges] = useState<number[]>([]);
-
   const getDateRangesForCensus = (census: OrgCensusRDS | undefined) => {
     return census?.dateRanges ?? [];
   };
-
   const handleDateRangeChange = (censusID: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.checked) {
       setSelectedDateRanges(prev => [...prev, censusID]);
@@ -160,97 +162,30 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       setSelectedDateRanges(prev => prev.filter(id => id !== censusID));
     }
   };
-
   const renderDateRangeFilters = (dateRanges: CensusDateRange[]) => (
-    <FormGroup>
+    <FormGroup sx={{ ml: 1.5 }}>
       {dateRanges.map(range => (
         <FormControlLabel
           key={range.censusID}
           control={<Checkbox checked={selectedDateRanges.includes(range.censusID)} onChange={handleDateRangeChange(range.censusID)} />}
-          label={`${range.startDate?.toLocaleDateString()} - ${range.endDate?.toLocaleDateString()}`}
+          label={
+            <Stack direction={'column'} alignItems='flex-start' sx={{ my: 2 }}>
+              <Typography level='body-sm' sx={{ mb: -0.5 }}>ID: {range.censusID}</Typography>
+              <Typography level='body-md'>
+                {moment(range.startDate).format('ddd, MMM D, YYYY')} - {moment(range.endDate).format('ddd, MMM D, YYYY')}
+              </Typography>
+            </Stack>
+          }
         />
       ))}
     </FormGroup>
   );
-
   const handleShowDeprecatedRowsChange = (event: any) => {
     setShowDeprecatedRows(event.target.checked);
   };
-
   const rowIsDeprecated = (rowId: GridRowId) => {
     return deprecatedRows.some(depRow => depRow.id === rowId);
   };
-
-  const validationStatusColumn: GridColDef = {
-    field: 'isValidated',
-    headerName: '',
-    headerAlign: 'center',
-    align: 'center',
-    width: 50,
-    renderCell: (params: GridCellParams) => {
-      const rowId = params.row.id;
-      const isDeprecated = deprecatedRows.some(row => row.id === rowId);
-      const validationError = validationErrors[Number(rowId)];
-      const isPendingValidation = !params.row.isValidated && !validationError;
-      const isValidated = params.row.isValidated;
-
-      if (isDeprecated) {
-        return (
-          <Tooltip title="Deprecated" size="md">
-            <BlockIcon color="action" />
-          </Tooltip>
-        );
-      } else if (validationError) {
-        return (
-          <Tooltip title="Failed Validation" size="md">
-            <ErrorIcon color="error" />
-          </Tooltip>
-        );
-      } else if (isPendingValidation) {
-        return (
-          <Tooltip title="Pending" size="md">
-            <HourglassEmptyIcon color="disabled" />
-          </Tooltip>
-        );
-      } else if (isValidated) {
-        return (
-          <Tooltip title="Passed Validation" size="md">
-            <CheckIcon color="success" />
-          </Tooltip>
-        );
-      } else {
-        return null;
-      }
-    },
-  };
-  const measurementDateColumn: GridColDef = {
-    field: 'measurementDate',
-    headerName: 'Date',
-    headerClassName: 'header',
-    flex: 0.8,
-    sortable: true,
-    editable: true,
-    type: 'date',
-    renderHeader: () => <Box flexDirection={'column'}>
-      <Typography level='title-lg'>Date</Typography>
-      <Typography level='body-xs'>YYYY-MM-DD</Typography>
-    </Box>,
-    valueFormatter: (value) => {
-      console.log('params: ', value);
-      // Check if the date is present and valid
-      if (!value || !moment(value).utc().isValid()) {
-        console.log('value: ', value);
-        console.log('moment-converted: ', moment(value).utc().format('YYYY-MM-DD'));
-        return '';
-      }
-      // Format the date as a dash-separated set of numbers
-      return moment(value).utc().format('YYYY-MM-DD');
-    },
-  };
-  const handleLockedClick = () => {
-    triggerPulse();
-  };
-
   const extractErrorRows = () => {
     if (errorRowsForExport.length > 0) return;
 
@@ -258,55 +193,23 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       setErrorRowsForExport(fetchedRows);
     });
   };
-
-  const stemUnitsColumn: GridColDef = {
-    field: 'stemUnits',
-    headerName: 'U',
-    headerClassName: 'header',
-    flex: 0.4,
-    renderHeader: () => <Typography level='body-xs'>U</Typography>,
-    align: 'left',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
+  const cellHasError = (colField: string, rowId: GridRowId) => {
+    const error = validationErrors[Number(rowId)];
+    if (!error) return false;
+    const errorFields = error.ValidationErrorIDs.flatMap(
+      id => errorMapping[id.toString()] || []
+    );
+    return errorFields.includes(colField);
   };
-
-  const dbhUnitsColumn: GridColDef = {
-    field: 'dbhUnits',
-    headerName: 'U',
-    headerClassName: 'header',
-    flex: 0.4,
-    renderHeader: () => <Typography level='body-xs'>U</Typography>,
-    align: 'left',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
+  const rowHasError = (rowId: GridRowId) => {
+    if (!rows || rows.length === 0) return false;
+    return gridColumns.some(column => cellHasError(column.field, rowId));
   };
-
-  const homUnitsColumn: GridColDef = {
-    field: 'homUnits',
-    headerName: 'U',
-    headerClassName: 'header',
-    flex: 0.4,
-    renderHeader: () => <Typography level='body-xs'>U</Typography>,
-    align: 'left',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  };
-
   const fetchErrorRows = async () => {
     if (!rows || rows.length === 0) return [];
     const errorRows = rows.filter(row => rowHasError(row.id));
     return errorRows;
   };
-
-  useEffect(() => {
-    if (errorRowsForExport && errorRowsForExport.length > 0) {
-      printErrorRows();
-    }
-  }, [errorRowsForExport]);
-
   const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
     const error = validationErrors[Number(rowId)];
     if (!error) return [];
@@ -316,61 +219,102 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     });
   };
 
-  const saveErrorRowsAsCSV = () => {
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += gridColumns.map(col => col.headerName).concat("Validation Errors").join(",") + "\r\n"; // Add "Validation Errors" column header
+  const errorRowCount = useMemo(() => {
+    return rows.filter(row => rowHasError(row.id)).length;
+  }, [rows, gridColumns]);
 
-    errorRowsForExport.forEach(row => {
-      const rowValues = gridColumns.map(col => row[col.field] ?? '').join(",");
-      const errorDescriptions = getRowErrorDescriptions(row.id).join("; "); // Function to retrieve error descriptions for a row
-      csvContent += `${rowValues},"${errorDescriptions}"\r\n`;
-    });
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    saveAs(blob, `validation_errors_${currentPlot?.plotName}.csv`);
-  };
-
-  const printErrorRows = () => {
-    if (!errorRowsForExport || errorRowsForExport.length === 0) {
-      extractErrorRows();
-      return;
+  // use effect loops, pulled from datagridcommons:
+  useEffect(() => {
+    if (currentCensus !== undefined) {
+      setLocked(currentCensus.dateRanges[0].endDate !== undefined);
     }
+  }, [currentCensus]);
 
-    let printContent = "<html><head><style>";
-    printContent += "table {width: 100%; border-collapse: collapse;}";
-    printContent += "th, td {border: 1px solid black; padding: 8px; text-align: left;}";
-    printContent += "</style></head><body>";
-    printContent += `<h5>Site: ${currentSite?.schemaName} | Plot: ${currentPlot?.plotName} | Census: ${currentCensus?.plotCensusNumber}</h5>`;
-    printContent += "<table><thead><tr>";
+  useEffect(() => {
+    if (!isNewRowAdded) {
+      fetchPaginatedData(paginationModel.page).catch(console.error);
+    }
+  }, [paginationModel.page, sortModel]);
 
-    gridColumns.forEach(col => {
-      printContent += `<th>${col.headerName}</th>`;
-    });
-    printContent += "<th>Validation Errors</th>"; // Add error header
-    printContent += "</tr></thead><tbody>";
+  useEffect(() => {
+    if (currentPlot?.plotID || currentCensus?.plotCensusNumber) {
+      fetchPaginatedData(paginationModel.page).catch(console.error);
+    }
+  }, [currentPlot, currentCensus, paginationModel.page]);
 
-    errorRowsForExport.forEach(row => {
-      printContent += "<tr>";
-      gridColumns.forEach(col => {
-        console.log('column fields: ', col.field);
-        if (col.field === "measurementDate") {
-          printContent += `<td>${moment(new Date(row[col.field])).utc().toDate().toDateString() ?? ''}</td>`;
-        } else {
-          printContent += `<td>${row[col.field] ?? ''}</td>`;
-        }
+  useEffect(() => {
+    if (refresh && currentSite) {
+      handleRefresh().then(() => {
+        setRefresh(false);
       });
-      const errorDescriptions = getRowErrorDescriptions(row.id).join("; ");
-      printContent += `<td>${errorDescriptions}</td>`; // Print error descriptions
-      printContent += "</tr>";
-    });
+    }
+  }, [refresh, setRefresh]);
 
-    printContent += "</tbody></table></body></html>";
+  // custom useEffect loops for msvdatagrid --> setting date range filters
+  useEffect(() => {
+    if (currentCensus) {
+      const allDateRangeIDs = currentCensus.dateRanges.map(range => range.censusID);
+      setSelectedDateRanges(allDateRangeIDs);
+    }
+  }, [currentCensus]);
 
-    const printWindow = window.open('', '', 'height=600,width=800');
-    if (printWindow) {
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      printWindow.print();
+  useEffect(() => {
+    fetchValidationErrors()
+      .catch(console.error)
+      .then(() => setRefresh(false));
+  }, [refresh]);
+
+  useEffect(() => {
+    if (errorRowCount > 0) {
+      setSnackbar({
+        children: `${errorRowCount} row(s) with validation errors detected.`,
+        severity: 'warning'
+      });
+    }
+  }, [errorRowCount]);
+
+  // main system begins here:
+
+  const updateRow = async (
+    gridType: string,
+    schemaName: string | undefined,
+    newRow: GridRowModel,
+    oldRow: GridRowModel,
+    setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
+    setIsNewRowAdded: (value: boolean) => void,
+    setShouldAddRowAfterFetch: (value: boolean) => void,
+    fetchPaginatedData: (page: number) => Promise<void>,
+    paginationModel: { page: number }
+  ): Promise<GridRowModel> => {
+    const gridID = getGridID(gridType);
+    const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
+
+    try {
+      const response = await fetch(fetchProcessQuery, {
+        method: oldRow.isNew ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
+      });
+
+      const responseJSON = await response.json();
+
+      if (!response.ok) {
+        setSnackbar({ children: `Error: ${responseJSON.message}`, severity: 'error' });
+        return Promise.reject(responseJSON.row);
+      }
+
+      setSnackbar({ children: oldRow.isNew ? 'New row added!' : 'Row updated!', severity: 'success' });
+
+      if (oldRow.isNew) {
+        setIsNewRowAdded(false);
+        setShouldAddRowAfterFetch(false);
+        await fetchPaginatedData(paginationModel.page);
+      }
+
+      return newRow;
+    } catch (error: any) {
+      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+      return Promise.reject(newRow);
     }
   };
 
@@ -379,69 +323,101 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     actionId: GridRowId
   ) => {
     setPendingAction({ actionType, actionId });
-    setIsDialogOpen(true);
+    const row = rows.find(row => String(row.id) === String(actionId));
+    if (row) {
+      if (actionType === 'delete') {
+        setIsDeleteDialogOpen(true);
+      } else {
+        setIsDialogOpen(true);
+        setRowModesModel(oldModel => ({
+          ...oldModel,
+          [actionId]: { mode: GridRowModes.View }
+        }));
+      }
+    }
   };
 
   const handleConfirmAction = async () => {
     setIsDialogOpen(false);
-    if (
-      pendingAction.actionType === 'save' &&
-      pendingAction.actionId !== null
-    ) {
+    setIsDeleteDialogOpen(false);
+    if (pendingAction.actionType === 'save' && pendingAction.actionId !== null && promiseArguments) {
       await performSaveAction(pendingAction.actionId);
-    } else if (
-      pendingAction.actionType === 'delete' &&
-      pendingAction.actionId !== null
-    ) {
+    } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
       await performDeleteAction(pendingAction.actionId);
     }
     setPendingAction({ actionType: '', actionId: null });
+    setPromiseArguments(null);  // Clear promise arguments after handling
   };
 
   const handleCancelAction = () => {
     setIsDialogOpen(false);
+    setIsDeleteDialogOpen(false);
+    if (promiseArguments) {
+      promiseArguments.reject(new Error('Action cancelled by user'));
+    }
     setPendingAction({ actionType: '', actionId: null });
+    setPromiseArguments(null);  // Clear promise arguments after handling
   };
 
   const performSaveAction = async (id: GridRowId) => {
-    if (locked) return;
-    console.log('save confirmed');
-    setRowModesModel(oldModel => ({
-      ...oldModel,
-      [id]: { mode: GridRowModes.View }
-    }));
-    const row = rows.find(row => row.id === id);
+    if (locked || !promiseArguments) return;
+    setLoading(true, "Saving changes...");
+    try {
+      const updatedRow = await updateRow(
+        'measurementssummaryview',
+        currentSite?.schemaName,
+        promiseArguments.newRow,
+        promiseArguments.oldRow,
+        setSnackbar,
+        setIsNewRowAdded,
+        setShouldAddRowAfterFetch,
+        fetchPaginatedData,
+        paginationModel
+      );
+      promiseArguments.resolve(updatedRow);
+    } catch (error) {
+      promiseArguments.reject(error);
+    }
+    const row = rows.find(row => String(row.id) === String(id));
     if (row?.isNew) {
       setIsNewRowAdded(false);
       setShouldAddRowAfterFetch(false);
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
+    setLoading(false);
     await fetchPaginatedData(paginationModel.page);
   };
 
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
-    const gridID = getGridID('measurementssummaryview');
-    const deletionID = rows.find(row => row.id == id)?.[gridID];
+    setLoading(true, "Deleting...");
+    const deletionID = rows.find(row => String(row.id) === String(id))?.id;
+    if (!deletionID) return;
     const deleteQuery = createDeleteQuery(
       currentSite?.schemaName ?? '',
       'measurementssummaryview',
-      gridID,
-      deletionID,
+      getGridID('measurementssummaryview'),
+      deletionID
     );
     const response = await fetch(deleteQuery, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ oldRow: undefined, newRow: rows.find(row => row.id === id)! })
+      body: JSON.stringify({ oldRow: undefined, newRow: rows.find(row => String(row.id) === String(id))! })
     });
-    if (!response.ok)
-      setSnackbar({ children: 'Error: Deletion failed', severity: 'error' });
-    else {
+    setLoading(false);
+    if (!response.ok) {
+      const error = await response.json();
+      if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
+        setSnackbar({ children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`, severity: 'error' });
+      } else {
+        setSnackbar({ children: `Error: ${error.message || 'Deletion failed'}`, severity: 'error' });
+      }
+    } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
       setSnackbar({ children: 'Row successfully deleted', severity: 'success' });
-      setRows(rows.filter(row => row.id !== id));
+      setRows(rows.filter(row => String(row.id) !== String(id)));
       await fetchPaginatedData(paginationModel.page);
     }
   };
@@ -470,11 +446,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   const handleAddNewRow = async () => {
     if (locked) {
-      console.log('rowCount: ', rowCount);
       return;
     }
-    console.log('handleAddNewRow triggered');
-
     const newRowCount = rowCount + 1;
     const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
     const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
@@ -485,7 +458,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setNewLastPage(calculatedNewLastPage);
 
     if (isNewPageNeeded) {
-      await setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
+      setPaginationModel({ ...paginationModel, page: calculatedNewLastPage });
       addNewRowToGrid();
     } else {
       setPaginationModel({ ...paginationModel, page: existingLastPage });
@@ -517,14 +490,26 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       console.log('output: ', data.output);
       if (data.deprecated) setDeprecatedRows(data.deprecated);
 
-      // Apply date range filtering
+      // Apply date range filtering with UTC handling
       const filteredRows = data.output.filter((row: any) => {
-        return selectedDateRanges.length === 0 || selectedDateRanges.some(id => {
+        if (selectedDateRanges.length === 0) {
+          // If no date ranges are selected, show no rows
+          return false;
+        }
+        return selectedDateRanges.some(id => {
           const range = currentCensus?.dateRanges.find(r => r.censusID === id);
-          const measurementDate = new Date(row.measurementDate);
-          return range && range.startDate && range.endDate && measurementDate >= range.startDate && measurementDate <= range.endDate;
+          const measurementDate = moment.utc(row.measurementDate);
+          if (range) {
+            const startDate = moment.utc(range.startDate);
+            const endDate = moment.utc(range.endDate);
+            console.log('measurementDate:', measurementDate.toISOString());
+            console.log('range startDate:', startDate.toISOString(), 'endDate:', endDate.toISOString());
+            return measurementDate.isBetween(startDate, endDate, undefined, '[]');
+          }
+          return false;
         });
       });
+      console.log('filtered rows: ', filteredRows);
 
       // Sort rows by measurementDate before setting them
       const sortedRows = sortRowsByMeasurementDate(filteredRows, sortModel[0]?.sort || 'asc');
@@ -545,104 +530,26 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     }
   };
 
-  useEffect(() => {
-    if (!isNewRowAdded) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
+  const processRowUpdate = useCallback((newRow: GridRowModel, oldRow: GridRowModel) => new Promise<GridRowModel>((resolve, reject) => {
+    setLoading(true, "Processing changes...");
+    if (newRow.id === '') {
+      setLoading(false);
+      return reject(new Error('Primary key id cannot be empty!'));
     }
-  }, [paginationModel.page, sortModel]);
 
-  useEffect(() => {
-    if (currentPlot?.plotID || currentCensus?.plotCensusNumber) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
-    }
-  }, [currentPlot, currentCensus, paginationModel.page]);
-
-  useEffect(() => {
-    if (refresh && currentSite) {
-      handleRefresh().then(() => {
-        setRefresh(false);
-      });
-    }
-  }, [refresh, setRefresh]);
-
-  useEffect(() => {
-    if (currentCensus) {
-      const allDateRangeIDs = currentCensus.dateRanges.map(range => range.censusID);
-      setSelectedDateRanges(allDateRangeIDs);
-    }
-  }, [currentCensus]);
-
-  const processRowUpdate = React.useCallback(
-    async (
-      newRow: GridRowModel,
-      oldRow: GridRowModel
-    ): Promise<GridRowModel> => {
-      console.log(
-        'Processing row update. Old row:',
-        oldRow,
-        '; New row:',
-        newRow
-      );
-
-      const gridID = getGridID('measurementssummaryview');
-      const fetchProcessQuery = createPostPatchQuery(
-        currentSite?.schemaName ?? '',
-        'measurementssummaryview',
-        gridID
-      );
-
-      if (newRow[gridID] === '') {
-        throw new Error(`Primary key ${gridID} cannot be empty!`);
-      }
-
-      try {
-        let response, responseJSON;
-        if (oldRow.isNew) {
-          response = await fetch(fetchProcessQuery, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-          });
-          responseJSON = await response.json();
-          if (response.status > 299 || response.status < 200)
-            throw new Error(responseJSON.message || 'Insertion failed');
-          setSnackbar({ children: `New row added!`, severity: 'success' });
-        } else {
-          const mutation = computeMutation('measurementssummaryview', newRow, oldRow);
-          if (mutation) {
-            response = await fetch(fetchProcessQuery, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
-            });
-            responseJSON = await response.json();
-            if (response.status > 299 || response.status < 200)
-              throw new Error(responseJSON.message || 'Update failed');
-            setSnackbar({ children: `Row updated!`, severity: 'success' });
-          }
-        }
-        if (oldRow.isNew) {
-          setIsNewRowAdded(false);
-          setShouldAddRowAfterFetch(false);
-          await fetchPaginatedData(paginationModel.page);
-        }
-
-        return newRow;
-      } catch (error: any) {
-        setSnackbar({ children: error.message, severity: 'error' });
-        throw error;
-      }
-    },
-    [
-      setSnackbar,
-      setIsNewRowAdded,
-      fetchPaginatedData,
-      paginationModel.page
-    ]
-  );
+    setPromiseArguments({ resolve, reject, newRow, oldRow });
+    setLoading(false);
+  }), [currentSite?.schemaName, setSnackbar, setIsNewRowAdded, setShouldAddRowAfterFetch, fetchPaginatedData, paginationModel]);
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
+
+    const rowInEditMode = Object.entries(newRowModesModel).find(([id, mode]) => mode.mode === GridRowModes.Edit);
+    if (rowInEditMode) {
+      const [id] = rowInEditMode;
+      const row = rows.find(row => String(row.id) === String(id));
+      console.log('handleRowModesModelChange triggered on row: ', row);
+    }
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -668,12 +575,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
     if (locked) return;
     event?.preventDefault();
-
     const row = rows.find(r => r.id === id);
     if (row?.isNew) {
       setRows(oldRows => oldRows.filter(row => row.id !== id));
       setIsNewRowAdded(false);
-
       if (rowCount % paginationModel.pageSize === 1 && isNewRowAdded) {
         const newPage =
           paginationModel.page - 1 >= 0 ? paginationModel.page - 1 : 0;
@@ -756,26 +661,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
           return acc;
         }, {})
         : {};
-
+        
       setValidationErrors(errorMap);
     } catch (error) {
       console.error('Error fetching validation errors:', error);
     }
-  };
-
-  useEffect(() => {
-    fetchValidationErrors()
-      .catch(console.error)
-      .then(() => setRefresh(false));
-  }, [refresh]);
-
-  const cellHasError = (colField: string, rowId: GridRowId) => {
-    const error = validationErrors[Number(rowId)];
-    if (!error) return false;
-    const errorFields = error.ValidationErrorIDs.flatMap(
-      id => errorMapping[id.toString()] || []
-    );
-    return errorFields.includes(colField);
   };
 
   const getCellErrorMessages = (colField: string, rowId: GridRowId) => {
@@ -845,6 +735,107 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     };
   });
 
+  // custom column formatting: 
+  const validationStatusColumn: GridColDef = {
+    field: 'isValidated',
+    headerName: '',
+    headerAlign: 'center',
+    align: 'center',
+    width: 50,
+    renderCell: (params: GridCellParams) => {
+      const rowId = params.row.id;
+      const isDeprecated = deprecatedRows.some(row => row.id === rowId);
+      const validationError = validationErrors[Number(rowId)];
+      const isPendingValidation = !params.row.isValidated && !validationError;
+      const isValidated = params.row.isValidated;
+
+      if (isDeprecated) {
+        return (
+          <Tooltip title="Deprecated" size="md">
+            <BlockIcon color="action" />
+          </Tooltip>
+        );
+      } else if (validationError) {
+        return (
+          <Tooltip title="Failed Validation" size="md">
+            <ErrorIcon color="error" />
+          </Tooltip>
+        );
+      } else if (isPendingValidation) {
+        return (
+          <Tooltip title="Pending" size="md">
+            <HourglassEmptyIcon color="disabled" />
+          </Tooltip>
+        );
+      } else if (isValidated) {
+        return (
+          <Tooltip title="Passed Validation" size="md">
+            <CheckIcon color="success" />
+          </Tooltip>
+        );
+      } else {
+        return null;
+      }
+    },
+  };
+  const measurementDateColumn: GridColDef = {
+    field: 'measurementDate',
+    headerName: 'Date',
+    headerClassName: 'header',
+    flex: 0.8,
+    sortable: true,
+    editable: true,
+    type: 'date',
+    renderHeader: () => <Box flexDirection={'column'}>
+      <Typography level='title-lg'>Date</Typography>
+      <Typography level='body-xs'>YYYY-MM-DD</Typography>
+    </Box>,
+    valueFormatter: (value) => {
+      console.log('params: ', value);
+      // Check if the date is present and valid
+      if (!value || !moment(value).utc().isValid()) {
+        console.log('value: ', value);
+        console.log('moment-converted: ', moment(value).utc().format('YYYY-MM-DD'));
+        return '';
+      }
+      // Format the date as a dash-separated set of numbers
+      return moment(value).utc().format('YYYY-MM-DD');
+    },
+  };
+  const stemUnitsColumn: GridColDef = {
+    field: 'stemUnits',
+    headerName: 'U',
+    headerClassName: 'header',
+    flex: 0.4,
+    renderHeader: () => <Typography level='body-xs'>U</Typography>,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  };
+  const dbhUnitsColumn: GridColDef = {
+    field: 'dbhUnits',
+    headerName: 'U',
+    headerClassName: 'header',
+    flex: 0.4,
+    renderHeader: () => <Typography level='body-xs'>U</Typography>,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  };
+  const homUnitsColumn: GridColDef = {
+    field: 'homUnits',
+    headerName: 'U',
+    headerClassName: 'header',
+    flex: 0.4,
+    renderHeader: () => <Typography level='body-xs'>U</Typography>,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  };
+
   const columns = useMemo(() => {
     const commonColumns = modifiedColumns;
     if (locked) {
@@ -855,11 +846,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
-
-  const rowHasError = (rowId: GridRowId) => {
-    if (!rows || rows.length === 0) return false;
-    return gridColumns.some(column => cellHasError(column.field, rowId));
-  };
 
   const visibleRows = useMemo(() => {
     let filteredRows = rows;
@@ -875,33 +861,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     return filteredRows;
   }, [rows, showErrorRows, showValidRows, showDeprecatedRows]);
 
-  const errorRowCount = useMemo(() => {
-    return rows.filter(row => rowHasError(row.id)).length;
-  }, [rows, gridColumns]);
-
-
-  useEffect(() => {
-    if (currentCensus !== undefined) {
-      setLocked(currentCensus.dateRanges[0].endDate !== undefined); // if the end date is not undefined, then grid should be locked
-    }
-  }, [currentCensus]);
-  useEffect(() => {
-    if (errorRowCount > 0) {
-      setSnackbar({
-        children: `${errorRowCount} row(s) with validation errors detected.`,
-        severity: 'warning'
-      });
-    }
-  }, [errorRowCount]);
-
   const getRowClassName = (params: any) => {
     const rowId = params.id;
     if (rowIsDeprecated(rowId)) {
       return 'deprecated';
     } else if (rowHasError(rowId)) {
       return 'error-row';
-    } else if (!params.row.isValidated) {
-      return 'pending-validation';
     } else {
       return 'validated';
     }
@@ -942,7 +907,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
           <Stack direction={'row'} justifyContent="space-between">
-            <Stack direction='row'>
+            <Stack direction='row' spacing={2}>
               <Typography>
                 <Checkbox
                   checked={showErrorRows}
@@ -965,19 +930,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
                 Show deprecated rows: ({deprecatedRows.length})
               </Typography>
             </Stack>
-
-            <Box>
-              <Button color="primary" onClick={saveErrorRowsAsCSV}>
-                Save Errors as CSV
-              </Button>
-              <Button color="primary" onClick={printErrorRows}>
-                Print Errors
-              </Button>
-            </Box>
           </Stack>
-          <Typography level={'title-lg'}>
-            Note: The Grid is filtered by your selected Plot and Plot ID
-          </Typography>
+          <Stack direction={'column'} marginTop={2}>
+            <Typography level='title-lg'>Filtering &mdash;</Typography>
+            <Typography level="body-xs">Select or deselect filters to filter by date ranges within a census</Typography>
+          </Stack>
           {renderDateRangeFilters(getDateRangesForCensus(currentCensus))}
           <StyledDataGrid
             sx={{ width: '100%' }}
@@ -1026,7 +983,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             }}
             autoHeight
             getRowHeight={() => 'auto'}
-          // getRowClassName={getRowClassName}
+            getRowClassName={getRowClassName}
+            isCellEditable={() => !locked}
           />
         </Box>
         {!!snackbar && (
@@ -1039,40 +997,25 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
-        <ConfirmationDialog
-          isOpen={isDialogOpen}
-          onConfirm={handleConfirmAction}
-          onCancel={handleCancelAction}
-          message={
-            pendingAction.actionType === 'save'
-              ? 'Are you sure you want to save changes?'
-              : 'Are you sure you want to delete this row?'
-          }
-        />
+        {isDialogOpen && promiseArguments && (
+          <ReEnterDataModal
+            row={promiseArguments.oldRow}
+            reEnterData={promiseArguments.newRow}
+            handleClose={handleCancelAction}
+            handleSave={handleConfirmAction}
+            columns={gridColumns}
+          />
+        )}
+        {isDeleteDialogOpen && (
+          <ConfirmationDialog
+            open={isDeleteDialogOpen}
+            onClose={handleCancelAction}
+            onConfirm={handleConfirmAction}
+            title="Confirm Deletion"
+            content="Are you sure you want to delete this row? This action cannot be undone."
+          />
+        )}
       </Box>
     );
   }
 }
-
-// ConfirmationDialog component with TypeScript types
-const ConfirmationDialog: React.FC<ConfirmationDialogProps> = (props) => {
-  const { isOpen, onConfirm, onCancel, message } = props;
-  return (
-    <Dialog open={isOpen} onClose={onCancel}>
-      <DialogTitle>Confirm Action</DialogTitle>
-      <DialogContent>
-        <DialogContentText>
-          {message}
-        </DialogContentText>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel} color="primary">
-          Cancel
-        </Button>
-        <Button onClick={onConfirm} color="primary">
-          Confirm
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-};

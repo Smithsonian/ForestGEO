@@ -19,19 +19,19 @@ export const TableHeadersByFormType: Record<string, { label: string; }[]> = {
   "species": [{label: "spcode"}, {label: "family"}, {label: "genus"}, {label: "species"}, {label: "subspecies"}, {label: "idlevel"}, {label: "authority"}, {label: "subspeciesauthority"}],
   "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
   "subquadrats": [{label: "subquadrat"}, {label: "quadrat"}, {label: "dimx"}, {label: "dimy"}, {label: "xindex"}, {label: "yindex"}, {label: "unit"}, {label: "orderindex"}],
-  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: "subquadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "dbhunit"}, {label: "hom"}, {label: "homunit"}, {label: "date"}, {label: "codes"},],
+  "measurements": [{label: "tag"}, {label: "stemtag"}, {label: "spcode"}, {label: 'quadrat'}, {label: "subquadrat"}, {label: "lx"}, {label: "ly"}, {label: "dbh"}, {label: "dbhunit"}, {label: "hom"}, {label: "homunit"}, {label: "date"}, {label: "codes"},],
   "arcgis_xlsx": arcgisHeaders
 };
 
-export function getTableHeaders(formType: string, usesSubquadrats: boolean): { label: string; }[] {
-  if (formType === "measurements") {
-    return TableHeadersByFormType["measurements"].map(header => {
-      if (header.label === "subquadrat") {
-        return {label: usesSubquadrats ? "subquadrat" : "quadrat"};
-      }
-      return header;
-    });
-  }
+export function getTableHeaders(formType: string, _usesSubquadrats: boolean): { label: string; }[] {
+  // if (formType === "measurements") {
+  //   return TableHeadersByFormType["measurements"].map(header => {
+  //     if (header.label === "subquadrat") {
+  //       return {label: usesSubquadrats ? "subquadrat" : "quadrat"};
+  //     }
+  //     return header;
+  //   });
+  // }
 
   return TableHeadersByFormType[formType];
 }

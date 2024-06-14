@@ -115,7 +115,6 @@ export type UnifiedValidityFlags = {
   personnel: boolean;
   species: boolean;
   quadrats: boolean;
-  subquadrats: boolean;
   quadratpersonnel: boolean;
 }
 

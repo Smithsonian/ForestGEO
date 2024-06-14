@@ -81,6 +81,8 @@ export const fileMappings: Record<string, FileMapping> = {
     // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
     columnMappings: {
       "quadrat": "QuadratName",
+      "plotID": "PlotID",
+      "censusID": "CensusID",
       "startx": "StartX",
       "starty": "StartY",
       "dimx": "DimensionX",
@@ -95,6 +97,8 @@ export const fileMappings: Record<string, FileMapping> = {
     columnMappings: {
       "subquadrat": "SubquadratName",
       "quadrat": "QuadratID",
+      "plotID": "PlotID",
+      "censusID": "CensusID",
       "dimx": "DimensionX",
       "dimy": "DimensionY",
       "xindex": "X",

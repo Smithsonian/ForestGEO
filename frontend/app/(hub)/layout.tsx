@@ -233,9 +233,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && !quadratListLoaded) {
       loadQuadratsData().catch(console.error);
     }
-    if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && quadratListLoaded && !subquadratListLoaded) {
-      loadSubquadratsData().catch(console.error);
-    }
+    // if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && quadratListLoaded && !subquadratListLoaded) {
+    //   loadSubquadratsData().catch(console.error);
+    // }
   }, [siteListLoaded, currentSite, plotListLoaded, censusListLoaded, quadratListLoaded, subquadratListLoaded, loadCensusData, loadPlotsData, loadQuadratsData, loadSubquadratsData]);
 
   useEffect(() => {

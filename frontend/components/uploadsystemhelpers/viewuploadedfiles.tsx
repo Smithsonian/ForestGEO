@@ -82,7 +82,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDownload = async (containerName: string, filename: string) => {
     try {
-      const response = await fetch(`/api/filehandlers/downloadfile?container=${containerName}&filename=${encodeURIComponent(filename)}`);
+      const response = await fetch(`/api/filehandlers/downloadfile?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`);
       if (!response.ok) throw new Error('Error getting download link');
 
       const data = await response.json();
@@ -96,7 +96,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDelete = async (containerName: string, filename: string) => {
     try {
-      const response = await fetch(`/api/filehandlers/deletefile?container=${containerName}&filename=${encodeURIComponent(filename)}`, {
+      const response = await fetch(`/api/filehandlers/deletefile?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Error deleting file');

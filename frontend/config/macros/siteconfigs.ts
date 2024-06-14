@@ -41,7 +41,6 @@ export const validityMapping: ValidityMapping = {
   '/personnel': 'personnel',
   '/alltaxonomies': 'species',
   '/quadrats': 'quadrats',
-  '/subquadrats': 'subquadrats',
   '/quadratpersonnel': 'quadratpersonnel'
 };
 

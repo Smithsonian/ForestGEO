@@ -10,7 +10,6 @@ import { DatePicker } from '@mui/x-date-pickers';
 interface ReEnterDataModalProps {
   row: GridRowModel;
   reEnterData: GridRowModel | null;
-  setReEnterData: (data: GridRowModel) => void;
   handleClose: () => void;
   handleSave: () => void;
   columns: GridColDef[];
@@ -19,15 +18,15 @@ interface ReEnterDataModalProps {
 const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
   row,
   reEnterData,
-  setReEnterData,
   handleClose,
   handleSave,
   columns,
 }) => {
-  const [localData, setLocalData] = useState<GridRowModel>({ ...row });
+  const [localData, setLocalData] = useState<GridRowModel>({ ...reEnterData });
 
   useEffect(() => {
-    // Reset the fields that have been changed to empty strings only once on mount
+    console.log('row: ', row);
+    console.log('reEnterData: ', reEnterData);
     const initialData = { ...row };
     columns.forEach((column) => {
       const { field, editable } = column;
@@ -35,9 +34,8 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
         initialData[field] = '';
       }
     });
-    setLocalData(initialData);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
+    setLocalData({ ...initialData });
+  }, [row, reEnterData, columns]);
 
   const handleInputChange = (field: string, value: any) => {
     setLocalData((prevData) => ({
@@ -47,13 +45,13 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
   };
 
   const validateData = () => {
-    const allFieldsMatch = Object.keys(row).every((field) => row[field] === localData[field]);
+    if (!reEnterData) return false;
+    const allFieldsMatch = Object.keys(reEnterData).every((field) => reEnterData[field] === localData[field]);
     return allFieldsMatch;
   };
 
   const handleConfirm = () => {
     if (validateData()) {
-      setReEnterData(localData);
       handleSave();
     } else {
       alert("Values do not match. Please re-enter correctly.");
@@ -78,9 +76,12 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
                   <FormControl key={field}>
                     <FormLabel>{column.headerName}</FormLabel>
                     <Select
+                      disabled={row[field] === (reEnterData || {})[field]}
                       placeholder={column.headerName}
                       value={value}
-                      onChange={(e: any) => handleInputChange(field, e.target.value)}
+                      onChange={(_event, newValue) => {
+                        handleInputChange(field, newValue);
+                      }}
                     >
                       {valueOptions.map((option) => (
                         <Option key={option} value={option}>
@@ -96,6 +97,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
                   <FormControl key={field}>
                     <FormLabel>{column.headerName}</FormLabel>
                     <DatePicker
+                      disabled={row[field] === (reEnterData || {})[field]}
                       label={column.headerName}
                       value={value ? moment(value).utc() : null}
                       onChange={(newValue) => {
@@ -109,6 +111,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
                 <FormControl key={field}>
                   <FormLabel>{column.headerName}</FormLabel>
                   <Input
+                    disabled={row[field] === (reEnterData || {})[field]}
                     placeholder={column.headerName}
                     value={value}
                     onChange={(e) => handleInputChange(field, e.target.value)}
@@ -117,6 +120,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
                 </FormControl>
               );
             })}
+
           </Stack>
         </DialogContent>
         <DialogActions>

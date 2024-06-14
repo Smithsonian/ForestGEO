@@ -27,13 +27,13 @@ export async function POST(request: NextRequest) {
   const censusID = parseInt(censusIDParam.trim());
   // quadrat ID
   const quadratIDParam = request.nextUrl.searchParams.get("quadrat");
-  if (!quadratIDParam) throw new Error("no quadrat ID provided");
-  const quadratID = parseInt(quadratIDParam.trim());
+  if (!quadratIDParam) console.error("no quadrat ID provided");
+  const quadratID = quadratIDParam ? parseInt(quadratIDParam.trim()) : undefined;
   // form type
   let formType = request.nextUrl.searchParams.get("formType");
   if (!formType) throw new Error('no formType provided!');
   formType = formType.trim();
-// full name
+  // full name
   const fullName = request.nextUrl.searchParams.get("user") ?? undefined;
   // if (!fullName) throw new Error('no full name provided!');
   // fullName = fullName.trim();
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
           responseMessage: `Failure in connecting to SQL with ${error.message}`,
           error: error.message,
         }),
-        {status: HTTPResponses.SQL_CONNECTION_FAILURE}
+        { status: HTTPResponses.SQL_CONNECTION_FAILURE }
       );
     } else {
       console.error("Unknown error in connecting to SQL:", error);
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
         JSON.stringify({
           responseMessage: `Unknown SQL connection error with error: ${error}`,
         }),
-        {status: HTTPResponses.SQL_CONNECTION_FAILURE}
+        { status: HTTPResponses.SQL_CONNECTION_FAILURE }
       );
     }
   }
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Container client or SQL connection is undefined",
       }),
-      {status: HTTPResponses.SERVICE_UNAVAILABLE}
+      { status: HTTPResponses.SERVICE_UNAVAILABLE }
     );
   }
 
@@ -99,13 +99,10 @@ export async function POST(request: NextRequest) {
         censusID,
         quadratID,
         fullName,
-        // dbhUnit: dbhUnit,
-        // homUnit: homUnit,
-        // coordUnit: coordUnit,
       };
       const coreMeasurementID = await insertOrUpdate(props);
       if (formType === 'measurements' && coreMeasurementID) {
-        idToRows.push({coreMeasurementID: coreMeasurementID, fileRow: row});
+        idToRows.push({ coreMeasurementID: coreMeasurementID, fileRow: row });
       } else if (formType === 'measurements' && coreMeasurementID === undefined) {
         throw new Error("CoreMeasurement insertion failure at row: " + row);
       }
@@ -117,7 +114,7 @@ export async function POST(request: NextRequest) {
             responseMessage: `Error processing row in file ${fileName}`,
             error: error.message,
           }),
-          {status: HTTPResponses.SERVICE_UNAVAILABLE}
+          { status: HTTPResponses.SERVICE_UNAVAILABLE }
         );
       } else {
         console.error("Unknown error processing row:", error);
@@ -125,12 +122,12 @@ export async function POST(request: NextRequest) {
           JSON.stringify({
             responseMessage: `Unknown processing error at row, in file ${fileName}`,
           }),
-          {status: HTTPResponses.SERVICE_UNAVAILABLE}
+          { status: HTTPResponses.SERVICE_UNAVAILABLE }
         );
       }
     } finally {
       if (connection) connection.release();
     }
   }
-  return new NextResponse(JSON.stringify({message: "Insert to SQL successful", idToRows: idToRows}), {status: 200});
+  return new NextResponse(JSON.stringify({ message: "Insert to SQL successful", idToRows: idToRows }), { status: 200 });
 }

@@ -3,13 +3,14 @@ import React, {createContext, useCallback, useContext, useEffect, useState} from
 import {useOrgCensusContext, usePlotContext, useSiteContext} from "./userselectionprovider";
 import {UnifiedValidityFlags} from "@/config/macros";
 import {useLoading} from "./loadingprovider";
+import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from "./listselectionprovider";
+import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusrds";
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
   personnel: false,
   species: false,
   quadrats: false,
-  subquadrats: false,
   quadratpersonnel: false,
 };
 
@@ -63,7 +64,7 @@ export const DataValidityProvider = ({children}: { children: React.ReactNode }) 
     }
     setValidity(type as keyof UnifiedValidityFlags, response.ok);
     setLoading(false);
-  }, [currentSite, currentPlot, currentCensus, setValidity]);
+  }, [currentSite, currentPlot, currentCensus, setValidity, validity]);
 
   const recheckValidityIfNeeded = useCallback(async () => {
     if ((Object.values(validity).some(flag => !flag)) || refreshNeeded) {

@@ -24,10 +24,11 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const currentQuadrat = useQuadratContext();
   const currentPlot = usePlotContext();
   console.log('current quadrat: ', currentQuadrat);
-  const [quadrat, setQuadrat] = useState<Quadrat>();
+  const [quadrat, setQuadrat] = useState<Quadrat>(currentQuadrat);
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
   const quadratDispatch = useQuadratDispatch();
-  const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(false);
+  const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(!!currentQuadrat);
+
   const handleChange = (
     _event: React.SyntheticEvent | null,
     dispatcher: Dispatch<SetStateAction<string>>,
@@ -53,7 +54,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
       // ensure that selectable list is restricted by selected plot
       setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
     }
-  }, []);
+  }, [currentPlot]);
 
   useEffect(() => {
     if (finish) setReviewState(ReviewStates.UPLOAD_FILES);
@@ -82,7 +83,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
       return <Typography>Select a Quadrat</Typography>; // or some placeholder JSX
     }
 
-    // Find the corresponding CensusRDS object
+    // Find the corresponding Quadrat object
     const selectedValue = option.value; // assuming option has a 'value' property
     const selectedQuadrat = quadratListContext?.find(c => c?.quadratName === selectedValue);
 
@@ -141,13 +142,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             <Typography level={"title-sm"}>Select Quadrat:</Typography>
             <Select
               placeholder="Select a Quadrat"
-              name="None"
+              name={currentQuadrat?.quadratName ?? 'None'}
               required
               autoFocus
               size={"md"}
+              value={currentQuadrat?.quadratName ?? ''}
               renderValue={renderQuadratValue}
               onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
-                // Find the corresponding Plot object using newValue
+                // Find the corresponding Quadrat object using newValue
                 const selectedQuadrat = quadratList?.find(quadrat => quadrat?.quadratName === newValue) || undefined;
                 setQuadrat(selectedQuadrat);
               }}

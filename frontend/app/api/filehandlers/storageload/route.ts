@@ -11,12 +11,12 @@ export async function POST(request: NextRequest) {
     return new NextResponse('File is required', {status: 400});
   }
   console.log("formData: ", formData);
-  const fileName = request.nextUrl.searchParams.get('fileName')?.trim();
+  const fileName = request.nextUrl.searchParams.get('fileName')?.trim() ;
   const plot = request.nextUrl.searchParams.get("plot")?.trim();
   const census = request.nextUrl.searchParams.get("census")?.trim();
   const user = request.nextUrl.searchParams.get("user");
   const formType = request.nextUrl.searchParams.get('formType');
-  const file = formData.get('file') as File | null;
+  const file = formData.get(fileName ?? 'file') as File | null;
   const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(<string>formData.get('fileRowErrors')) : [];
 
   if ((file === null || file === undefined) ||
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
 
   let containerClient;
   try {
-    containerClient = await getContainerClient(`${plot}-${census}`.toLowerCase());
+    containerClient = await getContainerClient(`${plot.toLowerCase()}-${census.toLowerCase()}`);
   } catch (error: any) {
     console.error("Error getting container client:", error.message);
     return new NextResponse(
