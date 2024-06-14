@@ -5,7 +5,11 @@
  */
 import {FileRejection, FileWithPath} from "react-dropzone";
 import '@/styles/customtablesettings.css';
-import { GridColDef, GridValidRowModel } from "@mui/x-data-grid";
+import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+
+export type ColumnStates = {
+  [key: string]: boolean;
+}
 
 
 export type ValidationErrorID = number;
@@ -19,6 +23,7 @@ export enum HTTPResponses {
   SQL_CONNECTION_FAILURE = 408, // Custom code, example
   INVALID_REQUEST = 400,
   PRECONDITION_VALIDATION_FAILURE = 412,
+  FOREIGN_KEY_CONFLICT = 555,
   NOT_FOUND, // Custom code, example
 }
 
@@ -110,7 +115,6 @@ export type UnifiedValidityFlags = {
   personnel: boolean;
   species: boolean;
   quadrats: boolean;
-  subquadrats: boolean;
   quadratpersonnel: boolean;
 }
 

@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { GET } from '@/app/api/details/cmid/route';
-import { getConn, runQuery } from '@/components/processors/processormacros';
-import { createMocks } from 'node-mocks-http';
-import { NextRequest } from 'next/server';
+import {describe, it, expect, vi} from 'vitest';
+import {GET} from '@/app/api/details/cmid/route';
+import {getConn, runQuery} from '@/components/processors/processormacros';
+import {createMocks} from 'node-mocks-http';
+import {NextRequest} from 'next/server';
 
 vi.mock('@/components/processors/processormacros', () => ({
   getConn: vi.fn(),
@@ -31,7 +31,7 @@ describe('GET /api/details/cmid', () => {
     (getConn as jest.Mock).mockResolvedValue(conn);
     (runQuery as jest.Mock).mockResolvedValue(mockData);
 
-    const { req, res } = createMocks({
+    const {req, res} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/details/cmid?cmid=1&schema=test_schema',
     });
@@ -55,7 +55,7 @@ describe('GET /api/details/cmid', () => {
   it('should return 500 if there is a database error', async () => {
     (getConn as jest.Mock).mockRejectedValue(new Error('Database error'));
 
-    const { req, res } = createMocks({
+    const {req, res} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/details/cmid?cmid=1&schema=test_schema',
     });
@@ -66,7 +66,7 @@ describe('GET /api/details/cmid', () => {
   });
 
   it('should return 400 if schema is not provided', async () => {
-    const { req, res } = createMocks({
+    const {req, res} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/details/cmid?cmid=1',
     });

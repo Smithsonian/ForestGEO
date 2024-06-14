@@ -294,9 +294,9 @@ const CensusAutocompleteInputForm = () => {
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_SQL); // placeholder
 
 
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
 
   const {data: session} = useSession();
   const handleQuadratChange = (id: number | string, newValue: string) => {

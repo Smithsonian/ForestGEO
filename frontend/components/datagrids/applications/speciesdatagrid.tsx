@@ -3,7 +3,7 @@ import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useState} from "react";
 import {SpeciesGridColumns} from '@/config/sqlrdsdefinitions/tables/speciesrds';
-import {usePlotContext} from "@/app/contexts/userselectionprovider";
+import {useOrgCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {useSession} from "next-auth/react";
@@ -13,19 +13,19 @@ import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmoda
 export default function SpeciesDataGrid() {
   /**
    *   id?: number;
-  speciesID?: number;
-  genusID?: number;
-  currentTaxonFlag?: boolean;
-  obsoleteTaxonFlag?: boolean;
-  speciesName?: string;
-  subspeciesName?: string;
-  speciesCode?: string;
-  idLevel?: string;
-  speciesAuthority?: string;
-  subspeciesAuthority?: string;
-  fieldFamily?: string;
-  description?: string;
-  referenceID?: number;
+   speciesID?: number;
+   genusID?: number;
+   currentTaxonFlag?: boolean;
+   obsoleteTaxonFlag?: boolean;
+   speciesName?: string;
+   subspeciesName?: string;
+   speciesCode?: string;
+   idLevel?: string;
+   speciesAuthority?: string;
+   subspeciesAuthority?: string;
+   fieldFamily?: string;
+   description?: string;
+   referenceID?: number;
    */
   const initialRows: GridRowsProp = [
     {
@@ -58,8 +58,7 @@ export default function SpeciesDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const {data: session} = useSession();
-  let currentPlot = usePlotContext();
-
+  const currentCensus = useOrgCensusContext();
   const addNewRowToGrid = () => {
     const id = randomId();
     // New row object
@@ -115,14 +114,17 @@ export default function SpeciesDataGrid() {
           </Box>
 
           {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} color={'primary'}>Upload</Button>
+          <Button onClick={() => {
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              else alert('census must be opened before upload allowed');
+            }} variant="solid" color="primary">Upload</Button>
         </Box>
       </Box>
 
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
-                           setIsUploadModalOpen(false);
-                           setRefresh(true);
-                         }} formType={'species'} />
+        setIsUploadModalOpen(false);
+        setRefresh(true);
+      }} formType={'species'}/>
 
       <DataGridCommons
         gridType="species"

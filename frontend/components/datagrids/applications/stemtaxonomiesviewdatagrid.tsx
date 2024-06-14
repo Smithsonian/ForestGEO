@@ -1,42 +1,18 @@
-// alltaxonomiesview datagrid
+// stemtaxonomiesview datagrid
 "use client";
-import { GridRowsProp } from "@mui/x-data-grid";
-import { AlertProps } from "@mui/material";
-import React, { useState } from "react";
-import { randomId } from "@mui/x-data-grid-generator";
+import {GridRowsProp} from "@mui/x-data-grid";
+import {AlertProps} from "@mui/material";
+import React, {useState} from "react";
+import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import { Box, Button, Typography } from "@mui/joy";
-import { useSession } from "next-auth/react";
+import {Box, Button, Typography} from "@mui/joy";
+import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import { AllTaxonomiesViewGridColumns } from "@/config/sqlrdsdefinitions/views/alltaxonomyviewrds";
+import { initialStemTaxonomiesViewRDSRow, StemTaxonomiesViewGridColumns } from "@/config/sqlrdsdefinitions/views/stemtaxonomiesviewrds";
+import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
 
-export default function AllTaxonomiesViewDataGrid() {
-  const initialRows: GridRowsProp = [
-    {
-      id: 0,
-      speciesID: 0,
-      speciesCode: '',
-      familyID: 0,
-      family: '',
-      genusID: 0,
-      genus: '',
-      genusAuthority: '',
-      speciesName: '',
-      subspeciesName: '',
-      speciesIDLevel: '',
-      speciesAuthority: '',
-      subspeciesAuthority: '',
-      currentTaxonFlag: null,
-      obsoleteTaxonFlag: null,
-      fieldFamily: '',
-      speciesDescription: '',
-      referenceID: 0,
-      publicationTitle: '',
-      dateOfPublication: null,
-      citation: '',
-    }
-  ];
-  const [rows, setRows] = useState(initialRows);
+export default function StemTaxonomiesViewDataGrid() {
+  const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = React.useState<Pick<
@@ -44,49 +20,32 @@ export default function AllTaxonomiesViewDataGrid() {
     'children' | 'severity'
   > | null>(null);
   const [refresh, setRefresh] = useState(false);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 10 });
+  const [paginationModel, setPaginationModel] = useState({page: 0, pageSize: 10});
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const { data: session } = useSession();
+  const {data: session} = useSession();
+  const currentCensus = useOrgCensusContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();
     const newRow = {
+      ...initialStemTaxonomiesViewRDSRow,
       id,
-      speciesID: 0,
-      speciesCode: '',
-      familyID: 0,
-      family: '',
-      genusID: 0,
-      genus: '',
-      genusAuthority: '',
-      speciesName: '',
-      subspeciesName: '',
-      speciesIDLevel: '',
-      speciesAuthority: '',
-      subspeciesAuthority: '',
-      currentTaxonFlag: null,
-      obsoleteTaxonFlag: null,
-      fieldFamily: '',
-      speciesDescription: '',
-      referenceID: 0,
-      publicationTitle: '',
-      dateOfPublication: null,
-      citation: '',
       isNew: true,
     };
+
     setRows(oldRows => [...oldRows ?? [], newRow]);
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: 'edit', fieldToFocus: 'code' },
+      [id]: {mode: 'edit', fieldToFocus: 'stemTag'},
     }));
     console.log('attributes addnewrowtogrid triggered');
   };
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
+      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -96,9 +55,9 @@ export default function AllTaxonomiesViewDataGrid() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{ flexGrow: 1 }}>
+          <Box sx={{flexGrow: 1}}>
             {session?.user.isAdmin && (
-              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
+              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}
@@ -106,18 +65,21 @@ export default function AllTaxonomiesViewDataGrid() {
 
 
           {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+          <Button onClick={() => {
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              else alert('census must be opened before upload allowed');
+            }} variant="solid" color="primary">Upload</Button>
         </Box>
       </Box>
 
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
         setIsUploadModalOpen(false);
         setRefresh(true);
-      }} formType={"species"} />
+      }} formType={"species"}/>
 
       <DataGridCommons
-        gridType="alltaxonomiesview"
-        gridColumns={AllTaxonomiesViewGridColumns}
+        gridType="stemtaxonomiesview"
+        gridColumns={StemTaxonomiesViewGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

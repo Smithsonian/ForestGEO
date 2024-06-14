@@ -1,15 +1,15 @@
 // userselectionprovider.tsx
 "use client";
-import React, { createContext, useContext, useReducer } from "react";
+import React, {createContext, useContext, useReducer} from "react";
 import {
   createEnhancedDispatch,
   EnhancedDispatch,
   genericLoadContextReducer,
   LoadAction
 } from "@/config/macros/contextreducers";
-import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
   useOrgCensusListContext,
   usePlotListContext,
@@ -17,8 +17,8 @@ import {
   useSiteListContext,
   useSubquadratListContext
 } from "@/app/contexts/listselectionprovider";
-import { OrgCensus } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { Subquadrat } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
+import {OrgCensus} from "@/config/sqlrdsdefinitions/orgcensusrds";
+import {Subquadrat} from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 
 export const PlotContext = createContext<Plot>(undefined);
 export const OrgCensusContext = createContext<OrgCensus>(undefined);
@@ -31,7 +31,7 @@ export const QuadratDispatchContext = createContext<EnhancedDispatch<Quadrat> | 
 export const SubquadratDispatchContext = createContext<EnhancedDispatch<Subquadrat> | undefined>(undefined);
 export const SiteDispatchContext = createContext<EnhancedDispatch<Site> | undefined>(undefined);
 
-export default function UserSelectionProvider({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
   const plotListContext = usePlotListContext();
   const orgCensusListContext = useOrgCensusListContext();
   const quadratListContext = useQuadratListContext();

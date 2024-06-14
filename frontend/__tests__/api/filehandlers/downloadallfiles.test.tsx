@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GET } from '@/app/api/filehandlers/downloadallfiles/route';
-import { getContainerClient } from '@/config/macros/azurestorage';
-import { createMocks } from 'node-mocks-http';
-import { NextRequest } from 'next/server';
+import {describe, it, expect, vi, beforeEach} from 'vitest';
+import {GET} from '@/app/api/filehandlers/downloadallfiles/route';
+import {getContainerClient} from '@/config/macros/azurestorage';
+import {createMocks} from 'node-mocks-http';
+import {NextRequest} from 'next/server';
 
 vi.mock('@/config/macros/azurestorage', () => ({
   getContainerClient: vi.fn()
@@ -14,7 +14,7 @@ describe('GET /api/filehandlers/downloadallfiles', () => {
   });
 
   it('should return 400 if plot or census is not provided', async () => {
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadallfiles'
     });
@@ -30,7 +30,7 @@ describe('GET /api/filehandlers/downloadallfiles', () => {
   it('should return 400 if container client creation fails', async () => {
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadallfiles?plot=testPlot&census=testCensus'
     });
@@ -51,7 +51,7 @@ describe('GET /api/filehandlers/downloadallfiles', () => {
           metadata: {
             user: 'testUser',
             FormType: 'testFormType',
-            FileErrorState: JSON.stringify([{ stemtag: 'testStemtag', tag: 'testTag', validationErrorID: 1 }])
+            FileErrorState: JSON.stringify([{stemtag: 'testStemtag', tag: 'testTag', validationErrorID: 1}])
           },
           properties: {
             lastModified: new Date()
@@ -62,7 +62,7 @@ describe('GET /api/filehandlers/downloadallfiles', () => {
 
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue(mockContainerClient);
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadallfiles?plot=testPlot&census=testCensus'
     });
@@ -79,7 +79,7 @@ describe('GET /api/filehandlers/downloadallfiles', () => {
       name: 'testBlob',
       user: 'testUser',
       formType: 'testFormType',
-      fileErrors: [{ stemtag: 'testStemtag', tag: 'testTag', validationErrorID: 1 }],
+      fileErrors: [{stemtag: 'testStemtag', tag: 'testTag', validationErrorID: 1}],
       date: expect.any(String) // Date will be serialized to a string
     });
   });
@@ -93,7 +93,7 @@ describe('GET /api/filehandlers/downloadallfiles', () => {
 
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue(mockContainerClient);
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'GET',
       url: 'http://localhost/api/filehandlers/downloadallfiles?plot=testPlot&census=testCensus'
     });

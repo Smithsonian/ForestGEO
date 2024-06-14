@@ -1,5 +1,5 @@
-import { runQuery, SpecialProcessingProps } from '@/components/processors/processormacros';
-import { booleanToBit } from '@/config/macros';
+import {runQuery, SpecialProcessingProps} from '@/components/processors/processormacros';
+import {booleanToBit} from '@/config/macros';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};
@@ -12,7 +12,7 @@ function cleanInputData(data: any) {
 }
 
 export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
-  const { connection, rowData, schema } = props;
+  const {connection, rowData, schema} = props;
   console.log('rowData: ', rowData);
 
   try {
