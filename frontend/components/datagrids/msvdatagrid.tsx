@@ -47,7 +47,6 @@ import {
   useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import { saveAs } from 'file-saver';
 import { redirect } from 'next/navigation';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 import moment from 'moment';

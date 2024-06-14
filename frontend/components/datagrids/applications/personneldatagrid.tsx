@@ -81,7 +81,7 @@ export default function PersonnelDataGrid() {
           {/* Upload Button */}
           <Stack direction='column'>
             <Button onClick={() => {
-              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true)
+              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
               else alert('census must be opened before upload allowed');
             }} variant="solid" color="primary">Upload</Button>
             {/* Link to Quadrat Personnel Data Grid */}
