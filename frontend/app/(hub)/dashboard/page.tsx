@@ -17,12 +17,14 @@ import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
 import { CensusLogo, PlotLogo } from "@/components/icons";
 import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { useEffect, useState } from "react";
 
 export default function DashboardPage() {
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const [output, setOutput] = useState<any>();
 
   const attributeNote = "NOTE: If a code can be used for more than one status (e.g. The code “L” for a leaning tree, could\n" +
     "apply to either a dead or alive stem), or if a code does not indicate any of the above status\n" +
