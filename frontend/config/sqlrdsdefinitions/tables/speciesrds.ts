@@ -17,6 +17,7 @@ export type SpeciesRDS = {
   subspeciesAuthority?: string;
   fieldFamily?: string;
   description?: string;
+  validCode?: string;
   referenceID?: number;
 };
 
@@ -33,6 +34,7 @@ export interface SpeciesResult {
   SubspeciesAuthority: any;
   FieldFamily: any;
   Description: any;
+  ValidCode: any;
   ReferenceID: any;
 }
 
@@ -91,27 +93,30 @@ export class SpeciesMapper implements IDataMapper<SpeciesResult, SpeciesRDS> {
       subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
       fieldFamily: item.FieldFamily != null ? String(item.FieldFamily) : undefined,
       description: item.Description != null ? String(item.Description) : undefined,
+      validCode: item.ValidCode != null ? String(item.ValidCode) : undefined,
       referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
     }));
   }
 
   demapData(results: SpeciesRDS[]): SpeciesResult[] {
     return results.map((item) => ({
-      SpeciesID: item.speciesID != null ? Number(item.speciesID) : null,
-      GenusID: item.genusID != null ? Number(item.genusID) : null,
-      CurrentTaxonFlag: item.currentTaxonFlag != null ? item.currentTaxonFlag : null,
-      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != null ? item.obsoleteTaxonFlag : null,
-      SpeciesName: item.speciesName != null ? String(item.speciesName) : null,
-      SubspeciesName: item.subspeciesName != null ? String(item.subspeciesName) : null,
-      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
-      IDLevel: item.idLevel != null ? String(item.idLevel) : null,
-      SpeciesAuthority: item.speciesAuthority != null ? String(item.speciesAuthority) : null,
-      SubspeciesAuthority: item.subspeciesAuthority != null ? String(item.subspeciesAuthority) : null,
-      FieldFamily: item.fieldFamily != null ? String(item.fieldFamily) : null,
-      Description: item.description != null ? String(item.description) : null,
-      ReferenceID: item.referenceID != null ? Number(item.referenceID) : null,
+      SpeciesID: item.speciesID != undefined ? Number(item.speciesID) : null,
+      GenusID: item.genusID != undefined ? Number(item.genusID) : null,
+      CurrentTaxonFlag: item.currentTaxonFlag != undefined ? item.currentTaxonFlag : null,
+      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != undefined ? item.obsoleteTaxonFlag : null,
+      SpeciesName: item.speciesName != undefined ? String(item.speciesName) : null,
+      SubspeciesName: item.subspeciesName != undefined ? String(item.subspeciesName) : null,
+      SpeciesCode: item.speciesCode != undefined ? String(item.speciesCode) : null,
+      IDLevel: item.idLevel != undefined ? String(item.idLevel) : null,
+      SpeciesAuthority: item.speciesAuthority != undefined ? String(item.speciesAuthority) : null,
+      SubspeciesAuthority: item.subspeciesAuthority != undefined ? String(item.subspeciesAuthority) : null,
+      FieldFamily: item.fieldFamily != undefined ? String(item.fieldFamily) : null,
+      Description: item.description != undefined ? String(item.description) : null,
+      ValidCode: item.validCode != undefined ? String(item.validCode) : null,
+      ReferenceID: item.referenceID != undefined ? Number(item.referenceID) : null,
     }));
   }
+
 }
 
 export const speciesFields = [
@@ -125,6 +130,7 @@ export const speciesFields = [
   'subspeciesAuthority',
   'fieldFamily',
   'description',
+  'validCode',
   'referenceID'
 ];
 
@@ -201,6 +207,15 @@ export const SpeciesGridColumns: GridColDef[] = [
   {
     field: 'description',
     headerName: 'Description',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'validCode',
+    headerName: 'Valid Code',
     headerClassName: 'header',
     flex: 1,
     align: 'left',

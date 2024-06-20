@@ -6,6 +6,7 @@ import { Dispatch, SetStateAction } from "react";
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
   handleRefresh?: () => Promise<void>;
+  handleExportAll?: () => Promise<void>;
   locked?: boolean;
 }
 
