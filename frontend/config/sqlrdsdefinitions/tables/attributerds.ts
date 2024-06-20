@@ -1,6 +1,6 @@
 import {GridColDef} from '@mui/x-data-grid';
-import { IDataMapper } from "../../datamapper";
-import { FileRow, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import {IDataMapper} from "../../datamapper";
+import {FileRow, RowValidationErrors, ValidationFunction} from '@/config/macros/formdetails';
 
 // attributes table column character limits
 const ATTRIBUTES_CODE_LIMIT = 10;
@@ -24,6 +24,13 @@ export type AttributesRDS = {
   code?: string;
   description?: string;
   status?: string;
+};
+
+export const initialAttributesRDSRow = {
+  id: 0,
+  code: '',
+  description: '',
+  status: '',
 };
 
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];

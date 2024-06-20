@@ -1,4 +1,4 @@
-import { openDB, IDBPDatabase, DBSchema } from 'idb';
+import {openDB, IDBPDatabase, DBSchema} from 'idb';
 
 interface MyDB extends DBSchema {
   MyStore: {
@@ -23,6 +23,7 @@ async function getDb(): Promise<IDBPDatabase<MyDB>> {
 
   return db;
 }
+
 export async function ensureObjectStore() {
   try {
     let db = await openDB<MyDB>(dbName);

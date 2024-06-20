@@ -1,4 +1,4 @@
-import { IDataMapper } from "../../datamapper";
+import {IDataMapper} from "../../datamapper";
 
 export type SitesRDS = {
   siteID?: number;

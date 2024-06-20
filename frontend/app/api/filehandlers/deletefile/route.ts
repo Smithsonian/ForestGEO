@@ -10,7 +10,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const containerClient = await getContainerClient(containerName); // Adjust as needed
+    const containerClient = await getContainerClient(containerName.toLowerCase()); // Adjust as needed
     if (!containerClient) return new NextResponse('Container name and filename are required', {status: 400});
     const blobClient = containerClient.getBlobClient(filename);
 

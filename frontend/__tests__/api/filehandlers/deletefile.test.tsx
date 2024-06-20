@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { DELETE } from '@/app/api/filehandlers/deletefile/route';
-import { getContainerClient } from '@/config/macros/azurestorage';
-import { createMocks } from 'node-mocks-http';
-import { NextRequest } from 'next/server';
+import {describe, it, expect, vi, beforeEach} from 'vitest';
+import {DELETE} from '@/app/api/filehandlers/deletefile/route';
+import {getContainerClient} from '@/config/macros/azurestorage';
+import {createMocks} from 'node-mocks-http';
+import {NextRequest} from 'next/server';
 
 vi.mock('@/config/macros/azurestorage', () => ({
   getContainerClient: vi.fn()
@@ -14,7 +14,7 @@ describe('DELETE /api/filehandlers/deletefile', () => {
   });
 
   it('should return 400 if container name or filename is missing', async () => {
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'DELETE',
       url: 'http://localhost/api/filehandlers/deletefile'
     });
@@ -30,7 +30,7 @@ describe('DELETE /api/filehandlers/deletefile', () => {
   it('should return 400 if container client creation fails', async () => {
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'DELETE',
       url: 'http://localhost/api/filehandlers/deletefile?container=testContainer&filename=testFile'
     });
@@ -53,7 +53,7 @@ describe('DELETE /api/filehandlers/deletefile', () => {
 
     (getContainerClient as ReturnType<typeof vi.fn>).mockResolvedValue(mockContainerClient);
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'DELETE',
       url: 'http://localhost/api/filehandlers/deletefile?container=testContainer&filename=testFile'
     });
@@ -70,7 +70,7 @@ describe('DELETE /api/filehandlers/deletefile', () => {
   it('should return 500 if there is an error', async () => {
     (getContainerClient as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Test error'));
 
-    const { req } = createMocks({
+    const {req} = createMocks({
       method: 'DELETE',
       url: 'http://localhost/api/filehandlers/deletefile?container=testContainer&filename=testFile'
     });

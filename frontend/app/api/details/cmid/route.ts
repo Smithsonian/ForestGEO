@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    let query = `
+    const query = `
       SELECT 
           cm.CoreMeasurementID,
           p.PlotName,

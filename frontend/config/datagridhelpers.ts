@@ -2,15 +2,23 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { GridRowModel, GridToolbarProps, GridValidRowModel } from '@mui/x-data-grid';
-import { coreMeasurementsFields } from './sqlrdsdefinitions/tables/coremeasurementsrds';
-import { attributesFields } from './sqlrdsdefinitions/tables/attributerds';
-import { censusFields } from './sqlrdsdefinitions/tables/censusrds';
-import { personnelFields } from './sqlrdsdefinitions/tables/personnelrds';
-import { quadratsFields } from './sqlrdsdefinitions/tables/quadratrds';
-import { speciesFields } from './sqlrdsdefinitions/tables/speciesrds';
-import { subquadratsFields } from './sqlrdsdefinitions/tables/subquadratrds';
-import { allTaxonomiesFields, stemDimensionsViewFields, stemTaxonomiesViewFields } from '@/components/processors/processorhelperfunctions';
+import {GridRowModel, GridToolbarProps} from '@mui/x-data-grid';
+import {coreMeasurementsFields} from './sqlrdsdefinitions/tables/coremeasurementsrds';
+import {attributesFields} from './sqlrdsdefinitions/tables/attributerds';
+import {censusFields} from './sqlrdsdefinitions/tables/censusrds';
+import {personnelFields} from './sqlrdsdefinitions/tables/personnelrds';
+import {getQuadratHCs, quadratsFields} from './sqlrdsdefinitions/tables/quadratrds';
+import {speciesFields} from './sqlrdsdefinitions/tables/speciesrds';
+import {subquadratsFields} from './sqlrdsdefinitions/tables/subquadratrds';
+import {
+  allTaxonomiesFields,
+  stemDimensionsViewFields,
+  stemTaxonomiesViewFields
+} from '@/components/processors/processorhelperfunctions';
+import {getAllTaxonomiesViewHCs} from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
+import {getMeasurementsSummaryViewHCs} from './sqlrdsdefinitions/views/measurementssummaryviewrds';
+import {getStemDimensionsViewHCs} from './sqlrdsdefinitions/views/stemdimensionsviewrds';
+import {getStemTaxonomiesViewHCs} from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown'
@@ -49,6 +57,37 @@ export interface EditToolbarProps extends GridToolbarProps {
   handleAddNewRow: () => void
   handleRefresh: () => Promise<void>
 }
+
+const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
+  default: {
+    id: false,
+  },
+  // views
+  alltaxonomiesview: {
+    id: false,
+    ...getAllTaxonomiesViewHCs()
+  },
+  measurementssummaryview: {
+    id: false,
+    ...getMeasurementsSummaryViewHCs()
+  },
+  stemdimensionsview: {
+    id: false,
+    ...getStemDimensionsViewHCs()
+  },
+  stemtaxonomiesview: {
+    id: false,
+    ...getStemTaxonomiesViewHCs()
+  },
+  quadrats: {
+    id: false,
+    ...getQuadratHCs()
+  },
+};
+
+export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
+  return columnVisibilityMap[gridType] || columnVisibilityMap.default;
+};
 
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
   return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;

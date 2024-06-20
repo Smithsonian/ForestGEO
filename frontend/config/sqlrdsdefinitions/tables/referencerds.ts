@@ -1,5 +1,5 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper, parseDate } from '../../datamapper';
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper, parseDate} from '../../datamapper';
 
 
 export type ReferenceRDS = {
@@ -40,9 +40,9 @@ export class ReferenceMapper implements IDataMapper<ReferenceResult, ReferenceRD
 
 
 export const ReferenceGridColumns: GridColDef[] = [
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1, align: 'left', },
-  { field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1, align: 'left', },
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1, align: 'left',},
+  {field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1, align: 'left',},
   {
     field: 'dateOfPublication',
     headerName: 'DateOfPublication',

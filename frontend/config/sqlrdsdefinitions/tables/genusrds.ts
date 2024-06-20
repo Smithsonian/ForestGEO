@@ -1,5 +1,5 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper } from '../../datamapper';
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper} from '../../datamapper';
 
 export type GenusRDS = {
   id?: number;
@@ -43,9 +43,9 @@ export class GenusMapper implements IDataMapper<GenusResult, GenusRDS> {
 
 
 export const GenusGridColumns: GridColDef[] = [
-  { field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  { field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  { field: 'genusAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left', editable: true},
+  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {field: 'genusAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', editable: true},
 ];

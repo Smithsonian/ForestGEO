@@ -1,8 +1,8 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
+import {getConn, runQuery} from "@/components/processors/processormacros";
 import MapperFactory from "@/config/datamapper";
-import { handleError } from "@/utils/errorhandler";
-import { PoolConnection, format } from "mysql2/promise";
-import { NextRequest, NextResponse } from "next/server";
+import {handleError} from "@/utils/errorhandler";
+import {PoolConnection, format} from "mysql2/promise";
+import {NextRequest, NextResponse} from "next/server";
 import {
   generateInsertOperations,
   generateUpdateOperations,
@@ -10,9 +10,12 @@ import {
   AllTaxonomiesViewQueryConfig,
   StemTaxonomiesViewQueryConfig,
 } from '@/components/processors/processorhelperfunctions';
+import { HTTPResponses } from "@/config/macros";
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
-export async function GET(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }): Promise<NextResponse<{ output: any[], deprecated?: any[], totalCount: number }>> {
+export async function GET(request: NextRequest, {params}: {
+  params: { dataType: string, slugs?: string[] }
+}): Promise<NextResponse<{ output: any[], deprecated?: any[], totalCount: number }>> {
   if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam] = params.slugs;
   if ((!schema || schema === 'undefined') || (!pageParam || pageParam === 'undefined') || (!pageSizeParam || pageSizeParam === 'undefined')) throw new Error("core slugs schema/page/pageSize not correctly received");
@@ -25,7 +28,9 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
   const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
   let conn: PoolConnection | null = null;
   let updatedMeasurementsExist = false;
-  let censusIDs; let mostRecentCensusID: any; let pastCensusIDs: string | any[];
+  let censusIDs;
+  let mostRecentCensusID: any;
+  let pastCensusIDs: string | any[];
 
   try {
     conn = await getConn();
@@ -98,13 +103,13 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
           WHERE PlotID = ?
             AND PlotCensusNumber = ?
           ORDER BY StartDate DESC
-          LIMIT 10
+          LIMIT 30
         `;
         const censusResults = await runQuery(conn, format(censusQuery, [plotID, plotCensusNumber]));
         if (censusResults.length < 2) {
           paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS *
-          FROM ${schema}.${params.dataType} cm
+          FROM ${schema}.${params.dataType} 
           WHERE PlotID = ?
             AND CensusID IN (
               SELECT c.CensusID
@@ -162,11 +167,19 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const deprecatedRows = mapper.mapData(filteredDeprecated);
       const rows = mapper.mapData(paginatedResults);
-      return new NextResponse(JSON.stringify({ output: rows, deprecated: deprecatedRows, totalCount: totalRows }), { status: 200 });
+      return new NextResponse(JSON.stringify({
+        output: rows,
+        deprecated: deprecatedRows,
+        totalCount: totalRows
+      }), {status: 200});
     } else {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const rows = mapper.mapData(paginatedResults);
-      return new NextResponse(JSON.stringify({ output: rows, deprecated: undefined, totalCount: totalRows }), { status: 200 });
+      return new NextResponse(JSON.stringify({
+        output: rows,
+        deprecated: undefined,
+        totalCount: totalRows
+      }), {status: 200});
     }
   } catch (error: any) {
     if (conn) await conn.rollback();
@@ -177,19 +190,19 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
 }
 
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
-export async function POST(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
+export async function POST(request: NextRequest, {params}: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
-  const { newRow } = await request.json();
+  const {newRow} = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const newRowData = mapper.demapData([newRow])[0];
-    let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+    const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
     if (params.dataType.includes('view')) {
       let queryConfig;
@@ -220,7 +233,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       await runQuery(conn, insertQuery);
     }
     await conn.commit();
-    return NextResponse.json({ message: "Insert successful" }, { status: 200 });
+    return NextResponse.json({message: "Insert successful"}, {status: 200});
   } catch (error: any) {
     return handleError(error, conn, newRow);
   } finally {
@@ -229,20 +242,20 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
 }
 
 // slugs: schema, gridID
-export async function PATCH(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
+export async function PATCH(request: NextRequest, {params}: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
-  let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow, oldRow } = await request.json();
+  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const {newRow, oldRow} = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
-      const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
+      const {[demappedGridID]: gridIDKey, ...remainingProperties} = newRowData;
       const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]);
       await runQuery(conn, updateQuery);
       await conn.commit();
@@ -267,7 +280,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       }
       await conn.commit();
     }
-    return NextResponse.json({ message: "Update successful" }, { status: 200 });
+    return NextResponse.json({message: "Update successful"}, {status: 200});
   } catch (error: any) {
     return handleError(error, conn, newRow);
   } finally {
@@ -290,7 +303,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
-  let demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
+  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
   try {
     conn = await getConn();
@@ -320,6 +333,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     await conn.commit();
     return NextResponse.json({ message: "Delete successful" }, { status: 200 });
   } catch (error: any) {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
+      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
+      return NextResponse.json({ message: "Foreign key conflict detected", referencingTable }, { status: HTTPResponses.FOREIGN_KEY_CONFLICT });
+    }
     return handleError(error, conn, newRow);
   } finally {
     if (conn) conn.release();
