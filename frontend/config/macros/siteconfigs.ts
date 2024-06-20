@@ -53,13 +53,13 @@ export const siteConfigNav: SiteConfigProps[] = [
     expanded: [],
   },
   {
-    label: "Measurements Hub",
+    label: "Census Hub",
     href: "/measurementshub",
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
     icon: DataObjectIcon,
     expanded: [
       {
-        label: "View Measurements",
+        label: "View Data",
         href: "/summary",
         tip: '',
         icon: VisibilityIcon
@@ -80,13 +80,13 @@ export const siteConfigNav: SiteConfigProps[] = [
   },
 
   {
-    label: "Supporting Data Views",
+    label: "Stem & Plot Details",
     href: "/fixeddatainput",
     tip: 'View Modifiable Properties',
     icon: SettingsSuggestIcon,
     expanded: [
       {
-        label: 'Attributes',
+        label: 'Stem Codes',
         href: '/attributes',
         tip: '',
         icon: DescriptionIcon,
@@ -122,19 +122,19 @@ export const siteConfigNav: SiteConfigProps[] = [
       //   icon: BugReportIcon,
       // },
       {
-        label: "View Stem Taxonomies",
+        label: "Plot-Species List",
         href: "/stemtaxonomies",
         tip: '',
         icon: FilterIcon
       },
+      // {
+      //   label: "View Stem Dimensions",
+      //   href: "/stemdimensions",
+      //   tip: '',
+      //   icon: PlaceIcon
+      // },
       {
-        label: "View Stem Dimensions",
-        href: "/stemdimensions",
-        tip: '',
-        icon: PlaceIcon
-      },
-      {
-        label: "View All Taxonomies",
+        label: "Species List",
         href: "/alltaxonomies",
         tip: '',
         icon: SchemaIcon

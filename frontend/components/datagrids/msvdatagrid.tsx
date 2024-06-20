@@ -469,9 +469,13 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     await fetchPaginatedData(paginationModel.page);
   };
 
+  const handleError = (error: any, message: string) => {
+    console.error(message, error);
+    setSnackbar({ children: `Error: ${message}`, severity: 'error' });
+  };
+
   const fetchPaginatedData = async (pageToFetch: number) => {
     setRefresh(true);
-    console.log('fetchPaginatedData triggered');
     const paginatedQuery = createFetchQuery(
       currentSite?.schemaName ?? '',
       'measurementssummaryview',
@@ -484,46 +488,34 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     try {
       const response = await fetch(paginatedQuery, { method: 'GET' });
       const data = await response.json();
-      console.log('fetchPaginatedData data (json-converted): ', data);
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
-      console.log('output: ', data.output);
-      if (data.deprecated) setDeprecatedRows(data.deprecated);
 
-      // Apply date range filtering with UTC handling
+      // Apply date range filtering and sorting
       const filteredRows = data.output.filter((row: any) => {
-        if (selectedDateRanges.length === 0) {
-          // If no date ranges are selected, show no rows
-          return false;
-        }
+        if (selectedDateRanges.length === 0) return false;
         return selectedDateRanges.some(id => {
           const range = currentCensus?.dateRanges.find(r => r.censusID === id);
           const measurementDate = moment.utc(row.measurementDate);
           if (range) {
             const startDate = moment.utc(range.startDate);
             const endDate = moment.utc(range.endDate);
-            console.log('measurementDate:', measurementDate.toISOString());
-            console.log('range startDate:', startDate.toISOString(), 'endDate:', endDate.toISOString());
             return measurementDate.isBetween(startDate, endDate, undefined, '[]');
           }
           return false;
         });
       });
-      console.log('filtered rows: ', filteredRows);
 
-      // Sort rows by measurementDate before setting them
       const sortedRows = sortRowsByMeasurementDate(filteredRows, sortModel[0]?.sort || 'asc');
 
       setRows(sortedRows.length > 0 ? sortedRows : []);
       setRowCount(data.totalCount);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
-        console.log('isNewRowAdded true, on new last page');
         addNewRowToGrid();
         setIsNewRowAdded(false);
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
-      setSnackbar({ children: 'Error fetching data', severity: 'error' });
+      handleError(error, 'Error fetching data');
     } finally {
       setRefresh(false);
     }
@@ -660,7 +652,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
           return acc;
         }, {})
         : {};
-        
+
       setValidationErrors(errorMap);
     } catch (error) {
       console.error('Error fetching validation errors:', error);
@@ -681,57 +673,30 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       .join('; ');
   };
 
+  const renderMeasurementDateCell = (params: GridCellParams) => {
+    const cellValue = params.value ? moment(params.value).utc().format('YYYY-MM-DD') : '';
+    const cellError = cellHasError('measurementDate', params.id) ? getCellErrorMessages('measurementDate', params.id) : '';
+    return (
+      <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5 }}>
+        <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
+        {cellError && (
+          <Typography color={'danger'} variant={'solid'} sx={{ color: 'error.main', fontSize: '0.75rem', mt: 1, whiteSpace: 'normal', lineHeight: 'normal' }}>
+            {cellError}
+          </Typography>
+        )}
+      </Box>
+    );
+  };
+
+
   const modifiedColumns = gridColumns.map(column => {
     if (column.field !== 'measurementssummaryview') {
       return column;
     }
     return {
       ...column,
-      renderCell: (params: GridCellParams) => {
-        const cellValue =
-          params.value !== undefined ? params.value?.toString() : '';
-        const cellError = cellHasError(column.field, params.id)
-          ? getCellErrorMessages(column.field, params.id)
-          : '';
-        return (
-          <Box
-            sx={{
-              display: 'flex',
-              flex: 1,
-              flexDirection: 'column',
-              marginY: 1.5
-            }}
-          >
-            {cellError ? (
-              <>
-                <Typography
-                  sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}
-                >
-                  {cellValue}
-                </Typography>
-                <Typography
-                  color={'danger'}
-                  variant={'solid'}
-                  sx={{
-                    color: 'error.main',
-                    fontSize: '0.75rem',
-                    mt: 1,
-                    whiteSpace: 'normal',
-                    lineHeight: 'normal'
-                  }}
-                >
-                  {cellError}
-                </Typography>
-              </>
-            ) : (
-              <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
-                {cellValue}
-              </Typography>
-            )}
-          </Box>
-        );
-      }
-    };
+      renderCell: renderMeasurementDateCell,
+    }
   });
 
   // custom column formatting: 
