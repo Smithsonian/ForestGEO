@@ -53,17 +53,35 @@ import ConfirmationDialog from './confirmationdialog';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, locked }: EditToolbarProps) => (
-  <GridToolbarContainer>
-    <GridToolbar />
-    <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
-      Add Row
-    </Button>
-    <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
-      Refresh
-    </Button>
-  </GridToolbarContainer>
-);
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked }: EditToolbarProps) => {
+  const handleExportClick = async () => {
+    if (!handleExportAll) return;
+    const fullData = await handleExportAll();
+    const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'data.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <GridToolbarContainer>
+      <GridToolbar />
+      <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
+        Add Row
+      </Button>
+      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
+        Refresh
+      </Button>
+      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleExportClick}>
+        Export Full Data
+      </Button>
+    </GridToolbarContainer>
+  );
+};
 
 export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const {
@@ -132,6 +150,29 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       });
     }
   }, [refresh, setRefresh]);
+
+  const fetchFullData = async () => {
+    setLoading(true, "Fetching full dataset...");
+    let partialQuery = ``;
+    if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
+    if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
+    if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
+    const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
+  
+    try {
+      const response = await fetch(fullDataQuery, { method: 'GET' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Error fetching full data');
+      return data.output;
+    } catch (error) {
+      console.error('Error fetching full data:', error);
+      setSnackbar({ children: 'Error fetching full data', severity: 'error' });
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+  
 
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
@@ -543,7 +584,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
               toolbar: {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
-                handleRefresh: handleRefresh
+                handleRefresh: handleRefresh,
+                handleExportAll: fetchFullData
               }
             }}
             autoHeight

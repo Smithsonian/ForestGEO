@@ -35,8 +35,10 @@ import {
   Stack,
   Badge,
   Tooltip,
+  IconButton,
 } from "@mui/joy";
 import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
+import AddIcon from '@mui/icons-material/Add';
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
 import {
@@ -56,16 +58,6 @@ import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config
 import moment from 'moment';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
-
-// const initialSteps: Step[] = [
-//   {
-//     target: '.site-select',
-//     content: 'Select a site from here.',
-//     disableBeacon: true,
-//     spotlightClicks: true,  // Allow clicks on the spotlighted element
-//     placement: 'right', 
-//   },
-// ];
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -235,130 +227,15 @@ export default function Sidebar(props: SidebarProps) {
       resizeObserver.disconnect();
     };
   }, [site, plot, census]);
-
-
-  /** this has been postponed and marked as a future completion task. the joyride is not critical to the usage of the application.
-   const [run, setRun] = useState(false);
-   const [steps, setSteps] = useState<Step[]>(initialSteps);
-   const [stepIndex, setStepIndex] = useState(0);
-   const [joyridePrompted, setJoyridePrompted] = useState(false);
-   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
-   const [dashboardLoaded, setDashboardLoaded] = useState(false);
-
-   useEffect(() => {
-   if (pathname === '/dashboard') {
-   setDashboardLoaded(true);
-   }
-   }, [pathname]);
-
-   useEffect(() => {
-   if (session && siteListLoaded && dashboardLoaded && !joyridePrompted) {
-   const startJoyride = confirm("Would you like to start the tutorial?");
-   if (startJoyride) {
-   setRun(true);
-   }
-   setJoyridePrompted(true);
-   }
-   }, [session, siteListLoaded, dashboardLoaded, joyridePrompted]);
-
-   const handleJoyrideCallback = (data: CallBackProps) => {
-   const { status, action, index } = data;
-   const finishedStatuses: Status[] = [STATUS.FINISHED, STATUS.SKIPPED];
-
-   if (finishedStatuses.includes(status)) {
-   setRun(false);
-   } else if (action === 'next' && index === 0) {
-   // Move to the next step if site is selected
-   if (site) {
-   setSteps(prevSteps => [
-   ...prevSteps,
-   {
-   target: '.plot-selection',
-   content: 'Select a plot from here.',
-   disableBeacon: true,
-   spotlightClicks: true,
-   placement: 'right',
-   },
-   ]);
-   setStepIndex(1);
-   } else {
-   alert("Please select a site to proceed.");
-   }
-   } else if (action === 'next' && index === 1) {
-   // Move to the next step if plot is selected
-   if (plot) {
-   setSteps(prevSteps => [
-   ...prevSteps,
-   {
-   target: '.census-select',
-   content: 'Select a census from here.',
-   disableBeacon: true,
-   spotlightClicks: true,
-   placement: 'right',
-   },
-   ]);
-   setStepIndex(2);
-   } else {
-   alert("Please select a plot to proceed.");
-   }
-   } else if (action === 'next' && index === 2) {
-   // End the tour if census is selected
-   if (census) {
-   setRun(false);
-   } else {
-   alert("Please select a census to proceed.");
-   }
-   }
-   }; */
-
-  const getOpenClosedCensusStartEndDate = (censusType: string, census: OrgCensus): Date | undefined => {
-    if (!census) return undefined;
-    const mapper = new OrgCensusToCensusResultMapper();
-    if (censusType === 'open') {
-      const openCensusID = mapper.findOpenCensusID(census);
-      if (!openCensusID) return undefined;
-      const openCensusDateRange = census?.dateRanges.find(dateRange => dateRange.censusID === openCensusID);
-      return openCensusDateRange?.startDate;
-    } else {
-      const closedCensusID = mapper.findClosedCensusID(census);
-      if (!closedCensusID) return undefined;
-      const closedDateRange = census?.dateRanges.find(dateRange => dateRange.censusID === closedCensusID);
-      return closedDateRange?.endDate;
-    }
-  };
-
-  const handleReopenCensus = async () => {
-    if (census && reopenStartDate) {
-      const mapper = new OrgCensusToCensusResultMapper();
-      const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
-      await mapper.reopenCensus(site?.schemaName || '', census.plotCensusNumber, reopenStartDate, validCensusListContext);
-      setCensusListLoaded(false);
-      setOpenReopenCensusModal(false);
-      setReopenStartDate(null);
-    } else throw new Error("current census or reopen start date was not set");
-  };
-
-
-  const handleCloseCensus = async () => {
-    if (census && closeEndDate) {
-      const mapper = new OrgCensusToCensusResultMapper();
-      const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
-      await mapper.closeCensus(site?.schemaName || '', census.plotCensusNumber, closeEndDate, validCensusListContext);
-      setCensusListLoaded(false);
-      setOpenCloseCensusModal(false);
-      setCloseEndDate(null);
-    }
-  };
-
   const handleOpenNewCensus = async () => {
-    if ((site === undefined || site.schemaName === undefined) || newStartDate === null || (plot === undefined || plot.plotID === undefined)) throw new Error("new census start date was not set OR plot is undefined");
+    if ((site === undefined || site.schemaName === undefined) || (plot === undefined || plot.plotID === undefined)) throw new Error("new census start date was not set OR plot is undefined");
     const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
     const highestPlotCensusNumber = validCensusListContext.length > 0
       ? validCensusListContext.reduce((max, census) =>
         census.plotCensusNumber > max ? census.plotCensusNumber : max, validCensusListContext[0].plotCensusNumber)
       : 0;
     const mapper = new OrgCensusToCensusResultMapper();
-    await mapper.startNewCensus(site.schemaName, plot.plotID, highestPlotCensusNumber + 1, newStartDate, census ? census.description : undefined);
+    await mapper.startNewCensus(site.schemaName, plot.plotID, highestPlotCensusNumber + 1, census ? census.description : undefined);
     setCensusListLoaded(false);
     setOpenNewCensusModal(false);
     setNewStartDate(null);
@@ -369,42 +246,6 @@ export default function Sidebar(props: SidebarProps) {
     setCensus(currentCensus);
     setSite(currentSite);
   }, [currentPlot, currentCensus, currentSite]);
-
-  useEffect(() => {
-    if (census && reopenStartDate === null && getOpenClosedCensusStartEndDate('closed', census)) setReopenStartDate(getOpenClosedCensusStartEndDate('closed', census) ?? null);
-    if (census && newStartDate === null && getOpenClosedCensusStartEndDate('open', census)) setNewStartDate(getOpenClosedCensusStartEndDate('open', census) ?? null);
-    if (census && closeEndDate === null && getOpenClosedCensusStartEndDate('open', census)) setCloseEndDate(getOpenClosedCensusStartEndDate('open', census) ?? null);
-  }, [census, reopenStartDate, closeEndDate, newStartDate]);
-
-  // useEffect(() => {
-  //   if (siteListLoaded && session) {
-  //     const checkAndInitializeKey = async (key: string, defaultValue: any) => {
-  //       try {
-  //         const data = await getData(key);
-  //         if (data === undefined) {
-  //           await setData(key, defaultValue);
-  //         }
-  //       } catch (error) {
-  //         console.error(`Error initializing key ${key} in IDB:`, error);
-  //         await setData(key, defaultValue); // Ensure the key is present
-  //       }
-  //     };
-
-  //     const initializeKeys = async () => {
-  //       await Promise.all([
-  //         checkAndInitializeKey('site', null),
-  //         checkAndInitializeKey('plot', null),
-  //         checkAndInitializeKey('census', null)
-  //       ]);
-  //     };
-
-  //     initializeKeys().then(() => {
-  //       getData('site').then((savedSite: Site) => setStoredSite(savedSite)).catch(console.error);
-  //       getData('plot').then((savedPlot: Plot) => setStoredPlot(savedPlot)).catch(console.error);
-  //       getData('census').then((savedCensus: OrgCensus) => setStoredCensus(savedCensus)).catch(console.error);
-  //     }).catch(console.error);
-  //   }
-  // }, [siteListLoaded, session]);  
 
   useEffect(() => {
     if (storedSite && session) {
@@ -518,12 +359,12 @@ export default function Sidebar(props: SidebarProps) {
             <Stack direction={"column"} alignItems={'start'}>
               <Typography color={(!census) ? "danger" : "primary"} level="body-sm" className="sidebar-item">
                 {(census !== undefined) && (
-                  <>{(census.dateRanges[0]?.startDate) ? `\u2014 Starting: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : ''}</>
+                  <>{(census.dateRanges[0]?.startDate !== undefined) ? `\u2014 First Measurement: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : 'No Measurements'}</>
                 )}
               </Typography>
               <Typography color={(!census) ? "danger" : "primary"} level="body-sm" className="sidebar-item">
                 {(census !== undefined) && (
-                  <>{(census.dateRanges[0]?.endDate) ? `\u2014 Ending ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : `\u2014 Ongoing`}</>
+                  <>{(census.dateRanges[0]?.endDate !== undefined) ? `\u2014 Last Measurement ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : ``}</>
                 )}
               </Typography>
             </Stack>
@@ -565,39 +406,65 @@ export default function Sidebar(props: SidebarProps) {
         }
       }}
     >
-      <List>
-        <Option value={""}>None</Option>
-        <Divider orientation={"horizontal"} />
-        {censusListContext?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map((item) => (
-          <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
-            <Box sx={{
+      <ListItem
+        onMouseDown={(event) => event.preventDefault()} // Prevents closing the dropdown
+        onClick={(event) => event.stopPropagation()} // Prevents any response
+      >
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%'
+          }}
+        >
+          <Typography level="body-sm" color="primary">Add New Census</Typography>
+          <IconButton
+            size="sm"
+            color="primary"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpenNewCensus();
+            }}
+          >
+            <AddIcon />
+          </IconButton>
+        </Box>
+      </ListItem>
+      <Divider orientation={"horizontal"} sx={{ my: 1 }} />
+      {censusListContext?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0)).map((item) => (
+        <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
+          <Box
+            sx={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
               width: "100%"
-            }} className="sidebar-item">
-              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }} >
-                <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
-                {item?.dateRanges?.map((dateRange, index) => (
-                  <React.Fragment key={index}>
-                    <Stack direction={"row"}>
-                      <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em' }}>
-                        {`${dateRange.startDate ? new Date(dateRange.startDate).toDateString() : 'undefined'}`}
-                      </Typography>
+            }} className="sidebar-item"
+          >
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }} >
+              <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
+              {item?.dateRanges?.map((dateRange, index) => (
+                <React.Fragment key={index}>
+                  <Stack direction={"row"}>
+                    <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em' }}>
+                      {`${dateRange.startDate ? `First Msmt: ${new Date(dateRange.startDate).toDateString()}` : 'No Measurements'}`}
+                    </Typography>
+                    {dateRange.endDate && (
                       <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
                         &lt;===&gt;
                       </Typography>
-                      <Typography level="body-sm" color={"neutral"}>
-                        {`${dateRange.endDate ? new Date(dateRange.endDate).toDateString() : 'Ongoing'}`}
-                      </Typography>
-                    </Stack>
-                  </React.Fragment>
-                ))}
-              </Box>
+                    )}
+                    <Typography level="body-sm" color={"neutral"}>
+                      {`${dateRange.endDate ? `Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
+                    </Typography>
+                  </Stack>
+                </React.Fragment>
+              ))}
             </Box>
-          </Option>
-        ))}
-      </List>
+          </Box>
+        </Option>
+      ))}
     </Select>
   );
 
@@ -740,20 +607,6 @@ export default function Sidebar(props: SidebarProps) {
 
   return (
     <>
-      {/* <Joyride
-        steps={steps}
-        run={run}
-        stepIndex={stepIndex}
-        continuous
-        showProgress
-        showSkipButton
-        callback={handleJoyrideCallback}
-        styles={{
-          options: {
-            zIndex: 10000,
-          },
-        }}
-      /> */}
       <Stack direction={"row"} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
           ref={sidebarRef}
@@ -954,6 +807,7 @@ export default function Sidebar(props: SidebarProps) {
                               isOpen={!!toggle}>
                               <List sx={{ gap: 0.75 }} size={"sm"}>
                                 {item.expanded.map((link, subIndex) => {
+                                  if (link.href === '/subquadrats' && !currentPlot?.usesSubquadrats) return null;
                                   const SubIcon = link.icon;
                                   const delay = (subIndex + 1) * 200;
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
@@ -1019,209 +873,11 @@ export default function Sidebar(props: SidebarProps) {
           </Box>
 
           <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }} className="sidebar-item">
-            {site && plot && (
-              <>
-                {!census && censusListContext?.length === 0 ? (
-                  <Box sx={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    flexDirection: 'column',
-                    width: '100%'
-                  }}>
-                    <Button
-                      ref={addButtonRef}
-                      size="sm"
-                      variant="solid"
-                      color="primary"
-                      sx={{ width: '100%' }}
-                      onClick={() => setOpenNewCensusModal(true)}
-                      className={isPulsing ? 'animate-pulse' : ''}
-                    >
-                      Start New Census
-                    </Button>
-                  </Box>
-                ) : (
-                  <>
-                    {census && census.dateRanges[0].endDate ? (
-                      <Box sx={{
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        flexDirection: 'column',
-                        width: '100%'
-                      }}>
-                        <Button
-                          ref={reopenButtonRef}
-                          disabled={census === undefined}
-                          size="sm"
-                          variant="solid"
-                          color="success"
-                          onClick={() => setOpenReopenCensusModal(true)}
-                          sx={{ width: '100%', marginBottom: 0.5 }}
-                          className={isPulsing ? 'animate-pulse' : ''}
-                        >
-                          Reopen Census
-                        </Button>
-                        <Button
-                          ref={addButtonRef}
-                          size="sm"
-                          variant="solid"
-                          color="primary"
-                          sx={{ width: '100%' }}
-                          onClick={() => setOpenNewCensusModal(true)}
-                          className={isPulsing ? 'animate-pulse' : ''}
-                        >
-                          Start New Census
-                        </Button>
-                      </Box>
-                    ) : (
-                      <Box sx={{
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        flexDirection: 'column',
-                        width: '100%'
-                      }}>
-                        <Button disabled={census === undefined} size="sm" variant="solid" color="danger"
-                          onClick={() => setOpenCloseCensusModal(true)} sx={{ width: '100%' }}>
-                          Close Census
-                        </Button>
-                      </Box>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-          </Box>
           {site && plot && census && (
             <Button onClick={() => triggerRefresh()}>Reload Prevalidation</Button>
           )}
           <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
-          <Modal open={openReopenCensusModal} onClose={() => {
-          }}>
-            <ModalDialog variant="outlined" role="alertdialog">
-              <DialogTitle>
-                <WarningRoundedIcon />
-                Reopen Census
-              </DialogTitle>
-              <Divider />
-              <DialogContent>
-                <Stack direction={"column"} spacing={2}>
-                  <Typography level="title-sm">The most recent census ended
-                    on: {moment(getOpenClosedCensusStartEndDate('closed', census) ?? new Date()).utc().toDate().toDateString()}</Typography>
-                  <Typography level={"title-sm"}>Select a start date for the new census:</Typography>
-                  <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for
-                    standardized handling</Typography>
-                  <DatePicker
-                    label="Reopen Start Date (UTC)"
-                    value={moment(reopenStartDate).utc()}
-                    onChange={(newValue) => {
-                      if (newValue) {
-                        setReopenStartDate(moment(newValue.toDate()).utc().toDate());
-                      } else {
-                        setReopenStartDate(null);
-                      }
-                    }}
-                  />
-                </Stack>
-              </DialogContent>
-              <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenReopenCensusModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button size={"sm"} variant={"soft"} color="success" onClick={handleReopenCensus}>
-                    Submit
-                  </Button>
-                </Stack>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-          <Modal open={openNewCensusModal} onClose={() => {
-          }}>
-            <ModalDialog variant="outlined" role="alertdialog">
-              <DialogTitle>
-                <WarningRoundedIcon />
-                Start New Census
-              </DialogTitle>
-              <Divider />
-              <DialogContent>
-                <Stack direction={"column"} spacing={2}>
-                  {censusListContext && censusListContext?.length > 0 && (
-                    <Typography level="title-sm">The most recent census ended
-                      on: {moment(getOpenClosedCensusStartEndDate('closed', census) ?? new Date()).utc().toDate().toDateString()}</Typography>
-                  )}
-                  <Typography level={"title-sm"}>Select a start date for the new census:</Typography>
-                  <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for
-                    standardized handling</Typography>
-                  <DatePicker
-                    label="New Census Date (UTC)"
-                    value={moment(newStartDate).utc()}
-                    onChange={(newValue) => {
-                      if (newValue) {
-                        setNewStartDate(moment(newValue.toDate()).utc().toDate());
-                      } else {
-                        setNewStartDate(null);
-                      }
-                    }}
-                  />
-                </Stack>
-              </DialogContent>
-              <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenNewCensusModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button size={"sm"} variant={"soft"} color="success" onClick={handleOpenNewCensus}>
-                    Submit
-                  </Button>
-                </Stack>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
-          <Modal open={openCloseCensusModal} onClose={() => {
-          }}>
-            <ModalDialog variant="outlined" role="alertdialog">
-              <DialogTitle>
-                <WarningRoundedIcon />
-                Close Census
-              </DialogTitle>
-              <Divider />
-              <DialogContent>
-                <Stack direction={"column"} spacing={2}>
-                  <Typography level={"title-sm"}>Start
-                    Date: {moment(getOpenClosedCensusStartEndDate('open', census) ?? new Date()).utc().toDate().toDateString()}</Typography>
-                  <Typography level={"title-sm"}>Select an end date for the current census:</Typography>
-                  <Typography level="body-sm" color='warning'>NOTE: selected date will be converted to UTC for
-                    standardized handling</Typography>
-                  <DatePicker
-                    label="Closing Date (UTC)"
-                    value={moment(closeEndDate).utc()}
-                    onChange={(newValue) => {
-                      if (newValue) {
-                        setCloseEndDate(moment(newValue.toDate()).utc().toDate());
-                      } else {
-                        setCloseEndDate(null);
-                      }
-                    }}
-                  />
-                </Stack>
-              </DialogContent>
-              <DialogActions>
-                <Stack direction={"row"} spacing={2} divider={<Divider orientation={"vertical"} />}>
-                  <Button size={"sm"} color={"danger"} variant="soft" onClick={() => setOpenCloseCensusModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button size={"sm"} variant={"soft"} color="success" onClick={handleCloseCensus}>
-                    Submit
-                  </Button>
-                </Stack>
-              </DialogActions>
-            </ModalDialog>
-          </Modal>
         </Box>
       </Stack>
     </>
