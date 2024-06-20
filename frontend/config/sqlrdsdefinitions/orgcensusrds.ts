@@ -173,12 +173,12 @@ class OrgCensusToCensusResultMapper {
     // trigger reload 
   }
 
-  async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, startDate: Date, description?: string): Promise<void> {
+  async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, description?: string): Promise<void> {
     const newCensusRDS: CensusRDS = {
       censusID: 0, // This will be replaced with the actual ID after the POST request
       plotID: plotID,
       plotCensusNumber: plotCensusNumber,
-      startDate: startDate,
+      startDate: undefined,
       endDate: undefined,
       description: description
     };
