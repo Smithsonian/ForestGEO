@@ -1,5 +1,4 @@
-import { IDataMapper } from "@/config/datamapper";
-import { GridColDef } from "@mui/x-data-grid";
+import {IDataMapper} from "@/config/datamapper";
 
 export interface QuadratPersonnelRDS {
   id?: number;
@@ -7,6 +6,13 @@ export interface QuadratPersonnelRDS {
   quadratID?: number;
   personnelID?: number;
 }
+
+export const initialQuadratPersonnelRDSRow: QuadratPersonnelRDS = {
+  id: 0,
+  quadratPersonnelID: 0,
+  quadratID: 0,
+  personnelID: 0,
+};
 
 export interface QuadratPersonnelResult {
   QuadratPersonnelID: any;

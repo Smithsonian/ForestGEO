@@ -8,8 +8,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema provided!');
   const partialLastName = request.nextUrl.searchParams.get('searchfor')!;
-  let conn: PoolConnection | null;
-  conn = await getConn();
+  const conn = await getConn();
   try {
     const query = partialLastName === '' ?
       `SELECT DISTINCT PersonnelID, FirstName, LastName, Role

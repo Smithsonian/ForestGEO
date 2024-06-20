@@ -35,6 +35,7 @@ export async function getPersonnelIDByName(
     const rows = await runQuery(connection, query, [firstName.trim(), lastName.trim()]);
 
     if (rows.length > 0) {
+      console.log('getpersonnelidbyname: ', rows);
       return rows[0].PersonnelID as number;
     }
     return null; // No matching personnel found
@@ -58,16 +59,17 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       await mapping.specialProcessing({...subProps, schema});
     } else {
       const columns = Object.keys(mapping.columnMappings);
+      if (columns.includes('plotID')) rowData['plotID'] = subProps.plotID?.toString() ?? null;
+      if (columns.includes('censusID')) rowData['censusID'] = subProps.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
       const values = columns.map(fileColumn => rowData[fileColumn]);
-      let query = `
+      const query = `
         INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
         VALUES (${placeholders}) ON DUPLICATE KEY
         UPDATE
           ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
       `;
-
       try {
         // Execute the query using the provided connection
         await connection.beginTransaction();
@@ -250,7 +252,7 @@ interface UpdateQueryConfig {
 }
 
 export function generateUpdateOperations(schema: string, newRow: any, oldRow: any, config: UpdateQueryConfig): string[] {
-  const { fieldList, slices } = config;
+  const {fieldList, slices} = config;
   const changedFields = detectFieldChanges(newRow, oldRow, fieldList);
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string[] => {
@@ -258,7 +260,7 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
     if (!sliceConfig) {
       return []; // Safety check in case of an undefined slice
     }
-    const { range, primaryKey } = sliceConfig;
+    const {range, primaryKey} = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
     const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
     return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
@@ -272,14 +274,14 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
 }
 
 export function generateInsertOperations(schema: string, newRow: any, config: UpdateQueryConfig): string[] {
-  const { fieldList, slices } = config;
+  const {fieldList, slices} = config;
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string => {
     const sliceConfig = slices[type];
     if (!sliceConfig) {
       return ''; // Safety check in case of an undefined slice
     }
-    const { range } = sliceConfig;
+    const {range} = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
     return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
   };
@@ -368,31 +370,31 @@ export const stemTaxonomiesViewFields = [
 export const StemDimensionsViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemDimensionsViewFields,
   slices: {
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 5], primaryKey: 'StemID' },
-    subquadrats: { range: [5, 12], primaryKey: 'SubquadratID' },
-    quadrats: { range: [12, 16], primaryKey: 'QuadratID' },
-    plots: { range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID' },
+    trees: {range: [0, 1], primaryKey: 'TreeID'},
+    stems: {range: [1, 5], primaryKey: 'StemID'},
+    subquadrats: {range: [5, 12], primaryKey: 'SubquadratID'},
+    quadrats: {range: [12, 16], primaryKey: 'QuadratID'},
+    plots: {range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID'},
   }
 };
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
-    family: { range: [0, 1], primaryKey: 'FamilyID' },
-    genus: { range: [1, 3], primaryKey: 'GenusID' },
-    species: { range: [3, 11], primaryKey: 'SpeciesID' },
-    reference: { range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID' },
+    family: {range: [0, 1], primaryKey: 'FamilyID'},
+    genus: {range: [1, 3], primaryKey: 'GenusID'},
+    species: {range: [3, 11], primaryKey: 'SpeciesID'},
+    reference: {range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID'},
   }
 };
 
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemID' },
-    family: { range: [2, 3], primaryKey: 'FamilyID' },
-    genus: { range: [3, 5], primaryKey: 'GenusID' },
-    species: { range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID' },
+    trees: {range: [0, 1], primaryKey: 'TreeID'},
+    stems: {range: [1, 2], primaryKey: 'StemID'},
+    family: {range: [2, 3], primaryKey: 'FamilyID'},
+    genus: {range: [3, 5], primaryKey: 'GenusID'},
+    species: {range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID'},
   }
 };

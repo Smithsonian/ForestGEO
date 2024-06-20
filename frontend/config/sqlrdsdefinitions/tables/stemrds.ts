@@ -1,6 +1,6 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper } from "../../datamapper";
-import { bitToBoolean, booleanToBit, unitSelectionOptions } from '../../macros';
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper} from "../../datamapper";
+import {bitToBoolean, booleanToBit, unitSelectionOptions} from '../../macros';
 
 
 export type StemRDS = {
@@ -68,11 +68,68 @@ export const StemGridColumns: GridColDef[] = [
   // {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left',},
   // {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
   // {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', flex: 1, align: 'left',},
-  { field: 'stemTag', headerName: 'Stem Tag', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'treeTag', headerName: 'Tree Tag', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true},
-  { field: 'localX', headerName: 'Plot X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'localY', headerName: 'Plot Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
-  { field: 'unit', headerName: 'Unit', headerClassName: 'header', flex: 1, align: 'left', type: 'singleSelect', valueOptions: unitSelectionOptions, editable: true},
-  { field: 'moved', headerName: 'Moved', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true},
-  { field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true},
+  {
+    field: 'stemTag',
+    headerName: 'Stem Tag',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'treeTag',
+    headerName: 'Tree Tag',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'localX',
+    headerName: 'Plot X',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'localY',
+    headerName: 'Plot Y',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'unit',
+    headerName: 'Unit',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions,
+    editable: true
+  },
+  {
+    field: 'moved',
+    headerName: 'Moved',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'boolean',
+    editable: true
+  },
+  {
+    field: 'stemDescription',
+    headerName: 'StemDescription',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
 ];

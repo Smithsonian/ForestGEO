@@ -1,4 +1,4 @@
-import {PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
+import {PoolConnection, PoolOptions} from 'mysql2/promise';
 import {booleanToBit} from "@/config/macros";
 import {FileRow} from "@/config/macros/formdetails";
 
@@ -6,13 +6,13 @@ import {processSpecies} from "@/components/processors/processspecies";
 import {NextRequest} from "next/server";
 import {processCensus} from "@/components/processors/processcensus";
 import {PoolMonitor} from "@/config/poolmonitor";
-import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
-import { GridValidRowModel } from '@mui/x-data-grid';
+import {AttributesResult} from '@/config/sqlrdsdefinitions/tables/attributerds';
+import {GridValidRowModel} from '@mui/x-data-grid';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
   try {
-    let i = 0;
+    const i = 0;
     conn = await getSqlConnection(i);
   } catch (error: any) {
     console.error("Error processing files:", error.message);
@@ -81,6 +81,8 @@ export const fileMappings: Record<string, FileMapping> = {
     // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
     columnMappings: {
       "quadrat": "QuadratName",
+      "plotID": "PlotID",
+      "censusID": "CensusID",
       "startx": "StartX",
       "starty": "StartY",
       "dimx": "DimensionX",
@@ -95,6 +97,8 @@ export const fileMappings: Record<string, FileMapping> = {
     columnMappings: {
       "subquadrat": "SubquadratName",
       "quadrat": "QuadratID",
+      "plotID": "PlotID",
+      "censusID": "CensusID",
       "dimx": "DimensionX",
       "dimy": "DimensionY",
       "xindex": "X",
@@ -202,7 +206,7 @@ export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
 }
 
 export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
-  const {newRow: requestBody}: {newRow: GridValidRowModel} = await request.json();
+  const {newRow: requestBody}: { newRow: GridValidRowModel } = await request.json();
   switch (parseType) {
     case 'POST':
     case 'PATCH': {
@@ -216,6 +220,7 @@ export async function parseAttributeRequestBody(request: NextRequest, parseType:
       throw new Error("Invalid parse type -- attributes");
   }
 }
+
 export function getCatalogSchema() {
   const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
   if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
@@ -249,10 +254,10 @@ export interface QueryConfig {
 }
 
 export function buildPaginatedQuery(config: QueryConfig): { query: string, params: any[] } {
-  const { schema, table, joins, conditionals, pagination, extraParams } = config;
-  const { page, pageSize } = pagination;
+  const {schema, table, joins, conditionals, pagination, extraParams} = config;
+  const {page, pageSize} = pagination;
   const startRow = page * pageSize;
-  let queryParams = extraParams || [];
+  const queryParams = extraParams || [];
 
   // Establish an alias for the primary table for consistency in joins and selections
   const tableAlias = table[0].toLowerCase();  // Simple default alias based on first letter of table name
@@ -273,5 +278,5 @@ export function buildPaginatedQuery(config: QueryConfig): { query: string, param
   query += ` LIMIT ?, ?`;
   queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
 
-  return { query, params: queryParams };
+  return {query, params: queryParams};
 }

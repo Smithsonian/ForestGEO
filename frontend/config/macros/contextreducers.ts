@@ -1,6 +1,5 @@
 // contextreducers.ts
-import { Dispatch } from "react";
-import { setData } from "../db";
+import {Dispatch} from "react";
 
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | undefined }) => Promise<void>;
@@ -13,7 +12,7 @@ export function createEnhancedDispatch<T>(
     // Save to IndexedDB only if payload is not undefined
     // await setData(actionType, payload[actionType] !== undefined ? payload[actionType] : undefined); // gonna comment this out temporarily, it seems to be causing issues
     // Dispatch the action
-    dispatch({ type: actionType, payload });
+    dispatch({type: actionType, payload});
   };
 }
 

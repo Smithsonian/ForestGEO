@@ -82,7 +82,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDownload = async (containerName: string, filename: string) => {
     try {
-      const response = await fetch(`/api/filehandlers/downloadfile?container=${containerName}&filename=${encodeURIComponent(filename)}`);
+      const response = await fetch(`/api/filehandlers/downloadfile?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`);
       if (!response.ok) throw new Error('Error getting download link');
 
       const data = await response.json();
@@ -96,7 +96,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const handleDelete = async (containerName: string, filename: string) => {
     try {
-      const response = await fetch(`/api/filehandlers/deletefile?container=${containerName}&filename=${encodeURIComponent(filename)}`, {
+      const response = await fetch(`/api/filehandlers/deletefile?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Error deleting file');
@@ -112,17 +112,17 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const getListOfFiles = useCallback(async () => {
     try {
-      let response = await fetch(`/api/filehandlers/downloadallfiles?plot=${currentPlot?.plotName?.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, {
+      const response = await fetch(`/api/filehandlers/downloadallfiles?plot=${currentPlot?.plotName?.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, {
         method: 'GET',
       });
 
       if (!response.ok) {
-        let jsonOutput = await response.json();
+        const jsonOutput = await response.json();
         console.error('response.statusText', jsonOutput.statusText);
         setErrorMessage(`API response: ${jsonOutput.statusText}`);
       } else {
         console.log(response.status + ", " + response.statusText);
-        let data = await response.json();
+        const data = await response.json();
         setFileRows(data.blobData);
         setIsLoaded(true);
       }
@@ -167,16 +167,16 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   if (!isLoaded || !fileRows) {
     return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>;
   } else {
-    let sortedFileData: UploadedFileData[] = fileRows;
+    const sortedFileData: UploadedFileData[] = fileRows;
     if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date ? b.date : '').getTime() - new Date(a.date ? a.date : '').getTime());
     let i = 1;
     sortedFileData.forEach((row) => {
       row.key = i;
       i++;
     });
-    let sortedFileTextCSV = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.csv') ||
+    const sortedFileTextCSV = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.csv') ||
       row.name.toLowerCase().endsWith('.txt'));
-    let sortedFileArcGIS = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.xlsx'));
+    const sortedFileArcGIS = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.xlsx'));
     return (
       <>
         {/*CSV FILES*/}
@@ -215,7 +215,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                   ) : (
                     sortedFileTextCSV.map((row) => {
                       // let errs = row.errors == "false";
-                      let errs = false;
+                      const errs = false;
                       return (
                         <TableRow key={row.key}>
                           <TableCell sx={(errs) ? {
@@ -264,7 +264,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                     </TableRow>
                   ) : (
                     sortedFileArcGIS.map((row) => {
-                      let errs = "false";
+                      const errs = "false";
                       return (
                         <TableRow key={row.key}>
                           <TableCell sx={(errs) ? {

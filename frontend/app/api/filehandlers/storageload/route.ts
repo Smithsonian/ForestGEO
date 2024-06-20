@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { HTTPResponses } from '@/config/macros';
-import { getContainerClient, uploadValidFileAsBuffer } from '@/config/macros/azurestorage';
+import {NextRequest, NextResponse} from 'next/server';
+import {HTTPResponses} from '@/config/macros';
+import {getContainerClient, uploadValidFileAsBuffer} from '@/config/macros/azurestorage';
 
 export async function POST(request: NextRequest) {
   let formData: FormData;
@@ -8,30 +8,30 @@ export async function POST(request: NextRequest) {
     formData = await request.formData();
     if (formData === null || formData === undefined || formData.entries().next().done) throw new Error();
   } catch (error) {
-    return new NextResponse('File is required', { status: 400 });
-  } 
+    return new NextResponse('File is required', {status: 400});
+  }
   console.log("formData: ", formData);
-  const fileName = request.nextUrl.searchParams.get('fileName')?.trim();
+  const fileName = request.nextUrl.searchParams.get('fileName')?.trim() ;
   const plot = request.nextUrl.searchParams.get("plot")?.trim();
   const census = request.nextUrl.searchParams.get("census")?.trim();
   const user = request.nextUrl.searchParams.get("user");
   const formType = request.nextUrl.searchParams.get('formType');
-  const file = formData.get('file') as File | null;
+  const file = formData.get(fileName ?? 'file') as File | null;
   const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(<string>formData.get('fileRowErrors')) : [];
 
-  if ((file === null || file === undefined) || 
-    (fileName === undefined || fileName === null) || 
-    (plot === undefined || plot === null) || 
-    (census === undefined || census === null) || 
-    (user === undefined || user === null) || 
+  if ((file === null || file === undefined) ||
+    (fileName === undefined || fileName === null) ||
+    (plot === undefined || plot === null) ||
+    (census === undefined || census === null) ||
+    (user === undefined || user === null) ||
     (formType === undefined || formType === null)) {
 
-    return new NextResponse('Missing required parameters', { status: 400 });
+    return new NextResponse('Missing required parameters', {status: 400});
   }
 
   let containerClient;
   try {
-    containerClient = await getContainerClient(`${plot}-${census}`.toLowerCase());
+    containerClient = await getContainerClient(`${plot.toLowerCase()}-${census.toLowerCase()}`);
   } catch (error: any) {
     console.error("Error getting container client:", error.message);
     return new NextResponse(
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
         responseMessage: "Error getting container client.",
         error: error.message,
       }),
-      { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      {status: HTTPResponses.INTERNAL_SERVER_ERROR}
     );
   }
 
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         responseMessage: "Container client is undefined",
       }),
-      { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      {status: HTTPResponses.INTERNAL_SERVER_ERROR}
     );
   }
 
@@ -66,9 +66,9 @@ export async function POST(request: NextRequest) {
         responseMessage: "File Processing error",
         error: error.message ? error.message : 'Unknown error',
       }),
-      { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      {status: HTTPResponses.INTERNAL_SERVER_ERROR}
     );
   }
 
-  return new NextResponse(JSON.stringify({ message: "Insert to Azure Storage successful" }), { status: 200 });
+  return new NextResponse(JSON.stringify({message: "Insert to Azure Storage successful"}), {status: 200});
 }

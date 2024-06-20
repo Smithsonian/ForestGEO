@@ -1,4 +1,3 @@
-// NEXTAUTH ROUTE HANDLERS
 import NextAuth, { AzureADProfile } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { getAllowedSchemas, getAllSchemas, verifyEmail } from "@/components/processors/processorhelperfunctions";
@@ -15,14 +14,15 @@ const handler = NextAuth({
     }),
   ],
   session: {
-    strategy: "jwt"
+    strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 24 hours (you can adjust this value as needed)
   },
   callbacks: {
     async signIn({ user, account, profile, email: signInEmail, credentials }) {
-      // console.log('User object:', user); // Debugging
-      // console.log('Profile object:', profile); // Debugging
-      // console.log('Account object: ', account); // Debugging
-      // Now using the extended AzureADProfile
+      console.log('user: ', user);
+      console.log('account: ', account);
+      console.log('credentials: ', credentials);
+      console.log('profile: ', profile);
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
       if (typeof userEmail !== 'string') {
@@ -34,19 +34,16 @@ const handler = NextAuth({
         if (!emailVerified) {
           throw new Error("User email not found.");
         }
-        // console.log('verify email results: ', emailVerified, isAdmin);
         user.isAdmin = isAdmin; // Add isAdmin property to the user object
-        // console.log('user admin state: ', user.isAdmin);
         user.email = userEmail;
         // console.log('getting all sites: ');
-        let allSites = await getAllSchemas();
-        let allowedSites = await getAllowedSchemas(userEmail);
+        const allSites = await getAllSchemas();
+        const allowedSites = await getAllowedSchemas(userEmail);
         if (!allowedSites || !allSites) {
           throw new Error("User does not have any allowed sites.");
         }
 
         user.sites = allowedSites;
-        // console.log('user sites: ', user.sites);
         user.allsites = allSites;
         // console.log('all sites: ', user.allsites);
       }

@@ -9,9 +9,6 @@ import Divider from "@mui/joy/Divider";
 import { useLoading } from "@/app/contexts/loadingprovider";
 import { getAllSchemas } from "@/components/processors/processorhelperfunctions";
 import {
-  useOrgCensusDispatch,
-  usePlotDispatch,
-  useQuadratDispatch,
   useSiteContext,
   usePlotContext,
   useOrgCensusContext,
@@ -28,8 +25,8 @@ import {
   useSubquadratListContext,
   useSubquadratListDispatch,
 } from "@/app/contexts/listselectionprovider";
-import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { siteConfig } from "@/config/macros/siteconfigs";
+import {createAndUpdateCensusList} from "@/config/sqlrdsdefinitions/orgcensusrds";
+import {siteConfig} from "@/config/macros/siteconfigs";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -37,7 +34,8 @@ const Header = dynamic(() => import('@/components/header'), { ssr: false });
 function renderSwitch(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
-      return <Box><h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User Guide</h3></Box>;
+      return <Box><h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User
+        Guide</h3></Box>;
     case '/measurementshub/summary':
       return <Box><h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3></Box>;
     case '/measurementshub/validationhistory':
@@ -90,7 +88,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
 
-  let pathname = usePathname();
+  const pathname = usePathname();
 
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && (quadratListLoaded || subquadratListLoaded);
 
@@ -99,18 +97,14 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (censusListContext !== undefined && censusListContext.length > 0) return { success: true };
 
     setLoading(true, 'Loading raw census data');
-    let response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
+    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
     const censusRDSLoad = await response.json();
     setLoading(false);
 
     setLoading(true, 'Converting raw census data...');
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
-    if (!censusList) return { success: false, message: 'Failed to convert census data' };
-    setLoading(false);
-
-    setLoading(true, "Dispatching cleaned census list to context");
     if (censusListDispatch) {
-      censusListDispatch({ censusList: censusList });
+      censusListDispatch({ censusList });
     }
     setLoading(false);
     setCensusListLoaded(true);
@@ -118,11 +112,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   }, [censusListContext, censusListDispatch, currentPlot, currentSite, setLoading]);
 
   const loadPlotsData = useCallback(async () => {
+    if (!currentSite) return { success: false, message: 'Site must be selected to load plot data' };
     if (plotListContext !== undefined && plotListContext.length > 0) return { success: true };
 
     setLoading(true, "Loading plot list information...");
-    let plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
-    let plotsData = await plotsResponse.json();
+    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+    const plotsData = await plotsResponse.json();
     if (!plotsData) return { success: false, message: 'Failed to load plots data' };
     setLoading(false);
 
@@ -136,12 +131,15 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   }, [plotListContext, plotListDispatch, currentSite, setLoading]);
 
   const loadQuadratsData = useCallback(async () => {
-    if (!currentPlot || !currentCensus) return { success: false, message: 'Plot and Census must be selected to load quadrat data' };
+    if (!currentPlot || !currentCensus) return {
+      success: false,
+      message: 'Plot and Census must be selected to load quadrat data'
+    };
     if (quadratListContext !== undefined && quadratListContext.length > 0) return { success: true };
 
     setLoading(true, "Loading quadrat list information...");
-    let quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
-    let quadratsData = await quadratsResponse.json();
+    const quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
+    const quadratsData = await quadratsResponse.json();
     if (!quadratsData) return { success: false, message: 'Failed to load quadrats data' };
     setLoading(false);
 
@@ -155,12 +153,15 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   }, [quadratListContext, quadratListDispatch, currentPlot, currentCensus, currentSite, setLoading]);
 
   const loadSubquadratsData = useCallback(async () => {
-    if (!currentPlot || !currentCensus || !currentQuadrat) return { success: false, message: 'Plot, Census, and Quadrat must be selected to load subquadrat data' };
+    if (!currentPlot || !currentCensus || !currentQuadrat) return {
+      success: false,
+      message: 'Plot, Census, and Quadrat must be selected to load subquadrat data'
+    };
     if (subquadratListContext !== undefined && subquadratListContext.length > 0) return { success: true };
 
     setLoading(true, "Loading subquadrat list information...");
-    let subquadratResponse = await fetch(`/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`);
-    let subquadratData = await subquadratResponse.json();
+    const subquadratResponse = await fetch(`/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`);
+    const subquadratData = await subquadratResponse.json();
     if (!subquadratData) return { success: false, message: 'Failed to load subquadrats data' };
     setLoading(false);
 
@@ -177,16 +178,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(true, 'Loading Sites...');
     try {
       if (session && !siteListLoaded) {
-        let sites = session?.user?.allsites ?? [];
+        const sites = session?.user?.allsites ?? [];
         if (sites.length === 0) {
           throw new Error("Session sites undefined");
         } else {
-          siteListDispatch ? await siteListDispatch({ siteList: sites }) : undefined;
+          siteListDispatch ? await siteListDispatch({siteList: sites}) : undefined;
         }
       }
     } catch (e: any) {
       const allsites = await getAllSchemas();
-      siteListDispatch ? await siteListDispatch({ siteList: allsites }) : undefined;
+      siteListDispatch ? await siteListDispatch({siteList: allsites}) : undefined;
     }
     setLoading(false);
   }, [session, siteListLoaded, siteListDispatch, setLoading]);
@@ -232,9 +233,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && !quadratListLoaded) {
       loadQuadratsData().catch(console.error);
     }
-    if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && quadratListLoaded && !subquadratListLoaded) {
-      loadSubquadratsData().catch(console.error);
-    }
+    // if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && quadratListLoaded && !subquadratListLoaded) {
+    //   loadSubquadratsData().catch(console.error);
+    // }
   }, [siteListLoaded, currentSite, plotListLoaded, censusListLoaded, quadratListLoaded, subquadratListLoaded, loadCensusData, loadPlotsData, loadQuadratsData, loadSubquadratsData]);
 
   useEffect(() => {

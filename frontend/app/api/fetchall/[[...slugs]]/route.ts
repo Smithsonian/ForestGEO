@@ -1,8 +1,8 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import MapperFactory, { IDataMapper } from "@/config/datamapper";
-import { HTTPResponses } from "@/config/macros";
-import { PoolConnection } from "mysql2/promise";
-import { NextRequest, NextResponse } from "next/server";
+import {getConn, runQuery} from "@/components/processors/processormacros";
+import MapperFactory, {IDataMapper} from "@/config/datamapper";
+import {HTTPResponses} from "@/config/macros";
+import {PoolConnection} from "mysql2/promise";
+import {NextRequest, NextResponse} from "next/server";
 
 const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCensusNumber?: string, quadratID?: string): string => {
   if (fetchType === 'plots') {
@@ -39,7 +39,7 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
 };
 
 
-export async function GET(request: NextRequest, { params }: { params: { slugs?: string[] } }) {
+export async function GET(request: NextRequest, {params}: { params: { slugs?: string[] } }) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema || schema === 'undefined') {
     throw new Error("Schema selection was not provided to API endpoint");
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
   const [fetchType, plotID, censusID, quadratID] = params.slugs ?? [];
   if (!fetchType) {
     throw new Error("fetchType was not correctly provided");
-  } 
+  }
 
   console.log('fetchall --> slugs provided: fetchType: ', fetchType, 'plotID: ', plotID, 'censusID: ', censusID, 'quadratID: ', quadratID);
   const query = buildQuery(schema, fetchType, plotID, censusID, quadratID);
@@ -58,12 +58,12 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
     conn = await getConn();
     const results = await runQuery(conn, query);
     if (!results) {
-      return new NextResponse(null, { status: 500 });
+      return new NextResponse(null, {status: 500});
     }
 
     const mapper: IDataMapper<any, any> = MapperFactory.getMapper<any, any>(fetchType);
     const rows = mapper.mapData(results);
-    return new NextResponse(JSON.stringify(rows), { status: HTTPResponses.OK });
+    return new NextResponse(JSON.stringify(rows), {status: HTTPResponses.OK});
   } catch (error) {
     console.error('Error:', error);
     throw new Error("Call failed");

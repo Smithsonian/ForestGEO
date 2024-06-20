@@ -1,6 +1,6 @@
-import { GridColDef } from '@mui/x-data-grid';
-import { IDataMapper, parseDate } from "../../datamapper";
-import { bitToBoolean, booleanToBit, unitSelectionOptions } from '@/config/macros';
+import {GridColDef} from '@mui/x-data-grid';
+import {IDataMapper, parseDate} from "../../datamapper";
+import {bitToBoolean, booleanToBit, unitSelectionOptions} from '@/config/macros';
 
 export type CoreMeasurementsRDS = {
   id?: number;
@@ -85,12 +85,20 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
     }));
   }
 }
+
 export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'subQuadratID', headerName: 'SubQuadratID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
+  {
+    field: 'subQuadratID',
+    headerName: 'SubQuadratID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  },
   {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
@@ -104,13 +112,31 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
     valueGetter: (params: any) => {
       if (!params.value) return null;
       return new Date(params.value);
-    }, 
+    },
     editable: true
   },
   {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'dbhUnit', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+  {
+    field: 'dbhUnit',
+    headerName: '<- Unit',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions,
+  },
   {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'homUnit', headerName: '<- Unit', headerClassName: 'header', flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions,},
+  {
+    field: 'homUnit',
+    headerName: '<- Unit',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions,
+  },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
 ];
 

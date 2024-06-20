@@ -276,9 +276,9 @@ const CensusAutocompleteInputForm = () => {
   const [validationErrors, setValidationErrors] = useState<{ [key: string]: string | null }>({});
   const [isFormComplete, setIsFormComplete] = useState(false);
 
-  let currentPlot = usePlotContext();
-  let currentCensus = useOrgCensusContext();
-  let currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
 
   const {data: session} = useSession();
 
@@ -311,7 +311,7 @@ const CensusAutocompleteInputForm = () => {
   };
 
   const validateAllFields = async (row: GridValidRowModel) => {
-    let [firstName = '', lastName = ''] = row.personnel.split(' ');
+    const [firstName = '', lastName = ''] = row.personnel.split(' ');
     const validations = [
       validateField('stems', 'StemTag', row.stemTag, row.id),
       validateField('trees', 'TreeTag', row.treeTag, row.id),

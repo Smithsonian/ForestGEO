@@ -9,6 +9,15 @@ export interface CensusResult {
   EndDate: any;
   Description: any;
 }
+export const initialCensusRDSRow: CensusRDS = {
+  id: 0,
+  censusID: 0,
+  plotID: 0,
+  plotCensusNumber: 0,
+  startDate: undefined,
+  endDate: undefined,
+  description: '',
+};
 
 export type CensusRaw = {
   id?: number;

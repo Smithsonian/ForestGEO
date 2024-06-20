@@ -5,12 +5,12 @@ import {
   useQuadratListDispatch,
   useSubquadratListDispatch
 } from "@/app/contexts/listselectionprovider";
-import { getData, setData } from "@/config/db";
-import { QuadratRDS } from "./sqlrdsdefinitions/tables/quadratrds";
-import { PlotRDS } from "./sqlrdsdefinitions/tables/plotrds";
-import { SubquadratRDS } from "./sqlrdsdefinitions/tables/subquadratrds";
-import { createAndUpdateCensusList } from "./sqlrdsdefinitions/orgcensusrds";
-import { CensusRDS } from "./sqlrdsdefinitions/tables/censusrds";
+import {getData, setData} from "@/config/db";
+import {QuadratRDS} from "./sqlrdsdefinitions/tables/quadratrds";
+import {PlotRDS} from "./sqlrdsdefinitions/tables/plotrds";
+import {SubquadratRDS} from "./sqlrdsdefinitions/tables/subquadratrds";
+import {createAndUpdateCensusList} from "./sqlrdsdefinitions/orgcensusrds";
+import {CensusRDS} from "./sqlrdsdefinitions/tables/censusrds";
 
 async function fetchData(endpoint: string): Promise<any> {
   const response = await fetch(endpoint);
@@ -37,7 +37,7 @@ interface UpdateContextsIDBProps {
   schema: string;
 }
 
-const UpdateContextsFromIDB = ({ schema }: UpdateContextsIDBProps) => {
+const UpdateContextsFromIDB = ({schema}: UpdateContextsIDBProps) => {
   const plotListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const orgCensusListDispatch = useOrgCensusListDispatch();
@@ -48,23 +48,23 @@ const UpdateContextsFromIDB = ({ schema }: UpdateContextsIDBProps) => {
     await loadServerDataIntoIDB('subquadrats', schema);
 
     const quadratList: QuadratRDS[] = await getData('quadratList', `/api/fetchall/quadrats?schema=${schema}`);
-    if (quadratListDispatch) await quadratListDispatch({ quadratList });
+    if (quadratListDispatch) await quadratListDispatch({quadratList});
 
     const subquadratList: SubquadratRDS[] = await getData('subquadratList', `/api/fetchall/subquadrats?schema=${schema}`);
-    if (subquadratListDispatch) await subquadratListDispatch({ subquadratList });
+    if (subquadratListDispatch) await subquadratListDispatch({subquadratList});
   };
 
   const updateCensusContext = async () => {
     const censusRDSLoad: CensusRDS[] = await getData('censusList', `/api/fetchall/census?schema=${schema}`);
     const orgCensusListData = await createAndUpdateCensusList(censusRDSLoad);
     await setData('censusList', orgCensusListData);
-    if (orgCensusListDispatch) await orgCensusListDispatch({ censusList: orgCensusListData });
+    if (orgCensusListDispatch) await orgCensusListDispatch({censusList: orgCensusListData});
   };
 
   const updatePlotsContext = async () => {
     await loadServerDataIntoIDB('plot', schema);
     const plotsListData: PlotRDS[] = await getData('plotList', `/api/fetchall/plots?schema=${schema}`);
-    if (plotListDispatch) await plotListDispatch({ plotList: plotsListData });
+    if (plotListDispatch) await plotListDispatch({plotList: plotsListData});
   };
 
   // return { updateQuadratsContext, updateCensusContext, updatePlotsContext };

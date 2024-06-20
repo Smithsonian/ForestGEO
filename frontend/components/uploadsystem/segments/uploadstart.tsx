@@ -2,36 +2,36 @@
 
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadStartProps} from "@/config/macros/uploadsystemmacros";
-import {Box, Button, ListSubheader, Stack, Tooltip, Typography} from "@mui/joy";
+import {Box, Button, Stack, Tooltip, Typography} from "@mui/joy";
 import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
 import React, {Dispatch, SetStateAction, useEffect, useState} from "react";
 import Select, {SelectOption} from "@mui/joy/Select";
-import List from "@mui/joy/List";
 import Option from '@mui/joy/Option';
 import FinalizeSelectionsButton from "../../client/finalizeselectionsbutton";
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import {useQuadratListContext} from "@/app/contexts/listselectionprovider";
-import {usePlotContext, useQuadratContext, useQuadratDispatch} from "@/app/contexts/userselectionprovider";
+import {useQuadratListContext, useQuadratListDispatch} from "@/app/contexts/listselectionprovider";
+import {useOrgCensusContext, usePlotContext, useQuadratContext, useQuadratDispatch, useSiteContext} from "@/app/contexts/userselectionprovider";
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const {
     uploadForm, personnelRecording,
     setPersonnelRecording,
     setReviewState,
-    dbhUnit, setDBHUnit,
-    homUnit, setHOMUnit,
-    coordUnit, setCoordUnit
   } = props;
   const [finish, setFinish] = useState<boolean>(false);
-  let quadratListContext = useQuadratListContext();
-  let currentQuadrat = useQuadratContext();
-  let currentPlot = usePlotContext();
+  const quadratListContext = useQuadratListContext();
+  const quadratListDispatch = useQuadratListDispatch();
+  const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
+  const currentQuadrat = useQuadratContext();
+  const currentPlot = usePlotContext();
   console.log('current quadrat: ', currentQuadrat);
-  const [quadrat, setQuadrat] = useState<Quadrat>();
+  const [quadrat, setQuadrat] = useState<Quadrat>(currentQuadrat);
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
   const quadratDispatch = useQuadratDispatch();
-  const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(false);
+  const [isQuadratConfirmed, setIsQuadratConfirmed] = useState(!!currentQuadrat);
+
   const handleChange = (
     _event: React.SyntheticEvent | null,
     dispatcher: Dispatch<SetStateAction<string>>,
@@ -44,15 +44,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
 
   // Single function to handle "Back" action
   const handleBack = () => {
-    // if (dbhUnit !== '' || homUnit !== '' || coordUnit !== '') {
-    //   setCoordUnit('');
-    //   setDBHUnit('');
-    //   setHOMUnit('');
-    // } else if (personnelRecording !== '') {
-    //   setPersonnelRecording('');
-    // } else if (isQuadratConfirmed) {
-    //   setIsQuadratConfirmed(false);
-    // }
     if (personnelRecording !== '') {
       setPersonnelRecording('');
     } else if (isQuadratConfirmed) {
@@ -60,13 +51,32 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     }
     setFinish(false);
   };
+  useEffect(() => {
+    if (quadratDispatch) quadratDispatch({quadrat: undefined}); // deselect quadrat at start of execution
+  }, []);
 
   useEffect(() => {
-    if (currentPlot) {
+    const loadQuadratsData = async () => {
+      if (!currentPlot || !currentCensus) return;
+      if (quadratListContext !== undefined && quadratListContext.length > 0) return { success: true };
+  
+      const quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
+      const quadratsData = await quadratsResponse.json();
+      if (!quadratsData) return;
+  
+      if (quadratListDispatch) {
+        await quadratListDispatch({ quadratList: quadratsData });
+      } else return ;
+      return ;
+    };
+    if (currentPlot && currentCensus && currentSite) {
       // ensure that selectable list is restricted by selected plot
-      setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
+      // need to re-pull quadrats to be sure:
+      loadQuadratsData().then(() => {
+        setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
+      }).catch(console.error);
     }
-  }, []);
+  }, [currentSite, currentPlot, currentCensus]);
 
   useEffect(() => {
     if (finish) setReviewState(ReviewStates.UPLOAD_FILES);
@@ -86,10 +96,8 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
 
   const allSelectionsMade = uploadForm !== '' &&
     (uploadForm !== 'measurements' ||
-      // (personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && isQuadratConfirmed));
       (personnelRecording !== '' && isQuadratConfirmed));
 
-  // const showBackButton = personnelRecording !== '' || (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') || isQuadratConfirmed;
   const showBackButton = personnelRecording !== '' || isQuadratConfirmed;
 
   const renderQuadratValue = (option: SelectOption<string> | null) => {
@@ -97,7 +105,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
       return <Typography>Select a Quadrat</Typography>; // or some placeholder JSX
     }
 
-    // Find the corresponding CensusRDS object
+    // Find the corresponding Quadrat object
     const selectedValue = option.value; // assuming option has a 'value' property
     const selectedQuadrat = quadratListContext?.find(c => c?.quadratName === selectedValue);
 
@@ -151,89 +159,19 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           </>
         )}
 
-        {/* Unit of Measurement Selection for measurements -- DEPRECATED, UNITS INCORPORATED INTO FORM TYPE */}
-        {/* {uploadForm === 'measurements' && personnelRecording !== '' && (dbhUnit === '' || homUnit === '' || coordUnit === '') && (
-          <>
-            <Stack direction={'row'} spacing={2}>
-              <Box>
-                <Typography sx={{mb: 2}}>
-                  Select the DBH unit of measurement:
-                </Typography>
-                <Select
-                  value={dbhUnit}
-                  defaultValue={'cm'}
-                  onChange={(event: React.SyntheticEvent | null,
-                             newValue: string | null,) => handleChange(event, setDBHUnit, newValue ?? '')}
-                  placeholder="Select unit"
-                  sx={{minWidth: '200px'}}
-                >
-                  <List>
-                    <ListSubheader>Metric Units</ListSubheader>
-                    <Option value={"km"}>Kilometers (km)</Option>
-                    <Option value={"m"}>Meters (m)</Option>
-                    <Option value={"cm"}>Centimeters (cm)</Option>
-                    <Option value={"mm"}>Millimeters (mm)</Option>
-                  </List>
-                </Select>
-                <Box>
-                  <Typography sx={{mb: 2}}>
-                    Select the HOM unit of measurement:
-                  </Typography>
-                  <Select
-                    value={homUnit}
-                    defaultValue={'m'}
-                    onChange={(event: React.SyntheticEvent | null,
-                               newValue: string | null,) => handleChange(event, setHOMUnit, newValue ?? '')}
-                    placeholder="Select unit"
-                    sx={{minWidth: '200px'}}
-                  >
-                    <List>
-                      <ListSubheader>Metric Units</ListSubheader>
-                      <Option value={"km"}>Kilometers (km)</Option>
-                      <Option value={"m"}>Meters (m)</Option>
-                      <Option value={"cm"}>Centimeters (cm)</Option>
-                      <Option value={"mm"}>Millimeters (mm)</Option>
-                    </List>
-                  </Select>
-                </Box>
-                <Box>
-                  <Typography sx={{mb: 2}}>
-                    Select the Coordinate unit of measurement:
-                  </Typography>
-                  <Select
-                    value={coordUnit}
-                    defaultValue={'m'}
-                    onChange={(event: React.SyntheticEvent | null,
-                               newValue: string | null,) => handleChange(event, setCoordUnit, newValue ?? '')}
-                    placeholder="Select unit"
-                    sx={{minWidth: '200px'}}
-                  >
-                    <List>
-                      <ListSubheader>Metric Units</ListSubheader>
-                      <Option value={"km"}>Kilometers (km)</Option>
-                      <Option value={"m"}>Meters (m)</Option>
-                      <Option value={"cm"}>Centimeters (cm)</Option>
-                      <Option value={"mm"}>Millimeters (mm)</Option>
-                    </List>
-                  </Select>
-                </Box>
-              </Box>
-            </Stack>
-          </>
-        )} */}
-        {/* {(uploadForm === "measurements" && personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && !isQuadratConfirmed) && ( */}
         {(uploadForm === "measurements" && personnelRecording !== '' && !isQuadratConfirmed) && (
           <Stack direction={"column"} spacing={2} marginBottom={2}>
             <Typography level={"title-sm"}>Select Quadrat:</Typography>
             <Select
               placeholder="Select a Quadrat"
-              name="None"
+              name={currentQuadrat?.quadratName ?? 'None'}
               required
               autoFocus
               size={"md"}
+              value={currentQuadrat?.quadratName ?? ''}
               renderValue={renderQuadratValue}
               onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
-                // Find the corresponding Plot object using newValue
+                // Find the corresponding Quadrat object using newValue
                 const selectedQuadrat = quadratList?.find(quadrat => quadrat?.quadratName === newValue) || undefined;
                 setQuadrat(selectedQuadrat);
               }}
@@ -250,21 +188,14 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             <Button onClick={handleConfirmQuadrat} size="sm" color="primary">Confirm</Button>
           </Stack>
         )}
-        {/* {uploadForm === 'measurements' && personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && currentQuadrat && !finish && ( */}
         {uploadForm === 'measurements' && personnelRecording !== '' && currentQuadrat && !finish && (
           <>
             <Typography sx={{mb: 2, mt: 2}}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
             <Typography>Quadrat: {quadrat?.quadratName}</Typography>
             <Typography>Personnel: {personnelRecording}</Typography>
-            {/* <Stack direction={'row'}>
-              <Typography sx={{mx: 2}}>DBH units of measurement: {dbhUnit}</Typography>
-              <Typography sx={{mx: 2}}>HOM units of measurement: {homUnit}</Typography>
-              <Typography sx={{mx: 2}}>Coordinate units of measurement: {coordUnit}</Typography>
-            </Stack> */}
           </>
         )}
-        {/* {['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes(uploadForm) && personnelRecording !== '' && (dbhUnit !== '' && homUnit !== '' && coordUnit !== '') && currentQuadrat && !finish && ( */}
         {['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes(uploadForm) && personnelRecording !== '' && currentQuadrat && !finish && (
           <>
             <Typography sx={{mb: 2, mt: 2}}>You have selected:</Typography>

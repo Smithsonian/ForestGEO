@@ -1,25 +1,17 @@
 import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
 import React, {Dispatch, SetStateAction} from "react";
 import {FileWithPath} from "react-dropzone";
-import {CensusRDS} from "../sqlrdsdefinitions/tables/censusrds";
-import {Plot} from "../sqlrdsdefinitions/tables/plotrds";
 import {FileCollectionRowSet} from "./formdetails";
 
 export interface UploadStartProps {
   // state vars
   uploadForm: string;
   personnelRecording: string;
-  dbhUnit: string;
-  homUnit: string;
-  coordUnit: string;
   // state setters
   setUploadForm: Dispatch<SetStateAction<string>>;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
-  setDBHUnit: Dispatch<SetStateAction<string>>;
-  setHOMUnit: Dispatch<SetStateAction<string>>;
-  setCoordUnit: Dispatch<SetStateAction<string>>;
 }
 
 export interface UploadParseFilesProps {
