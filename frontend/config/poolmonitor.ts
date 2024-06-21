@@ -52,17 +52,14 @@ export class PoolMonitor {
   getPoolStatus() {
     return `active: ${this.activeConnections} | total: ${this.totalConnectionsCreated} | waiting: ${this.waitingForConnection}`;
   }
+
+  async closeAllConnections(): Promise<void> {
+    try {
+      await this.pool.end();
+      console.log('All connections closed.');
+    } catch (error) {
+      console.error('Error closing connections:', error);
+      throw error;
+    }
+  }
 }
-
-const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER,
-  password: process.env.AZURE_SQL_PASSWORD,
-  host: process.env.AZURE_SQL_SERVER,
-  port: parseInt(process.env.AZURE_SQL_PORT!, 10),
-  database: process.env.AZURE_SQL_CATALOG_SCHEMA,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-};
-
-export const poolMonitor = new PoolMonitor(sqlConfig);
