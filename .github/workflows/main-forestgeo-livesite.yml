@@ -78,13 +78,13 @@ jobs:
           mv ./frontend/public ./frontend/build/standalone
           mv ./frontend/*.pem ./frontend/build/standalone/
 
-      - name: 'Login to Azure'
-        uses: azure/login@v1
-        with:
-          client-id: ${{ secrets.AZURE_AD_CLIENT_ID }}
-          client-secret: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
-          tenant-id: ${{ secrets.AZURE_AD_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_AD_SUBSCRIPTION_ID }}
+      # - name: 'Login to Azure'
+      #   uses: azure/login@v1
+      #   with:
+      #     client-id: ${{ secrets.AZURE_AD_CLIENT_ID }}
+      #     client-secret: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
+      #     tenant-id: ${{ secrets.AZURE_AD_TENANT_ID }}
+      #     subscription-id: ${{ secrets.AZURE_AD_SUBSCRIPTION_ID }}
 
       - name: 'Deploy to Azure Web App (development)'
         id: deploy-to-webapp-dev
