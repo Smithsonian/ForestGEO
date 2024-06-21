@@ -103,5 +103,5 @@ jobs:
         with:
           app-name: 'forestgeo-livesite'
           slot-name: 'development'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_AARDVARK }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: ./frontend/build/standalone
