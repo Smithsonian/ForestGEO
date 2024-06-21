@@ -31,7 +31,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       const initialData = { ...row };
       columns.forEach((column) => {
         const { field, editable } = column;
-        if (editable && initialData[field] !== localData[field] && 
+        if (editable && initialData[field] !== localData[field] &&
           (initialData[field] !== '' || initialData[field] !== null || initialData[field] !== undefined || initialData[field] !== false || initialData[field] !== 0)) { // empty/default value here means that this is a new entry, should be preserved
           initialData[field] = '';
         }
@@ -118,27 +118,15 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
               })}
             </Stack>
           ) : (
-            <div className="mt-4">
+            <Box className="mt-4">
               <Typography level='title-md' className="mb-4">Select the correct row:</Typography>
-              <Box className="flex flex-col space-y-4">
-                <Stack
-                  className={`p-4 mb-4 cursor-pointer border-2 transition-transform duration-500 ease-in-out transform ${selectedRow === reEnterData ? 'border-blue-500 scale-105' : 'border-transparent'}`}
-                  onClick={() => handleRowSelect(reEnterData!)}
-                >
-                  {columns.map((column) => (
-                    <Typography key={column.field}><strong>{column.headerName}:</strong> {reEnterData ? reEnterData[column.field] : ''}</Typography>
-                  ))}
-                </Stack>
-                <Box
-                  className={`p-4 mb-4 cursor-pointer border-2 transition-transform duration-500 ease-in-out transform ${selectedRow === localData ? 'border-blue-500 scale-105' : 'border-transparent'}`}
-                  onClick={() => handleRowSelect(localData)}
-                >
-                  {columns.map((column) => (
-                    <Typography key={column.field}><strong>{column.headerName}:</strong> {localData[column.field]}</Typography>
-                  ))}
-                </Box>
-              </Box>
-            </div>
+              {columns.map((column) => (
+                <Typography key={column.field}><strong>{column.headerName}:</strong> {reEnterData ? reEnterData[column.field] : ''}</Typography>
+              ))}
+              {columns.map((column) => (
+                <Typography key={column.field}><strong>{column.headerName}:</strong> {localData[column.field]}</Typography>
+              ))}
+            </Box>
           )}
         </DialogContent>
         <DialogActions>
