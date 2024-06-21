@@ -86,6 +86,16 @@ jobs:
       #     tenant-id: ${{ secrets.AZURE_AD_TENANT_ID }}
       #     subscription-id: ${{ secrets.AZURE_AD_SUBSCRIPTION_ID }}
 
+      - name: 'Deploy to Azure Web App (main)'
+        id: deploy-to-webapp-main
+        if: github.ref == 'refs/heads/main'
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: 'forestgeo-livesite'
+          slot-name: 'Production'
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_852346BD764D45D08854E6679137F844 }}
+          package: ./frontend/build/standalone
+
       - name: 'Deploy to Azure Web App (development)'
         id: deploy-to-webapp-dev
         if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
