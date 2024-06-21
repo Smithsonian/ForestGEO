@@ -51,7 +51,7 @@ export default function AttributesDataGrid() {
           p: 2
         }}>
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.isAdmin && (
+            {session?.user.userStatus !== 'fieldcrew' && (
               <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>

@@ -322,7 +322,7 @@ export default function SummaryPage() {
                     Please ensure that you use quadrat names when submitting new measurements instead of subquadrat
                     names</Typography>
                 )}
-                {session?.user.isAdmin ? (
+                {session?.user.userStatus !== 'fieldcrew' ? (
                   <Stack direction="column">
                     {/* <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
                     <Stack direction="row" spacing={4}>

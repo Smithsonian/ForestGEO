@@ -1,7 +1,7 @@
-import {Pool, PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
+import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
 
 export class PoolMonitor {
-  private pool: Pool;
+  public pool: Pool; // Make pool public to access it in shutdown script
   private activeConnections = 0;
   private totalConnectionsCreated = 0;
   private waitingForConnection = 0;
@@ -37,7 +37,6 @@ export class PoolMonitor {
     });
   }
 
-
   async getConnection(): Promise<PoolConnection> {
     try {
       console.log('Requesting new connection...');
@@ -54,3 +53,16 @@ export class PoolMonitor {
     return `active: ${this.activeConnections} | total: ${this.totalConnectionsCreated} | waiting: ${this.waitingForConnection}`;
   }
 }
+
+const sqlConfig: PoolOptions = {
+  user: process.env.AZURE_SQL_USER,
+  password: process.env.AZURE_SQL_PASSWORD,
+  host: process.env.AZURE_SQL_SERVER,
+  port: parseInt(process.env.AZURE_SQL_PORT!, 10),
+  database: process.env.AZURE_SQL_CATALOG_SCHEMA,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+};
+
+export const poolMonitor = new PoolMonitor(sqlConfig);

@@ -8,7 +8,6 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import SchemaIcon from '@mui/icons-material/Schema';
 import FilterIcon from '@mui/icons-material/FilterList';
-import PlaceIcon from '@mui/icons-material/Place';
 import React from "react";
 import { UnifiedValidityFlags } from '../macros';
 

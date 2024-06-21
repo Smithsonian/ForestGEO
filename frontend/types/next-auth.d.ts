@@ -4,11 +4,11 @@ import {Profile} from "next-auth";
 
 declare module 'next-auth' {
   /**
-   * Extends the built-in session types to include the isAdmin property.
+   * Extends the built-in session types to include the userStatus property.
    */
   interface Session {
     user: {
-      isAdmin: boolean;
+      userStatus: string;
       name?: string;
       email?: string;
       image?: string;
@@ -22,17 +22,17 @@ declare module 'next-auth' {
   }
 
   /**
-   * Extends the built-in user types to include the isAdmin property.
+   * Extends the built-in user types to include the userStatus property.
    */
   interface User {
-    isAdmin: boolean;
+    userStatus: string;
     sites: SitesRDS[];
     allsites: SitesRDS[];
   }
 
   // Extend the Token type
   interface Token {
-    isAdmin: boolean;
+    userStatus: string;
     sites: SitesRDS[];
     allsites: SitesRDS[];
   }

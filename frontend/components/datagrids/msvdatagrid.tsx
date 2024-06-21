@@ -696,7 +696,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     return {
       ...column,
       renderCell: renderMeasurementDateCell,
-    }
+    };
   });
 
   // custom column formatting: 
