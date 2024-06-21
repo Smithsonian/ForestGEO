@@ -30,11 +30,11 @@ const handler = NextAuth({
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        const { emailVerified, isAdmin } = await verifyEmail(userEmail);
+        const { emailVerified, userStatus } = await verifyEmail(userEmail);
         if (!emailVerified) {
           throw new Error("User email not found.");
         }
-        user.isAdmin = isAdmin; // Add isAdmin property to the user object
+        user.userStatus = userStatus; // Add userStatus property to the user object
         user.email = userEmail;
         // console.log('getting all sites: ');
         const allSites = await getAllSchemas();
@@ -51,20 +51,17 @@ const handler = NextAuth({
     },
 
     async jwt({ token, user }) {
-      if (user?.isAdmin !== undefined) token.isAdmin = user.isAdmin; // Persist admin status in the JWT token
+      if (user?.userStatus !== undefined) token.userStatus = user.userStatus; // Persist admin status in the JWT token
       if (user?.sites !== undefined) token.sites = user.sites; // persist allowed sites in JWT token
       if (user?.allsites !== undefined) token.allsites = user.allsites;
-      // console.log('jwt admin state: ', token.isAdmin);
-      // console.log('jwt sites: ', token.sites);
-      // console.log('jwt all sites: ', token.allsites);
       return token;
     },
 
     async session({ session, token }) {
-      if (typeof token.isAdmin === 'boolean') {
-        session.user.isAdmin = token.isAdmin;
+      if (typeof token.userStatus === 'string') {
+        session.user.userStatus = token.userStatus;
       } else {
-        session.user.isAdmin = false;
+        session.user.userStatus = 'fieldcrew'; // default no admin permissions
       }
       if (token && token.allsites && Array.isArray(token.allsites)) {
         session.user.allsites = token.allsites as SitesRDS[];
@@ -72,9 +69,6 @@ const handler = NextAuth({
       if (token && token.sites && Array.isArray(token.sites)) {
         session.user.sites = token.sites as SitesRDS[];
       }
-      // console.log('session admin state: ', session.user.isAdmin);
-      // console.log('session sites: ', session.user.sites);
-      // console.log('session all sites: ', session.user.allsites);
       return session;
     },
   },

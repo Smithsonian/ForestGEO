@@ -1,8 +1,6 @@
 {
   "name": "forestgeo-app",
   "version": "2.2.0",
-  "name": "forestgeo-app",
-  "version": "2.2.0",
   "private": true,
   "overrides": {
     "glob": "^10.3.10",
@@ -15,7 +13,6 @@
     "lint": "eslint '**/*.{ts,tsx}' --fix",
     "build": "npm run lint && next build",
     "start": "node build/standalone/server.js -p 8080",
-    "bs": "next build; npm run start",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",
     "bdwin": "npm run build ; npm run dev",

@@ -17,7 +17,7 @@ import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
 import { CensusLogo, PlotLogo } from "@/components/icons";
 import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export default function DashboardPage() {
 

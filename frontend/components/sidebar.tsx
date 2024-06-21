@@ -26,18 +26,12 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import {
   Button,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Modal,
-  ModalDialog,
   SelectOption,
   Stack,
   Badge,
   Tooltip,
   IconButton,
 } from "@mui/joy";
-import WarningRoundedIcon from "@mui/icons-material/WarningRounded";
 import AddIcon from '@mui/icons-material/Add';
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
@@ -55,8 +49,6 @@ import { CensusLogo, PlotLogo } from "@/components/icons";
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
-import moment from 'moment';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 export interface SimpleTogglerProps {
@@ -647,7 +639,7 @@ export default function Sidebar(props: SidebarProps) {
                     </Box>
                     ForestGEO
                   </Box>
-                  {session?.user.isAdmin && (
+                  {session?.user.userStatus !== 'fieldcrew' && (
                     <Typography level="h1" color='danger' sx={{ marginLeft: 0.5 }}>(Admin)</Typography>
                   )}
                 </Typography>

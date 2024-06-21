@@ -158,7 +158,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
     if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
     const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
-  
+
     try {
       const response = await fetch(fullDataQuery, { method: 'GET' });
       const data = await response.json();
@@ -172,7 +172,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       setLoading(false);
     }
   };
-  
+
 
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
@@ -190,14 +190,14 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
           [actionId]: { mode: GridRowModes.View }
         }));
       }
-    } 
+    }
   };
 
-  const handleConfirmAction = async () => {
+  const handleConfirmAction = async (selectedRow?: GridRowModel) => {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
-    if (pendingAction.actionType === 'save' && pendingAction.actionId !== null && promiseArguments) {
-      await performSaveAction(pendingAction.actionId);
+    if (pendingAction.actionType === 'save' && pendingAction.actionId !== null) {
+      await performSaveAction(pendingAction.actionId, selectedRow);
     } else if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
       await performDeleteAction(pendingAction.actionId);
     }
@@ -215,14 +215,14 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setPromiseArguments(null);  // Clear promise arguments after handling
   };
 
-  const performSaveAction = async (id: GridRowId) => {
+  const performSaveAction = async (id: GridRowId, selectedRow?: GridRowModel) => {
     if (locked || !promiseArguments) return;
     setLoading(true, "Saving changes...");
     try {
       const updatedRow = await updateRow(
         gridType,
         currentSite?.schemaName,
-        promiseArguments.newRow,
+        selectedRow ?? promiseArguments.newRow,
         promiseArguments.oldRow,
         setSnackbar,
         setIsNewRowAdded,

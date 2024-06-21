@@ -7,7 +7,6 @@ import {
 } from "@/components/processors/processormacros";
 import {SitesResult} from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import {processCensus} from "@/components/processors/processcensus";
-import {bitToBoolean} from "@/config/macros";
 import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import MapperFactory from "@/config/datamapper";
 
@@ -135,11 +134,10 @@ export async function runValidationProcedure(
   }
 }
 
-export async function verifyEmail(email: string): Promise<{ emailVerified: boolean, isAdmin: boolean }> {
+export async function verifyEmail(email: string): Promise<{ emailVerified: boolean, userStatus: string }> {
   const connection: PoolConnection | null = await getConn();
   try {
-    // Query to fetch the IsAdmin field for a given email
-    const query = `SELECT IsAdmin
+    const query = `SELECT UserStatus
                    FROM catalog.users
                    WHERE Email = ?
                    LIMIT 1`;
@@ -147,10 +145,9 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
 
     // emailVerified is true if there is at least one result
     const emailVerified = results.length > 0;
-    // isAdmin is determined based on the IsAdmin field if email is verified
-    const isAdmin = emailVerified && bitToBoolean(results[0]?.IsAdmin);
+    const userStatus = results[0].UserStatus;
 
-    return {emailVerified, isAdmin};
+    return {emailVerified, userStatus};
   } catch (error: any) {
     console.error('Error verifying email in database: ', error);
     throw error;
