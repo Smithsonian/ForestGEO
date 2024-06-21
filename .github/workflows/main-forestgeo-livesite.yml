@@ -56,7 +56,7 @@ jobs:
           echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_DEVELOPMENT_TENANT_ID }} >> frontend/.env
           echo AZURE_AD_SUBSCRIPTION_ID=${{ secrets.AZURE_AD_SUBSCRIPTION_ID }} >> frontend/.env
           echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
-          echo NEXTAUTH_DEV_URL=${{ secrets.NEXTAUTH_URL }} >> frontend/.env
+          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_DEV_URL }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
           echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
