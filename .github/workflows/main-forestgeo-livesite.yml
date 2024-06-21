@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - main
-      - forestgeo-app-aardvark
+      - 'forestgeo-app-*'
   workflow_dispatch:
 
 jobs:
@@ -55,6 +55,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-
 
+      - name: Cache Next.js build
+        uses: actions/cache@v2
+        with:
+          path: frontend/.next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-
+
       - name: move into frontend --> npm install, build, and test
         run: |
           cd frontend/
@@ -78,12 +86,12 @@ jobs:
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_852346BD764D45D08854E6679137F844 }}
           package: ./frontend/build/standalone
 
-      - name: 'Deploy to Azure Web App (aardvark)'
-        id: deploy-to-webapp-aardvark
-        if: github.ref == 'refs/heads/forestgeo-app-aardvark'
+      - name: 'Deploy to Azure Web App (development)'
+        id: deploy-to-webapp-dev
+        if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
         uses: azure/webapps-deploy@v2
         with:
           app-name: 'forestgeo-livesite'
           slot-name: 'development'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_AARDVARK }}
           package: ./frontend/build/standalone
