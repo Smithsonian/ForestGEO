@@ -83,7 +83,7 @@ jobs:
         if: github.ref == 'refs/heads/forestgeo-app-aardvark'
         uses: azure/webapps-deploy@v2
         with:
-          app-name: 'forestgeo-livesite-development'
+          app-name: 'forestgeo-livesite'
           slot-name: 'development'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: ./frontend/build/standalone
