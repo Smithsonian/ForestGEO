@@ -4,7 +4,7 @@ import { subtitle, title } from "@/config/primitives";
 import { useSession } from "next-auth/react";
 import { redirect, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Box } from "@mui/joy";
+import { Box, Stack, Tooltip, Typography } from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import { useLoading } from "@/app/contexts/loadingprovider";
 import { getAllSchemas } from "@/components/processors/processorhelperfunctions";
@@ -25,36 +25,44 @@ import {
   useSubquadratListContext,
   useSubquadratListDispatch,
 } from "@/app/contexts/listselectionprovider";
-import {createAndUpdateCensusList} from "@/config/sqlrdsdefinitions/orgcensusrds";
-import {siteConfig} from "@/config/macros/siteconfigs";
+import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusrds";
+import { siteConfig } from "@/config/macros/siteconfigs";
 import { useDataValidityContext } from "../contexts/datavalidityprovider";
+import { AcaciaVersionTypography } from "@/styles/versions/acaciaversion";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
 
 function renderSwitch(endpoint: string) {
+  const commonStyle = {
+    display: 'flex',
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+  };
+
   switch (endpoint) {
     case '/dashboard':
-      return <Box><h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard - ForestGEO Application User
-        Guide</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard</h3></Box>;
     case '/measurementshub/summary':
-      return <Box><h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3></Box>;
     case '/measurementshub/validationhistory':
-      return <Box><h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3></Box>;
     case '/fixeddatainput/attributes':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data Hub - Attributes</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data Hub - Attributes</h3></Box>;
     case '/fixeddatainput/census':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Census</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Census</h3></Box>;
     case '/fixeddatainput/personnel':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Personnel</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Personnel</h3></Box>;
     case '/fixeddatainput/quadrats':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Quadrats</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Quadrats</h3></Box>;
     case '/fixeddatainput/subquadrats':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Subquadrats</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Subquadrats</h3></Box>;
     case '/fixeddatainput/quadratpersonnel':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - QuadratPersonnel</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - QuadratPersonnel</h3></Box>;
     case '/fixeddatainput/alltaxonomies':
-      return <Box><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - All Taxonomies</h3></Box>;
+      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - All Taxonomies</h3></Box>;
     default:
       return <></>;
   }
@@ -79,7 +87,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
   const { data: session } = useSession();
-  const {validity} = useDataValidityContext();
+  const { validity } = useDataValidityContext();
   const previousSiteRef = useRef<string | undefined>(undefined);
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
@@ -184,12 +192,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         if (sites.length === 0) {
           throw new Error("Session sites undefined");
         } else {
-          siteListDispatch ? await siteListDispatch({siteList: sites}) : undefined;
+          siteListDispatch ? await siteListDispatch({ siteList: sites }) : undefined;
         }
       }
     } catch (e: any) {
       const allsites = await getAllSchemas();
-      siteListDispatch ? await siteListDispatch({siteList: allsites}) : undefined;
+      siteListDispatch ? await siteListDispatch({ siteList: allsites }) : undefined;
     }
     setLoading(false);
   }, [session, siteListLoaded, siteListDispatch, setLoading, validity]);
@@ -325,23 +333,24 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           )}
         </Box>
         <Divider orientation={"horizontal"} />
-        <Box mt={1}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            alignSelf: 'center',
-            flexDirection: 'row',
-            position: 'relative',
-            left: 'calc(-1 * var(--Sidebar-width) / 2)',
-            transition: 'top 0.3s ease-in-out', // Transition for vertical movement only
-          }}>
-          <Box>
-            <h1 className={title({ color: "violet" })}>{siteConfig.name}&nbsp;</h1>
-          </Box>
-          <Divider orientation={"vertical"} sx={{ marginRight: 2 }} />
-          <Box>
-            <p className={subtitle({ color: "cyan" })}>{siteConfig.description}</p>
-          </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 0.15 }}>
+          <Stack
+            spacing={1}
+            direction="row"
+            sx={{ alignItems: 'center', justifyContent: 'center', width: '100%' }}
+            divider={<Divider orientation="vertical"  />}
+          >
+            <Typography level="h1" sx={{ color: 'plum', display: 'inline-block', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' }}>
+              {siteConfig.name}
+            </Typography>
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>
+              <Tooltip title="Version" variant="solid" placement="top" arrow>
+                <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>
+                  <AcaciaVersionTypography>Acacia</AcaciaVersionTypography>
+                </Box>
+              </Tooltip>
+            </Stack>
+          </Stack>
         </Box>
       </Box>
     </>
