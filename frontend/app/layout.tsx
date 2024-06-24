@@ -15,7 +15,7 @@ export default function RootLayout({ children, }: Readonly<{ children: React.Rea
     <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
       <Head>
         <title>ForestGEO Census</title>
-        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" href="/favicon.ico"/>
       </Head>
       <body>
         <Providers>
