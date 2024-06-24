@@ -1,3 +1,4 @@
+// rainbowtext.tsx
 "use client";
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';

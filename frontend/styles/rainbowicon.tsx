@@ -1,3 +1,4 @@
+// rainbowicon.tsx
 "use client";
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
@@ -39,7 +40,7 @@ const RainbowIconWrapper = styled.div<RainbowIconWrapperProps>`
   background: linear-gradient(90deg, ${generateForestColors().join(', ')});
   background-size: 300% 100%;
   filter: blur(0.2px);
-  animation: ${({animate}) => animate ? css`${waveAnimation} 10s linear infinite` : undefined};
+  animation: ${({animate}) => animate ? css`${waveAnimation} 20s linear infinite` : undefined};
   mask: url(#logo-mask);
   -webkit-mask: url(#logo-mask);
 `;
@@ -47,12 +48,12 @@ const RainbowIconWrapper = styled.div<RainbowIconWrapperProps>`
 export const RainbowIcon: React.FC = () => {
   const [animate, setAnimate] = useState(true);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setAnimate(false);
-    }, 30000); // Stop the animation after 30 seconds
-    return () => clearTimeout(timer);
-  }, []);
+  // useEffect(() => {
+  //   const timer = setTimeout(() => {
+  //     setAnimate(false);
+  //   }, 30000); // Stop the animation after 30 seconds
+  //   return () => clearTimeout(timer);
+  // }, []);
 
   return (
     <RainbowIconWrapper animate={animate}>

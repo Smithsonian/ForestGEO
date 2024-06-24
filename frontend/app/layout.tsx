@@ -8,15 +8,14 @@ import { LoadingProvider } from "@/app/contexts/loadingprovider";
 import { GlobalLoadingIndicator } from "@/styles/globalloadingindicator";
 import { DataValidityProvider } from "@/app/contexts/datavalidityprovider";
 import { LockAnimationProvider } from "./contexts/lockanimationcontext";
-import Head from "next/head";
 
 export default function RootLayout({ children, }: Readonly<{ children: React.ReactNode; }>) {
   return (
     <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
-      <Head>
+      <head>
         <title>ForestGEO Census</title>
-        <link rel="icon" href="/favicon.ico"/>
-      </Head>
+        <link rel="icon" href="icon.jpg"/>
+      </head>
       <body>
         <Providers>
           <LoadingProvider>
