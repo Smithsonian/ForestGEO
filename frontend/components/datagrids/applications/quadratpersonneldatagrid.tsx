@@ -7,11 +7,7 @@ import {randomId} from "@mui/x-data-grid-generator";
 import {useSession} from "next-auth/react";
 import React, {useEffect, useState} from "react";
 import DataGridCommons from "../datagridcommons";
-import {
-  useOrgCensusContext,
-  usePlotContext,
-  useSiteContext
-} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {useDataValidityContext} from "@/app/contexts/datavalidityprovider";
 import {GridSelections} from "@/config/macros";
 import { initialQuadratPersonnelRDSRow } from "@/config/sqlrdsdefinitions/tables/quadratpersonnelrds";

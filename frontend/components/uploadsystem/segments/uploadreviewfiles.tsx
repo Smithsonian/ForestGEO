@@ -1,22 +1,12 @@
 "use client";
 
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
-  Grid,
-  Pagination
-} from "@mui/material";
+import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Grid, Pagination} from "@mui/material";
 import {Box, Checkbox, Modal, Typography} from "@mui/joy";
 import {DisplayParsedDataGridInline} from "@/components/uploadsystemhelpers/displayparseddatagrid";
 import Divider from "@mui/joy/Divider";
 import React, {useState, useEffect} from "react";
 import {ReviewStates} from "@/config/macros/uploadsystemmacros";
 import {UploadReviewFilesProps} from "@/config/macros/uploadsystemmacros";
-
 
 import {FileWithPath} from "react-dropzone";
 import {DropzoneLogic} from "@/components/uploadsystemhelpers/dropzone";

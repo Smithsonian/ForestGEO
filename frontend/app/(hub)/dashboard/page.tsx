@@ -1,17 +1,6 @@
 "use client";
 
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionGroup,
-  AccordionSummary,
-  Box,
-  IconButton,
-  List,
-  ListItem,
-  Tooltip,
-  Typography
-} from "@mui/joy";
+import { Accordion, AccordionDetails, AccordionGroup, AccordionSummary, Box, IconButton, List, ListItem, Tooltip, Typography} from "@mui/joy";
 import WarningIcon from '@mui/icons-material/Warning';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import Avatar from "@mui/joy/Avatar";
