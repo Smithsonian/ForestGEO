@@ -1,24 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  GridActionsCellItem,
-  GridColDef,
-  GridEventListener,
-  GridRowEditStopReasons,
-  GridRowId,
-  GridRowModel,
-  GridRowModes,
-  GridRowModesModel,
-  GridToolbar,
-  GridToolbarContainer,
-  GridToolbarProps,
-  ToolbarPropsOverrides
-} from '@mui/x-data-grid';
-import {
-  Alert,
-  Button,
-  Snackbar
-} from '@mui/material';
+import { GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridToolbar, GridToolbarContainer, GridToolbarProps, ToolbarPropsOverrides, useGridApiRef, GridCellParams, } from '@mui/x-data-grid';
+import { Alert, Button, Snackbar, } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -28,20 +11,9 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
 import { Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
-import {
-  createDeleteQuery,
-  createFetchQuery,
-  createPostPatchQuery,
-  getColumnVisibilityModel,
-  getGridID,
-} from "@/config/datagridhelpers";
+import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getColumnVisibilityModel, getGridID } from "@/config/datagridhelpers";
 import { useSession } from "next-auth/react";
-import {
-  useOrgCensusContext,
-  usePlotContext,
-  useQuadratContext,
-  useSiteContext
-} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { redirect } from 'next/navigation';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
@@ -112,6 +84,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const [locked, setLocked] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
   const [promiseArguments, setPromiseArguments] = useState<{ resolve: (value: GridRowModel) => void, reject: (reason?: any) => void, newRow: GridRowModel, oldRow: GridRowModel } | null>(null);
+  const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -124,6 +97,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleLockedClick = () => triggerPulse();
 
   useSession();
+
+  const apiRef = useGridApiRef();
 
   useEffect(() => {
     if (currentCensus !== undefined) {
@@ -346,7 +321,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       setRowCount(data.totalCount);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
-        console.log('isNewRowAdded true, on new last page');
         addNewRowToGrid();
         setIsNewRowAdded(false);
       }
@@ -419,7 +393,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (rowInEditMode) {
       const [id] = rowInEditMode;
       const row = rows.find(row => String(row.id) === String(id));
-      console.log('handleRowModesModelChange triggered on row: ', row);
     }
   };
 
@@ -437,7 +410,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleEditClick = (id: GridRowId) => () => {
     if (locked) return;
     const row = rows.find(row => String(row.id) === String(id));
-    console.log('handleEditClick row: ', row);
     if (row && handleSelectQuadrat) {
       handleSelectQuadrat(row.quadratID);
     }
@@ -445,6 +417,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       ...prevModel,
       [id]: { mode: GridRowModes.Edit },
     }));
+    // Auto-focus on the first editable cell when entering edit mode
+    setTimeout(() => {
+      const firstEditableColumn = filteredColumns.find((col) => col.editable);
+      if (firstEditableColumn) {
+        apiRef.current.setCellFocus(id, firstEditableColumn.field);
+      }
+    });
   };
 
   const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
@@ -527,6 +506,44 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     else return columns;
   }, [rows, columns]);
 
+  const handleEnterKeyNavigation = async (params: GridCellParams, event: React.KeyboardEvent) => {
+    event.defaultPrevented = true;
+    const columnIndex = filteredColumns.findIndex(col => col.field === params.field);
+    const isLastColumn = columnIndex === filteredColumns.length - 2;
+    const currentColumn = filteredColumns[columnIndex];
+
+    if (isSaveHighlighted) {
+      openConfirmationDialog('save', params.id);
+      setIsSaveHighlighted(false);
+    } else if (currentColumn.type === 'singleSelect') {
+      const cell = apiRef.current.getCellElement(params.id, params.field);
+      if (cell) {
+        const select = cell.querySelector('select');
+        if (select) {
+          select.focus();
+        }
+      }
+    } else if (isLastColumn) {
+      setIsSaveHighlighted(true);
+      apiRef.current.setCellFocus(params.id, 'actions');
+    } else {
+      apiRef.current.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
+    }
+  };
+
+  const handleSelectKeyDown = (params: GridCellParams, event: React.KeyboardEvent) => {
+    const column = filteredColumns.find(col => col.field === params.field);
+    if (column && column.type === 'singleSelect' && event.key === 'Enter') {
+      const cell = apiRef.current.getCellElement(params.id, params.field);
+      if (cell) {
+        const select = cell.querySelector('select');
+        if (select) {
+          select.blur();
+        }
+      }
+    }
+  };
+
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
   } else {
@@ -547,6 +564,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             Note: The Grid is filtered by your selected Plot and Plot ID
           </Typography>
           <StyledDataGrid
+            apiRef={apiRef}
             sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
@@ -562,8 +580,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
-                event.defaultMuiPrevented = true;
-                openConfirmationDialog('save', params.id);
+                handleEnterKeyNavigation(params, event);
               }
             }}
             loading={refresh}

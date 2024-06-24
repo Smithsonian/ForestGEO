@@ -7,14 +7,7 @@ import '@/styles/validationtable.css';
 import moment from 'moment';
 import { GridCellParams, GridColDef, GridRowModel, GridRowsProp} from '@mui/x-data-grid';
 import {StyledDataGrid} from '@/config/styleddatagrid';
-import {
-  FileErrors,
-  FileRow,
-  FileCollectionRowSet,
-  RowValidationErrors,
-  ValidationFunction,
-  getTableHeaders
-} from '@/config/macros/formdetails';
+import { FileErrors, FileRow, FileCollectionRowSet, RowValidationErrors, ValidationFunction, getTableHeaders} from '@/config/macros/formdetails';
 import {validateAttributesRow} from '@/config/sqlrdsdefinitions/tables/attributerds';
 import {validatePersonnelRow} from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import {validateQuadratsRow} from '@/config/sqlrdsdefinitions/tables/quadratrds';

@@ -27,6 +27,7 @@ import {
 } from "@/app/contexts/listselectionprovider";
 import {createAndUpdateCensusList} from "@/config/sqlrdsdefinitions/orgcensusrds";
 import {siteConfig} from "@/config/macros/siteconfigs";
+import { useDataValidityContext } from "../contexts/datavalidityprovider";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -78,6 +79,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
   const { data: session } = useSession();
+  const {validity} = useDataValidityContext();
   const previousSiteRef = useRef<string | undefined>(undefined);
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
@@ -109,7 +111,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(false);
     setCensusListLoaded(true);
     return { success: true };
-  }, [censusListContext, censusListDispatch, currentPlot, currentSite, setLoading]);
+  }, [censusListContext, censusListDispatch, currentPlot, currentSite, setLoading, validity]);
 
   const loadPlotsData = useCallback(async () => {
     if (!currentSite) return { success: false, message: 'Site must be selected to load plot data' };
@@ -128,7 +130,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(false);
     setPlotListLoaded(true);
     return { success: true };
-  }, [plotListContext, plotListDispatch, currentSite, setLoading]);
+  }, [plotListContext, plotListDispatch, currentSite, setLoading, validity]);
 
   const loadQuadratsData = useCallback(async () => {
     if (!currentPlot || !currentCensus) return {
@@ -150,7 +152,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(false);
     setQuadratListLoaded(true);
     return { success: true };
-  }, [quadratListContext, quadratListDispatch, currentPlot, currentCensus, currentSite, setLoading]);
+  }, [quadratListContext, quadratListDispatch, currentPlot, currentCensus, currentSite, setLoading, validity]);
 
   const loadSubquadratsData = useCallback(async () => {
     if (!currentPlot || !currentCensus || !currentQuadrat) return {
@@ -172,7 +174,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(false);
     setSubquadratListLoaded(true);
     return { success: true };
-  }, [subquadratListContext, subquadratListDispatch, currentPlot, currentCensus, currentQuadrat, currentSite, setLoading]);
+  }, [subquadratListContext, subquadratListDispatch, currentPlot, currentCensus, currentQuadrat, currentSite, setLoading, validity]);
 
   const fetchSiteList = useCallback(async () => {
     setLoading(true, 'Loading Sites...');
@@ -190,7 +192,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       siteListDispatch ? await siteListDispatch({siteList: allsites}) : undefined;
     }
     setLoading(false);
-  }, [session, siteListLoaded, siteListDispatch, setLoading]);
+  }, [session, siteListLoaded, siteListDispatch, setLoading, validity]);
 
   useEffect(() => {
     if (session && !siteListLoaded) {

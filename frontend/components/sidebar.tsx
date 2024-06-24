@@ -15,31 +15,13 @@ import { siteConfigNav, validityMapping } from "@/config/macros/siteconfigs";
 import { SiteConfigProps } from "@/config/macros/siteconfigs";
 import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
 import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
-import {
-  useOrgCensusContext,
-  useOrgCensusDispatch,
-  usePlotContext,
-  usePlotDispatch,
-  useSiteContext,
-  useSiteDispatch
-} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, usePlotDispatch, useSiteContext, useSiteDispatch } from "@/app/contexts/userselectionprovider";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  Button,
-  SelectOption,
-  Stack,
-  Badge,
-  Tooltip,
-  IconButton,
-} from "@mui/joy";
+import { Button, SelectOption, Stack, Badge, Tooltip, IconButton, } from "@mui/joy";
 import AddIcon from '@mui/icons-material/Add';
 import Select from "@mui/joy/Select";
 import Option from '@mui/joy/Option';
-import {
-  useOrgCensusListContext,
-  usePlotListContext,
-  useSiteListContext
-} from "@/app/contexts/listselectionprovider";
+import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
 import { useSession } from "next-auth/react";
 import { TransitionComponent } from "@/components/client/clientmacros";
 import ListDivider from "@mui/joy/ListDivider";
@@ -197,7 +179,7 @@ export default function Sidebar(props: SidebarProps) {
           }
         });
 
-        setSidebarWidth(maxWidth + 10);
+        setSidebarWidth(Math.min(maxWidth + 10, 500));
       }
     };
 
@@ -522,6 +504,7 @@ export default function Sidebar(props: SidebarProps) {
         name="None"
         required
         autoFocus
+        sx={{ marginRight: '1em' }}
         size={"md"}
         renderValue={renderSiteValue}
         value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ""}
@@ -629,9 +612,9 @@ export default function Sidebar(props: SidebarProps) {
               },
             })}
           />
-          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1}}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
-              <Stack direction={"column"}>
+              <Stack direction={"column"} sx={{marginRight: '1em' }}>
                 <Typography level="h1">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ marginRight: 1.5 }}>
@@ -655,21 +638,21 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
               {(site !== undefined) && (
                 <>
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
                     <Avatar size={"sm"} sx={{ marginRight: 1 }}>
                       <PlotLogo />
                     </Avatar>
-                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center' }}>
+                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em'  }}>
                       {renderPlotOptions()}
                     </Box>
                   </Box>
                   {plot !== undefined && (
                     <>
-                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
                         <Avatar size={"sm"} sx={{ marginRight: 1 }}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center' }}>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em'  }}>
                           {renderCensusOptions()}
                         </Box>
                       </Box>
@@ -683,8 +666,7 @@ export default function Sidebar(props: SidebarProps) {
               display: 'flex',
               flexDirection: 'column',
               gap: 1,
-              ml: -1
-            }}> {/* Added ml: -1 to adjust the position of the navigation menu */}
+              ml: -1}}> {/* Added ml: -1 to adjust the position of the navigation menu */}
               <Box
                 sx={{
                   minHeight: 0,

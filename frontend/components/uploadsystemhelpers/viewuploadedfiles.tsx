@@ -4,19 +4,7 @@ import {tableHeaderSettings} from "@/config/macros";
 import {fileColumns} from "@/config/macros/formdetails";
 import {UploadedFileData} from "@/config/macros/formdetails";
 import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
-import {
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow
-} from "@mui/material";
+import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow} from "@mui/material";
 import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
 import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";

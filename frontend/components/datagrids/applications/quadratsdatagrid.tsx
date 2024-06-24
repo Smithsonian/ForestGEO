@@ -3,10 +3,7 @@ import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, { useState} from "react";
 import {QuadratsGridColumns as BaseQuadratsGridColumns, initialQuadratRDSRow} from '@/config/sqlrdsdefinitions/tables/quadratrds';
-import {
-  useOrgCensusContext,
-  usePlotContext,
-} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, } from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {Box, Button, Typography} from "@mui/joy";
