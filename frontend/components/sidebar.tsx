@@ -32,6 +32,7 @@ import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import { get } from 'http';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -612,9 +613,9 @@ export default function Sidebar(props: SidebarProps) {
               },
             })}
           />
-          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1}}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
-              <Stack direction={"column"} sx={{marginRight: '1em' }}>
+              <Stack direction={"column"} sx={{ marginRight: '1em' }}>
                 <Typography level="h1">
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ marginRight: 1.5 }}>
@@ -638,21 +639,21 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
               {(site !== undefined) && (
                 <>
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
                     <Avatar size={"sm"} sx={{ marginRight: 1 }}>
                       <PlotLogo />
                     </Avatar>
-                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em'  }}>
+                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>
                       {renderPlotOptions()}
                     </Box>
                   </Box>
                   {plot !== undefined && (
                     <>
-                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2}}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
                         <Avatar size={"sm"} sx={{ marginRight: 1 }}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em'  }}>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>
                           {renderCensusOptions()}
                         </Box>
                       </Box>
@@ -666,7 +667,8 @@ export default function Sidebar(props: SidebarProps) {
               display: 'flex',
               flexDirection: 'column',
               gap: 1,
-              ml: -1}}> {/* Added ml: -1 to adjust the position of the navigation menu */}
+              ml: -1
+            }}> {/* Added ml: -1 to adjust the position of the navigation menu */}
               <Box
                 sx={{
                   minHeight: 0,

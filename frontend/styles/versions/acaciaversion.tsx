@@ -35,17 +35,5 @@ const RainbowText = styled(Typography)`
 `;
 
 export const AcaciaVersionTypography: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      const element = document.querySelector('.rainbow-text');
-      if (element) {
-        const styles = window.getComputedStyle(element);
-        console.log('Background Position:', styles.backgroundPosition);
-      }
-    }, 1000);
-
-    return () => clearInterval(intervalId);
-  }, []);
-
   return <RainbowText className="rainbow-text" level="h1">{children}</RainbowText>;
 };
