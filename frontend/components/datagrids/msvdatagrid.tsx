@@ -33,17 +33,52 @@ import { useSession } from 'next-auth/react';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, locked }: EditToolbarProps) => (
-  <GridToolbarContainer>
-    <GridToolbar />
-    <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
-      Add Row
-    </Button>
-    <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
-      Refresh
-    </Button>
-  </GridToolbarContainer>
-);
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, locked }: EditToolbarProps) => {
+  const handleExportClick = async () => {
+    if (!handleExportAll) return;
+    const fullData = await handleExportAll();
+    const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'data.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportErrorsClick = async () => {
+    if (!handleExportErrors) return;
+    const errorData = await handleExportErrors();
+    const blob = new Blob([JSON.stringify(errorData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'error_data.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <GridToolbarContainer>
+      <GridToolbar />
+      <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
+        Add Row
+      </Button>
+      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
+        Refresh
+      </Button>
+      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleExportClick}>
+        Export Full Data
+      </Button>
+      <Button color="primary" startIcon={<ErrorIcon />} onClick={handleExportErrorsClick}>
+        Export Errors
+      </Button>
+    </GridToolbarContainer>
+  );
+};
+
 /**
  * Renders custom UI components for measurement summary view.
  *
@@ -655,6 +690,36 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     );
   };
 
+  const fetchFullData = async () => {
+    setLoading(true, "Fetching full dataset...");
+    let partialQuery = ``;
+    if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
+    if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
+    if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
+    const fullDataQuery = `/api/fetchall/${'measurementssummaryview'}` + partialQuery + `?schema=${currentSite?.schemaName}`;
+
+    try {
+      const response = await fetch(fullDataQuery, { method: 'GET' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Error fetching full data');
+      return data.output;
+    } catch (error) {
+      console.error('Error fetching full data:', error);
+      setSnackbar({ children: 'Error fetching full data', severity: 'error' });
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportErrors = async () => {
+    const errorRows = await fetchErrorRows();
+    const formattedErrorRows = errorRows.map(row => {
+      const errors = getRowErrorDescriptions(row.id);
+      return { ...row, errors };
+    });
+    return formattedErrorRows;
+  };  
 
   const modifiedColumns = gridColumns.map(column => {
     if (column.field !== 'measurementssummaryview') {
@@ -909,7 +974,9 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
               toolbar: {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
-                handleRefresh: handleRefresh
+                handleRefresh: handleRefresh,
+                handleExportAll: fetchFullData,
+                handleExportErrors: handleExportErrors,
               }
             }}
             autoHeight
