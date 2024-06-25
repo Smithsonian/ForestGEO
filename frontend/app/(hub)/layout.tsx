@@ -29,6 +29,7 @@ import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusr
 import { siteConfig } from "@/config/macros/siteconfigs";
 import { useDataValidityContext } from "../contexts/datavalidityprovider";
 import { AcaciaVersionTypography } from "@/styles/versions/acaciaversion";
+import { minHeight } from "@mui/system";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -40,32 +41,36 @@ function renderSwitch(endpoint: string) {
     alignItems: 'center',
     justifyContent: 'center',
     textAlign: 'center',
+    minHeight: '50px'
   };
+
+  let output: string = '';
+
 
   switch (endpoint) {
     case '/dashboard':
-      return <Box sx={commonStyle}><h3 className={title({ color: "cyan" })} key={endpoint}>Dashboard</h3></Box>;
+      output = 'Dashboard'; break;
     case '/measurementshub/summary':
-      return <Box sx={commonStyle}><h3 className={title({ color: "green" })} key={endpoint}>Measurements Summary</h3></Box>;
+      output = 'View Data'; break;
     case '/measurementshub/validationhistory':
-      return <Box sx={commonStyle}><h3 className={title({ color: "green" })} key={endpoint}>Validation History</h3></Box>;
+      output = 'Validation History'; break;
     case '/fixeddatainput/attributes':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data Hub - Attributes</h3></Box>;
-    case '/fixeddatainput/census':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Census</h3></Box>;
+      output = 'Stem Codes'; break;
     case '/fixeddatainput/personnel':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Personnel</h3></Box>;
+      output = 'Personnel'; break;
     case '/fixeddatainput/quadrats':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Quadrats</h3></Box>;
+      output = 'Quadrats'; break;
     case '/fixeddatainput/subquadrats':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - Subquadrats</h3></Box>;
+      output = 'Subquadrats'; break;
+    case '/fixeddatainput/stemtaxonomies':
+      output = 'Plot-Species List'; break;
     case '/fixeddatainput/quadratpersonnel':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - QuadratPersonnel</h3></Box>;
+      output = 'Quadrat-Assigned Personnel'; break;
     case '/fixeddatainput/alltaxonomies':
-      return <Box sx={commonStyle}><h3 className={title({ color: "sky" })} key={endpoint}>Supporting Data - All Taxonomies</h3></Box>;
-    default:
-      return <></>;
+      output = 'Species List'; break;
   }
+
+  return <Box sx={commonStyle}><h1 style={{lineHeight: '1.1em'}} className={title({ color: "cyan" })} key={endpoint}>{output}</h1></Box>;
 }
 
 export default function HubLayout({ children }: { children: React.ReactNode }) {
@@ -311,7 +316,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           alignItems: 'left',
           paddingTop: '25px',
           paddingLeft: '5px',
-          paddingBottom: '25px',
+          paddingBottom: '20px',
           flexDirection: 'column',
         }}>
           {renderSwitch(usePathname())}
@@ -333,7 +338,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           )}
         </Box>
         <Divider orientation={"horizontal"} />
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 0.15 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
           <Stack
             spacing={1}
             direction="row"
@@ -346,7 +351,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>
               <Tooltip title="Version" variant="solid" placement="top" arrow>
                 <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>
-                  <AcaciaVersionTypography>Acacia</AcaciaVersionTypography>
+                  <AcaciaVersionTypography>{siteConfig.version}</AcaciaVersionTypography>
                 </Box>
               </Tooltip>
             </Stack>

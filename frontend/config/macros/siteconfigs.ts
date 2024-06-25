@@ -26,6 +26,7 @@ export type SiteConfigProps = {
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and storage",
+  version: "Acacia"
 };
 
 type DataValidityKey = keyof UnifiedValidityFlags;
