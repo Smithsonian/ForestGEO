@@ -26,7 +26,7 @@ export type SiteConfigProps = {
 export const siteConfig = {
   name: "ForestGEO",
   description: "Census data entry and storage",
-  version: "Acacia"
+  version: "Acacia" // needs to be updated as new versions are released
 };
 
 type DataValidityKey = keyof UnifiedValidityFlags;
@@ -121,12 +121,6 @@ export const siteConfigNav: SiteConfigProps[] = [
       //   tip: '',
       //   icon: BugReportIcon,
       // },
-      {
-        label: "Plot-Species List",
-        href: "/stemtaxonomies",
-        tip: '',
-        icon: FilterIcon
-      },
       // {
       //   label: "View Stem Dimensions",
       //   href: "/stemdimensions",
@@ -138,6 +132,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         href: "/alltaxonomies",
         tip: '',
         icon: SchemaIcon
+      },
+      {
+        label: "Plot-Species List",
+        href: "/stemtaxonomies",
+        tip: '',
+        icon: FilterIcon
       },
       // {
       //   label: 'Measurements Form',

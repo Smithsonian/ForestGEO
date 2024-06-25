@@ -148,7 +148,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     }
   };
 
-
   const openConfirmationDialog = (
     actionType: 'save' | 'delete',
     actionId: GridRowId
