@@ -122,6 +122,8 @@ const sqlConfig: PoolOptions = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  keepAliveInitialDelay: 10000, // 0 by default.
+  enableKeepAlive: true, // false by default.
 };
 // database: process.env.AZURE_SQL_SCHEMA!, // better stored in an app setting such as process.env.DB_NAME
 export const poolMonitor = new PoolMonitor(sqlConfig);
@@ -280,3 +282,35 @@ export function buildPaginatedQuery(config: QueryConfig): { query: string, param
 
   return {query, params: queryParams};
 }
+
+// Function to close all active connections
+async function closeConnections() {
+  console.log('Closing all active connections...');
+  await poolMonitor.closeAllConnections();
+  console.log('All connections closed.');
+}
+
+// Function to handle graceful shutdown
+async function gracefulShutdown() {
+  console.log('Initiating graceful shutdown...');
+  try {
+    await closeConnections();
+    console.log('Graceful shutdown complete.');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during graceful shutdown:', error);
+    process.exit(1);
+  }
+}
+
+// Capture SIGINT signal (triggered by ctrl+c)
+process.on('SIGINT', async () => {
+  console.log('SIGINT signal received.');
+  await gracefulShutdown();
+});
+
+// Capture SIGTERM signal (triggered by process kill)
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM signal received.');
+  await gracefulShutdown();
+});
