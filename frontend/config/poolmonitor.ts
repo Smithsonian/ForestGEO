@@ -1,4 +1,4 @@
-import {Pool, PoolConnection, PoolOptions, createPool} from 'mysql2/promise';
+import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
 
 export class PoolMonitor {
   private pool: Pool;
@@ -37,7 +37,6 @@ export class PoolMonitor {
     });
   }
 
-
   async getConnection(): Promise<PoolConnection> {
     try {
       console.log('Requesting new connection...');
@@ -52,5 +51,15 @@ export class PoolMonitor {
 
   getPoolStatus() {
     return `active: ${this.activeConnections} | total: ${this.totalConnectionsCreated} | waiting: ${this.waitingForConnection}`;
+  }
+
+  async closeAllConnections(): Promise<void> {
+    try {
+      await this.pool.end();
+      console.log('All connections closed.');
+    } catch (error) {
+      console.error('Error closing connections:', error);
+      throw error;
+    }
   }
 }
