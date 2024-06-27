@@ -1,7 +1,7 @@
 "use client";
 /** @jsxImportSource @emotion/react */
 import styled from '@emotion/styled';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { keyframes } from '@emotion/react';
 import Typography from '@mui/joy/Typography';
 
