@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useCallback, useRef, useState } from "react";
-import { subtitle, title } from "@/config/primitives";
+import { title } from "@/config/primitives";
 import { useSession } from "next-auth/react";
 import { redirect, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -29,7 +29,6 @@ import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusr
 import { siteConfig } from "@/config/macros/siteconfigs";
 import { useDataValidityContext } from "../contexts/datavalidityprovider";
 import { AcaciaVersionTypography } from "@/styles/versions/acaciaversion";
-import { minHeight } from "@mui/system";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });

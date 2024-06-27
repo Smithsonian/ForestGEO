@@ -32,7 +32,6 @@ import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
-import { get } from 'http';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
