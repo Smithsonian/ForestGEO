@@ -26,9 +26,9 @@ export class FamilyMapper implements IDataMapper<FamilyResult, FamilyRDS> {
 
   demapData(results: FamilyRDS[]): FamilyResult[] {
     return results.map((item) => ({
-      FamilyID: item.familyID != null ? Number(item.familyID) : null,
-      Family: item.family != null ? String(item.family) : null,
-      ReferenceID: item.referenceID != null ? Number(item.referenceID) : null,
+      FamilyID: item.familyID != undefined ? Number(item.familyID) : null,
+      Family: item.family != undefined ? String(item.family) : null,
+      ReferenceID: item.referenceID != undefined ? Number(item.referenceID) : null,
     }));
   }
 }

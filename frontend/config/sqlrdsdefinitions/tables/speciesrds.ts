@@ -1,14 +1,11 @@
 import {GridColDef} from '@mui/x-data-grid';
 import {IDataMapper} from "../../datamapper";
-import {bitToBoolean} from '../../macros';
 import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 
 export type SpeciesRDS = {
   id?: number;
   speciesID?: number;
   genusID?: number;
-  currentTaxonFlag?: boolean;
-  obsoleteTaxonFlag?: boolean;
   speciesName?: string;
   subspeciesName?: string;
   speciesCode?: string;
@@ -24,8 +21,6 @@ export type SpeciesRDS = {
 export interface SpeciesResult {
   SpeciesID: any;
   GenusID: any;
-  CurrentTaxonFlag: any;
-  ObsoleteTaxonFlag: any;
   SpeciesName: any;
   SubspeciesName: any;
   SpeciesCode: any;
@@ -83,8 +78,6 @@ export class SpeciesMapper implements IDataMapper<SpeciesResult, SpeciesRDS> {
       id: index + indexOffset,
       speciesID: item.SpeciesID != null ? Number(item.SpeciesID) : undefined,
       genusID: item.GenusID != null ? Number(item.GenusID) : undefined,
-      currentTaxonFlag: item.CurrentTaxonFlag != null ? bitToBoolean(item.CurrentTaxonFlag) : undefined,
-      obsoleteTaxonFlag: item.ObsoleteTaxonFlag != null ? bitToBoolean(item.ObsoleteTaxonFlag) : undefined,
       speciesName: item.SpeciesName != null ? String(item.SpeciesName) : undefined,
       subspeciesName: item.SubspeciesName != null ? String(item.SubspeciesName) : undefined,
       speciesCode: item.SpeciesCode != null ? String(item.SpeciesCode) : undefined,
@@ -102,8 +95,6 @@ export class SpeciesMapper implements IDataMapper<SpeciesResult, SpeciesRDS> {
     return results.map((item) => ({
       SpeciesID: item.speciesID != undefined ? Number(item.speciesID) : null,
       GenusID: item.genusID != undefined ? Number(item.genusID) : null,
-      CurrentTaxonFlag: item.currentTaxonFlag != undefined ? item.currentTaxonFlag : null,
-      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != undefined ? item.obsoleteTaxonFlag : null,
       SpeciesName: item.speciesName != undefined ? String(item.speciesName) : null,
       SubspeciesName: item.subspeciesName != undefined ? String(item.subspeciesName) : null,
       SpeciesCode: item.speciesCode != undefined ? String(item.speciesCode) : null,
@@ -116,7 +107,6 @@ export class SpeciesMapper implements IDataMapper<SpeciesResult, SpeciesRDS> {
       ReferenceID: item.referenceID != undefined ? Number(item.referenceID) : null,
     }));
   }
-
 }
 
 export const speciesFields = [

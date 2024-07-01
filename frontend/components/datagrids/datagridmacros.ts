@@ -1,12 +1,13 @@
 import styled from "@emotion/styled";
 import { AlertProps } from "@mui/material";
-import { GridColDef, GridRowsProp, GridRowModesModel, GridRowId, GridSortDirection, GridRowModel } from "@mui/x-data-grid";
+import { GridColDef, GridRowsProp, GridRowModesModel, GridRowId, GridSortDirection, GridRowModel, GridFilterModel } from "@mui/x-data-grid";
 import { Dispatch, SetStateAction } from "react";
 
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
   handleRefresh?: () => Promise<void>;
-  handleExportAll?: () => Promise<void>;
+  handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
+  filterModel?: GridFilterModel;
   locked?: boolean;
 }
 

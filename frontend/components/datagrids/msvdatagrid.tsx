@@ -1,7 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GridActionsCellItem, GridCellParams, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridSortModel, GridToolbar, GridToolbarContainer, GridToolbarProps, GridValidRowModel, ToolbarPropsOverrides} from '@mui/x-data-grid';
-import { Alert, Button, Checkbox, FormControlLabel, FormGroup, Snackbar} from '@mui/material';
+import { GridActionsCellItem, GridCellParams, GridColDef, GridEventListener, GridFilterModel, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridSortModel, GridToolbar, GridToolbarContainer, GridToolbarProps, GridValidRowModel, ToolbarPropsOverrides } from '@mui/x-data-grid';
+import { Alert, Button, Checkbox, FormControlLabel, FormGroup, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -11,9 +11,9 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from "@mui/joy/Box";
 import { Stack, Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
-import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getGridID,} from "@/config/datagridhelpers";
+import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getGridID, } from "@/config/datagridhelpers";
 import { CMError } from "@/config/macros/uploadsystemmacros";
-import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { redirect } from 'next/navigation';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 import moment from 'moment';
@@ -33,10 +33,10 @@ import { useSession } from 'next-auth/react';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, locked }: EditToolbarProps) => {
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, locked, filterModel }: EditToolbarProps) => {
   const handleExportClick = async () => {
     if (!handleExportAll) return;
-    const fullData = await handleExportAll();
+    const fullData = await handleExportAll(filterModel);
     const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -49,7 +49,7 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
 
   const handleExportErrorsClick = async () => {
     if (!handleExportErrors) return;
-    const errorData = await handleExportErrors();
+    const errorData = await handleExportErrors(filterModel);
     const blob = new Blob([JSON.stringify(errorData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -115,6 +115,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [locked, setLocked] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{ resolve: (value: GridRowModel) => void, reject: (reason?: any) => void, newRow: GridRowModel, oldRow: GridRowModel } | null>(null);
+  const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
 
   // custom states -- msvdatagrid
   const [deprecatedRows, setDeprecatedRows] = useState<GridValidRowModel[]>([]); // new state to track deprecated rows
@@ -699,7 +700,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     const fullDataQuery = `/api/fetchall/${'measurementssummaryview'}` + partialQuery + `?schema=${currentSite?.schemaName}`;
 
     try {
-      const response = await fetch(fullDataQuery, { method: 'GET' });
+      const response = await fetch(fullDataQuery, { method: 'GET', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(filterModel) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Error fetching full data');
       return data.output;
@@ -719,10 +720,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       return { ...row, errors };
     });
     return formattedErrorRows;
-  };  
+  };
 
   const modifiedColumns = gridColumns.map(column => {
-    if (column.field !== 'measurementssummaryview') {
+    if (column.field !== 'measurementDate') {
       return column;
     }
     return {
@@ -800,33 +801,42 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   };
   const stemUnitsColumn: GridColDef = {
     field: 'stemUnits',
-    headerName: 'U',
+    headerName: 'Stem Units',
     headerClassName: 'header',
     flex: 0.4,
-    renderHeader: () => <Typography level='body-xs'>U</Typography>,
-    align: 'left',
+    renderHeader: () => <Stack direction={'column'} sx={{alignItems: 'center', justifyContent: 'center'}}>
+      <Typography level='body-sm' fontWeight={'xl'}>Stem</Typography>
+      <Typography level='body-xs'>Units</Typography>
+    </Stack>,
+    align: 'center',
     editable: true,
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
   };
   const dbhUnitsColumn: GridColDef = {
     field: 'dbhUnits',
-    headerName: 'U',
+    headerName: 'DBH Units',
     headerClassName: 'header',
     flex: 0.4,
-    renderHeader: () => <Typography level='body-xs'>U</Typography>,
-    align: 'left',
+    renderHeader: () => <Stack direction={'column'} sx={{alignItems: 'center', justifyContent: 'center'}}>
+      <Typography level='body-sm' fontWeight={'xl'}>DBH</Typography>
+      <Typography level='body-xs'>Units</Typography>
+    </Stack>,
+    align: 'center',
     editable: true,
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
   };
   const homUnitsColumn: GridColDef = {
     field: 'homUnits',
-    headerName: 'U',
+    headerName: 'HOM Units',
     headerClassName: 'header',
     flex: 0.4,
-    renderHeader: () => <Typography level='body-xs'>U</Typography>,
-    align: 'left',
+    renderHeader: () => <Stack direction={'column'} sx={{alignItems: 'center', justifyContent: 'center'}}>
+      <Typography level='body-sm' fontWeight={'xl'}>HOM</Typography>
+      <Typography level='body-xs'>Units</Typography>
+    </Stack>,
+    align: 'center',
     editable: true,
     type: 'singleSelect',
     valueOptions: unitSelectionOptions

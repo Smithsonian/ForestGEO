@@ -1,7 +1,7 @@
-import {GridColDef} from '@mui/x-data-grid';
-import {IDataMapper} from "../../datamapper";
-import {ColumnStates, unitSelectionOptions} from '@/config/macros';
-import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
+import { GridColDef } from '@mui/x-data-grid';
+import { IDataMapper } from "../../datamapper";
+import { ColumnStates, unitSelectionOptions } from '@/config/macros';
+import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
 
 export type QuadratRDS = {
   id?: number;
@@ -11,46 +11,14 @@ export type QuadratRDS = {
   quadratName?: string;
   startX?: number;
   startY?: number;
+  coordinateUnits?: string;
   dimensionX?: number;
   dimensionY?: number;
+  dimensionUnits?: string;
   area?: number;
-  unit?: string;
+  areaUnits?: string;
   quadratShape?: string;
 };
-
-// export const quadratConfig: DataConfig<QuadratRDS> = {
-//   schema: "schema",
-//   tableName: "quadrats",
-//   uniqueField: "quadratName",
-//   selectQuery: "SELECT * FROM quadrats WHERE PlotID = ? AND CensusID IN (SELECT CensusID from ",
-//   insertQuery: `
-//     INSERT INTO quadrats (quadratName, plotID, CensusID, startX, startY, dimensionX, dimensionY, area, unit, quadratShape, plotCensusNumber) 
-//     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-//   `,
-// };
-
-export const initialQuadratRDSRow: QuadratRDS = {
-  id: 0,
-  quadratID: 0,
-  plotID: 0,
-  censusID: 0,
-  quadratName: '',
-  startX: 0,
-  startY: 0,
-  dimensionX: 0,
-  dimensionY: 0,
-  area: 0,
-  unit: 'm',
-  quadratShape: '',
-};
-
-export interface QuadratRaw {
-  quadratID: number;
-  plotID: number;
-  quadratName: string;
-}
-
-export type Quadrat = QuadratRDS | undefined;
 
 export interface QuadratsResult {
   QuadratID: any;
@@ -59,23 +27,14 @@ export interface QuadratsResult {
   QuadratName: any;
   StartX: any;
   StartY: any;
+  CoordinateUnits: any;
   DimensionX: any;
   DimensionY: any;
+  DimensionUnits: any;
   Area: any;
-  Unit: any;
+  AreaUnits: any;
   QuadratShape: any;
 }
-
-export const validateQuadratsRow: ValidationFunction = (row) => {
-  const errors: RowValidationErrors = {};
-
-  if (row['unit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['unit'])) {
-    errors['unit'] = 'Invalid unit value.';
-  }
-
-  return Object.keys(errors).length > 0 ? errors : null;
-};
-
 
 export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratRDS> {
   mapData(results: any[], indexOffset: number = 1): QuadratRDS[] {
@@ -87,10 +46,12 @@ export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratRDS> {
       quadratName: item.QuadratName != null ? String(item.QuadratName) : undefined,
       startX: item.StartX != null ? Number(item.StartX) : undefined,
       startY: item.StartY != null ? Number(item.StartY) : undefined,
+      coordinateUnits: item.CoordinateUnits != null ? String(item.CoordinateUnits) : undefined,
       dimensionX: item.DimensionX != null ? Number(item.DimensionX) : undefined,
       dimensionY: item.DimensionY != null ? Number(item.DimensionY) : undefined,
+      dimensionUnits: item.DimensionUnits != null ? String(item.DimensionUnits) : undefined,
       area: item.Area != null ? Number(item.Area) : undefined,
-      unit: item.Unit != null ? String(item.Unit) : undefined,
+      areaUnits: item.AreaUnits != null ? String(item.AreaUnits) : undefined,
       quadratShape: item.QuadratShape != null ? String(item.QuadratShape) : undefined,
       // personnel: personnelWithId
     }));
@@ -104,25 +65,63 @@ export class QuadratsMapper implements IDataMapper<QuadratsResult, QuadratRDS> {
       QuadratName: quadrat.quadratName !== undefined ? String(quadrat.quadratName) : null,
       StartX: quadrat.startX !== undefined ? Number(quadrat.startX) : null,
       StartY: quadrat.startY !== undefined ? Number(quadrat.startY) : null,
+      CoordinateUnits: quadrat.coordinateUnits !== undefined ? String(quadrat.coordinateUnits) : null,
       DimensionX: quadrat.dimensionX !== undefined ? Number(quadrat.dimensionX) : null,
       DimensionY: quadrat.dimensionY !== undefined ? Number(quadrat.dimensionY) : null,
+      DimensionUnits: quadrat.dimensionUnits !== undefined ? String(quadrat.dimensionUnits) : null,
       Area: quadrat.area !== undefined ? Number(quadrat.area) : null,
-      Unit: quadrat.unit !== undefined ? String(quadrat.unit) : null,
+      AreaUnits: quadrat.areaUnits !== undefined ? String(quadrat.areaUnits) : null,
       QuadratShape: quadrat.quadratShape !== undefined ? String(quadrat.quadratShape) : null,
       // Personnel: JSON.stringify(quadrat.personnel)
     }));
   }
 }
 
+export const initialQuadratRDSRow: QuadratRDS = {
+  id: 0,
+  quadratID: 0,
+  plotID: 0,
+  censusID: 0,
+  quadratName: '',
+  startX: 0,
+  startY: 0,
+  coordinateUnits: 'm',
+  dimensionX: 0,
+  dimensionY: 0,
+  dimensionUnits: 'm',
+  area: 0,
+  areaUnits: 'm',
+  quadratShape: '',
+};
+
+export interface QuadratRaw {
+  quadratID: number;
+  plotID: number;
+  quadratName: string;
+}
+
+export type Quadrat = QuadratRDS | undefined;
+
+export const validateQuadratsRow: ValidationFunction = (row) => {
+  const errors: RowValidationErrors = {};
+
+  if (row['unit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['unit'])) {
+    errors['unit'] = 'Invalid unit value.';
+  }
+
+  return Object.keys(errors).length > 0 ? errors : null;
+};
 
 export const quadratsFields = [
   'quadratName',
   'startX',
   'startY',
+  'coordinateUnits',
   'dimensionX',
   'dimensionY',
+  'dimensionUnits',
   'area',
-  'unit',
+  'areaUnits',
   'quadratShape',
 ];
 
@@ -133,81 +132,76 @@ export function getQuadratHCs(): ColumnStates {
   };
 }
 
-export const QuadratsGridColumns: GridColDef[] = [
-  {field: 'quadratID', headerName: '#', headerClassName: 'header', flex: 0.2, align: 'left', editable: false},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 0.4, align: 'left',},
-  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 0.55, align: 'left',},
-  {
-    field: 'quadratName',
-    headerName: 'Quadrat Name',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'startX',
-    headerName: 'X',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'startY',
-    headerName: 'Y',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'dimensionX',
-    headerName: 'DimX',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'dimensionY',
-    headerName: 'DimY',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'area',
-    headerName: 'Area',
-    headerClassName: 'header',
-    flex: 0.5,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'unit',
-    headerName: 'Unit',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions,
-    editable: true
-  },
-  {
-    field: 'quadratShape',
-    headerName: 'Quadrat Shape',
-    headerClassName: 'header',
-    flex: 0.75,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
+export const QuadratsGridColumnSet: GridColDef[][] = [
+  [
+    { field: 'quadratID', headerName: '#', headerClassName: 'header', flex: 0.2, align: 'left', editable: false },
+    { field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 0.4, align: 'left', },
+    { field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 0.55, align: 'left', },
+    {
+      field: 'quadratName',
+      headerName: 'Quadrat Name',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'left',
+      type: 'string',
+      editable: true
+    },
+    {
+      field: 'startX',
+      headerName: 'X',
+      headerClassName: 'header',
+      flex: 0.3,
+      align: 'left',
+      type: 'number',
+      editable: true
+    },
+    {
+      field: 'startY',
+      headerName: 'Y',
+      headerClassName: 'header',
+      flex: 0.3,
+      align: 'left',
+      type: 'number',
+      editable: true
+    },
+  ], [
+    {
+      field: 'area',
+      headerName: 'Area',
+      headerClassName: 'header',
+      flex: 0.5,
+      align: 'left',
+      type: 'number',
+      editable: true
+    },
+  ], [
+    {
+      field: 'dimensionX',
+      headerName: 'DimX',
+      headerClassName: 'header',
+      flex: 0.3,
+      align: 'left',
+      type: 'number',
+      editable: true
+    },
+    {
+      field: 'dimensionY',
+      headerName: 'DimY',
+      headerClassName: 'header',
+      flex: 0.3,
+      align: 'left',
+      type: 'number',
+      editable: true
+    },
+  ], [
+    {
+      field: 'quadratShape',
+      headerName: 'Quadrat Shape',
+      headerClassName: 'header',
+      flex: 0.75,
+      align: 'left',
+      type: 'string',
+      editable: true
+    },
+  ]
 ];

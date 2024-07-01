@@ -2,17 +2,16 @@ import {GridColDef} from '@mui/x-data-grid';
 import {IDataMapper} from "../../datamapper";
 import {bitToBoolean, booleanToBit, unitSelectionOptions} from '../../macros';
 
-
 export type StemRDS = {
   id?: number;
   stemID?: number;
   treeID?: number;
-  subquadratID?: number;
+  quadratID?: number;
   stemNumber?: number;
   stemTag?: string;
   localX?: number;
   localY?: number;
-  unit?: string;
+  coordinateUnits?: string;
   moved?: boolean;
   stemDescription?: string;
 };
@@ -20,12 +19,12 @@ export type StemRDS = {
 export interface StemResult {
   StemID: any;
   TreeID: any;
-  SubquadratID: any;
+  QuadratID: any;
   StemNumber: any;
   StemTag: any;
   LocalX: any;
   LocalY: any;
-  Unit: any;
+  CoordinateUnits: any;
   Moved: any;
   StemDescription: any;
 }
@@ -36,50 +35,37 @@ export class StemsMapper implements IDataMapper<StemResult, StemRDS> {
       id: index + indexOffset,
       stemID: item.StemID != null ? Number(item.StemID) : undefined,
       treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
-      subquadratID: item.SubquadratID != null ? Number(item.SubquadratID) : undefined,
+      quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
       stemNumber: item.StemNumber != null ? Number(item.StemNumber) : undefined,
       stemTag: item.StemTag != null ? String(item.StemTag) : undefined,
       localX: item.LocalX != null ? Number(item.LocalX) : undefined,
       localY: item.LocalY != null ? Number(item.LocalY) : undefined,
       moved: item.Moved != null ? bitToBoolean(item.Moved) : undefined,
-      unit: item.Unit != null ? String(item.Unit) : undefined,
+      coordinateUnits: item.CoordinateUnits != null ? unitSelectionOptions.find(x => x === item.CoordinateUnits) : undefined,
       stemDescription: item.StemDescription != null ? String(item.StemDescription) : undefined,
     }));
   }
 
   demapData(results: StemRDS[]): StemResult[] {
     return results.map(item => ({
-      StemID: item.stemID != null ? String(item.stemID) : null,
-      TreeID: item.treeID != null ? String(item.treeID) : null,
-      SubquadratID: item.subquadratID != null ? String(item.subquadratID) : null,
-      StemNumber: item.stemNumber != null ? String(item.stemNumber) : null,
-      StemTag: item.stemTag != null ? String(item.stemTag) : null,
-      LocalX: item.localX != null ? String(item.localX) : null,
-      LocalY: item.localY != null ? String(item.localY) : null,
-      Moved: item.moved != null ? booleanToBit(item.moved) : null,
-      Unit: item.unit != null ? String(item.unit) : null,
-      StemDescription: item.stemDescription != null ? String(item.stemDescription) : null,
+      StemID: item.stemID !== undefined ? String(item.stemID) : null,
+      TreeID: item.treeID !== undefined ? String(item.treeID) : null,
+      QuadratID: item.quadratID !== undefined ? String(item.quadratID) : null,
+      StemNumber: item.stemNumber !== undefined ? String(item.stemNumber) : null,
+      StemTag: item.stemTag !== undefined ? String(item.stemTag) : null,
+      LocalX: item.localX !== undefined ? String(item.localX) : null,
+      LocalY: item.localY !== undefined ? String(item.localY) : null,
+      Moved: item.moved !== undefined ? booleanToBit(item.moved) : null,
+      CoordinateUnits: item.coordinateUnits !== undefined ? item.coordinateUnits : null,
+      StemDescription: item.stemDescription !== undefined ? String(item.stemDescription) : null,
     }));
   }
 }
 
 export const StemGridColumns: GridColDef[] = [
-  // {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left',},
-  // {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left',},
-  // {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left',},
-  // {field: 'stemNumber', headerName: 'StemNumber', headerClassName: 'header', flex: 1, align: 'left',},
   {
     field: 'stemTag',
     headerName: 'Stem Tag',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'treeTag',
-    headerName: 'Tree Tag',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -105,7 +91,7 @@ export const StemGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'unit',
+    field: 'coordinateUnits',
     headerName: 'Unit',
     headerClassName: 'header',
     flex: 1,
