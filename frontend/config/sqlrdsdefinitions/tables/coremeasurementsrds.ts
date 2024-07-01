@@ -5,13 +5,7 @@ import {bitToBoolean, booleanToBit, unitSelectionOptions} from '@/config/macros'
 export type CoreMeasurementsRDS = {
   id?: number;
   coreMeasurementID?: number;
-  censusID?: number;
-  plotID?: number;
-  quadratID?: number;
-  subquadratID?: number;
-  treeID?: number;
   stemID?: number;
-  personnelID?: number;
   isValidated?: boolean;
   measurementDate?: Date;
   measuredDBH?: number;
@@ -24,13 +18,7 @@ export type CoreMeasurementsRDS = {
 
 export interface CoreMeasurementsResult {
   CoreMeasurementID: any;
-  CensusID: any;
-  PlotID: any;
-  QuadratID: any;
-  SubquadratID: any;
-  TreeID: any;
   StemID: any;
-  PersonnelID: any;
   IsValidated: any;
   MeasurementDate: any;
   MeasuredDBH: any;
@@ -46,13 +34,7 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
     return results.map((item, index) => ({
       id: index + indexOffset,
       coreMeasurementID: item.CoreMeasurementID != null ? Number(item.CoreMeasurementID) : undefined,
-      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
-      plotID: item.PlotID != null ? Number(item.PlotID) : undefined,
-      quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
-      subquadratID: item.SubquadratID != null ? Number(item.SubquadratID) : undefined,
-      treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
       stemID: item.StemID != null ? Number(item.StemID) : undefined,
-      personnelID: item.PersonnelID != null ? Number(item.PersonnelID) : undefined,
       isValidated: item.IsValidated != null ? bitToBoolean(item.IsValidated) : undefined,
       measurementDate: parseDate(item.MeasurementDate),
       measuredDBH: item.MeasuredDBH != null ? Number(item.MeasuredDBH) : undefined,
@@ -67,13 +49,7 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
   demapData(results: CoreMeasurementsRDS[]): CoreMeasurementsResult[] {
     return results.map((item) => ({
       CoreMeasurementID: item.coreMeasurementID != undefined ? Number(item.coreMeasurementID) : null,
-      CensusID: item.censusID != undefined ? Number(item.censusID) : null,
-      PlotID: item.plotID != undefined ? Number(item.plotID) : null,
-      QuadratID: item.quadratID != undefined ? Number(item.quadratID) : null,
-      SubquadratID: item.subquadratID != undefined ? Number(item.subquadratID) : null,
-      TreeID: item.treeID != undefined ? Number(item.treeID) : null,
       StemID: item.stemID != undefined ? Number(item.stemID) : null,
-      PersonnelID: item.personnelID != undefined ? Number(item.personnelID) : null,
       IsValidated: item.isValidated != undefined ? booleanToBit(item.isValidated) : null,
       MeasurementDate: parseDate(item.measurementDate),
       MeasuredDBH: item.measuredDBH != undefined ? Number(item.measuredDBH) : null,
@@ -88,20 +64,7 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
 
 export const CoreMeasurementsGridColumns: GridColDef[] = [
   {field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'quadratID', headerName: 'QuadratID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {
-    field: 'subQuadratID',
-    headerName: 'SubQuadratID',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: false
-  },
-  {field: 'treeID', headerName: 'TreeID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {field: 'isValidated', headerName: 'IsValidated', headerClassName: 'header', flex: 1, align: 'left', editable: false},
   {
     field: 'measurementDate',
@@ -116,37 +79,12 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
     editable: true
   },
   {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left'},
-  {
-    field: 'dbhUnit',
-    headerName: '<- Unit',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions,
-  },
   {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left'},
-  {
-    field: 'homUnit',
-    headerName: '<- Unit',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions,
-  },
   {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
 ];
 
 export const coreMeasurementsFields = [
-  'censusID',
-  'plotID',
-  'quadratID',
-  'treeID',
   'stemID',
-  'personnelID',
   'isValidated',
   'measurementDate',
   'measuredDBH',

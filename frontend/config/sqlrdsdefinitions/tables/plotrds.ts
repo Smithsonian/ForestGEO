@@ -10,12 +10,13 @@ export type PlotRDS = {
   countryName?: string;
   dimensionX?: number;
   dimensionY?: number;
+  dimensionUnits?: string;
   area?: number;
+  areaUnits?: string;
   globalX?: number;
   globalY?: number;
   globalZ?: number;
-  unit?: string;
-  usesSubquadrats?: boolean;
+  coordinateUnits?: string;
   plotShape?: string;
   plotDescription?: string;
   numQuadrats?: number;
@@ -30,12 +31,13 @@ export interface PlotsResult {
   CountryName: any;
   DimensionX: any;
   DimensionY: any;
+  DimensionUnits: any;
   Area: any;
+  AreaUnits: any;
   GlobalX: any;
   GlobalY: any;
   GlobalZ: any;
-  Unit: any;
-  UsesSubquadrats: any
+  CoordinateUnits: any;
   PlotShape: any;
   PlotDescription: any;
   NumQuadrats: any;
@@ -51,12 +53,13 @@ export class PlotsMapper implements IDataMapper<PlotsResult, PlotRDS> {
       countryName: item.CountryName != null ? String(item.CountryName) : undefined,
       dimensionX: item.DimensionX != null ? Number(item.DimensionX) : undefined,
       dimensionY: item.DimensionY != null ? Number(item.DimensionY) : undefined,
+      dimensionUnits: item.DimensionUnits != null ? String(item.DimensionUnits) : undefined,
       area: item.Area != null ? Number(item.Area) : undefined,
+      areaUnits: item.AreaUnits != null ? String(item.AreaUnits) : undefined,
       globalX: item.GlobalX != null ? Number(item.GlobalX) : undefined,
       globalY: item.GlobalY != null ? Number(item.GlobalY) : undefined,
       globalZ: item.GlobalZ != null ? Number(item.GlobalZ) : undefined,
-      unit: item.Unit != null ? String(item.Unit) : undefined,
-      usesSubquadrats: item.UsesSubquadrats != null ? bitToBoolean(item.UsesSubquadrats) : undefined,
+      coordinateUnits: item.CoordinateUnits != null ? String(item.CoordinateUnits) : undefined,
       plotShape: item.PlotShape != null ? String(item.PlotShape) : undefined,
       plotDescription: item.PlotDescription != null ? String(item.PlotDescription) : undefined,
       numQuadrats: item.NumQuadrats !== null ? Number(item.NumQuadrats) : undefined,
@@ -71,12 +74,13 @@ export class PlotsMapper implements IDataMapper<PlotsResult, PlotRDS> {
       CountryName: item.countryName !== undefined ? String(item.countryName) : null,
       DimensionX: item.dimensionX !== undefined ? Number(item.dimensionX) : null,
       DimensionY: item.dimensionY !== undefined ? Number(item.dimensionY) : null,
+      DimensionUnits: item.dimensionUnits !== undefined ? String(item.dimensionUnits) : null,
       Area: item.area !== undefined ? Number(item.area) : null,
+      AreaUnits: item.areaUnits !== undefined ? String(item.areaUnits) : null,
       GlobalX: item.globalX ? Number(item.globalX) : null,
       GlobalY: item.globalY !== undefined ? Number(item.globalY) : null,
       GlobalZ: item.globalZ !== undefined ? Number(item.globalZ) : null,
-      UsesSubquadrats: item.usesSubquadrats !== undefined ? booleanToBit(item.usesSubquadrats) : null,
-      Unit: item.unit !== undefined ? String(item.unit) : null,
+      CoordinateUnits: item.coordinateUnits !== undefined ? String(item.coordinateUnits) : null,
       PlotShape: item.plotShape !== undefined ? String(item.plotShape) : null,
       PlotDescription: item.plotDescription !== undefined ? String(item.plotDescription) : null,
       NumQuadrats: item.numQuadrats !== undefined ? Number(item.numQuadrats) : null,

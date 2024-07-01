@@ -1,15 +1,17 @@
 "use client";
-import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {AlertProps} from "@mui/material";
-import React, { useState} from "react";
-import {QuadratsGridColumns as BaseQuadratsGridColumns, initialQuadratRDSRow} from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { AlertProps } from "@mui/material";
+import React, { useState } from "react";
+import { initialQuadratRDSRow, QuadratsGridColumnSet } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import { useOrgCensusContext, usePlotContext, } from "@/app/contexts/userselectionprovider";
-import {randomId} from "@mui/x-data-grid-generator";
+import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {Box, Button, Typography} from "@mui/joy";
-import {useSession} from "next-auth/react";
+import { Box, Button, Stack, Typography } from "@mui/joy";
+import { useSession } from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import Link from 'next/link';
+import { GridColDef } from "@mui/x-data-grid";
+import { unitSelectionOptions } from "@/config/macros";
 
 export default function QuadratsDataGrid() {
   const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);
@@ -26,12 +28,28 @@ export default function QuadratsDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormType, setUploadFormType] = useState<'quadrats'>('quadrats');
+  const [a, b] = QuadratsGridColumnSet;
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+
+  const quadratsUnitColumn: GridColDef = {
+    field: 'unit',
+    headerName: 'Unit',
+    headerClassName: 'header',
+    flex: 0.3,
+    renderHeader: () => <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+      <Typography level='body-sm' fontWeight={'xl'}>Quadrat</Typography>
+      <Typography level='body-xs'>Units</Typography>
+    </Stack>,
+    align: 'center',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  }
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -51,12 +69,12 @@ export default function QuadratsDataGrid() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratName' },
     }));
   };
   return (
     <>
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -66,16 +84,16 @@ export default function QuadratsDataGrid() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{flexGrow: 1}}>
+          <Box sx={{ flexGrow: 1 }}>
             {session?.user.userStatus !== 'fieldcrew' && (
-              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
+              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}
-            <Typography level={"title-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"title-md"} sx={{ color: "#ffa726" }}>
               Note: This is a locked view and will not allow modification.
             </Typography>
-            <Typography level={"body-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"body-md"} sx={{ color: "#ffa726" }}>
               Please use this view as a way to confirm changes made to measurements.
             </Typography>
           </Box>
@@ -89,17 +107,17 @@ export default function QuadratsDataGrid() {
           </Button>
           {/* Link to Quadrat Personnel Data Grid */}
           <Link href="/fixeddatainput/quadratpersonnel" passHref>
-            <Button variant="solid" color="primary" sx={{ml: 2}}>View Quadrat Personnel</Button>
+            <Button variant="solid" color="primary" sx={{ ml: 2 }}>View Quadrat Personnel</Button>
           </Link>
         </Box>
       </Box>
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
         setIsUploadModalOpen(false);
         setRefresh(true);
-      }} formType={uploadFormType}/>
+      }} formType={uploadFormType} />
       <DataGridCommons
         gridType="quadrats"
-        gridColumns={BaseQuadratsGridColumns}
+        gridColumns={[...a, quadratsUnitColumn, ...b]}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

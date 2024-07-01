@@ -5,6 +5,7 @@ export interface QuadratPersonnelRDS {
   quadratPersonnelID?: number;
   quadratID?: number;
   personnelID?: number;
+  censusID?: number;
 }
 
 export const initialQuadratPersonnelRDSRow: QuadratPersonnelRDS = {
@@ -12,12 +13,14 @@ export const initialQuadratPersonnelRDSRow: QuadratPersonnelRDS = {
   quadratPersonnelID: 0,
   quadratID: 0,
   personnelID: 0,
+  censusID: 0
 };
 
 export interface QuadratPersonnelResult {
   QuadratPersonnelID: any;
   QuadratID: any;
   PersonnelID: any;
+  CensusID: any;
 }
 
 export class QuadratPersonnelMapper implements IDataMapper<QuadratPersonnelResult, QuadratPersonnelRDS> {
@@ -27,16 +30,18 @@ export class QuadratPersonnelMapper implements IDataMapper<QuadratPersonnelResul
       quadratPersonnelID: item.QuadratPersonnelID != null ? Number(item.QuadratPersonnelID) : undefined,
       quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
       personnelID: item.PersonnelID != null ? Number(item.PersonnelID) : undefined,
+      censusID: item.CensusID != null ? Number(item.CensusID) : undefined,
     }));
   }
 
   demapData(results: QuadratPersonnelRDS[]): QuadratPersonnelResult[] {
     return results.map((item) => ({
-      QuadratPersonnelID: item.quadratPersonnelID != null ? String(item.quadratPersonnelID) : null,
-      QuadratID: item.quadratID != null ? String(item.quadratID) : null,
-      PersonnelID: item.personnelID != null ? String(item.personnelID) : null,
+      QuadratPersonnelID: item.quadratPersonnelID != undefined ? String(item.quadratPersonnelID) : null,
+      QuadratID: item.quadratID != undefined ? String(item.quadratID) : null,
+      PersonnelID: item.personnelID != undefined ? String(item.personnelID) : null,
+      CensusID: item.censusID != undefined ? String(item.censusID) : null,
     }));
   }
 }
 
-export const quadratPersonnelFields = ['quadratPersonnelID', 'quadratID', 'personnelID'];
+export const quadratPersonnelFields = ['quadratPersonnelID', 'quadratID', 'personnelID', 'censusID'];

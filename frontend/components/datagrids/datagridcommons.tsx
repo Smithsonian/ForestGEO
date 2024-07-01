@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridToolbar, GridToolbarContainer, GridToolbarProps, ToolbarPropsOverrides, useGridApiRef, GridCellParams, } from '@mui/x-data-grid';
+import { GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridToolbar, GridToolbarContainer, GridToolbarProps, ToolbarPropsOverrides, useGridApiRef, GridCellParams, GridFilterModel, } from '@mui/x-data-grid';
 import { Alert, Button, Snackbar, } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -25,10 +25,10 @@ import ConfirmationDialog from './confirmationdialog';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked }: EditToolbarProps) => {
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, filterModel }: EditToolbarProps) => {
   const handleExportClick = async () => {
     if (!handleExportAll) return;
-    const fullData = await handleExportAll();
+    const fullData = await handleExportAll(filterModel);
     const blob = new Blob([JSON.stringify(fullData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -85,6 +85,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const [pendingAction, setPendingAction] = useState<PendingAction>({ actionType: '', actionId: null });
   const [promiseArguments, setPromiseArguments] = useState<{ resolve: (value: GridRowModel) => void, reject: (reason?: any) => void, newRow: GridRowModel, oldRow: GridRowModel } | null>(null);
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
+  const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -135,7 +136,11 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
 
     try {
-      const response = await fetch(fullDataQuery, { method: 'GET' });
+      const response = await fetch(fullDataQuery, { 
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(filterModel)
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Error fetching full data');
       return data.output;
@@ -588,6 +593,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             paginationModel={paginationModel}
             rowCount={rowCount}
             pageSizeOptions={[paginationModel.pageSize]}
+            filterModel={filterModel}
+            onFilterModelChange={(newFilterModel) => setFilterModel(newFilterModel)}
             initialState={{
               columns: {
                 columnVisibilityModel: getColumnVisibilityModel(gridType),
@@ -601,7 +608,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
-                handleExportAll: fetchFullData
+                handleExportAll: fetchFullData,
+                filterModel: filterModel
               }
             }}
             autoHeight
