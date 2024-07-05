@@ -10,8 +10,8 @@ export type SubquadratRDS = {
   quadratID?: number;
   dimensionX?: number;
   dimensionY?: number;
-  x?: number;
-  y?: number;
+  qX?: number;
+  qY?: number;
   unit?: string;
   ordering?: number;
 };
@@ -24,8 +24,8 @@ export interface SubquadratResult {
   QuadratID: any;
   DimensionX: any;
   DimensionY: any;
-  X: any;
-  Y: any;
+  QX: any;
+  QY: any;
   Unit: any;
   Ordering: any;
 }
@@ -43,15 +43,15 @@ export const validateSubquadratsRow: ValidationFunction = (row) => {
 export class SubquadratsMapper implements IDataMapper<SubquadratResult, SubquadratRDS> {
   demapData(results: SubquadratRDS[]): SubquadratResult[] {
     return results.map(item => ({
-      SubquadratID: item.subquadratID != null ? String(item.subquadratID) : null,
-      SubquadratName: item.subquadratName != null ? String(item.subquadratName) : null,
-      QuadratID: item.quadratID != null ? String(item.quadratID) : null,
-      DimensionX: item.dimensionX != null ? String(item.dimensionX) : null,
-      DimensionY: item.dimensionY != null ? String(item.dimensionY) : null,
-      X: item.x != null ? String(item.x) : null,
-      Y: item.y != null ? String(item.y) : null,
-      Unit: item.unit != null ? String(item.unit) : null,
-      Ordering: item.ordering != null ? String(item.ordering) : null,
+      SubquadratID: item.subquadratID !== undefined ? String(item.subquadratID) : null,
+      SubquadratName: item.subquadratName !== undefined ? String(item.subquadratName) : null,
+      QuadratID: item.quadratID !== undefined ? String(item.quadratID) : null,
+      DimensionX: item.dimensionX !== undefined ? String(item.dimensionX) : null,
+      DimensionY: item.dimensionY !== undefined ? String(item.dimensionY) : null,
+      QX: item.qX !== undefined ? String(item.qX) : null,
+      QY: item.qY !== undefined ? String(item.qY) : null,
+      Unit: item.unit !== undefined ? String(item.unit) : null,
+      Ordering: item.ordering !== undefined ? String(item.ordering) : null,
     }));
   }
 
@@ -63,8 +63,8 @@ export class SubquadratsMapper implements IDataMapper<SubquadratResult, Subquadr
       quadratID: item.QuadratID != null ? Number(item.QuadratID) : undefined,
       dimensionX: item.DimensionX != null ? Number(item.DimensionX) : undefined,
       dimensionY: item.DimensionY != null ? Number(item.DimensionY) : undefined,
-      x: item.X != null ? Number(item.X) : undefined,
-      y: item.Y != null ? Number(item.Y) : undefined,
+      qX: item.QX != null ? Number(item.QX) : undefined,
+      qY: item.QY != null ? Number(item.QY) : undefined,
       unit: item.Unit != null ? String(item.Unit) : undefined,
       ordering: item.Ordering != null ? Number(item.Ordering) : undefined,
     }));
@@ -75,8 +75,8 @@ export const subquadratsFields = [
   'subquadratName',
   'dimensionX',
   'dimensionY',
-  'x',
-  'y',
+  'qX',
+  'qY',
   'unit',
   'ordering'
 ];
@@ -111,8 +111,8 @@ export const SubquadratGridColumns: GridColDef[] = [
     type: 'number',
     editable: true
   },
-  {field: 'x', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
-  {field: 'y', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'qX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
+  {field: 'qY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
   {
     field: 'unit',
     headerName: 'Units',

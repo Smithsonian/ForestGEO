@@ -8,6 +8,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import Box from "@mui/joy/Box";
 import { Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
@@ -48,7 +49,7 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, 
       <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
         Refresh
       </Button>
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleExportClick}>
+      <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
         Export Full Data
       </Button>
     </GridToolbarContainer>
@@ -393,10 +394,9 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
 
-    const rowInEditMode = Object.entries(newRowModesModel).find(([id, mode]) => mode.mode === GridRowModes.Edit);
+    const rowInEditMode = Object.entries(newRowModesModel).find(([, mode]) => mode.mode === GridRowModes.Edit);
     if (rowInEditMode) {
       const [id] = rowInEditMode;
-      const row = rows.find(row => String(row.id) === String(id));
     }
   };
 
@@ -532,19 +532,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       apiRef.current.setCellFocus(params.id, 'actions');
     } else {
       apiRef.current.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
-    }
-  };
-
-  const handleSelectKeyDown = (params: GridCellParams, event: React.KeyboardEvent) => {
-    const column = filteredColumns.find(col => col.field === params.field);
-    if (column && column.type === 'singleSelect' && event.key === 'Enter') {
-      const cell = apiRef.current.getCellElement(params.id, params.field);
-      if (cell) {
-        const select = cell.querySelector('select');
-        if (select) {
-          select.blur();
-        }
-      }
     }
   };
 

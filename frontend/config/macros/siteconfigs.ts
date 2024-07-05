@@ -9,7 +9,7 @@ import WidgetsIcon from '@mui/icons-material/Widgets';
 import SchemaIcon from '@mui/icons-material/Schema';
 import FilterIcon from '@mui/icons-material/FilterList';
 import React from "react";
-import { UnifiedValidityFlags } from '../macros';
+import {UnifiedValidityFlags} from '../macros';
 
 export type SiteConfigProps = {
   label: string;

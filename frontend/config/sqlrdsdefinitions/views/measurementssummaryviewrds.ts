@@ -187,6 +187,7 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
   };
 }
 
+// note --> originally attempted to use GridValueFormatterParams, but this isn't exported by MUI X DataGrid anymore. replaced with <any> for now. 
 export const gridColumnsArrayMSVRDS: GridColDef[][] = [
   [
     { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
@@ -230,9 +231,33 @@ export const gridColumnsArrayMSVRDS: GridColDef[][] = [
   [
     { field: 'personnelID', headerName: 'Personnel ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
     { field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-    { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 0.8, align: 'left', editable: true }
+    {
+      field: 'measuredDBH',
+      headerName: 'DBH',
+      headerClassName: 'header',
+      flex: 0.8,
+      align: 'left',
+      editable: true,
+      valueFormatter: (params: any) => {
+        const value = Number(params.value);
+        return value.toFixed(2); // limit trailing decimals to 2 places
+      }
+    }
   ],
-  [{ field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 0.5, align: 'left', editable: true }],
+  [
+    {
+      field: 'measuredHOM',
+      headerName: 'HOM',
+      headerClassName: 'header',
+      flex: 0.5,
+      align: 'left',
+      editable: true,
+      valueFormatter: (params: any) => {
+        const value = Number(params.value);
+        return value.toFixed(2); // limit trailing decimals to 2 places
+      }
+    }
+  ],
   [
     { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true },
     { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true }

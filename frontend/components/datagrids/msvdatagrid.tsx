@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GridActionsCellItem, GridCellParams, GridColDef, GridEventListener, GridFilterModel, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridSortModel, GridToolbar, GridToolbarContainer, GridToolbarProps, GridValidRowModel, ToolbarPropsOverrides } from '@mui/x-data-grid';
+import { GridActionsCellItem, GridCellParams, GridColDef, GridEventListener, GridFilterModel, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridSortModel, GridToolbar, GridToolbarContainer, GridToolbarProps, GridValidRowModel, ToolbarPropsOverrides, useGridApiRef } from '@mui/x-data-grid';
 import { Alert, Button, Checkbox, FormControlLabel, FormGroup, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -8,10 +8,12 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import FileDownloadTwoToneIcon from '@mui/icons-material/FileDownloadTwoTone';
 import Box from "@mui/joy/Box";
 import { Stack, Tooltip, Typography } from "@mui/joy";
 import { StyledDataGrid } from "@/config/styleddatagrid";
-import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getGridID, } from "@/config/datagridhelpers";
+import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getGridID } from "@/config/datagridhelpers";
 import { CMError } from "@/config/macros/uploadsystemmacros";
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { redirect } from 'next/navigation';
@@ -69,10 +71,10 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
       <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
         Refresh
       </Button>
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleExportClick}>
+      <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
         Export Full Data
       </Button>
-      <Button color="primary" startIcon={<ErrorIcon />} onClick={handleExportErrorsClick}>
+      <Button color="primary" startIcon={<FileDownloadTwoToneIcon />} onClick={handleExportErrorsClick}>
         Export Errors
       </Button>
     </GridToolbarContainer>
@@ -116,13 +118,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const [locked, setLocked] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{ resolve: (value: GridRowModel) => void, reject: (reason?: any) => void, newRow: GridRowModel, oldRow: GridRowModel } | null>(null);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
+  const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
 
   // custom states -- msvdatagrid
-  const [deprecatedRows, setDeprecatedRows] = useState<GridValidRowModel[]>([]); // new state to track deprecated rows
   const [validationErrors, setValidationErrors] = useState<{ [key: number]: CMError }>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
-  const [showDeprecatedRows, setShowDeprecatedRows] = useState<boolean>(true);
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [selectedDateRanges, setSelectedDateRanges] = useState<number[]>([]);
@@ -141,6 +142,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   // use the session
   useSession();
+
+  const apiRef = useGridApiRef();
 
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
@@ -182,12 +185,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       ))}
     </FormGroup>
   );
-  const handleShowDeprecatedRowsChange = (event: any) => {
-    setShowDeprecatedRows(event.target.checked);
-  };
-  const rowIsDeprecated = (rowId: GridRowId) => {
-    return deprecatedRows.some(depRow => depRow.id === rowId);
-  };
   const extractErrorRows = () => {
     if (errorRowsForExport.length > 0) return;
 
@@ -741,18 +738,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     width: 50,
     renderCell: (params: GridCellParams) => {
       const rowId = params.row.id;
-      const isDeprecated = deprecatedRows.some(row => row.id === rowId);
       const validationError = validationErrors[Number(rowId)];
       const isPendingValidation = !params.row.isValidated && !validationError;
       const isValidated = params.row.isValidated;
 
-      if (isDeprecated) {
-        return (
-          <Tooltip title="Deprecated" size="md">
-            <BlockIcon color="action" />
-          </Tooltip>
-        );
-      } else if (validationError) {
+      if (validationError) {
         return (
           <Tooltip title="Failed Validation" size="md">
             <ErrorIcon color="error" />
@@ -861,17 +851,12 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (!showErrorRows) {
       filteredRows = filteredRows.filter(row => !rowHasError(row.id));
     }
-    if (!showDeprecatedRows) {
-      filteredRows = filteredRows.filter(row => !rowIsDeprecated(row.id));
-    }
     return filteredRows;
-  }, [rows, showErrorRows, showValidRows, showDeprecatedRows]);
+  }, [rows, showErrorRows, showValidRows]);
 
   const getRowClassName = (params: any) => {
     const rowId = params.id;
-    if (rowIsDeprecated(rowId)) {
-      return 'deprecated';
-    } else if (rowHasError(rowId)) {
+    if (rowHasError(rowId)) {
       return 'error-row';
     } else {
       return 'validated';
@@ -895,6 +880,31 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
+
+  const handleEnterKeyNavigation = async (params: GridCellParams, event: React.KeyboardEvent) => {
+    event.defaultPrevented = true;
+    const columnIndex = filteredColumns.findIndex(col => col.field === params.field);
+    const isLastColumn = columnIndex === filteredColumns.length - 2;
+    const currentColumn = filteredColumns[columnIndex];
+
+    if (isSaveHighlighted) {
+      openConfirmationDialog('save', params.id);
+      setIsSaveHighlighted(false);
+    } else if (currentColumn.type === 'singleSelect') {
+      const cell = apiRef.current.getCellElement(params.id, params.field);
+      if (cell) {
+        const select = cell.querySelector('select');
+        if (select) {
+          select.focus();
+        }
+      }
+    } else if (isLastColumn) {
+      setIsSaveHighlighted(true);
+      apiRef.current.setCellFocus(params.id, 'actions');
+    } else {
+      apiRef.current.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
+    }
+  };
 
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
@@ -928,13 +938,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
                 />
                 Show rows without errors: ({rows.length - errorRowCount})
               </Typography>
-              <Typography>
-                <Checkbox
-                  checked={showDeprecatedRows}
-                  onChange={handleShowDeprecatedRowsChange}
-                />
-                Show deprecated rows: ({deprecatedRows.length})
-              </Typography>
             </Stack>
           </Stack>
           <Stack direction={'column'} marginTop={2}>
@@ -955,6 +958,15 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             loading={refresh}
             paginationMode='server'
             onPaginationModelChange={setPaginationModel}
+            onProcessRowUpdateError={(error) => {
+              console.error('Row update error:', error);
+              setSnackbar({ children: 'Error updating row', severity: 'error' });
+            }}
+            onCellKeyDown={(params, event) => {
+              if (event.key === 'Enter') {
+                handleEnterKeyNavigation(params, event);
+              }
+            }}
             paginationModel={paginationModel}
             rowCount={rowCount}
             pageSizeOptions={[paginationModel.pageSize]}

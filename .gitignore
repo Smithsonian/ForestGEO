@@ -46,7 +46,6 @@ next-env.d.ts
 /.fleet
 /frontend/sampledata
 /frontend/scripts
-/frontend/sqlscripting
 /frontend/.vscode
 /documentation/.obsidian
 /documentation/.obsidian/*

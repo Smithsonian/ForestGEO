@@ -19,10 +19,6 @@ const handler = NextAuth({
   },
   callbacks: {
     async signIn({ user, account, profile, email: signInEmail, credentials }) {
-      console.log('user: ', user);
-      console.log('account: ', account);
-      console.log('credentials: ', credentials);
-      console.log('profile: ', profile);
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
       if (typeof userEmail !== 'string') {
