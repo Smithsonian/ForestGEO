@@ -91,7 +91,7 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         onOpen={() => setOpen(true)}
         onClose={() => setOpen(false)}
         options={options}
-        getOptionLabel={(option) => `${option.lastName}, ${option.firstName} | ${option.role}`}
+        getOptionLabel={(option) => `${option.lastName}, ${option.firstName} | ${option.roleID}`}
         isOptionEqualToValue={(option, value) => JSON.stringify(option) === JSON.stringify(value)}
         loading={loading}
         value={undefined}

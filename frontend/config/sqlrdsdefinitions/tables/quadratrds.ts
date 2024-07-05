@@ -1,6 +1,6 @@
 import { GridColDef } from '@mui/x-data-grid';
 import { IDataMapper } from "../../datamapper";
-import { ColumnStates, unitSelectionOptions } from '@/config/macros';
+import { ColumnStates } from '@/config/macros';
 import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
 
 export type QuadratRDS = {

@@ -1,6 +1,6 @@
 import {GridColDef} from '@mui/x-data-grid';
 import {IDataMapper} from '../../datamapper';
-import {bitToBoolean, booleanToBit, unitSelectionOptions} from '@/config/macros';
+import { unitSelectionOptions} from '@/config/macros';
 
 export type PlotRDS = {
   id?: number;
@@ -20,6 +20,7 @@ export type PlotRDS = {
   plotShape?: string;
   plotDescription?: string;
   numQuadrats?: number;
+  usesSubquadrats?: boolean;
 };
 
 export type Plot = PlotRDS | undefined;
@@ -63,6 +64,7 @@ export class PlotsMapper implements IDataMapper<PlotsResult, PlotRDS> {
       plotShape: item.PlotShape != null ? String(item.PlotShape) : undefined,
       plotDescription: item.PlotDescription != null ? String(item.PlotDescription) : undefined,
       numQuadrats: item.NumQuadrats !== null ? Number(item.NumQuadrats) : undefined,
+      usesSubquadrats: false
     }));
   }
 

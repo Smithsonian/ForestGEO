@@ -1,6 +1,6 @@
 import {GridColDef} from '@mui/x-data-grid';
 import {IDataMapper, parseDate} from "../../datamapper";
-import {bitToBoolean, booleanToBit, unitSelectionOptions} from '@/config/macros';
+import {bitToBoolean, booleanToBit} from '@/config/macros';
 
 export type CoreMeasurementsRDS = {
   id?: number;

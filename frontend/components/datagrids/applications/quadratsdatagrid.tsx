@@ -49,7 +49,7 @@ export default function QuadratsDataGrid() {
     editable: true,
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
-  }
+  };
 
   const addNewRowToGrid = () => {
     const id = randomId();
