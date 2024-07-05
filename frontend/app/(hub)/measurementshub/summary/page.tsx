@@ -3,10 +3,10 @@ import React, { useEffect, useState } from "react";
 import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
 import { Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses } from "@mui/material";
 import { gridColumnsArrayMSVRDS, initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
-import { Box, ListItemContent, ListItem, List, Modal, ModalDialog, Typography, Button, DialogTitle, DialogContent, DialogActions, Snackbar, Stack,} from "@mui/joy";
+import { Box, ListItemContent, ListItem, List, Modal, ModalDialog, Typography, Button, DialogTitle, DialogContent, DialogActions, Snackbar, Stack, } from "@mui/joy";
 import Select, { SelectOption } from "@mui/joy/Select";
 import { useSession } from "next-auth/react";
-import { useOrgCensusContext, usePlotContext, useQuadratDispatch, useSiteContext} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext, useQuadratDispatch, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { randomId } from "@mui/x-data-grid-generator";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
@@ -65,7 +65,6 @@ export default function SummaryPage() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const [useSubquadrats, setUseSubquadrats] = useState(currentPlot?.usesSubquadrats ?? false);
 
   useEffect(() => {
     const verifyPreconditions = async () => {
@@ -220,7 +219,7 @@ export default function SummaryPage() {
     <Stack direction="column" spacing={2} marginBottom={2}>
       <Typography level="title-sm">Select Quadrat:</Typography>
       <Select
-        disabled={!validity['quadrats'] || !currentPlot?.usesSubquadrats}
+        disabled={!validity['quadrats']}
         placeholder="Select a Quadrat"
         name="None"
         required
@@ -245,7 +244,7 @@ export default function SummaryPage() {
         onClick={handleConfirmQuadrat}
         size="sm"
         color="primary"
-        disabled={!currentPlot?.usesSubquadrats}
+        disabled={!validity['quadrats']}
       >Confirm</Button>
       {!validity['quadrats'] && (
         <Alert severity="warning" sx={{ mt: 2 }}>
@@ -254,25 +253,6 @@ export default function SummaryPage() {
       )}
     </Stack>
   );
-
-  useEffect(() => {
-    const updateUseSubquadrats = async () => {
-      const updatedPlot = {
-        ...currentPlot,
-        usesSubquadrats: useSubquadrats,
-      };
-      const response = await fetch(`/api/fixeddata/plots?schema=${currentSite?.schemaName ?? ''}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedPlot)
-      });
-      if (!response.ok) setGlobalError('Toggling subquadrats usage failed!');
-    };
-
-    if (currentPlot?.usesSubquadrats !== useSubquadrats) {
-      updateUseSubquadrats().catch(console.error);
-    }
-  }, [currentPlot, useSubquadrats]);
 
   return (
     <>
@@ -290,19 +270,11 @@ export default function SummaryPage() {
           <Stack direction="column">
             <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
               <Box sx={{ flex: 1, display: 'flex', justifyContent: 'left', flexDirection: 'column', marginTop: 2 }}>
-                {currentPlot?.usesSubquadrats ? (
-                  <Box sx={{ display: 'flex', flexDirection: 'row' }}>
-                    <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot has been set to accept
-                      subquadrats. <br />
-                      Please ensure you select a quadrat before proceeding.</Typography>
-                    <QuadratSelectionMenu />
-                  </Box>
-                ) : (
-                  <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot does not accept
-                    subquadrats. <br />
-                    Please ensure that you use quadrat names when submitting new measurements instead of subquadrat
-                    names</Typography>
-                )}
+                <Typography level={"title-md"} sx={{ color: "#ffa726" }}>Note: This plot does not accept
+                  subquadrats. <br />
+                  Please ensure that you use quadrat names when submitting new measurements instead of subquadrat
+                  names
+                </Typography>
                 {session?.user.userStatus !== 'fieldcrew' ? (
                   <Stack direction="column">
                     {/* <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
