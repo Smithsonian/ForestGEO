@@ -28,8 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
       personnelID: row.PersonnelID,
       firstName: row.FirstName,
       lastName: row.LastName,
-      role: row.Role
-      // ... other fields as needed
+      roleID: row.RoleID
     }));
 
     // Properly mapping results to return an array of { label, code }
