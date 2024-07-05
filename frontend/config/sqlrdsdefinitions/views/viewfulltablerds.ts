@@ -42,8 +42,8 @@ export type ViewFullTableRDS = {
   subquadratName?: string;
   subquadratDimensionX?: number;
   subquadratDimensionY?: number;
-  x?: number;
-  y?: number;
+  qX?: number;
+  qY?: number;
   subquadratUnit?: string;
   treeID?: number;
   treeTag?: string;
@@ -138,8 +138,8 @@ export const initialViewFullTableRDSRow: ViewFullTableRDS = {
   subquadratName: '',
   subquadratDimensionX: 0,
   subquadratDimensionY: 0,
-  x: 0,
-  y: 0,
+  qX: 0,
+  qY: 0,
   subquadratUnit: '',
   treeID: 0,
   treeTag: '',
@@ -234,8 +234,8 @@ export interface ViewFullTableResult {
   SubquadratName: any;
   SubquadratDimensionX: any;
   SubquadratDimensionY: any;
-  X: any;
-  Y: any;
+  QX: any;
+  QY: any;
   SubquadratUnit: any;
   TreeID: any;
   TreeTag: any;
@@ -331,8 +331,8 @@ export class ViewFullTableMapper implements IDataMapper<ViewFullTableResult, Vie
       SubquadratName: item.subquadratName != undefined ? String(item.subquadratName) : null,
       SubquadratDimensionX: item.subquadratDimensionX != undefined ? String(item.subquadratDimensionX) : null,
       SubquadratDimensionY: item.subquadratDimensionY != undefined ? String(item.subquadratDimensionY) : null,
-      X: item.x != undefined ? String(item.x) : null,
-      Y: item.y != undefined ? String(item.y) : null,
+      QX: item.qX != undefined ? String(item.qX) : null,
+      QY: item.qY != undefined ? String(item.qY) : null,
       SubquadratUnit: item.subquadratUnit != undefined ? String(item.subquadratUnit) : null,
       TreeID: item.treeID != undefined ? String(item.treeID) : null,
       TreeTag: item.treeTag != undefined ? String(item.treeTag) : null,
@@ -430,8 +430,8 @@ export class ViewFullTableMapper implements IDataMapper<ViewFullTableResult, Vie
       subquadratName: item.SubquadratName != null ? String(item.SubquadratName) : undefined,
       subquadratDimensionX: item.SubquadratDimensionX != null ? Number(item.SubquadratDimensionX) : undefined,
       subquadratDimensionY: item.SubquadratDimensionY != null ? Number(item.SubquadratDimensionY) : undefined,
-      x: item.X != null ? Number(item.X) : undefined,
-      y: item.Y != null ? Number(item.Y) : undefined,
+      qX: item.QX != null ? Number(item.QX) : undefined,
+      qY: item.QY != null ? Number(item.QY) : undefined,
       subquadratUnit: item.SubquadratUnit != null ? String(item.SubquadratUnit) : undefined,
       treeID: item.TreeID != null ? Number(item.TreeID) : undefined,
       treeTag: item.TreeTag != null ? String(item.TreeTag) : undefined,

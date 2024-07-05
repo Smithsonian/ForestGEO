@@ -17,7 +17,6 @@
 # production
 /build
 /sampledata
-/sqlscripting
 /scripts
 DigiCertGlobalRootCA.crt.pem
 
