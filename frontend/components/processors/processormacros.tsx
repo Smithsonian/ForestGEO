@@ -114,20 +114,19 @@ export const fileMappings: Record<string, FileMapping> = {
   },
 };
 const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER, // better stored in an app setting such as process.env.DB_USER
-  password: process.env.AZURE_SQL_PASSWORD, // better stored in an app setting such as process.env.DB_PASSWORD
-  host: process.env.AZURE_SQL_SERVER, // better stored in an app setting such as process.env.DB_SERVER
-  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
+  user: process.env.AZURE_SQL_USER, 
+  password: process.env.AZURE_SQL_PASSWORD,
+  host: process.env.AZURE_SQL_SERVER,
+  port: parseInt(process.env.AZURE_SQL_PORT!), 
   database: process.env.AZURE_SQL_CATALOG_SCHEMA,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
   keepAliveInitialDelay: 10000, // 0 by default.
   enableKeepAlive: true, // false by default.
+  connectTimeout: 10000, // 10 seconds by default.
 };
-// database: process.env.AZURE_SQL_SCHEMA!, // better stored in an app setting such as process.env.DB_NAME
 export const poolMonitor = new PoolMonitor(sqlConfig);
-// const pool = createPool(sqlConfig);
 
 // Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {

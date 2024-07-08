@@ -1,10 +1,11 @@
 import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
 
 export class PoolMonitor {
-  public pool: Pool; // Make pool public to access it in shutdown script
+  public pool: Pool;
   private activeConnections = 0;
   private totalConnectionsCreated = 0;
   private waitingForConnection = 0;
+  private inactivityTimer: NodeJS.Timeout | null = null;
 
   constructor(config: PoolOptions) {
     this.pool = createPool(config);
@@ -14,6 +15,7 @@ export class PoolMonitor {
       this.totalConnectionsCreated++;
       console.log(`Acquired: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
+      this.resetInactivityTimer();
     });
 
     this.pool.on('release', (connection) => {
@@ -22,19 +24,25 @@ export class PoolMonitor {
       }
       console.log(`Released: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
+      this.resetInactivityTimer();
     });
 
     this.pool.on('connection', (connection) => {
       this.totalConnectionsCreated++;
       console.log(`New: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
+      this.resetInactivityTimer();
     });
 
     this.pool.on('enqueue', () => {
       this.waitingForConnection++;
       console.log(`Enqueued.`);
       console.log('Connection state:', this.getPoolStatus());
+      this.resetInactivityTimer();
     });
+
+    // Initialize inactivity timer
+    this.resetInactivityTimer();
   }
 
   async getConnection(): Promise<PoolConnection> {
@@ -42,6 +50,7 @@ export class PoolMonitor {
       console.log('Requesting new connection...');
       const connection = await this.pool.getConnection();
       console.log('Connection acquired');
+      this.resetInactivityTimer();
       return connection;
     } catch (error) {
       console.error('Error getting connection from pool:', error);
@@ -55,11 +64,26 @@ export class PoolMonitor {
 
   async closeAllConnections(): Promise<void> {
     try {
+      console.log('Ending pool connections...');
       await this.pool.end();
-      console.log('All connections closed.');
+      console.log('Pool connections ended.');
     } catch (error) {
       console.error('Error closing connections:', error);
       throw error;
     }
+  }
+
+  private resetInactivityTimer() {
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+    }
+
+    this.inactivityTimer = setTimeout(async () => {
+      if (this.activeConnections === 0) {
+        console.log('Inactivity period exceeded. Initiating graceful shutdown...');
+        await this.closeAllConnections();
+        console.log('Graceful shutdown complete.');
+      }
+    }, 3600000); // 1 hour in milliseconds
   }
 }
