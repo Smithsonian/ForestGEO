@@ -128,11 +128,16 @@ const sqlConfig: PoolOptions = {
 };
 export const poolMonitor = new PoolMonitor(sqlConfig);
 
-// Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
     console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
-    // const connection = await pool.getConnection();
+
+    // Check if the pool is closed and reinitialize if necessary
+    if (poolMonitor.isPoolClosed()) {
+      console.log('Connection pool is closed. Reinitializing...');
+      poolMonitor.reinitializePool();
+    }
+
     const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
     console.log('Connection successful');
