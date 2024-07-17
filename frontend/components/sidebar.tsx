@@ -30,8 +30,10 @@ import Avatar from "@mui/joy/Avatar";
 import { CensusLogo, PlotLogo } from "@/components/icons";
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { OrgCensus, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import RolloverModal from './client/rollovermodal';
+import RolloverStemsModal from './client/rolloverstemsmodal';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -143,15 +145,10 @@ export default function Sidebar(props: SidebarProps) {
   const [storedCensus, setStoredCensus] = useState<OrgCensus>();
   const [storedSite, setStoredSite] = useState<Site>();
 
+  const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
+  const [isRolloverStemsModalOpen, setIsRolloverStemsModalOpen] = useState(false);
+
   const { siteListLoaded, setCensusListLoaded } = props;
-
-  const [openCloseCensusModal, setOpenCloseCensusModal] = useState(false);
-  const [openReopenCensusModal, setOpenReopenCensusModal] = useState(false);
-  const [openNewCensusModal, setOpenNewCensusModal] = useState(false);
-
-  const [reopenStartDate, setReopenStartDate] = useState<Date | null>(null);
-  const [closeEndDate, setCloseEndDate] = useState<Date | null>(null);
-  const [newStartDate, setNewStartDate] = useState<Date | null>(null);
 
   const { triggerRefresh } = useDataValidityContext();
 
@@ -203,16 +200,44 @@ export default function Sidebar(props: SidebarProps) {
   }, [site, plot, census]);
   const handleOpenNewCensus = async () => {
     if ((site === undefined || site.schemaName === undefined) || (plot === undefined || plot.plotID === undefined)) throw new Error("new census start date was not set OR plot is undefined");
-    const validCensusListContext = (censusListContext || []).filter((census): census is OrgCensusRDS => census !== undefined);
-    const highestPlotCensusNumber = validCensusListContext.length > 0
-      ? validCensusListContext.reduce((max, census) =>
-        census.plotCensusNumber > max ? census.plotCensusNumber : max, validCensusListContext[0].plotCensusNumber)
-      : 0;
-    const mapper = new OrgCensusToCensusResultMapper();
-    await mapper.startNewCensus(site.schemaName, plot.plotID, highestPlotCensusNumber + 1, census ? census.description : undefined);
+    setIsRolloverModalOpen(true);
+  };
+
+  const handleConfirmRollover = async (rolledOverPersonnel: boolean, rolledOverQuadrats: boolean) => {
+    if (!rolledOverPersonnel && !rolledOverQuadrats) {
+      // didn't roll over anything, need to create a new census still:
+      // createdCensusID is undefined here
+      const highestPlotCensusNumber = censusListContext && censusListContext.length > 0
+        ? censusListContext.reduce((max, census) =>
+          (census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max, censusListContext[0]?.plotCensusNumber ?? 0)
+        : 0;
+      if (!highestPlotCensusNumber) throw new Error("highest plot census number calculation failed");
+
+      const mapper = new OrgCensusToCensusResultMapper();
+      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+      if (!newCensusID) throw new Error("census creation failure");
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // if (rolledOverQuadrats) { // passing census list loading trigger to stems rollover function:
+      //   setIsRolloverStemsModalOpen(true);
+      // } else setCensusListLoaded(false);
+      // rollover of stems functionality created from testing component initially used to test personnel/quadrat rollover 
+        // (seemed a shame to just delete it when I could just rename the references stems)
+      // will be added in the event that it is requested
+    }
+    setIsRolloverModalOpen(false);
     setCensusListLoaded(false);
-    setOpenNewCensusModal(false);
-    setNewStartDate(null);
+  };
+
+  const handleConfirmStemsRollover = async (rolledOverStems: boolean) => {
+    // assumption: new census has already been created, BUT census list has not been reloaded
+    // stored in createdCensusID
+    // additional note: dialog handles actual rollover process. do not need to perform any API calls here.
+    // --> stem rollover will not be triggered if quadrats are NOT rolled over
+    setIsRolloverStemsModalOpen(false);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    setCensusListLoaded(false);
   };
 
   useEffect(() => {
@@ -846,7 +871,16 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </Box>
           </Box>
-
+          <RolloverModal
+            open={isRolloverModalOpen}
+            onClose={() => setIsRolloverModalOpen(false)}
+            onConfirm={handleConfirmRollover}
+          />
+          <RolloverStemsModal
+            open={isRolloverStemsModalOpen}
+            onClose={() => setIsRolloverStemsModalOpen(false)}
+            onConfirm={handleConfirmStemsRollover}
+          />
           <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
           {site && plot && census && (
             <Button onClick={() => triggerRefresh()}>Reload Prevalidation</Button>

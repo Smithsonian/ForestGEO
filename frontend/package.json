@@ -9,7 +9,7 @@
   },
   "scripts": {
     "preinstall": "npx npm-force-resolutions",
-    "dev": "next dev",
+    "dev": "next dev --turbo",
     "lint": "eslint '**/*.{ts,tsx}' --fix",
     "build": "npm run lint && next build",
     "start": "node build/standalone/server.js -p 8080",
@@ -41,7 +41,6 @@
     "@types/crypto-js": "^4.2.2",
     "@types/file-saver": "^2.0.7",
     "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.2",
     "@types/papaparse": "^5.3.14",
     "@types/supertest": "^6.0.2",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
@@ -62,7 +61,6 @@
     "globby": "^14.0.1",
     "http": "^0.0.1-security",
     "idb": "^8.0.0",
-    "jest": "^29.7.0",
     "jest-mock": "^29.7.0",
     "jsdom": "^24.1.0",
     "moment": "^2.30.1",
@@ -86,8 +84,7 @@
     "tls": "^0.0.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
-    "unzipper": "^0.12.1",
-    "vitest": "^1.6.0"
+    "unzipper": "^0.12.1"
   },
   "eslintConfig": {
     "extends": [
@@ -104,8 +101,12 @@
     "stream": false
   },
   "devDependencies": {
+    "@playwright/test": "^1.45.2",
+    "@types/node": "^20.14.11",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "resize-observer-polyfill": "^1.5.1"
+    "jest": "^29.7.0",
+    "resize-observer-polyfill": "^1.5.1",
+    "vitest": "^2.0.3"
   }
 }

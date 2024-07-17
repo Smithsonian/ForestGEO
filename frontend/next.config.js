@@ -2,6 +2,17 @@
 const nextConfig = {
   experimental: {
     serverMinification: false,
+    turbo: {
+      resolveExtensions: [
+        '.mdx',
+        '.tsx',
+        '.ts',
+        '.jsx',
+        '.js',
+        '.mjs',
+        '.json',
+      ],
+    },
   },
   logging: {
     fetches: {

@@ -2,7 +2,7 @@ create table attributes
 (
     Code        varchar(10)                                                                                                     not null
         primary key,
-    Description text                                                                                                            null,
+    Description varchar(255)                                                                                                    null,
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
@@ -10,9 +10,9 @@ create table plots
 (
     PlotID          int auto_increment
         primary key,
-    PlotName        text                                                                null,
-    LocationName    text                                                                null,
-    CountryName     text                                                                null,
+    PlotName        varchar(255)                                                        null,
+    LocationName    longtext                                                            null,
+    CountryName     longtext                                                            null,
     DimensionX      int                                                                 null,
     DimensionY      int                                                                 null,
     DimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  null,
@@ -45,7 +45,7 @@ create table quadrats
         primary key,
     PlotID          int                                                                 null,
     CensusID        int                                                                 null,
-    QuadratName     text                                                                null,
+    QuadratName     varchar(255)                                                        null,
     StartX          decimal(10, 6)                                                      null,
     StartY          decimal(10, 6)                                                      null,
     CoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  null,
@@ -55,6 +55,8 @@ create table quadrats
     Area            decimal(10, 6)                                                      null,
     AreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' null,
     QuadratShape    text                                                                null,
+    constraint unique_quadrat_name_per_census_plot
+        unique (CensusID, PlotID, QuadratName),
     constraint Quadrats_Plots_FK
         foreign key (PlotID) references plots (PlotID),
     constraint quadrats_census_CensusID_fk
@@ -115,6 +117,8 @@ create table personnel
     FirstName   varchar(50) null,
     LastName    varchar(50) null,
     RoleID      int         null,
+    constraint unique_full_name_per_census
+        unique (CensusID, FirstName, LastName),
     constraint personnel_census_CensusID_fk
         foreign key (CensusID) references census (CensusID),
     constraint personnel_roles_RoleID_fk
@@ -150,7 +154,7 @@ create table species
     SubspeciesAuthority varchar(255) null,
     FieldFamily         varchar(32)  null,
     Description         text         null,
-    ValidCode           text         null,
+    ValidCode           longtext     null,
     ReferenceID         int          null,
     constraint SpeciesCode
         unique (SpeciesCode),
@@ -186,8 +190,8 @@ create table subquadrats
     DimensionX      int                                             default 5   null,
     DimensionY      int                                             default 5   null,
     DimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm' null,
-    X               int                                                         null,
-    Y               int                                                         null,
+    QX              int                                                         null,
+    QY              int                                                         null,
     CoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm' null,
     Ordering        int                                                         null,
     constraint SQName

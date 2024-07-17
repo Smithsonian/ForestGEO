@@ -1,8 +1,8 @@
-import {getConn, runQuery} from "@/components/processors/processormacros";
+import { getConn, runQuery } from "@/components/processors/processormacros";
 import MapperFactory from "@/config/datamapper";
-import {handleError} from "@/utils/errorhandler";
-import {PoolConnection, format} from "mysql2/promise";
-import {NextRequest, NextResponse} from "next/server";
+import { handleError } from "@/utils/errorhandler";
+import { PoolConnection, format } from "mysql2/promise";
+import { NextRequest, NextResponse } from "next/server";
 import {
   generateInsertOperations,
   generateUpdateOperations,
@@ -13,7 +13,7 @@ import {
 import { HTTPResponses } from "@/config/macros";
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
-export async function GET(request: NextRequest, {params}: {
+export async function GET(request: NextRequest, { params }: {
   params: { dataType: string, slugs?: string[] }
 }): Promise<NextResponse<{ output: any[], deprecated?: any[], totalCount: number }>> {
   if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
@@ -40,7 +40,6 @@ export async function GET(request: NextRequest, {params}: {
     switch (params.dataType) {
       case 'attributes':
       case 'species':
-      case 'personnel':
       case 'stems':
       case 'alltaxonomiesview':
       case 'stemtaxonomiesview':
@@ -51,39 +50,52 @@ export async function GET(request: NextRequest, {params}: {
           LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
         break;
+      case 'personnel':
+        paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS q.*
+            FROM ${schema}.${params.dataType} q
+            WHERE q.CensusID IN (
+                SELECT c.CensusID
+                FROM ${schema}.census c
+                WHERE c.PlotID = ?
+                  AND c.PlotCensusNumber = ?
+              )
+            LIMIT ?, ?`;
+        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+        break;
       case 'quadrats':
         paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS q.*
-          FROM ${schema}.quadrats q
-          WHERE q.PlotID = ?
-            AND q.CensusID IN (
-              SELECT c.CensusID
-              FROM ${schema}.census c
-              WHERE c.PlotID = q.PlotID
-                AND c.PlotCensusNumber = ?
-            )
-          GROUP BY q.QuadratID
-          LIMIT ?, ?`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+            SELECT SQL_CALC_FOUND_ROWS q.*
+            FROM ${schema}.${params.dataType} q
+            WHERE q.PlotID = ?
+              AND q.CensusID IN (
+                SELECT c.CensusID
+                FROM ${schema}.census c
+                WHERE c.PlotID = ?
+                  AND c.PlotCensusNumber = ?
+              )
+            GROUP BY q.QuadratID
+            LIMIT ?, ?`;
+        queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'subquadrats':
         if (!quadratID || quadratID === 0) {
           throw new Error("QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route");
         }
         paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS s.*
-          FROM ${schema}.subquadrats s
-          JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-          WHERE q.QuadratID = ?
-            AND q.PlotID = ?
-            AND q.CensusID IN (
-              SELECT c.CensusID
-              FROM ${schema}.census c
-              WHERE c.PlotID = q.PlotID
-                AND c.PlotCensusNumber = ?
-            )
-          LIMIT ?, ?`;
-        queryParams.push(quadratID, plotID, plotCensusNumber, page * pageSize, pageSize);
+            SELECT SQL_CALC_FOUND_ROWS s.*
+            FROM ${schema}.subquadrats s
+            JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+            WHERE q.QuadratID = ?
+              AND q.PlotID = ?
+              AND q.CensusID IN (
+                SELECT c.CensusID
+                FROM ${schema}.census c
+                WHERE c.PlotID = ?
+                  AND c.PlotCensusNumber = ?
+              )
+            LIMIT ?, ?`;
+        queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'census':
         paginatedQuery = `
@@ -108,15 +120,14 @@ export async function GET(request: NextRequest, {params}: {
         const censusResults = await runQuery(conn, format(censusQuery, [plotID, plotCensusNumber]));
         if (censusResults.length < 2) {
           paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS *
-          FROM ${schema}.${params.dataType} 
-          WHERE PlotID = ?
-            AND CensusID IN (
-              SELECT c.CensusID
-              FROM ${schema}.census c
-              WHERE c.PlotID = PlotID
-                AND c.PlotCensusNumber = ?
-            )
+          SELECT SQL_CALC_FOUND_ROWS pdt.*
+          FROM ${schema}.${params.dataType} pdt
+          JOIN ${schema}.stems s ON pdt.StemID = s.StemID
+          JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+          JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
+          JOIN ${schema}.census c ON sp.CensusID = c.CensusID
+          WHERE c.PlotID = ?
+            AND c.PlotCensusNumber = ?
           LIMIT ?, ?`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
@@ -127,12 +138,15 @@ export async function GET(request: NextRequest, {params}: {
           pastCensusIDs = censusIDs.slice(1);
           // Query to fetch paginated measurements from measurementssummaryview
           paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS *
-            FROM ${schema}.measurementssummaryview
-            WHERE PlotID = ?
-              AND CensusID IN (${censusIDs.map(() => '?').join(', ')})
-            LIMIT ?, ?
-          `;
+            SELECT SQL_CALC_FOUND_ROWS pdt.*
+            FROM ${schema}.${params.dataType} pdt
+            JOIN ${schema}.stems s ON pdt.StemID = s.StemID
+            JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+            JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
+            JOIN ${schema}.census c ON sp.CensusID = c.CensusID
+            WHERE c.PlotID = ?
+              AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
+            LIMIT ?, ?`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;
         }
@@ -171,7 +185,7 @@ export async function GET(request: NextRequest, {params}: {
         output: rows,
         deprecated: deprecatedRows,
         totalCount: totalRows
-      }), {status: 200});
+      }), { status: HTTPResponses.OK });
     } else {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const rows = mapper.mapData(paginatedResults);
@@ -179,7 +193,7 @@ export async function GET(request: NextRequest, {params}: {
         output: rows,
         deprecated: undefined,
         totalCount: totalRows
-      }), {status: 200});
+      }), { status: HTTPResponses.OK });
     }
   } catch (error: any) {
     if (conn) await conn.rollback();
@@ -190,12 +204,13 @@ export async function GET(request: NextRequest, {params}: {
 }
 
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
-export async function POST(request: NextRequest, {params}: { params: { dataType: string, slugs?: string[] } }) {
+export async function POST(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
-  const {newRow} = await request.json();
+  const { newRow } = await request.json();
+  let insertID: number | undefined = undefined;
   try {
     conn = await getConn();
     await conn.beginTransaction();
@@ -225,15 +240,17 @@ export async function POST(request: NextRequest, {params}: { params: { dataType:
       }
     } else if (params.dataType === 'attributes') {
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      await runQuery(conn, insertQuery);
+      const results = await runQuery(conn, insertQuery);
+      insertID = results.insertId;
     } else {
       delete newRowData[demappedGridID];
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      await runQuery(conn, insertQuery);
+      const results = await runQuery(conn, insertQuery);
+      insertID = results.insertId;
     }
     await conn.commit();
-    return NextResponse.json({message: "Insert successful"}, {status: 200});
+    return NextResponse.json({ message: "Insert successful", createdID: insertID}, { status: HTTPResponses.OK });
   } catch (error: any) {
     return handleError(error, conn, newRow);
   } finally {
@@ -242,20 +259,20 @@ export async function POST(request: NextRequest, {params}: { params: { dataType:
 }
 
 // slugs: schema, gridID
-export async function PATCH(request: NextRequest, {params}: { params: { dataType: string, slugs?: string[] } }) {
+export async function PATCH(request: NextRequest, { params }: { params: { dataType: string, slugs?: string[] } }) {
   if (!params.slugs) throw new Error("slugs not provided");
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error("no schema or gridID provided");
   let conn: PoolConnection | null = null;
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const {newRow, oldRow} = await request.json();
+  const { newRow, oldRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
     if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
-      const {[demappedGridID]: gridIDKey, ...remainingProperties} = newRowData;
+      const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
       const updateQuery = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]);
       await runQuery(conn, updateQuery);
       await conn.commit();
@@ -280,7 +297,7 @@ export async function PATCH(request: NextRequest, {params}: { params: { dataType
       }
       await conn.commit();
     }
-    return NextResponse.json({message: "Update successful"}, {status: 200});
+    return NextResponse.json({ message: "Update successful" }, { status: HTTPResponses.OK });
   } catch (error: any) {
     return handleError(error, conn, newRow);
   } finally {
@@ -322,7 +339,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${viewConfig.table}`, viewConfig.primaryKey, primaryKeyValue]);
       await runQuery(conn, deleteQuery);
       await conn.commit();
-      return NextResponse.json({ message: "Delete successful" }, { status: 200 });
+      return NextResponse.json({ message: "Delete successful" }, { status: HTTPResponses.OK });
     }
     // Handle deletion for tables
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
@@ -331,7 +348,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);
     await conn.commit();
-    return NextResponse.json({ message: "Delete successful" }, { status: 200 });
+    return NextResponse.json({ message: "Delete successful" }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);

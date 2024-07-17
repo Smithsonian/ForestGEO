@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConn, runQuery } from "@/components/processors/processormacros";
 import { PoolConnection } from "mysql2/promise";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
 
     return new NextResponse(
       JSON.stringify(response),
-      { status: 200 }
+      { status: HTTPResponses.OK }
     );
   } catch (error: any) {
     throw new Error('SQL query failed: ' + error.message);

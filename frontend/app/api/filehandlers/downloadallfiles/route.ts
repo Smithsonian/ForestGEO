@@ -1,6 +1,7 @@
 // DOWNLOAD ALL FILES ROUTE HANDLER
 import {NextRequest, NextResponse} from "next/server";
 import {getContainerClient} from "@/config/macros/azurestorage";
+import { HTTPResponses } from "@/config/macros";
 
 
 export async function GET(request: NextRequest) {
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
         responseMessage: "List of files",
         blobData: blobData,
       }),
-      {status: 200}
+      {status: HTTPResponses.OK}
     );
   } catch (error: any) {
     console.error('error in blob listing: ', error);

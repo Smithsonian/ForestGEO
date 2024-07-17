@@ -129,5 +129,5 @@ export async function POST(request: NextRequest) {
       if (connection) connection.release();
     }
   }
-  return new NextResponse(JSON.stringify({ message: "Insert to SQL successful", idToRows: idToRows }), { status: 200 });
+  return new NextResponse(JSON.stringify({ message: "Insert to SQL successful", idToRows: idToRows }), { status: HTTPResponses.OK });
 }

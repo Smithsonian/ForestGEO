@@ -103,12 +103,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: WidgetsIcon,
       },
-      {
-        label: 'Subquadrats',
-        href: '/subquadrats',
-        tip: '',
-        icon: WidgetsIcon,
-      },
+      // {
+      //   label: 'Subquadrats',
+      //   href: '/subquadrats',
+      //   tip: '',
+      //   icon: WidgetsIcon,
+      // },
       // {
       //   label: 'QuadratPersonnel',
       //   href: '/quadratpersonnel',

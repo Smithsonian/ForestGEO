@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   const cmID = parseInt(request.nextUrl.searchParams.get('cmid')!);
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
           personnelName: row.FirstName + ' ' + row.LastName,
           speciesName: row.SpeciesName
         }))
-      ), {status: 200});
+      ), {status: HTTPResponses.OK});
   } catch (error: any) {
     throw new Error('SQL query failed: ' + error.message);
   } finally {

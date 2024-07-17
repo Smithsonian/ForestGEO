@@ -2,16 +2,15 @@
 import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
 import { AlertProps } from "@mui/material";
 import React, { useState } from "react";
-import { initialQuadratRDSRow, QuadratsGridColumnSet } from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import { initialQuadratRDSRow} from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import { useOrgCensusContext, usePlotContext, } from "@/app/contexts/userselectionprovider";
 import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import { Box, Button, Stack, Typography } from "@mui/joy";
+import { Box, Button, Typography } from "@mui/joy";
 import { useSession } from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import Link from 'next/link';
-import { GridColDef } from "@mui/x-data-grid";
-import { unitSelectionOptions } from "@/config/macros";
+import { quadratGridColumns } from "@/components/client/datagridcolumns";
 
 export default function QuadratsDataGrid() {
   const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);
@@ -31,25 +30,9 @@ export default function QuadratsDataGrid() {
   const { data: session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFormType, setUploadFormType] = useState<'quadrats'>('quadrats');
-  const [a, b] = QuadratsGridColumnSet;
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-
-  const quadratsUnitColumn: GridColDef = {
-    field: 'unit',
-    headerName: 'Unit',
-    headerClassName: 'header',
-    flex: 0.3,
-    renderHeader: () => <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Typography level='body-sm' fontWeight={'xl'}>Quadrat</Typography>
-      <Typography level='body-xs'>Units</Typography>
-    </Stack>,
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  };
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -117,7 +100,7 @@ export default function QuadratsDataGrid() {
       }} formType={uploadFormType} />
       <DataGridCommons
         gridType="quadrats"
-        gridColumns={[...a, quadratsUnitColumn, ...b]}
+        gridColumns={quadratGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

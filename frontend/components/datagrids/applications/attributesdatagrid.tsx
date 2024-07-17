@@ -5,11 +5,12 @@ import { AlertProps } from "@mui/material";
 import React, { useState } from "react";
 import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import { AttributeGridColumns, initialAttributesRDSRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
+import { initialAttributesRDSRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { Box, Button, Typography } from "@mui/joy";
 import { useSession } from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
+import { AttributeGridColumns } from "@/components/client/datagridcolumns";
 
 export default function AttributesDataGrid() {
   const [rows, setRows] = useState([initialAttributesRDSRow] as GridRowsProp);

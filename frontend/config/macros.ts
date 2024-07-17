@@ -106,6 +106,7 @@ export function formatDate(isoDateString: string): string {
 }
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
 export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
   required?: boolean;
 };
