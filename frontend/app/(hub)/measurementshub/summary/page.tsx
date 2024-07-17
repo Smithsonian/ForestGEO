@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
 import { Alert, AlertProps, LinearProgress, Tooltip, TooltipProps, styled, tooltipClasses } from "@mui/material";
-import { gridColumnsArrayMSVRDS, initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { Box, ListItemContent, ListItem, List, Modal, ModalDialog, Typography, Button, DialogTitle, DialogContent, DialogActions, Snackbar, Stack, } from "@mui/joy";
 import Select, { SelectOption } from "@mui/joy/Select";
 import { useSession } from "next-auth/react";
@@ -15,7 +15,7 @@ import Option from '@mui/joy/Option';
 import MeasurementSummaryGrid from "@/components/datagrids/msvdatagrid";
 import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
 import { UnifiedValidityFlags } from "@/config/macros";
-
+import { msvGridColumns } from "@/components/client/datagridcolumns";
 const LargeTooltip = styled(({ className, ...props }: TooltipProps) => (
   <Tooltip {...props} classes={{ popper: className }} />
 ))(({ theme }) => ({
@@ -321,7 +321,7 @@ export default function SummaryPage() {
         formType={"measurements"}
       />
       <MeasurementSummaryGrid
-        gridColumns={gridColumnsArrayMSVRDS[0]}
+        gridColumns={msvGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {runValidationProcedure} from "@/components/processors/processorhelperfunctions";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest, {params}: { params: { validationType: string } }) {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest, {params}: { params: { validation
 
   try {
     const validationResponse = await runValidationProcedure(schema, validationType, plotID, censusID, minValue, maxValue);
-    return new NextResponse(JSON.stringify(validationResponse), {status: 200});
+    return new NextResponse(JSON.stringify(validationResponse), {status: HTTPResponses.OK});
   } catch (error: any) {
     return new NextResponse(JSON.stringify({error: error.message}), {status: 500});
   }

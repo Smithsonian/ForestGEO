@@ -1,4 +1,5 @@
 import {getConn, runQuery} from "@/components/processors/processormacros";
+import { HTTPResponses } from "@/config/macros";
 import {PoolConnection} from "mysql2/promise";
 import {NextResponse} from "next/server";
 
@@ -24,7 +25,7 @@ export async function GET(): Promise<NextResponse<ValidationMessages>> {
     }, {} as ValidationMessages);
 
     return new NextResponse(JSON.stringify(validationMessages), {
-      status: 200,
+      status: HTTPResponses.OK,
       headers: {'Content-Type': 'application/json'}
     });
 

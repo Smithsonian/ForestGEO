@@ -3,6 +3,7 @@ import {getConn, runQuery} from "@/components/processors/processormacros";
 import {PoolConnection} from "mysql2/promise";
 import {CMError} from "@/config/macros/uploadsystemmacros";
 import MapperFactory from "@/config/datamapper";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     const mapper = MapperFactory.getMapper<any, any>('coremeasurements');
     const mappedPending = mapper.mapData(pendingValidationRows);
     return new NextResponse(JSON.stringify({failed: parsedValidationErrors, pending: mappedPending}), {
-      status: 200,
+      status: HTTPResponses.OK,
       headers: {
         'Content-Type': 'application/json'
       }

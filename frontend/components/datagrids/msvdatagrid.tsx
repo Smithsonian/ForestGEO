@@ -25,7 +25,6 @@ import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { CensusDateRange, OrgCensusRDS } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { HTTPResponses, unitSelectionOptions } from '@/config/macros';
-import { gridColumnsArrayMSVRDS } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { MeasurementSummaryGridProps, sortRowsByMeasurementDate, PendingAction, CellItemContainer, errorMapping, filterColumns, EditToolbarCustomProps } from './datagridmacros';
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
@@ -135,9 +134,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const { setLoading } = useLoading();
   const { triggerPulse } = useLockAnimation();
   const handleLockedClick = () => triggerPulse();
-
-  // column destructuring -- applying custom formats to columns
-  const [a, b, c, d] = gridColumnsArrayMSVRDS;
 
   // use the session
   useSession();
@@ -834,10 +830,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const columns = useMemo(() => {
     const commonColumns = modifiedColumns;
     if (locked) {
-      return [validationStatusColumn, measurementDateColumn, ...commonColumns, ...b, dbhUnitsColumn, ...c, homUnitsColumn, ...d];
+      return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
     return [validationStatusColumn,
-      measurementDateColumn, ...commonColumns, stemUnitsColumn, ...b, dbhUnitsColumn, ...c, homUnitsColumn, ...d, getGridActionsColumn()];
+      measurementDateColumn, ...commonColumns, getGridActionsColumn()];
   }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);

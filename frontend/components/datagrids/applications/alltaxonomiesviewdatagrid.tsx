@@ -8,8 +8,9 @@ import DataGridCommons from "@/components/datagrids/datagridcommons";
 import {Box, Button, Typography} from "@mui/joy";
 import {useSession} from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import {AllTaxonomiesViewGridColumns, initialAllTaxonomiesViewRDSRow} from "@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds";
+import {initialAllTaxonomiesViewRDSRow} from "@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds";
 import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
+import { AllTaxonomiesViewGridColumns } from "@/components/client/datagridcolumns";
 
 export default function AllTaxonomiesViewDataGrid() {
   const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);

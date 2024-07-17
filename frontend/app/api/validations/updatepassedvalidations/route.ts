@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {getConn, runQuery, UpdateValidationResponse} from "@/components/processors/processormacros";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   const conn = await getConn();
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
       rowsValidated: rowsValidated
     };
 
-    return new NextResponse(JSON.stringify(response), {status: 200});
+    return new NextResponse(JSON.stringify(response), {status: HTTPResponses.OK});
   } catch (error: any) {
     await conn.rollback();
     console.error('Error in update operation:', error.message);

@@ -2,6 +2,7 @@ import {NextRequest, NextResponse} from "next/server";
 import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
 import {generateHash} from "@/config/crypto-actions";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
     conn = await getConn();
     const query = `SELECT * FROM ${schema}.quadrats`;
     const results = await runQuery(conn, query);
-    return new NextResponse(JSON.stringify(generateHash(results)), {status: 200});
+    return new NextResponse(JSON.stringify(generateHash(results)), {status: HTTPResponses.OK});
   } catch (error) {
     console.error('Error:', error);
     throw new Error("Call failed");

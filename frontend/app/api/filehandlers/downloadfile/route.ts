@@ -6,6 +6,7 @@ import {
   generateBlobSASQueryParameters,
   StorageSharedKeyCredential
 } from "@azure/storage-blob";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
   const containerName = request.nextUrl.searchParams.get('container');
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
     const url = `${blobClient.url}?${sasToken}`;
 
     return new NextResponse(JSON.stringify({url}), {
-      status: 200,
+      status: HTTPResponses.OK,
       headers: {
         'Content-Type': 'application/json'
       }

@@ -3,6 +3,7 @@ import {PoolConnection} from "mysql2/promise";
 import {getConn, runQuery} from "@/components/processors/processormacros";
 import {PersonnelRDS, PersonnelResult} from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import {FORMSEARCH_LIMIT} from "@/config/macros/azurestorage";
+import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[]>> {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
     }));
 
     // Properly mapping results to return an array of { label, code }
-    return new NextResponse(JSON.stringify(personnelRows), {status: 200});
+    return new NextResponse(JSON.stringify(personnelRows), {status: HTTPResponses.OK});
   } catch (error: any) {
     console.error('Error in GET Personnel:', error.message || error);
     throw new Error('Failed to fetch personnel data');
@@ -75,7 +76,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     // Commit the transaction
     await conn.commit();
 
-    return NextResponse.json({message: "Personnel updated successfully"}, {status: 200});
+    return NextResponse.json({message: "Personnel updated successfully"}, {status: HTTPResponses.OK});
   } catch (error) {
     await conn?.rollback();
     console.error('Error:', error);

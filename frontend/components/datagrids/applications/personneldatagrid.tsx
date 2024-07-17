@@ -2,7 +2,7 @@
 import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
 import { AlertProps } from "@mui/material";
 import React, { useState } from "react";
-import { initialPersonnelRDSRow, PersonnelGridColumns } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { initialPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
 import { useSession } from "next-auth/react";
@@ -10,6 +10,7 @@ import { Box, Button, Stack, Typography } from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import Link from 'next/link';
 import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
+import { PersonnelGridColumns } from "@/components/client/datagridcolumns";
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);

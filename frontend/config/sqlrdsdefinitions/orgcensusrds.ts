@@ -173,7 +173,7 @@ class OrgCensusToCensusResultMapper {
     // trigger reload 
   }
 
-  async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, description?: string): Promise<void> {
+  async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, description?: string): Promise<number | undefined> {
     const newCensusRDS: CensusRDS = {
       censusID: 0, // This will be replaced with the actual ID after the POST request
       plotID: plotID,
@@ -183,14 +183,15 @@ class OrgCensusToCensusResultMapper {
       description: description
     };
     // Perform the POST request
-    await fetch(`/api/fixeddata/census/${schema}/censusID`, {
+    const response = await fetch(`/api/fixeddata/census/${schema}/censusID`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ newRow: newCensusRDS })
     });
-    // trigger reload
+    const responseJSON = await response.json();
+    return responseJSON.createdID;
   }
 }
 

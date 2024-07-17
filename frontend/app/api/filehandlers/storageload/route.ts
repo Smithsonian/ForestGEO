@@ -70,5 +70,5 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return new NextResponse(JSON.stringify({message: "Insert to Azure Storage successful"}), {status: 200});
+  return new NextResponse(JSON.stringify({message: "Insert to Azure Storage successful"}), {status: HTTPResponses.OK});
 }

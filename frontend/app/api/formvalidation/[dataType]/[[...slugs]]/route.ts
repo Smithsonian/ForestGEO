@@ -1,4 +1,5 @@
 import {getConn, runQuery} from "@/components/processors/processormacros";
+import { HTTPResponses } from "@/config/macros";
 import {PoolConnection, format} from "mysql2/promise";
 import {NextRequest, NextResponse} from "next/server";
 
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest, {params}: { params: { dataType: 
     const formatted = format(query, [`${schema}.${params.dataType}`, columnName, value]);
     const results = await runQuery(conn, formatted);
     if (results.length === 0) return new NextResponse(null, {status: 404});
-    return new NextResponse(null, {status: 200});
+    return new NextResponse(null, {status: HTTPResponses.OK});
   } catch (error: any) {
     console.error(error);
     throw error;

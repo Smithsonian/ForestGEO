@@ -22,13 +22,9 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
   let query = `SELECT * FROM ${schema}.${fetchType}`;
   const conditions = [];
 
-  if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID))) conditions.push(`PlotID = ${plotID}`);
+  if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) && fetchType !== 'personnel') conditions.push(`PlotID = ${plotID}`);
   if (plotCensusNumber && plotCensusNumber !== 'undefined' && !isNaN(parseInt(plotCensusNumber))) {
-    conditions.push(`CensusID IN (
-              SELECT c.CensusID
-              FROM ${schema}.census c
-              WHERE c.PlotID = PlotID
-                AND c.PlotCensusNumber = ${plotCensusNumber})`);
+    conditions.push(`CensusID IN ( SELECT c.CensusID FROM ${schema}.census c WHERE c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber})`);
   }
   if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
 
@@ -38,20 +34,20 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
   return query;
 };
 
-
+// ordering: PCQ
 export async function GET(request: NextRequest, {params}: { params: { slugs?: string[] } }) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema || schema === 'undefined') {
     throw new Error("Schema selection was not provided to API endpoint");
   }
 
-  const [fetchType, plotID, censusID, quadratID] = params.slugs ?? [];
-  if (!fetchType) {
+  const [dataType, plotID, censusID, quadratID] = params.slugs ?? [];
+  if (!dataType) {
     throw new Error("fetchType was not correctly provided");
   }
 
-  console.log('fetchall --> slugs provided: fetchType: ', fetchType, 'plotID: ', plotID, 'censusID: ', censusID, 'quadratID: ', quadratID);
-  const query = buildQuery(schema, fetchType, plotID, censusID, quadratID);
+  console.log('fetchall --> slugs provided: fetchType: ', dataType, 'plotID: ', plotID, 'censusID: ', censusID, 'quadratID: ', quadratID);
+  const query = buildQuery(schema, dataType, plotID, censusID, quadratID);
   let conn: PoolConnection | null = null;
 
   try {
@@ -61,7 +57,7 @@ export async function GET(request: NextRequest, {params}: { params: { slugs?: st
       return new NextResponse(null, {status: 500});
     }
 
-    const mapper: IDataMapper<any, any> = MapperFactory.getMapper<any, any>(fetchType);
+    const mapper: IDataMapper<any, any> = MapperFactory.getMapper<any, any>(dataType);
     const rows = mapper.mapData(results);
     return new NextResponse(JSON.stringify(rows), {status: HTTPResponses.OK});
   } catch (error) {

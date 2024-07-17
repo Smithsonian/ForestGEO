@@ -1,5 +1,6 @@
 # The ForestGEO Data Entry App
 
+liquibase generate-changelog --exclude-objects="\b\w*view\w*\b"
 A cloud-native web application built to accelerate the pace of research for the Smithsonian
 Institution's Forest Global Earth Observatory (ForestGEO). ForestGEO is a global forest research
 network, unparalleled in size and scope, comprised of ecologists and research sites dedicated to
