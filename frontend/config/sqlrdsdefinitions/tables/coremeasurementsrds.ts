@@ -1,4 +1,4 @@
-import {GridColDef} from '@mui/x-data-grid';
+// core measurements custom data type
 import {IDataMapper, parseDate} from "../../datamapper";
 import {bitToBoolean, booleanToBit} from '@/config/macros';
 
@@ -62,26 +62,6 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
   }
 }
 
-export const CoreMeasurementsGridColumns: GridColDef[] = [
-  {field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'isValidated', headerName: 'IsValidated', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {
-    field: 'measurementDate',
-    headerName: 'MeasurementDate',
-    type: "date",
-    headerClassName: 'header',
-    flex: 1,
-    valueGetter: (params: any) => {
-      if (!params.value) return null;
-      return new Date(params.value);
-    },
-    editable: true
-  },
-  {field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left'},
-  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left'},
-];
 
 export const coreMeasurementsFields = [
   'stemID',

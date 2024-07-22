@@ -1,3 +1,4 @@
+// sites custom data type
 import {IDataMapper} from "../../datamapper";
 
 export type SitesRDS = {
@@ -25,13 +26,13 @@ export interface SitesResult {
 export class SitesMapper implements IDataMapper<SitesResult, SitesRDS> {
   demapData(results: SitesRDS[]): SitesResult[] {
     return results.map(item => ({
-      SiteID: item.siteID != null ? String(item.siteID) : null,
-      SiteName: item.siteName != null ? String(item.siteName) : null,
-      SchemaName: item.schemaName != null ? String(item.schemaName) : null,
-      SQDimX: item.subquadratDimX != null ? String(item.subquadratDimX) : null,
-      SQDimY: item.subquadratDimY != null ? String(item.subquadratDimY) : null,
-      DefaultUOMDBH: item.dbhUnits != null ? String(item.dbhUnits) : null,
-      DefaultUOMHOM: item.homUnits != null ? String(item.homUnits) : null,
+      SiteID: item.siteID != undefined ? String(item.siteID) : null,
+      SiteName: item.siteName != undefined ? String(item.siteName) : null,
+      SchemaName: item.schemaName != undefined ? String(item.schemaName) : null,
+      SQDimX: item.subquadratDimX != undefined ? String(item.subquadratDimX) : null,
+      SQDimY: item.subquadratDimY != undefined ? String(item.subquadratDimY) : null,
+      DefaultUOMDBH: item.dbhUnits != undefined ? String(item.dbhUnits) : null,
+      DefaultUOMHOM: item.homUnits != undefined ? String(item.homUnits) : null,
     }));
   }
 

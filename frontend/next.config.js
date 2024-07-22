@@ -29,6 +29,9 @@ const nextConfig = {
     AZURE_SQL_PORT: process.env.AZURE_SQL_PORT,
     AZURE_SQL_SCHEMA: process.env.AZURE_SQL_SCHEMA,
     AZURE_SQL_CATALOG_SCHEMA: process.env.AZURE_SQL_CATALOG_SCHEMA,
+    FG_PAT: process.env.FG_PAT,
+    OWNER: process.env.OWNER,
+    REPO: process.env.REPO,
   },
 }
 

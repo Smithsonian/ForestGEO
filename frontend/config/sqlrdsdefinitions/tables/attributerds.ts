@@ -1,3 +1,4 @@
+// attributes custom data type
 import {IDataMapper} from "../../datamapper";
 import {FileRow, RowValidationErrors, ValidationFunction} from '@/config/macros/formdetails';
 
@@ -52,9 +53,9 @@ export class AttributesMapper implements IDataMapper<AttributesResult, Attribute
 
   demapData(results: AttributesRDS[]): AttributesResult[] {
     return results.map((item) => ({
-      Code: item.code != null ? String(item.code) : null,
-      Description: item.description != null ? String(item.description) : null,
-      Status: item.status != null ? String(item.status) : null,
+      Code: item.code !== undefined ? String(item.code) : null,
+      Description: item.description !== undefined ? String(item.description) : null,
+      Status: item.status !== undefined ? String(item.status) : null,
     }));
   }
 }

@@ -1,5 +1,6 @@
+// alltaxonomiesview custom data type
 import {IDataMapper, parseDate} from "../../datamapper";
-import {bitToBoolean, ColumnStates} from "@/config/macros";
+import {ColumnStates} from "@/config/macros";
 
 export type AllTaxonomiesViewRDS = {
   id?: number;
@@ -15,38 +16,12 @@ export type AllTaxonomiesViewRDS = {
   speciesIDLevel?: string;
   speciesAuthority?: string;
   subspeciesAuthority?: string;
-  currentTaxonFlag?: boolean;
-  obsoleteTaxonFlag?: boolean;
   fieldFamily?: string;
   speciesDescription?: string;
   referenceID?: number;
   publicationTitle?: string;
   dateOfPublication?: Date;
   citation?: string;
-}
-
-export const initialAllTaxonomiesViewRDSRow = {
-  id: 0,
-  speciesID: 0,
-  speciesCode: '',
-  familyID: 0,
-  family: '',
-  genusID: 0,
-  genus: '',
-  genusAuthority: '',
-  speciesName: '',
-  subspeciesName: '',
-  speciesIDLevel: '',
-  speciesAuthority: '',
-  subspeciesAuthority: '',
-  currentTaxonFlag: undefined,
-  obsoleteTaxonFlag: undefined,
-  fieldFamily: '',
-  speciesDescription: '',
-  referenceID: 0,
-  publicationTitle: '',
-  dateOfPublication: undefined,
-  citation: '',
 };
 
 export interface AllTaxonomiesViewResult {
@@ -62,8 +37,6 @@ export interface AllTaxonomiesViewResult {
   SpeciesIDLevel: any;
   SpeciesAuthority: any;
   SubspeciesAuthority: any;
-  CurrentTaxonFlag: any;
-  ObsoleteTaxonFlag: any;
   FieldFamily: any;
   SpeciesDescription: any;
   ReferenceID: any;
@@ -71,32 +44,52 @@ export interface AllTaxonomiesViewResult {
   FullReference: any;
   DateOfPublication: any;
   Citation: any;
-}
+};
+
+export const initialAllTaxonomiesViewRDSRow = {
+  id: 0,
+  speciesID: 0,
+  speciesCode: '',
+  familyID: 0,
+  family: '',
+  genusID: 0,
+  genus: '',
+  genusAuthority: '',
+  speciesName: '',
+  subspeciesName: '',
+  speciesIDLevel: '',
+  speciesAuthority: '',
+  subspeciesAuthority: '',
+  fieldFamily: '',
+  speciesDescription: '',
+  referenceID: 0,
+  publicationTitle: '',
+  dateOfPublication: undefined,
+  citation: '',
+};
 
 export class AllTaxonomiesViewMapper implements IDataMapper<AllTaxonomiesViewResult, AllTaxonomiesViewRDS> {
   demapData(results: AllTaxonomiesViewRDS[]): AllTaxonomiesViewResult[] {
     return results.map(item => ({
-      SpeciesID: item.speciesID != null ? String(item.speciesID) : null,
-      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
-      FamilyID: item.familyID != null ? String(item.familyID) : null,
-      Family: item.family != null ? String(item.family) : null,
-      GenusID: item.genusID != null ? String(item.genusID) : null,
-      Genus: item.genus != null ? String(item.genus) : null,
-      GenusAuthority: item.genusAuthority != null ? String(item.genusAuthority) : null,
-      SpeciesName: item.speciesName != null ? String(item.speciesName) : null,
-      SubspeciesName: item.subspeciesName != null ? String(item.subspeciesName) : null,
-      SpeciesIDLevel: item.speciesIDLevel != null ? String(item.speciesIDLevel) : null,
-      SpeciesAuthority: item.speciesAuthority != null ? String(item.speciesAuthority) : null,
-      SubspeciesAuthority: item.subspeciesAuthority != null ? String(item.subspeciesAuthority) : null,
-      CurrentTaxonFlag: item.currentTaxonFlag != null ? item.currentTaxonFlag : null,
-      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != null ? item.obsoleteTaxonFlag : null,
-      FieldFamily: item.fieldFamily != null ? String(item.fieldFamily) : null,
-      SpeciesDescription: item.speciesDescription != null ? String(item.speciesDescription) : null,
-      ReferenceID: item.referenceID != null ? String(item.referenceID) : null,
-      PublicationTitle: item.publicationTitle != null ? String(item.publicationTitle) : null,
+      SpeciesID: item.speciesID !== undefined ? String(item.speciesID) : null,
+      SpeciesCode: item.speciesCode !== undefined ? String(item.speciesCode) : null,
+      FamilyID: item.familyID !== undefined ? String(item.familyID) : null,
+      Family: item.family !== undefined ? String(item.family) : null,
+      GenusID: item.genusID !== undefined ? String(item.genusID) : null,
+      Genus: item.genus !== undefined ? String(item.genus) : null,
+      GenusAuthority: item.genusAuthority !== undefined ? String(item.genusAuthority) : null,
+      SpeciesName: item.speciesName !== undefined ? String(item.speciesName) : null,
+      SubspeciesName: item.subspeciesName !== undefined ? String(item.subspeciesName) : null,
+      SpeciesIDLevel: item.speciesIDLevel !== undefined ? String(item.speciesIDLevel) : null,
+      SpeciesAuthority: item.speciesAuthority !== undefined ? String(item.speciesAuthority) : null,
+      SubspeciesAuthority: item.subspeciesAuthority !== undefined ? String(item.subspeciesAuthority) : null,
+      FieldFamily: item.fieldFamily !== undefined ? String(item.fieldFamily) : null,
+      SpeciesDescription: item.speciesDescription !== undefined ? String(item.speciesDescription) : null,
+      ReferenceID: item.referenceID !== undefined ? String(item.referenceID) : null,
+      PublicationTitle: item.publicationTitle !== undefined ? String(item.publicationTitle) : null,
       FullReference: `${item.publicationTitle} (${item.dateOfPublication?.toISOString()})`,
-      DateOfPublication: item.dateOfPublication != null ? item.dateOfPublication.toISOString() : null,
-      Citation: item.citation != null ? String(item.citation) : null,
+      DateOfPublication: item.dateOfPublication !== undefined ? item.dateOfPublication.toISOString() : null,
+      Citation: item.citation !== undefined ? String(item.citation) : null,
     }));
   }
 
@@ -115,8 +108,6 @@ export class AllTaxonomiesViewMapper implements IDataMapper<AllTaxonomiesViewRes
       speciesIDLevel: item.SpeciesIDLevel != null ? String(item.SpeciesIDLevel) : undefined,
       speciesAuthority: item.SpeciesAuthority != null ? String(item.SpeciesAuthority) : undefined,
       subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
-      currentTaxonFlag: item.CurrentTaxonFlag != null ? bitToBoolean(item.CurrentTaxonFlag) : undefined,
-      obsoleteTaxonFlag: item.ObsoleteTaxonFlag != null ? bitToBoolean(item.ObsoleteTaxonFlag) : undefined,
       fieldFamily: item.FieldFamily != null ? String(item.FieldFamily) : undefined,
       speciesDescription: item.SpeciesDescription != null ? String(item.SpeciesDescription) : undefined,
       referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
@@ -125,7 +116,7 @@ export class AllTaxonomiesViewMapper implements IDataMapper<AllTaxonomiesViewRes
       citation: item.Citation != null ? String(item.Citation) : undefined,
     }));
   }
-}
+};
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
@@ -133,4 +124,4 @@ export function getAllTaxonomiesViewHCs(): ColumnStates {
     genusID: false,
     referenceID: false,
   };
-}
+};

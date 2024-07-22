@@ -45,12 +45,24 @@ module.exports = {
           '0%': {transform: 'rotate(0deg)'},
           '100%': {transform: 'rotate(360deg)'},
         },
+        bounce: {
+          '0%, 20%, 50%, 80%, 100%': {
+            transform: 'translateY(0)',
+          },
+          '40%': {
+            transform: 'translateY(-30px)',
+          },
+          '60%': {
+            transform: 'translateY(-15px)',
+          },
+        },
       },
       animation: {
         shake: 'shake 0.5s',
         pulse: 'pulse 2s infinite',
         rainbowColor: 'rainbowColor 6s linear infinite',
         rotate: 'rotate 2s linear infinite',
+        bounce: 'bounce 0.5s',
       },
       textColor: {
         error: 'red',
@@ -113,4 +125,4 @@ module.exports = {
   xwind: {
     mode: 'objectstyles',
   },
-}
+};

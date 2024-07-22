@@ -1,3 +1,4 @@
+// quadrat custom data type
 import { IDataMapper } from "../../datamapper";
 import { ColumnStates } from '@/config/macros';
 import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';

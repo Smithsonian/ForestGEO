@@ -315,6 +315,6 @@ process.on('SIGINT', async () => {
 
 // Capture SIGTERM signal (triggered by process kill)
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received.');
-  await gracefulShutdown();
+  console.log('SIGTERM signal received (process kill --> waiting to trigger graceful shutdown.');
+  // await gracefulShutdown();
 });

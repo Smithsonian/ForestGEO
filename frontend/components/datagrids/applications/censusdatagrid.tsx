@@ -1,8 +1,8 @@
+// census datagrid
 "use client";
 import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
 import {AlertProps} from "@mui/material";
 import React, {useEffect, useState} from "react";
-import {CensusGridColumns} from '@/config/sqlrdsdefinitions/tables/censusrds';
 import { usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
 import {randomId} from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
@@ -12,6 +12,7 @@ import {redirect} from "next/navigation";
 import {useLoading} from "@/app/contexts/loadingprovider";
 import {DatePicker} from '@mui/x-date-pickers';
 import moment from "moment";
+import { CensusGridColumns } from "@/components/client/datagridcolumns";
 
 
 export default function CensusDataGrid() {

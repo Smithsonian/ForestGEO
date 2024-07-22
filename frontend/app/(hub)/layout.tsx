@@ -4,7 +4,7 @@ import { title } from "@/config/primitives";
 import { useSession } from "next-auth/react";
 import { redirect, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Box, Stack, Tooltip, Typography } from "@mui/joy";
+import { Box, IconButton, Stack, Tooltip, Typography } from "@mui/joy";
 import Divider from "@mui/joy/Divider";
 import { useLoading } from "@/app/contexts/loadingprovider";
 import { getAllSchemas } from "@/components/processors/processorhelperfunctions";
@@ -29,6 +29,8 @@ import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusr
 import { siteConfig } from "@/config/macros/siteconfigs";
 import { useDataValidityContext } from "../contexts/datavalidityprovider";
 import { AcaciaVersionTypography } from "@/styles/versions/acaciaversion";
+import GithubFeedbackModal from "@/components/client/githubfeedbackmodal";
+import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -69,7 +71,7 @@ function renderSwitch(endpoint: string) {
       output = 'Species List'; break;
   }
 
-  return <Box sx={commonStyle}><h1 style={{lineHeight: '1.1em'}} className={title({ color: "cyan" })} key={endpoint}>{output}</h1></Box>;
+  return <Box sx={commonStyle}><h1 style={{ lineHeight: '1.1em' }} className={title({ color: "cyan" })} key={endpoint}>{output}</h1></Box>;
 }
 
 export default function HubLayout({ children }: { children: React.ReactNode }) {
@@ -101,6 +103,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const [subquadratListLoaded, setSubquadratListLoaded] = useState(false);
   const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
+
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
 
   const pathname = usePathname();
 
@@ -337,12 +341,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           )}
         </Box>
         <Divider orientation={"horizontal"} />
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2, position: 'relative' }}>
           <Stack
             spacing={1}
             direction="row"
             sx={{ alignItems: 'center', justifyContent: 'center', width: '100%' }}
-            divider={<Divider orientation="vertical"  />}
+            divider={<Divider orientation="vertical" />}
           >
             <Typography level="h1" sx={{ color: 'plum', display: 'inline-block', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' }}>
               {siteConfig.name}
@@ -355,8 +359,26 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               </Tooltip>
             </Stack>
           </Stack>
+          <IconButton
+            onClick={() => setIsFeedbackModalOpen(true)}
+            sx={{
+              position: 'fixed',
+              bottom: 20,
+              right: 20,
+              zIndex: 2000,
+              bgcolor: 'primary.main',
+              color: 'white',
+              '&:hover': {
+                bgcolor: 'primary.dark',
+              },
+            }}
+            disabled
+          >
+            <HelpOutlineOutlinedIcon />
+          </IconButton>
         </Box>
       </Box>
+      <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />
     </>
   );
 }

@@ -1,49 +1,48 @@
-import {IDataMapper} from "@/config/datamapper";
-import {bitToBoolean, ColumnStates} from "@/config/macros";
+import { IDataMapper } from "@/config/datamapper";
+import { ColumnStates } from "@/config/macros";
 
 export type StemTaxonomiesViewRDS = {
   id?: number;
   stemID?: number;
-  stemTag?: string;
   treeID?: number;
-  treeTag?: string;
-  speciesID?: number;
-  speciesCode?: string;
   familyID?: number;
-  family?: string;
   genusID?: number;
+  speciesID?: number;
+  stemTag?: string;
+  treeTag?: string;
+  speciesCode?: string;
+  family?: string;
   genus?: string;
   speciesName?: string;
   subspeciesName?: string;
-  currentTaxonFlag?: boolean;
-  obsoleteTaxonFlag?: boolean;
+  validCode?: string;
   genusAuthority?: string;
   speciesAuthority?: string;
   subspeciesAuthority?: string;
   speciesIDLevel?: string;
   speciesFieldFamily?: string;
-}
+};
+
 export const initialStemTaxonomiesViewRDSRow: StemTaxonomiesViewRDS = {
   id: 0,
   stemID: 0,
-  stemTag: '',
   treeID: 0,
-  treeTag: '',
-  speciesID: 0,
-  speciesCode: '',
   familyID: 0,
-  family: '',
   genusID: 0,
+  speciesID: 0,
+  stemTag: '',
+  treeTag: '',
+  speciesCode: '',
+  family: '',
   genus: '',
   speciesName: '',
   subspeciesName: '',
-  currentTaxonFlag: undefined,
-  obsoleteTaxonFlag: undefined,
+  validCode: '',
   genusAuthority: '',
   speciesAuthority: '',
   subspeciesAuthority: '',
   speciesIDLevel: '',
-  speciesFieldFamily: ''
+  speciesFieldFamily: '',
 };
 
 export interface StemTaxonomiesViewResult {
@@ -59,8 +58,7 @@ export interface StemTaxonomiesViewResult {
   Genus: any;
   SpeciesName: any;
   SubspeciesName: any;
-  CurrentTaxonFlag: any;
-  ObsoleteTaxonFlag: any;
+  ValidCode: any;
   GenusAuthority: any;
   SpeciesAuthority: any;
   SubspeciesAuthority: any;
@@ -71,25 +69,24 @@ export interface StemTaxonomiesViewResult {
 export class StemTaxonomiesMapper implements IDataMapper<StemTaxonomiesViewResult, StemTaxonomiesViewRDS> {
   demapData(results: StemTaxonomiesViewRDS[]): StemTaxonomiesViewResult[] {
     return results.map((item) => ({
-      StemID: item.stemID != null ? String(item.stemID) : null,
-      StemTag: item.stemTag != null ? String(item.stemTag) : null,
-      TreeID: item.treeID != null ? String(item.treeID) : null,
-      TreeTag: item.treeTag != null ? String(item.treeTag) : null,
-      SpeciesID: item.speciesID != null ? String(item.speciesID) : null,
-      SpeciesCode: item.speciesCode != null ? String(item.speciesCode) : null,
-      FamilyID: item.familyID != null ? String(item.familyID) : null,
-      Family: item.family != null ? String(item.family) : null,
-      GenusID: item.genusID != null ? String(item.genusID) : null,
-      Genus: item.genus != null ? String(item.genus) : null,
-      SpeciesName: item.speciesName != null ? String(item.speciesName) : null,
-      SubspeciesName: item.subspeciesName != null ? String(item.subspeciesName) : null,
-      CurrentTaxonFlag: item.currentTaxonFlag != null ? item.currentTaxonFlag : null,
-      ObsoleteTaxonFlag: item.obsoleteTaxonFlag != null ? item.obsoleteTaxonFlag : null,
-      GenusAuthority: item.genusAuthority != null ? String(item.genusAuthority) : null,
-      SpeciesAuthority: item.speciesAuthority != null ? String(item.speciesAuthority) : null,
-      SubspeciesAuthority: item.subspeciesAuthority != null ? String(item.subspeciesAuthority) : null,
-      SpeciesIDLevel: item.speciesIDLevel != null ? String(item.speciesIDLevel) : null,
-      SpeciesFieldFamily: item.speciesFieldFamily != null ? String(item.speciesFieldFamily) : null,
+      StemID: item.stemID !== undefined ? String(item.stemID) : null,
+      StemTag: item.stemTag !== undefined ? String(item.stemTag) : null,
+      TreeID: item.treeID !== undefined ? String(item.treeID) : null,
+      TreeTag: item.treeTag !== undefined ? String(item.treeTag) : null,
+      SpeciesID: item.speciesID !== undefined ? String(item.speciesID) : null,
+      SpeciesCode: item.speciesCode !== undefined ? String(item.speciesCode) : null,
+      FamilyID: item.familyID !== undefined ? String(item.familyID) : null,
+      Family: item.family !== undefined ? String(item.family) : null,
+      GenusID: item.genusID !== undefined ? String(item.genusID) : null,
+      Genus: item.genus !== undefined ? String(item.genus) : null,
+      SpeciesName: item.speciesName !== undefined ? String(item.speciesName) : null,
+      SubspeciesName: item.subspeciesName !== undefined ? String(item.subspeciesName) : null,
+      ValidCode: item.validCode !== undefined ? String(item.validCode) : null,
+      GenusAuthority: item.genusAuthority !== undefined ? String(item.genusAuthority) : null,
+      SpeciesAuthority: item.speciesAuthority !== undefined ? String(item.speciesAuthority) : null,
+      SubspeciesAuthority: item.subspeciesAuthority !== undefined ? String(item.subspeciesAuthority) : null,
+      SpeciesIDLevel: item.speciesIDLevel !== undefined ? String(item.speciesIDLevel) : null,
+      SpeciesFieldFamily: item.speciesFieldFamily !== undefined ? String(item.speciesFieldFamily) : null,
     }));
   }
 
@@ -108,8 +105,7 @@ export class StemTaxonomiesMapper implements IDataMapper<StemTaxonomiesViewResul
       genus: item.Genus != null ? String(item.Genus) : undefined,
       speciesName: item.SpeciesName != null ? String(item.SpeciesName) : undefined,
       subspeciesName: item.SubspeciesName != null ? String(item.SubspeciesName) : undefined,
-      currentTaxonFlag: item.CurrentTaxonFlag != null ? bitToBoolean(item.CurrentTaxonFlag) : undefined,
-      obsoleteTaxonFlag: item.ObsoleteTaxonFlag != null ? bitToBoolean(item.ObsoleteTaxonFlag) : undefined,
+      validCode: item.ValidCode != null ? String(item.ValidCode) : undefined,
       genusAuthority: item.GenusAuthority != null ? String(item.GenusAuthority) : undefined,
       speciesAuthority: item.SpeciesAuthority != null ? String(item.SpeciesAuthority) : undefined,
       subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
@@ -136,4 +132,3 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
     stemDescription: false,
   };
 }
-

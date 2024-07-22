@@ -1,6 +1,5 @@
-import {GridColDef} from "@mui/x-data-grid";
+// subquadrat custom data type
 import {IDataMapper} from "../../datamapper";
-import {unitSelectionOptions} from "@/config/macros";
 import {ValidationFunction, RowValidationErrors} from "@/config/macros/formdetails";
 
 export type SubquadratRDS = {
@@ -81,46 +80,3 @@ export const subquadratsFields = [
   'ordering'
 ];
 
-export const SubquadratGridColumns: GridColDef[] = [
-  {field: 'ordering', headerName: 'Order', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {
-    field: 'subquadratName',
-    headerName: 'Name',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {field: 'quadratID', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {
-    field: 'dimensionX',
-    headerName: 'X-Dimension',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'dimensionY',
-    headerName: 'Y-Dimension',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {field: 'qX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
-  {field: 'qY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true},
-  {
-    field: 'unit',
-    headerName: 'Units',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions,
-    editable: true
-  },
-];

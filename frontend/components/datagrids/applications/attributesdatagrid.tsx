@@ -61,10 +61,7 @@ export default function AttributesDataGrid() {
 
 
           {/* Upload Button */}
-          <Button onClick={() => {
-            if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
-            else alert('census must be opened before upload allowed');
-          }} variant="solid" color="primary">Upload</Button>
+          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
         </Box>
       </Box>
 

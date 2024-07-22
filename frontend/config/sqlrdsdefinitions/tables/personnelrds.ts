@@ -1,3 +1,4 @@
+// personnel custom data type
 import {IDataMapper} from "../../datamapper";
 import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 

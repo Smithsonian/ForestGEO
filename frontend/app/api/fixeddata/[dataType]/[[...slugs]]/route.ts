@@ -3,13 +3,7 @@ import MapperFactory from "@/config/datamapper";
 import { handleError } from "@/utils/errorhandler";
 import { PoolConnection, format } from "mysql2/promise";
 import { NextRequest, NextResponse } from "next/server";
-import {
-  generateInsertOperations,
-  generateUpdateOperations,
-  StemDimensionsViewQueryConfig,
-  AllTaxonomiesViewQueryConfig,
-  StemTaxonomiesViewQueryConfig,
-} from '@/components/processors/processorhelperfunctions';
+import { generateInsertOperations, generateUpdateOperations, StemDimensionsViewQueryConfig, AllTaxonomiesViewQueryConfig, StemTaxonomiesViewQueryConfig } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from "@/config/macros";
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
@@ -107,6 +101,7 @@ export async function GET(request: NextRequest, { params }: {
         break;
       case 'coremeasurements':
       case 'measurementssummaryview':
+      case 'viewfulltableview':
       case 'stemdimensionsview':
         // Retrieve multiple past CensusID for the given PlotCensusNumber
         const censusQuery = `

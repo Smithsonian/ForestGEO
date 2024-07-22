@@ -1,4 +1,4 @@
-import { GridColDef } from '@mui/x-data-grid';
+// roles custom data type
 import { IDataMapper } from '../../datamapper';
 
 export type RolesRDS = {
@@ -32,8 +32,3 @@ export class RolesMapper implements IDataMapper<RolesResult, RolesRDS> {
   }
 }
 
-export const RolesGridColumns: GridColDef[] = [
-  {field: 'roleID', headerName: 'RoleID', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-  {field: 'roleDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: false},
-];

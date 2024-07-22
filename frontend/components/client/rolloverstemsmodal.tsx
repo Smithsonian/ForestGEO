@@ -2,11 +2,12 @@
 
 import { usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { StemGridColumns, StemRDS } from "@/config/sqlrdsdefinitions/tables/stemrds";
 import { Alert, Box, Button, Checkbox, DialogActions, DialogContent, DialogTitle, IconButton, Modal, ModalDialog, Option, Select, Stack, Typography } from "@mui/joy";
 import { DataGrid, GridRowSelectionModel } from "@mui/x-data-grid";
 import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import CloseIcon from '@mui/icons-material/Close';
+import { StemRDS } from "@/config/sqlrdsdefinitions/tables/stemrds";
+import { StemGridColumns } from "./datagridcolumns";
 
 interface RolloverStemsModalProps {
   open: boolean;
