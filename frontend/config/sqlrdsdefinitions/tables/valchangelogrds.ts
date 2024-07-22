@@ -1,4 +1,4 @@
-import {GridColDef} from '@mui/x-data-grid';
+// validation changelog custom data type
 import {IDataMapper, parseDate} from "../../datamapper";
 
 export type ValidationChangelogRDS = {
@@ -31,16 +31,16 @@ export interface ValidationChangelogResult {
 export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogResult, ValidationChangelogRDS> {
   demapData(results: ValidationChangelogRDS[]): ValidationChangelogResult[] {
     return results.map((item) => ({
-      ValidationRunID: item.validationRunID != null ? String(item.validationRunID) : null,
-      ProcedureName: item.procedureName != null ? String(item.procedureName) : null,
-      RunDateTime: item.runDateTime != null ? item.runDateTime.toISOString() : null,
-      TargetRowID: item.targetRowID != null ? String(item.targetRowID) : null,
+      ValidationRunID: item.validationRunID != undefined ? String(item.validationRunID) : null,
+      ProcedureName: item.procedureName != undefined ? String(item.procedureName) : null,
+      RunDateTime: item.runDateTime != undefined ? item.runDateTime.toISOString() : null,
+      TargetRowID: item.targetRowID != undefined ? String(item.targetRowID) : null,
       ValidationOutcome: item.validationOutcome,
-      ErrorMessage: item.errorMessage != null ? String(item.errorMessage) : null,
-      ValidationCriteria: item.validationCriteria != null ? String(item.validationCriteria) : null,
-      MeasuredValue: item.measuredValue != null ? String(item.measuredValue) : null,
-      ExpectedValueRange: item.expectedValueRange != null ? String(item.expectedValueRange) : null,
-      AdditionalDetails: item.additionalDetails != null ? String(item.additionalDetails) : null,
+      ErrorMessage: item.errorMessage != undefined ? String(item.errorMessage) : null,
+      ValidationCriteria: item.validationCriteria != undefined ? String(item.validationCriteria) : null,
+      MeasuredValue: item.measuredValue != undefined ? String(item.measuredValue) : null,
+      ExpectedValueRange: item.expectedValueRange != undefined ? String(item.expectedValueRange) : null,
+      AdditionalDetails: item.additionalDetails != undefined ? String(item.additionalDetails) : null,
     }));
   }
 
@@ -61,14 +61,3 @@ export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogR
   }
 }
 
-export const ValidationChangelogGridColumns: GridColDef[] = [
-  {field: 'validationRunID', headerName: 'ID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'procedureName', headerName: 'Procedure', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'runDatetime', headerName: 'Date', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'targetRowID', headerName: 'Core Measurement Target', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'errorMessage', headerName: 'Error Message', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'validationCriteria', headerName: 'Validation Criteria', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'measuredValue', headerName: 'Measured', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'expectedValueRange', headerName: 'Expected Range', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'additionalDetails', headerName: 'Details', headerClassName: 'header', flex: 1, align: 'left',},
-];

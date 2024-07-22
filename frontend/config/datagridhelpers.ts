@@ -19,6 +19,7 @@ import {getAllTaxonomiesViewHCs} from './sqlrdsdefinitions/views/alltaxonomiesvi
 import {getMeasurementsSummaryViewHCs} from './sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {getStemDimensionsViewHCs} from './sqlrdsdefinitions/views/stemdimensionsviewrds';
 import {getStemTaxonomiesViewHCs} from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
+import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltablerds';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown'
@@ -61,6 +62,10 @@ export interface EditToolbarProps extends GridToolbarProps {
 const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   default: {
     id: false,
+  },
+  viewfulltableview: {
+    id: false,
+    ...getAllViewFullTableViewsHCs(),
   },
   // views
   alltaxonomiesview: {
@@ -116,6 +121,7 @@ export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coremeasurements':
     case 'measurementssummaryview':
+    case 'viewfulltableview':
       return 'coreMeasurementID';
     case 'stemdimensionsview':
     case 'stemtaxonomiesview':

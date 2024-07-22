@@ -1,6 +1,5 @@
-import {GridColDef} from '@mui/x-data-grid';
+// reference custom data type
 import {IDataMapper, parseDate} from '../../datamapper';
-
 
 export type ReferenceRDS = {
   id?: number;
@@ -20,10 +19,10 @@ export interface ReferenceResult {
 export class ReferenceMapper implements IDataMapper<ReferenceResult, ReferenceRDS> {
   demapData(results: ReferenceRDS[]): ReferenceResult[] {
     return results.map(item => ({
-      ReferenceID: item.referenceID != null ? String(item.referenceID) : null,
-      PublicationTitle: item.publicationTitle != null ? String(item.publicationTitle) : null,
-      FullReference: item.fullReference != null ? String(item.fullReference) : null,
-      DateOfPublication: item.dateOfPublication != null ? item.dateOfPublication.toISOString() : null,
+      ReferenceID: item.referenceID != undefined ? String(item.referenceID) : null,
+      PublicationTitle: item.publicationTitle != undefined ? String(item.publicationTitle) : null,
+      FullReference: item.fullReference != undefined ? String(item.fullReference) : null,
+      DateOfPublication: item.dateOfPublication != undefined ? item.dateOfPublication.toISOString() : null,
     }));
   }
 
@@ -39,20 +38,3 @@ export class ReferenceMapper implements IDataMapper<ReferenceResult, ReferenceRD
 }
 
 
-export const ReferenceGridColumns: GridColDef[] = [
-  {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1, align: 'left',},
-  {field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1, align: 'left',},
-  {
-    field: 'dateOfPublication',
-    headerName: 'DateOfPublication',
-    type: "date",
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    valueGetter: (params: any) => {
-      if (!params.value) return null;
-      return new Date(params.value);
-    }
-  },
-];

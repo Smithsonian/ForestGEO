@@ -1,4 +1,4 @@
-import {GridColDef} from '@mui/x-data-grid';
+// census custom data type
 import {IDataMapper, parseDate} from "../../datamapper";
 
 export interface CensusResult {
@@ -66,52 +66,3 @@ export const censusFields = [
 ];
 
 
-export const CensusGridColumns: GridColDef[] = [
-  {
-    field: 'censusID',
-    headerName: 'ID',
-    type: 'number',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: false
-  },
-  {
-    field: 'plotCensusNumber',
-    headerName: 'PlotCensusNumber',
-    type: 'number',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    editable: false
-  },
-  {
-    field: 'startDate',
-    headerName: 'Starting',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'date',
-    editable: true,
-    valueFormatter: (params: any) => {
-      if (params) {
-        return new Date(params).toDateString();
-      } else return "null";
-    }
-  },
-  {
-    field: 'endDate',
-    headerName: 'Ending',
-    headerClassName: 'header',
-    type: 'date',
-    flex: 1,
-    align: 'left',
-    editable: true,
-    valueFormatter: (params: any) => {
-      if (params) {
-        return new Date(params).toDateString();
-      } else return "null";
-    }
-  },
-  {field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, type: 'string', editable: true},
-];

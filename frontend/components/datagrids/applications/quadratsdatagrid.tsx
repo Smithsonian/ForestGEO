@@ -1,3 +1,4 @@
+// quadrats datagrid
 "use client";
 import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
 import { AlertProps } from "@mui/material";

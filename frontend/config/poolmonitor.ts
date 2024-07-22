@@ -15,8 +15,8 @@ export class PoolMonitor {
     this.poolClosed = false;
 
     this.pool.on('acquire', (connection) => {
-      this.activeConnections++;
-      this.totalConnectionsCreated++;
+      ++this.activeConnections;
+      ++this.totalConnectionsCreated;
       console.log(`Acquired: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
       this.resetInactivityTimer();
@@ -24,7 +24,7 @@ export class PoolMonitor {
 
     this.pool.on('release', (connection) => {
       if (this.activeConnections > 0) {
-        this.activeConnections--;
+        --this.activeConnections;
       }
       console.log(`Released: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
@@ -32,14 +32,14 @@ export class PoolMonitor {
     });
 
     this.pool.on('connection', (connection) => {
-      this.totalConnectionsCreated++;
+      ++this.totalConnectionsCreated;
       console.log(`New: ${connection.threadId}`);
       console.log('Connection state:', this.getPoolStatus());
       this.resetInactivityTimer();
     });
 
     this.pool.on('enqueue', () => {
-      this.waitingForConnection++;
+      ++this.waitingForConnection;
       console.log(`Enqueued.`);
       console.log('Connection state:', this.getPoolStatus());
       this.resetInactivityTimer();

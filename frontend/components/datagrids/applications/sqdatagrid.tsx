@@ -6,15 +6,15 @@ import {
   useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import {SubquadratGridColumns} from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 import {AlertProps} from "@mui/material";
 import {Box} from "@mui/system";
 import {GridRowsProp, GridRowModesModel, GridRowModes, GridColDef} from "@mui/x-data-grid";
 import {randomId} from "@mui/x-data-grid-generator";
 import {useSession} from "next-auth/react";
 import React, {useEffect, useState} from "react";
-import DataGridCommons from "../datagrids/datagridcommons";
 import {Typography} from "@mui/joy";
+import { SubquadratGridColumns } from "@/components/client/datagridcolumns";
+import DataGridCommons from "../datagridcommons";
 
 export default function SubquadratsDataGrid() {
   const currentQuadrat = useQuadratContext();

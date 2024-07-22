@@ -1,3 +1,4 @@
+// personnel datagrid
 "use client";
 import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
 import { AlertProps } from "@mui/material";
@@ -81,10 +82,7 @@ export default function PersonnelDataGrid() {
 
           {/* Upload Button */}
           <Stack direction='column'>
-            <Button onClick={() => {
-              if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
-              else alert('census must be opened before upload allowed');
-            }} variant="solid" color="primary">Upload</Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
             {/* Link to Quadrat Personnel Data Grid */}
             <Link href="/fixeddatainput/quadratpersonnel" passHref>
               <Button variant="solid" color="primary" sx={{ ml: 2 }}>View Quadrat Personnel</Button>

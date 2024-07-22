@@ -1,3 +1,4 @@
+// specimens custom data type
 import { IDataMapper, parseDate } from "@/config/datamapper";
 
 export type SpecimensRDS = {

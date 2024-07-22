@@ -1,3 +1,4 @@
+// quadratpersonnel custom data type
 import {IDataMapper} from "@/config/datamapper";
 
 export interface QuadratPersonnelRDS {

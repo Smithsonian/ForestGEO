@@ -1,3 +1,4 @@
+// measurementssummaryview custom data type
 import { IDataMapper, parseDate } from "../../datamapper";
 import { bitToBoolean, booleanToBit, ColumnStates } from "@/config/macros";
 import { ValidationFunction, RowValidationErrors } from "@/config/macros/formdetails";

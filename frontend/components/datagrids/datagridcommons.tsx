@@ -137,7 +137,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
 
     try {
-      const response = await fetch(fullDataQuery, { 
+      const response = await fetch(fullDataQuery, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(filterModel)
@@ -450,26 +450,60 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (handleSelectQuadrat) handleSelectQuadrat(null);
   };
 
+  // const getEnhancedCellAction = (type: string, icon: any, onClick: any) => (
+  //   <CellItemContainer>
+  //     <Tooltip title={locked ? 'Actions disabled while census closed!' : ''} arrow placement="top">
+  //       <span
+  //         onClick={(e) => {
+  //           if (locked) {
+  //             handleLockedClick();
+  //             const iconElement = e.currentTarget.querySelector('svg');
+  //             if (iconElement) {
+  //               iconElement.classList.add('animate-shake');
+  //               setTimeout(() => {
+  //                 iconElement.classList.remove('animate-shake');
+  //               }, 500);
+  //             }
+  //           } else {
+  //             onClick();
+  //           }
+  //         }}
+  //       >
+  //         <GridActionsCellItem icon={icon} label={type} disabled={locked} />
+  //       </span>
+  //     </Tooltip>
+  //   </CellItemContainer>
+  // );
   const getEnhancedCellAction = (type: string, icon: any, onClick: any) => (
     <CellItemContainer>
-      <Tooltip title={locked ? 'Actions disabled while census closed!' : ''} arrow placement="top">
+      <Tooltip
+        title={
+          type === 'Save'
+            ? `Save your changes`
+            : type === 'Cancel'
+              ? `Cancel your changes`
+              : type === 'Edit'
+                ? `Edit this row`
+                : type === 'Delete'
+                  ? 'Delete this row (cannot be undone!)'
+                  : undefined
+        }
+        arrow
+        placement="top"
+      >
         <span
           onClick={(e) => {
-            if (locked) {
-              handleLockedClick();
-              const iconElement = e.currentTarget.querySelector('svg');
-              if (iconElement) {
-                iconElement.classList.add('animate-shake');
-                setTimeout(() => {
-                  iconElement.classList.remove('animate-shake');
-                }, 500);
-              }
-            } else {
-              onClick();
+            const iconElement = e.currentTarget.querySelector('svg');
+            if (iconElement) {
+              iconElement.classList.add('animate-bounce');
+              setTimeout(() => {
+                iconElement.classList.remove('animate-bounce');
+              }, 500);
             }
+            onClick();
           }}
         >
-          <GridActionsCellItem icon={icon} label={type} disabled={locked} />
+          <GridActionsCellItem icon={icon} label={type} />
         </span>
       </Tooltip>
     </CellItemContainer>

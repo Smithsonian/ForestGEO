@@ -122,3 +122,14 @@ export type UnifiedValidityFlags = {
 export type GridSelections = {
   label: string; value: number;
 }
+
+export type UniqueKeys<T, U> = {
+  [K in keyof (T & U)]: K extends keyof T ? (K extends keyof U ? never : K) : K;
+}[keyof (T & U)];
+export type Unique<T, U> = Pick<T & U, UniqueKeys<T, U>>;
+
+export type CommonKeys<T, U> = {
+  [K in keyof T & keyof U]: K;
+}[keyof T & keyof U];
+
+export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
