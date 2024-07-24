@@ -68,6 +68,9 @@ jobs:
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
           echo NODE_ENV=development >> frontend/.env
           echo PORT=3000 >> frontend/.env
+          echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
+          echo OWNER=${{ secrets.OWNER }} >> frontend/.env
+          echo REPO=${{ secrets.REPO }} >> frontend/.env
 
       - name: Write Certificate to File
         run: |
