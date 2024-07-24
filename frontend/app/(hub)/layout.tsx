@@ -372,7 +372,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
                 bgcolor: 'primary.dark',
               },
             }}
-//            disabled
           >
             <HelpOutlineOutlinedIcon />
           </IconButton>
