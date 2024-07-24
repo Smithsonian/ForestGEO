@@ -5,6 +5,7 @@ import {bitToBoolean, booleanToBit} from '@/config/macros';
 export type CoreMeasurementsRDS = {
   id?: number;
   coreMeasurementID?: number;
+  censusID?: number;
   stemID?: number;
   isValidated?: boolean;
   measurementDate?: Date;
@@ -18,6 +19,7 @@ export type CoreMeasurementsRDS = {
 
 export interface CoreMeasurementsResult {
   CoreMeasurementID: any;
+  CensusID: any;
   StemID: any;
   IsValidated: any;
   MeasurementDate: any;
@@ -34,6 +36,7 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
     return results.map((item, index) => ({
       id: index + indexOffset,
       coreMeasurementID: item.CoreMeasurementID != null ? Number(item.CoreMeasurementID) : undefined,
+      censusID: item.CensusID !== null ? Number(item.CoreMeasurementID) : undefined,
       stemID: item.StemID != null ? Number(item.StemID) : undefined,
       isValidated: item.IsValidated != null ? bitToBoolean(item.IsValidated) : undefined,
       measurementDate: parseDate(item.MeasurementDate),
@@ -49,6 +52,7 @@ export class CoreMeasurementsMapper implements IDataMapper<CoreMeasurementsResul
   demapData(results: CoreMeasurementsRDS[]): CoreMeasurementsResult[] {
     return results.map((item) => ({
       CoreMeasurementID: item.coreMeasurementID != undefined ? Number(item.coreMeasurementID) : null,
+      CensusID: item.censusID !== undefined ? Number(item.coreMeasurementID) : null,
       StemID: item.stemID != undefined ? Number(item.stemID) : null,
       IsValidated: item.isValidated != undefined ? booleanToBit(item.isValidated) : null,
       MeasurementDate: parseDate(item.measurementDate),

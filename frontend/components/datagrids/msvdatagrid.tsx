@@ -254,12 +254,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   }, [currentCensus]);
 
   useEffect(() => {
-    fetchValidationErrors()
-      .catch(console.error)
-      .then(() => setRefresh(false));
-  }, [refresh]);
-
-  useEffect(() => {
     if (errorRowCount > 0) {
       setSnackbar({
         children: `${errorRowCount} row(s) with validation errors detected.`,
@@ -463,6 +457,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   const handleRefresh = async () => {
     await fetchPaginatedData(paginationModel.page);
+    await fetchValidationErrors();
   };
 
   const handleError = (error: any, message: string) => {

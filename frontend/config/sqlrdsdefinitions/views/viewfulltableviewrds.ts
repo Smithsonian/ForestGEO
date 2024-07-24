@@ -1,15 +1,24 @@
 // viewfulltableview custom data type
-import { ColumnStates, Common, Unique } from "@/config/macros";
-import { MeasurementsSummaryMapper, MeasurementsSummaryRDS, MeasurementsSummaryResult } from "./measurementssummaryviewrds";
-import { StemTaxonomiesMapper, StemTaxonomiesViewRDS, StemTaxonomiesViewResult } from "./stemtaxonomiesviewrds";
-import { IDataMapper } from "@/config/datamapper";
+import {ColumnStates, Common, Unique} from "@/config/macros";
+import {
+  MeasurementsSummaryMapper,
+  MeasurementsSummaryRDS,
+  MeasurementsSummaryResult
+} from "./measurementssummaryviewrds";
+import {StemTaxonomiesMapper, StemTaxonomiesViewRDS, StemTaxonomiesViewResult} from "./stemtaxonomiesviewrds";
+import {IDataMapper} from "@/config/datamapper";
 
-export type ViewFullTableViewRDS = Common<MeasurementsSummaryRDS, StemTaxonomiesViewRDS> & Unique<MeasurementsSummaryRDS, StemTaxonomiesViewRDS>;
-export type ViewFullTableViewResult = Common<MeasurementsSummaryResult, StemTaxonomiesViewResult> & Unique<MeasurementsSummaryResult, StemTaxonomiesViewResult>;
+export type ViewFullTableViewRDS =
+  Common<MeasurementsSummaryRDS, StemTaxonomiesViewRDS>
+  & Unique<MeasurementsSummaryRDS, StemTaxonomiesViewRDS>;
+export type ViewFullTableViewResult =
+  Common<MeasurementsSummaryResult, StemTaxonomiesViewResult>
+  & Unique<MeasurementsSummaryResult, StemTaxonomiesViewResult>;
 
 export class ViewFullTableMapper implements IDataMapper<ViewFullTableViewResult, ViewFullTableViewRDS> {
   private measurementsSummaryMapper = new MeasurementsSummaryMapper();
   private stemTaxonomiesMapper = new StemTaxonomiesMapper();
+
   demapData(results: ViewFullTableViewRDS[]): ViewFullTableViewResult[] {
     const measurementsResults = this.measurementsSummaryMapper.demapData(results as MeasurementsSummaryRDS[]);
     const stemTaxonomiesResults = this.stemTaxonomiesMapper.demapData(results as StemTaxonomiesViewRDS[]);
@@ -90,5 +99,6 @@ export function getAllViewFullTableViewsHCs(): ColumnStates {
     personnelID: false,
     familyID: false,
     genusID: false,
+    subquadratName: false,
   };
-};
+}

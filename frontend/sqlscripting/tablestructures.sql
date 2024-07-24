@@ -145,7 +145,6 @@ create table species
     SpeciesID           int auto_increment
         primary key,
     GenusID             int          null,
-    CensusID            int          null,
     SpeciesCode         varchar(25)  null,
     SpeciesName         varchar(64)  null,
     SubspeciesName      varchar(255) null,
@@ -163,9 +162,7 @@ create table species
     constraint Species_Genus_GenusID_fk
         foreign key (GenusID) references genus (GenusID),
     constraint Species_Reference_ReferenceID_fk
-        foreign key (ReferenceID) references reference (ReferenceID),
-    constraint species_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID)
+        foreign key (ReferenceID) references reference (ReferenceID)
 );
 
 create table specieslimits

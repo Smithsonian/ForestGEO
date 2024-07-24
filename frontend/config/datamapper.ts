@@ -15,9 +15,10 @@ import {PlotsMapper} from "./sqlrdsdefinitions/tables/plotrds";
 import {StemTaxonomiesMapper} from "./sqlrdsdefinitions/views/stemtaxonomiesviewrds";
 import {QuadratPersonnelMapper} from "./sqlrdsdefinitions/tables/quadratpersonnelrds";
 import moment from "moment";
+import {ViewFullTableMapper} from "@/config/sqlrdsdefinitions/views/viewfulltableviewrds";
 
 export function parseDate(date: any): Date | undefined {
-  if (!date || date === null) return undefined;
+  if (!date) return undefined;
   // Check if date is a number (UNIX timestamp), string, or already a Date object
   if (typeof date === 'number') {
     return moment(new Date(date * 1000)).utc().toDate(); // Convert UNIX timestamp to milliseconds
@@ -73,6 +74,8 @@ class MapperFactory {
         return new StemTaxonomiesMapper() as any;
       case 'measurementssummaryview':
         return new MeasurementsSummaryMapper() as any;
+        case 'viewfulltableview':
+          return new ViewFullTableMapper() as any;
       default:
         throw new Error('Mapper not found for type: ' + type);
     }

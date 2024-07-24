@@ -19,7 +19,7 @@ import {getAllTaxonomiesViewHCs} from './sqlrdsdefinitions/views/alltaxonomiesvi
 import {getMeasurementsSummaryViewHCs} from './sqlrdsdefinitions/views/measurementssummaryviewrds';
 import {getStemDimensionsViewHCs} from './sqlrdsdefinitions/views/stemdimensionsviewrds';
 import {getStemTaxonomiesViewHCs} from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
-import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltablerds';
+import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltableviewrds';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown'
