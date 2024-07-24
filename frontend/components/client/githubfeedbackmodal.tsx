@@ -37,7 +37,7 @@ export default function GithubFeedbackModal({ open, onClose }: GithubFeedbackMod
   const pat = process.env.FG_PAT;
   const owner = process.env.OWNER;
   const repo = process.env.REPO;
-  if (!pat || !owner || !repo) throw new Error('env var retrieval failed.');
+  if (!pat || !owner || !repo) return <>ENV FAILURE</>;
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
