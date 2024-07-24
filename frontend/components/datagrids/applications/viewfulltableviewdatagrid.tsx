@@ -2,7 +2,7 @@
 "use client";
 
 import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
-import { initialViewFullTableViewRDS } from "@/config/sqlrdsdefinitions/views/viewfulltablerds";
+import { initialViewFullTableViewRDS } from "@/config/sqlrdsdefinitions/views/viewfulltableviewrds";
 import { Box, Typography } from "@mui/joy";
 import { AlertProps } from "@mui/material";
 import { GridRowsProp } from "@mui/x-data-grid";
@@ -42,7 +42,7 @@ export default function ViewFullTableViewDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%', flexDirection: 'column' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',

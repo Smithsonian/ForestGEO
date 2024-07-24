@@ -122,7 +122,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(true, 'Converting raw census data...');
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     if (censusListDispatch) {
-      censusListDispatch({ censusList });
+      await censusListDispatch({censusList});
     }
     setLoading(false);
     setCensusListLoaded(true);
@@ -322,7 +322,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           paddingBottom: '20px',
           flexDirection: 'column',
         }}>
-          {renderSwitch(usePathname())}
+          {renderSwitch(pathname)}
         </Box>
         <Divider orientation={"horizontal"} sx={{ my: '5px' }} />
         <Box

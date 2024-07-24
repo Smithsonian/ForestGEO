@@ -44,7 +44,7 @@ BEGIN
             'Code', OLD.Code,
             'Description', OLD.Description,
             'Status', OLD.Status
-              );
+                   );
 
     -- Construct the JSON object for the new row
     SET new_json = JSON_OBJECT(
@@ -76,12 +76,12 @@ CREATE TRIGGER after_delete_attributes
 BEGIN
     DECLARE old_json JSON;
 
-   -- Construct the JSON object for the new row
+    -- Construct the JSON object for the new row
     SET old_json = JSON_OBJECT(
             'Code', OLD.Code,
             'Description', OLD.Description,
             'Status', OLD.Status
-              );
+                   );
 
     -- Insert the change log entry into unifiedchangelog
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
@@ -1138,7 +1138,6 @@ BEGIN
     SET new_json = JSON_OBJECT(
             'SpeciesID', NEW.SpeciesID,
             'GenusID', NEW.GenusID,
-            'CensusID', NEW.CensusID,
             'SpeciesCode', NEW.SpeciesCode,
             'SpeciesName', NEW.SpeciesName,
             'SubspeciesName', NEW.SubspeciesName,
@@ -1179,7 +1178,6 @@ BEGIN
     SET old_json = JSON_OBJECT(
             'SpeciesID', OLD.SpeciesID,
             'GenusID', OLD.GenusID,
-            'CensusID', OLD.CensusID,
             'SpeciesCode', OLD.SpeciesCode,
             'SpeciesName', OLD.SpeciesName,
             'SubspeciesName', OLD.SubspeciesName,
@@ -1196,7 +1194,6 @@ BEGIN
     SET new_json = JSON_OBJECT(
             'SpeciesID', NEW.SpeciesID,
             'GenusID', NEW.GenusID,
-            'CensusID', NEW.CensusID,
             'SpeciesCode', NEW.SpeciesCode,
             'SpeciesName', NEW.SpeciesName,
             'SubspeciesName', NEW.SubspeciesName,
@@ -1237,7 +1234,6 @@ BEGIN
     SET old_json = JSON_OBJECT(
             'SpeciesID', OLD.SpeciesID,
             'GenusID', OLD.GenusID,
-            'CensusID', OLD.CensusID,
             'SpeciesCode', OLD.SpeciesCode,
             'SpeciesName', OLD.SpeciesName,
             'SubspeciesName', OLD.SubspeciesName,
@@ -1394,8 +1390,8 @@ BEGIN
             'DimensionX', NEW.DimensionX,
             'DimensionY', NEW.DimensionY,
             'DimensionUnits', NEW.DimensionUnits,
-            'X', NEW.X,
-            'Y', NEW.Y,
+            'QX', NEW.QX,
+            'QY', NEW.QY,
             'CoordinateUnits', NEW.CoordinateUnits,
             'Ordering', NEW.Ordering
                    );
@@ -1432,8 +1428,8 @@ BEGIN
             'DimensionX', OLD.DimensionX,
             'DimensionY', OLD.DimensionY,
             'DimensionUnits', OLD.DimensionUnits,
-            'X', OLD.X,
-            'Y', OLD.Y,
+            'QX', OLD.QX,
+            'QY', OLD.QY,
             'CoordinateUnits', OLD.CoordinateUnits,
             'Ordering', OLD.Ordering
                    );
@@ -1446,8 +1442,8 @@ BEGIN
             'DimensionX', NEW.DimensionX,
             'DimensionY', NEW.DimensionY,
             'DimensionUnits', NEW.DimensionUnits,
-            'X', NEW.X,
-            'Y', NEW.Y,
+            'QX', NEW.QX,
+            'QY', NEW.QY,
             'CoordinateUnits', NEW.CoordinateUnits,
             'Ordering', NEW.Ordering
                    );
@@ -1483,8 +1479,8 @@ BEGIN
             'DimensionX', OLD.DimensionX,
             'DimensionY', OLD.DimensionY,
             'DimensionUnits', OLD.DimensionUnits,
-            'X', OLD.X,
-            'Y', OLD.Y,
+            'QX', OLD.QX,
+            'QY', OLD.QY,
             'CoordinateUnits', OLD.CoordinateUnits,
             'Ordering', OLD.Ordering
                    );

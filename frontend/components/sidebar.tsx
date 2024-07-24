@@ -758,7 +758,7 @@ export default function Sidebar(props: SidebarProps) {
                             {site !== undefined && plot !== undefined && census !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }}>
-                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }} disabled={plot === undefined || census === undefined || isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
+                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }} disabled={isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
                                     if (!isLinkDisabled) {
                                       router.push(item.href);
                                     }
@@ -821,12 +821,9 @@ export default function Sidebar(props: SidebarProps) {
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }}>
                                               <ListItemButton sx={{ flex: 1 }} selected={pathname == (item.href + link.href)}
-                                                disabled={plot === undefined || census === undefined || isLinkDisabled} onClick={() => {
+                                                              disabled={isLinkDisabled} onClick={() => {
                                                   if (!isLinkDisabled) {
                                                     router.push(item.href + link.href);
-                                                    if (setToggle) {
-                                                      setToggle(false); // Close the menu
-                                                    }
                                                   }
                                                 }}>
                                                 <Badge color={link.href === '/summary' ? "warning" : "danger"}

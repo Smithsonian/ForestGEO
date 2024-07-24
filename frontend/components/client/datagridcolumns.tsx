@@ -101,6 +101,7 @@ export const msvGridColumns: GridColDef[] = [
   {
     field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 0.8, align: 'left', editable: true,
     valueFormatter: (params: any) => {
+      if (!params || !params.value) return 0;
       const value = Number(params.value);
       return value.toFixed(2); // limit trailing decimals to 2 places
     }
@@ -109,6 +110,7 @@ export const msvGridColumns: GridColDef[] = [
   {
     field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 0.5, align: 'left', editable: true,
     valueFormatter: (params: any) => {
+      if (!params || !params.value) return 0;
       const value = Number(params.value);
       return value.toFixed(2); // limit trailing decimals to 2 places
     }
@@ -152,7 +154,7 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
   {
     field: 'measurementDate', headerName: 'MeasurementDate', type: "date", headerClassName: 'header', flex: 1,
     valueGetter: (params: any) => {
-      if (!params.value) return null;
+      if (!params || !params.value) return null;
       return new Date(params.value);
     }, editable: true
   },

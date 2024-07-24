@@ -8,6 +8,7 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import SchemaIcon from '@mui/icons-material/Schema';
 import FilterIcon from '@mui/icons-material/FilterList';
+import HistoryIcon from '@mui/icons-material/History';
 import React from "react";
 import {UnifiedValidityFlags} from '../macros';
 
@@ -76,6 +77,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: "uploaded file display",
         icon: CloudCircleIcon,
       },
+      {
+        label: "View All Historical Data",
+        href: "/viewfulltable",
+        tip: "all historical data view",
+        icon: HistoryIcon
+      }
     ],
   },
 
