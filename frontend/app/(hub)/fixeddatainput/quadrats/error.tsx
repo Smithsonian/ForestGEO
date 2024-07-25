@@ -13,7 +13,7 @@ const ErrorPage = ({ error, reset }: { error: Error; reset: () => void }) => {
 
   return (
     <Box sx={{ p: 3, textAlign: 'center' }}>
-      <Typography level="h1">Something went wrong</Typography>
+      <Typography level="h1">Something went wrong - Quadrats Page</Typography>
       <Typography level="body-lg">{error.message}</Typography>
       <Typography level="body-lg">Retrying in 5 seconds...</Typography>
       <Button onClick={reset}>Retry Now</Button>
