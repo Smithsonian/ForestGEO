@@ -56,6 +56,14 @@ module.exports = {
             transform: 'translateY(-15px)',
           },
         },
+        'fade-blur-in': {
+          '0%': { filter: 'blur(0)', opacity: '1' },
+          '100%': { filter: 'blur(5px)', opacity: '0.3' },
+        },
+        'fade-blur-out': {
+          '0%': { filter: 'blur(5px)', opacity: '0.3' },
+          '100%': { filter: 'blur(0)', opacity: '1' },
+        },
       },
       animation: {
         shake: 'shake 0.5s',
@@ -63,6 +71,8 @@ module.exports = {
         rainbowColor: 'rainbowColor 6s linear infinite',
         rotate: 'rotate 2s linear infinite',
         bounce: 'bounce 0.5s',
+        'fade-blur-in': 'fade-blur-in 0.15s ease forwards',
+        'fade-blur-out': 'fade-blur-out 0.15s ease forwards',
       },
       textColor: {
         error: 'red',

@@ -122,7 +122,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(true, 'Converting raw census data...');
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     if (censusListDispatch) {
-      await censusListDispatch({censusList});
+      await censusListDispatch({ censusList });
     }
     setLoading(false);
     setCensusListLoaded(true);
@@ -378,6 +378,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         </Box>
       </Box>
       <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />
+      {/* <GithubFeedbackModal open={true} onClose={() => setIsFeedbackModalOpen(false)} /> */}
     </>
   );
 }

@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
+const withBundleAnalyzer = require('@next/bundle-analyzer')({
+  enabled: process.env.ANALYZE === 'true',
+});
+
+const nextConfig = withBundleAnalyzer({
   experimental: {
     serverMinification: false,
     turbo: {
@@ -21,7 +25,10 @@ const nextConfig = {
   },
   output: 'standalone',
   reactStrictMode: true,
-  distDir: "build",
+  distDir: 'build',
+  images: {
+    unoptimized: true, // since images are served from public directory
+  },
   env: {
     AZURE_SQL_USER: process.env.AZURE_SQL_USER,
     AZURE_SQL_PASSWORD: process.env.AZURE_SQL_PASSWORD,
@@ -33,6 +40,6 @@ const nextConfig = {
     OWNER: process.env.OWNER,
     REPO: process.env.REPO,
   },
-}
+});
 
-module.exports = nextConfig
+module.exports = nextConfig;

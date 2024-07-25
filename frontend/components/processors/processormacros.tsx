@@ -1,13 +1,13 @@
-import {PoolConnection, PoolOptions} from 'mysql2/promise';
-import {booleanToBit} from "@/config/macros";
-import {FileRow} from "@/config/macros/formdetails";
+import { PoolConnection, PoolOptions } from 'mysql2/promise';
+import { booleanToBit } from "@/config/macros";
+import { FileRow } from "@/config/macros/formdetails";
 
-import {processSpecies} from "@/components/processors/processspecies";
-import {NextRequest} from "next/server";
-import {processCensus} from "@/components/processors/processcensus";
-import {PoolMonitor} from "@/config/poolmonitor";
-import {AttributesResult} from '@/config/sqlrdsdefinitions/tables/attributerds';
-import {GridValidRowModel} from '@mui/x-data-grid';
+import { processSpecies } from "@/components/processors/processspecies";
+import { NextRequest } from "next/server";
+import { processCensus } from "@/components/processors/processcensus";
+import { PoolMonitor } from "@/config/poolmonitor";
+import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
+import { GridValidRowModel } from '@mui/x-data-grid';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
@@ -114,17 +114,17 @@ export const fileMappings: Record<string, FileMapping> = {
   },
 };
 const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER, 
+  user: process.env.AZURE_SQL_USER,
   password: process.env.AZURE_SQL_PASSWORD,
   host: process.env.AZURE_SQL_SERVER,
-  port: parseInt(process.env.AZURE_SQL_PORT!), 
+  port: parseInt(process.env.AZURE_SQL_PORT!),
   database: process.env.AZURE_SQL_CATALOG_SCHEMA,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 100, // increased from 10 to prevent bottlenecks
   queueLimit: 0,
   keepAliveInitialDelay: 10000, // 0 by default.
   enableKeepAlive: true, // false by default.
-  connectTimeout: 10000, // 10 seconds by default.
+  connectTimeout: 20000, // 10 seconds by default.
 };
 export const poolMonitor = new PoolMonitor(sqlConfig);
 
@@ -212,7 +212,7 @@ export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
 }
 
 export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
-  const {newRow: requestBody}: { newRow: GridValidRowModel } = await request.json();
+  const { newRow: requestBody }: { newRow: GridValidRowModel } = await request.json();
   switch (parseType) {
     case 'POST':
     case 'PATCH': {
@@ -260,8 +260,8 @@ export interface QueryConfig {
 }
 
 export function buildPaginatedQuery(config: QueryConfig): { query: string, params: any[] } {
-  const {schema, table, joins, conditionals, pagination, extraParams} = config;
-  const {page, pageSize} = pagination;
+  const { schema, table, joins, conditionals, pagination, extraParams } = config;
+  const { page, pageSize } = pagination;
   const startRow = page * pageSize;
   const queryParams = extraParams || [];
 
@@ -284,7 +284,7 @@ export function buildPaginatedQuery(config: QueryConfig): { query: string, param
   query += ` LIMIT ?, ?`;
   queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
 
-  return {query, params: queryParams};
+  return { query, params: queryParams };
 }
 
 // Function to close all active connections
