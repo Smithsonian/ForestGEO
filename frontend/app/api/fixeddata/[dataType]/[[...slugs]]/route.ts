@@ -159,12 +159,9 @@ export async function GET(request: NextRequest, {params}: {
     }
 
     const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
-    console.log('formatted query: ', format(paginatedQuery, queryParams));
-    console.log('paginated results: ', paginatedResults);
 
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
-    console.log('total rows results: ', totalRowsResult);
     const totalRows = totalRowsResult[0].totalRows;
 
     if (updatedMeasurementsExist) {
