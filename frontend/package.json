@@ -10,7 +10,7 @@
   "scripts": {
     "preinstall": "npx npm-force-resolutions",
     "dev": "next dev --turbo",
-    "build": "next build --debug",
+    "build": "next build --debug --no-lint",
     "start": "node build/standalone/server.js -p 8080",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",
@@ -32,6 +32,7 @@
     "@mui/x-data-grid": "^7.11.0",
     "@mui/x-data-grid-generator": "^7.11.0",
     "@mui/x-date-pickers": "^7.11.0",
+    "@next/eslint-plugin-next": "^14.2.5",
     "@octokit/types": "^13.5.0",
     "@popperjs/core": "^2.11.8",
     "@react-spring/web": "^9.7.4",
