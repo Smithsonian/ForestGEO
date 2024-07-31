@@ -6,13 +6,13 @@ import {
   useQuadratContext,
   useSiteContext
 } from "@/app/contexts/userselectionprovider";
-import {AlertProps} from "@mui/material";
-import {Box} from "@mui/system";
-import {GridRowsProp, GridRowModesModel, GridRowModes, GridColDef} from "@mui/x-data-grid";
-import {randomId} from "@mui/x-data-grid-generator";
-import {useSession} from "next-auth/react";
-import React, {useEffect, useState} from "react";
-import {Typography} from "@mui/joy";
+import { AlertProps } from "@mui/material";
+import { Box } from "@mui/system";
+import { GridRowsProp, GridRowModesModel, GridRowModes, GridColDef } from "@mui/x-data-grid";
+import { randomId } from "@mui/x-data-grid-generator";
+import { useSession } from "next-auth/react";
+import React, { useEffect, useState } from "react";
+import { Typography } from "@mui/joy";
 import { SubquadratGridColumns } from "@/components/client/datagridcolumns";
 import DataGridCommons from "../datagridcommons";
 
@@ -43,7 +43,7 @@ export default function SubquadratsDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
@@ -99,12 +99,12 @@ export default function SubquadratsDataGrid() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'subquadratName'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'subquadratName' },
     }));
   };
   return (
     <>
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -114,16 +114,16 @@ export default function SubquadratsDataGrid() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{flexGrow: 1}}>
+          <Box sx={{ flexGrow: 1 }}>
             {session?.user.userStatus !== 'fieldcrew' && (
-              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
+              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}
-            <Typography level={"title-md"} sx={{color: "#ffa726x`"}}>
+            <Typography level={"title-md"} sx={{ color: "#ffa726x`" }}>
               Note: This is a locked view and will not allow modification.
             </Typography>
-            <Typography level={"body-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"body-md"} sx={{ color: "#ffa726" }}>
               Please use this view as a way to confirm changes made to measurements.
             </Typography>
           </Box>

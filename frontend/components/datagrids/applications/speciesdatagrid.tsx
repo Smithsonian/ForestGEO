@@ -1,12 +1,12 @@
 "use client";
-import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {AlertProps} from "@mui/material";
-import React, {useState} from "react";
-import {useOrgCensusContext} from "@/app/contexts/userselectionprovider";
-import {randomId} from "@mui/x-data-grid-generator";
+import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { AlertProps } from "@mui/material";
+import React, { useState } from "react";
+import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
+import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {useSession} from "next-auth/react";
-import {Box, Button, Typography} from "@mui/joy";
+import { useSession } from "next-auth/react";
+import { Box, Button, Typography } from "@mui/joy";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
 import { SpeciesGridColumns } from "@/components/client/datagridcolumns";
 
@@ -57,7 +57,7 @@ export default function SpeciesDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const currentCensus = useOrgCensusContext();
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -84,12 +84,12 @@ export default function SpeciesDataGrid() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'speciesName'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'speciesName' },
     }));
   };
   return (
     <>
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -99,16 +99,16 @@ export default function SpeciesDataGrid() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{flexGrow: 1}}>
+          <Box sx={{ flexGrow: 1 }}>
             {session?.user.userStatus !== 'fieldcrew' && (
-              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
+              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}
-            <Typography level={"title-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"title-md"} sx={{ color: "#ffa726" }}>
               Note: This is a locked view and will not allow modification.
             </Typography>
-            <Typography level={"body-md"} sx={{color: "#ffa726"}}>
+            <Typography level={"body-md"} sx={{ color: "#ffa726" }}>
               Please use this view as a way to confirm changes made to measurements.
             </Typography>
           </Box>
@@ -121,7 +121,7 @@ export default function SpeciesDataGrid() {
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
         setIsUploadModalOpen(false);
         setRefresh(true);
-      }} formType={'species'}/>
+      }} formType={'species'} />
 
       <DataGridCommons
         gridType="species"

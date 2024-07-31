@@ -6,13 +6,50 @@ create table attributes
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
+create table batchprocessingflag
+(
+    flag_id       int auto_increment
+        primary key,
+    flag_status   enum ('STARTED', 'ENDED') not null,
+    needs_refresh tinyint(1) default 0      null
+);
+
+create table measurementssummary
+(
+    CoreMeasurementID int                                                          not null
+        primary key,
+    StemID            int                                                          null,
+    TreeID            int                                                          null,
+    SpeciesID         int                                                          null,
+    QuadratID         int                                                          null,
+    PlotID            int                                                          null,
+    CensusID          int                                                          null,
+    SpeciesName       varchar(64)                                                  null,
+    SubspeciesName    varchar(64)                                                  null,
+    SpeciesCode       varchar(25)                                                  null,
+    TreeTag           varchar(10)                                                  null,
+    StemTag           varchar(10)                                                  null,
+    StemLocalX        decimal(10, 6)                                               null,
+    StemLocalY        decimal(10, 6)                                               null,
+    StemUnits         enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
+    QuadratName       varchar(255)                                                 null,
+    MeasurementDate   date                                                         null,
+    MeasuredDBH       decimal(10, 6)                                               null,
+    DBHUnits          enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'cm' null,
+    MeasuredHOM       decimal(10, 6)                                               null,
+    HOMUnits          enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
+    IsValidated       bit                                             default b'0' null,
+    Description       varchar(255)                                                 null,
+    Attributes        varchar(255)                                                 null
+);
+
 create table plots
 (
     PlotID          int auto_increment
         primary key,
     PlotName        varchar(255)                                                        null,
-    LocationName    longtext                                                            null,
-    CountryName     longtext                                                            null,
+    LocationName    varchar(255)                                                        null,
+    CountryName     varchar(255)                                                        null,
     DimensionX      int                                                                 null,
     DimensionY      int                                                                 null,
     DimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  null,
@@ -22,19 +59,19 @@ create table plots
     GlobalY         decimal(10, 6)                                                      null,
     GlobalZ         decimal(10, 6)                                                      null,
     CoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  null,
-    PlotShape       text                                                                null,
-    PlotDescription text                                                                null
+    PlotShape       varchar(255)                                                        null,
+    PlotDescription varchar(255)                                                        null
 );
 
 create table census
 (
     CensusID         int auto_increment
         primary key,
-    PlotID           int  null,
-    StartDate        date null,
-    EndDate          date null,
-    Description      text null,
-    PlotCensusNumber int  null,
+    PlotID           int          null,
+    StartDate        date         null,
+    EndDate          date         null,
+    Description      varchar(255) null,
+    PlotCensusNumber int          null,
     constraint Census_Plots_PlotID_fk
         foreign key (PlotID) references plots (PlotID)
 );
@@ -54,7 +91,7 @@ create table quadrats
     DimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  null,
     Area            decimal(10, 6)                                                      null,
     AreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' null,
-    QuadratShape    text                                                                null,
+    QuadratShape    varchar(255)                                                        null,
     constraint unique_quadrat_name_per_census_plot
         unique (CensusID, PlotID, QuadratName),
     constraint Quadrats_Plots_FK
@@ -63,14 +100,32 @@ create table quadrats
         foreign key (CensusID) references census (CensusID)
 );
 
+create index idx_censusid_quadrats
+    on quadrats (CensusID);
+
+create index idx_pid_cid_quadrats
+    on quadrats (PlotID, CensusID);
+
+create index idx_plotid_quadrats
+    on quadrats (PlotID);
+
+create index idx_qid_pid_cid_quadrats
+    on quadrats (QuadratID, PlotID, CensusID);
+
+create index idx_qid_pid_quadrats
+    on quadrats (QuadratID, PlotID);
+
+create index idx_quadratid_quadrats
+    on quadrats (QuadratID);
+
 create table reference
 (
     ReferenceID       int auto_increment
         primary key,
-    PublicationTitle  varchar(64) null,
-    FullReference     text        null,
-    DateOfPublication date        null,
-    Citation          varchar(50) null
+    PublicationTitle  varchar(64)  null,
+    FullReference     varchar(255) null,
+    DateOfPublication date         null,
+    Citation          varchar(50)  null
 );
 
 create table family
@@ -106,7 +161,7 @@ create table roles
     RoleID          int auto_increment
         primary key,
     RoleName        varchar(255) null,
-    RoleDescription text         null
+    RoleDescription varchar(255) null
 );
 
 create table personnel
@@ -147,13 +202,13 @@ create table species
     GenusID             int          null,
     SpeciesCode         varchar(25)  null,
     SpeciesName         varchar(64)  null,
-    SubspeciesName      varchar(255) null,
+    SubspeciesName      varchar(64)  null,
     IDLevel             varchar(20)  null,
     SpeciesAuthority    varchar(128) null,
-    SubspeciesAuthority varchar(255) null,
+    SubspeciesAuthority varchar(128) null,
     FieldFamily         varchar(32)  null,
-    Description         text         null,
-    ValidCode           longtext     null,
+    Description         varchar(255) null,
+    ValidCode           varchar(255) null,
     ReferenceID         int          null,
     constraint SpeciesCode
         unique (SpeciesCode),
@@ -197,9 +252,6 @@ create table subquadrats
         foreign key (QuadratID) references quadrats (QuadratID)
 );
 
-create index QuadratID
-    on subquadrats (QuadratID);
-
 create table trees
 (
     TreeID    int auto_increment
@@ -224,7 +276,7 @@ create table stems
     LocalY          decimal(10, 6)                                              null,
     CoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm' null,
     Moved           bit                                                         null,
-    StemDescription text                                                        null,
+    StemDescription varchar(255)                                                null,
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID),
     constraint stems_quadrats_QuadratID_fk
@@ -235,6 +287,7 @@ create table coremeasurements
 (
     CoreMeasurementID int auto_increment
         primary key,
+    CensusID          int                                                          null,
     StemID            int                                                          null,
     IsValidated       bit                                             default b'0' null,
     MeasurementDate   date                                                         null,
@@ -242,10 +295,12 @@ create table coremeasurements
     DBHUnit           enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'cm' null,
     MeasuredHOM       decimal(10, 6)                                               null,
     HOMUnit           enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
-    Description       text                                                         null,
+    Description       varchar(255)                                                 null,
     UserDefinedFields text                                                         null,
     constraint FK_CoreMeasurements_Stems
-        foreign key (StemID) references stems (StemID)
+        foreign key (StemID) references stems (StemID),
+    constraint coremeasurements_census_CensusID_fk
+        foreign key (CensusID) references census (CensusID)
 );
 
 create table cmattributes
@@ -272,7 +327,22 @@ create table cmverrors
         foreign key (ValidationErrorID) references catalog.validationprocedures (ValidationID)
 );
 
-create index idx_stemid
+create index idx_censusid_coremeasurements
+    on coremeasurements (CensusID);
+
+create index idx_cmid_cid_coremeasurements
+    on coremeasurements (CoreMeasurementID, CensusID);
+
+create index idx_cmid_cid_sid_coremeasurements
+    on coremeasurements (CoreMeasurementID, CensusID, StemID);
+
+create index idx_coremeasurementid_coremeasurements
+    on coremeasurements (CoreMeasurementID);
+
+create index idx_measurementdate_coremeasurements
+    on coremeasurements (MeasurementDate);
+
+create index idx_stemid_coremeasurements
     on coremeasurements (StemID);
 
 create table specimens
@@ -287,15 +357,27 @@ create table specimens
     Voucher        smallint unsigned null,
     CollectionDate date              null,
     DeterminedBy   varchar(64)       null,
-    Description    text              null,
+    Description    varchar(255)      null,
     constraint specimens_personnel_PersonnelID_fk
         foreign key (PersonnelID) references personnel (PersonnelID),
     constraint specimens_stems_StemID_fk
         foreign key (StemID) references stems (StemID)
 );
 
-create index idx_stemid
+create index idx_quadratid_stems
+    on stems (QuadratID);
+
+create index idx_sid_tid_qid_stems
+    on stems (StemID, TreeID, QuadratID);
+
+create index idx_stemid_stems
     on stems (StemID);
+
+create index idx_stemid_treeid_stems
+    on stems (StemID, TreeID);
+
+create index idx_treeid_stems
+    on stems (TreeID);
 
 create table unifiedchangelog
 (
@@ -319,10 +401,87 @@ create table validationchangelog
     RunDateTime        datetime default CURRENT_TIMESTAMP not null,
     TargetRowID        int                                null,
     ValidationOutcome  enum ('Passed', 'Failed')          null,
-    ErrorMessage       text                               null,
-    ValidationCriteria text                               null,
+    ErrorMessage       varchar(255)                       null,
+    ValidationCriteria varchar(255)                       null,
     MeasuredValue      varchar(255)                       null,
     ExpectedValueRange varchar(255)                       null,
-    AdditionalDetails  text                               null
+    AdditionalDetails  varchar(255)                       null
+);
+
+create table viewfulltable
+(
+    CoreMeasurementID         int                                                                                                             not null
+        primary key,
+    MeasurementDate           date                                                                                                            null,
+    MeasuredDBH               decimal(10, 6)                                                                                                  null,
+    DBHUnits                  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'cm'    null,
+    MeasuredHOM               decimal(10, 6)                                                                                                  null,
+    HOMUnits                  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    Description               varchar(255)                                                                                                    null,
+    IsValidated               bit                                                                                             default b'0'    null,
+    PlotID                    int                                                                                                             null,
+    PlotName                  varchar(255)                                                                                                    null,
+    LocationName              varchar(255)                                                                                                    null,
+    CountryName               varchar(255)                                                                                                    null,
+    DimensionX                int                                                                                                             null,
+    DimensionY                int                                                                                                             null,
+    PlotDimensionUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    PlotArea                  decimal(10, 6)                                                                                                  null,
+    PlotAreaUnits             enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2')                                          default 'm2'    null,
+    PlotGlobalX               decimal(10, 6)                                                                                                  null,
+    PlotGlobalY               decimal(10, 6)                                                                                                  null,
+    PlotGlobalZ               decimal(10, 6)                                                                                                  null,
+    PlotCoordinateUnits       enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    PlotShape                 varchar(255)                                                                                                    null,
+    PlotDescription           varchar(255)                                                                                                    null,
+    CensusID                  int                                                                                                             null,
+    CensusStartDate           date                                                                                                            null,
+    CensusEndDate             date                                                                                                            null,
+    CensusDescription         varchar(255)                                                                                                    null,
+    PlotCensusNumber          int                                                                                                             null,
+    QuadratID                 int                                                                                                             null,
+    QuadratName               varchar(255)                                                                                                    null,
+    QuadratDimensionX         int                                                                                                             null,
+    QuadratDimensionY         int                                                                                                             null,
+    QuadratDimensionUnits     enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    QuadratArea               decimal(10, 6)                                                                                                  null,
+    QuadratAreaUnits          enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2')                                          default 'm2'    null,
+    QuadratStartX             decimal(10, 6)                                                                                                  null,
+    QuadratStartY             decimal(10, 6)                                                                                                  null,
+    QuadratCoordinateUnits    enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    QuadratShape              varchar(255)                                                                                                    null,
+    SubquadratID              int                                                                                                             null,
+    SubquadratName            varchar(255)                                                                                                    null,
+    SubquadratDimensionX      int                                                                                                             null,
+    SubquadratDimensionY      int                                                                                                             null,
+    SubquadratDimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    SubquadratX               int                                                                                                             null,
+    SubquadratY               int                                                                                                             null,
+    SubquadratCoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    TreeID                    int                                                                                                             null,
+    TreeTag                   varchar(10)                                                                                                     null,
+    StemID                    int                                                                                                             null,
+    StemTag                   varchar(10)                                                                                                     null,
+    StemLocalX                decimal(10, 6)                                                                                                  null,
+    StemLocalY                decimal(10, 6)                                                                                                  null,
+    StemCoordinateUnits       enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
+    PersonnelID               int                                                                                                             null,
+    FirstName                 varchar(50)                                                                                                     null,
+    LastName                  varchar(50)                                                                                                     null,
+    PersonnelRoles            varchar(255)                                                                                                    null,
+    SpeciesID                 int                                                                                                             null,
+    SpeciesCode               varchar(25)                                                                                                     null,
+    SpeciesName               varchar(64)                                                                                                     null,
+    SubspeciesName            varchar(64)                                                                                                     null,
+    SubspeciesAuthority       varchar(128)                                                                                                    null,
+    SpeciesIDLevel            varchar(20)                                                                                                     null,
+    GenusID                   int                                                                                                             null,
+    Genus                     varchar(32)                                                                                                     null,
+    GenusAuthority            varchar(32)                                                                                                     null,
+    FamilyID                  int                                                                                                             null,
+    Family                    varchar(32)                                                                                                     null,
+    AttributeCode             varchar(10)                                                                                                     null,
+    AttributeDescription      varchar(255)                                                                                                    null,
+    AttributeStatus           enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 

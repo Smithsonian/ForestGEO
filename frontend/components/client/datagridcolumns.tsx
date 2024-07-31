@@ -1,16 +1,18 @@
 import { unitSelectionOptions, areaSelectionOptions } from "@/config/macros";
 import { AttributeStatusOptions } from "@/config/sqlrdsdefinitions/tables/attributerds";
-import { Stack, Typography } from "@mui/joy";
-import { GridColDef } from "@mui/x-data-grid";
+import { Box, FormHelperText, Input, Option, Select, Stack, Typography } from "@mui/joy";
+import { GridCellParams, GridColDef, GridRenderCellParams, GridRenderEditCellParams, useGridApiRef } from "@mui/x-data-grid";
+import { useEffect, useState } from "react";
 
 const formatHeader = (word1: string, word2: string) => (
   <Stack direction={"column"} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-    <Typography level="body-sm" fontWeight={"xl"}>{word1}</Typography>
+    <Typography level="body-sm" fontWeight={"bold"}>{word1}</Typography>
     <Typography level="body-xs">{word2}</Typography>
   </Stack>
 );
 
 export const quadratGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'quadratID', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'quadratName', headerName: 'Quadrat Name', headerClassName: 'header', renderHeader: () => formatHeader("Quadrat", "Name"), flex: 0.75, align: 'right', headerAlign: 'right', type: 'string', editable: true },
   { field: 'startX', headerName: 'X', headerClassName: 'header', flex: 0.5, align: 'right', headerAlign: 'right', type: 'number', editable: true },
@@ -25,6 +27,7 @@ export const quadratGridColumns: GridColDef[] = [
 ];
 
 export const AllTaxonomiesViewGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'speciesID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: false },
   { field: 'speciesCode', headerName: 'Species Code', renderHeader: () => formatHeader("Species", "Code"), headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
@@ -39,19 +42,17 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
   { field: 'subspeciesAuthority', headerName: 'Subspecies Auth', renderHeader: () => formatHeader("Subspecies", "Authority"), headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'fieldFamily', headerName: 'Field Family', renderHeader: () => formatHeader("Field", "Family"), headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'speciesDescription', headerName: 'Species Description', renderHeader: () => formatHeader("Species", "Description"), headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'referenceID', headerName: 'Reference ID', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'publicationTitle', headerName: 'Publication', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'dateOfPublication', headerName: 'Publish Date', renderHeader: () => formatHeader("Publish", "Date"), headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'citation', headerName: 'Citation', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
 ];
 
 export const AttributeGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'code', headerName: 'Code', headerClassName: 'header', minWidth: 150, flex: 1, editable: true }, // all unique ID columns need to be tagged 'id'
   { field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 250, flex: 1, align: 'left', editable: true },
   { field: 'status', headerName: 'Status', headerClassName: 'header', minWidth: 150, flex: 1, align: 'left', editable: true, type: 'singleSelect', valueOptions: AttributeStatusOptions, },
 ];
 
 export const PersonnelGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'censusID', headerName: 'Census ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
@@ -60,19 +61,20 @@ export const PersonnelGridColumns: GridColDef[] = [
 ];
 
 export const StemTaxonomiesViewGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'stemID', headerName: '#', headerClassName: 'header', flex: 0.1, align: 'left' },
   { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'speciesCode', headerName: 'Species Code', renderHeader: () => formatHeader("Species", "Code"), headerClassName: 'header', flex: 1, align: 'left', },
+  { field: 'speciesCode', headerName: 'Species Code', renderHeader: () => formatHeader("Species", "Code"), headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'genusID', headerName: 'Genus ID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'subspeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'genusAuthority', headerName: 'Genus Authority', renderHeader: () => formatHeader("Genus", "Authority"), headerClassName: 'header', flex: 1, align: 'left', },
+  { field: 'genusAuthority', headerName: 'Genus Authority', renderHeader: () => formatHeader("Genus", "Authority"), headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'speciesAuthority', headerName: 'Species Authority', renderHeader: () => formatHeader("Species", "Authority"), headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'subspeciesAuthority', headerName: 'Subspecies Authority', renderHeader: () => formatHeader("Subspecies", "Authority"), headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'speciesIDLevel', headerName: 'Species ID Level', renderHeader: () => formatHeader("Species", "ID Level"), headerClassName: 'header', flex: 1, align: 'left' },
@@ -80,12 +82,162 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
 ];
 
 // note --> originally attempted to use GridValueFormatterParams, but this isn't exported by MUI X DataGrid anymore. replaced with <any> for now. 
+
+const renderDBHCell = (params: GridRenderEditCellParams) => {
+  const value = params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null';
+  const units = params.row.dbhUnits || '';
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+      <Typography level="body-sm">{value}</Typography>
+      <Typography level="body-sm">{units}</Typography>
+    </Box>
+  );
+};
+
+
+const renderEditDBHCell = (params: GridRenderEditCellParams) => {
+  const apiRef = useGridApiRef();
+  const { id, row } = params;
+  const [error, setError] = useState(false);
+  const [value, setValue] = useState(row.measuredDBH);
+
+  const handleValueChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const inputValue = event.target.value;
+    const isValid = /^\d*\.?\d{0,2}$/.test(inputValue);
+    setError(!isValid);
+    if (isValid) {
+      setValue(inputValue);
+    }
+  };
+
+  const handleValueBlur = () => {
+    const truncatedValue = Number(value).toFixed(2);
+    apiRef.current.setEditCellValue({ id, field: 'measuredDBH', value: truncatedValue });
+  };
+
+  const handleUnitsChange = (_event: React.SyntheticEvent | null, newValue: string | null) => {
+    if (newValue !== null) {
+      apiRef.current.setEditCellValue({ id, field: 'dbhUnits', value: newValue });
+    }
+  };
+
+  useEffect(() => {
+    setValue(row.measuredDBH);
+  }, [row.measuredDBH]);
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+      <Stack direction="column">
+        <Input
+          value={value}
+          onChange={handleValueChange}
+          onBlur={handleValueBlur}
+          error={error}
+          placeholder="Diameter at breast height (DBH)"
+          required
+          slotProps={{
+            input: {
+              'aria-invalid': error,
+            },
+          }}
+        />
+        {error && (
+          <FormHelperText>
+            <Typography color="danger">Only numbers with up to 2 decimal places accepted!</Typography>
+          </FormHelperText>
+        )}
+      </Stack>
+      <Select value={row.dbhUnits} onChange={handleUnitsChange} placeholder={"Units"} required>
+        {unitSelectionOptions.map((option) => (
+          <Option key={option} value={option}>
+            {option}
+          </Option>
+        ))}
+      </Select>
+    </Box>
+  );
+};
+
+const renderHOMCell = (params: GridRenderEditCellParams) => {
+  const value = params.row.measuredHOM ? Number(params.row.measuredHOM).toFixed(2) : 'null';
+  const units = params.row.homUnits || '';
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+      <Typography level="body-sm">{value}</Typography>
+      <Typography level="body-sm">{units}</Typography>
+    </Box>
+  );
+};
+
+const renderEditHOMCell = (params: GridRenderEditCellParams) => {
+  const apiRef = useGridApiRef();
+  const { id, row } = params;
+  const [error, setError] = useState(false);
+  const [value, setValue] = useState(row.measuredHOM);
+
+  const handleValueChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const inputValue = event.target.value;
+    const isValid = /^\d*\.?\d{0,2}$/.test(inputValue);
+    setError(!isValid);
+    if (isValid) {
+      setValue(inputValue);
+    }
+  };
+
+  const handleValueBlur = () => {
+    const truncatedValue = Number(value).toFixed(2);
+    apiRef.current.setEditCellValue({ id, field: 'measuredHOM', value: truncatedValue });
+  };
+
+  const handleUnitsChange = (_event: React.SyntheticEvent | null, newValue: string | null) => {
+    if (newValue !== null) {
+      apiRef.current.setEditCellValue({ id, field: 'homUnits', value: newValue });
+    }
+  };
+
+  useEffect(() => {
+    setValue(row.measuredHOM);
+  }, [row.measuredHOM]);
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+      <Stack direction="column">
+        <Input
+          value={value}
+          onChange={handleValueChange}
+          onBlur={handleValueBlur}
+          error={error}
+          placeholder="Height of Measure (HOM)"
+          required
+          slotProps={{
+            input: {
+              'aria-invalid': error,
+            },
+          }}
+        />
+        {error && (
+          <FormHelperText>
+            <Typography color="danger">Only numbers with up to 2 decimal places accepted!</Typography>
+          </FormHelperText>
+        )}
+      </Stack>
+      <Select value={row.homUnits} onChange={handleUnitsChange} placeholder={"Units"} required>
+        {unitSelectionOptions.map((option) => (
+          <Option key={option} value={option}>
+            {option}
+          </Option>
+        ))}
+      </Select>
+    </Box>
+  );
+};
+
+
 export const msvGridColumns: GridColDef[] = [
+  { field: 'id', headerName: 'ID', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
-  { field: 'plotID', headerName: 'Plot ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'plotName', headerName: 'Plot Name', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'censusID', headerName: 'Census ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'quadratID', headerName: 'Quadrat ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'quadratName', headerName: 'Quadrat', headerAlign: 'left', headerClassName: 'header', flex: 0.8, align: 'left', editable: true },
   { field: 'speciesID', headerName: 'Species ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'speciesCode', headerName: 'Species Code', headerAlign: 'left', headerClassName: 'header', flex: 1.2, align: 'left', editable: true },
@@ -93,34 +245,59 @@ export const msvGridColumns: GridColDef[] = [
   { field: 'treeTag', headerName: 'Tree', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
   { field: 'stemID', headerName: 'Stem ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'stemTag', headerName: 'Stem', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
-  { field: 'stemLocalX', headerName: 'X', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
-  { field: 'stemLocalY', headerName: 'Y', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
-  { field: 'stemUnits', headerName: 'Stem Units', headerClassName: 'header', flex: 0.4, renderHeader: () => formatHeader("Stem", "Units"), align: 'center', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions },
-  { field: 'personnelID', headerName: 'Personnel ID', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'personnelName', headerName: 'Recording', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  { field: 'stemLocalX', headerName: 'X', headerAlign: 'left', headerClassName: 'header', flex: 0.7, 
+    type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    }, maxWidth: 100, align: 'left', editable: true },
+  { field: 'stemLocalY', headerName: 'Y', headerAlign: 'left', headerClassName: 'header', flex: 0.7, 
+    type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    }, 
+    maxWidth: 100, align: 'left', editable: true },
+  { field: 'stemUnits', headerName: 'Stem Units', headerClassName: 'header', flex: 0.4, maxWidth: 65,
+    renderHeader: () => formatHeader("Stem", "Units"), align: 'center', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions },
   {
-    field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 0.8, align: 'left', editable: true,
-    valueFormatter: (params: any) => {
-      if (!params || !params.value) return 0;
-      const value = Number(params.value);
-      return value.toFixed(2); // limit trailing decimals to 2 places
-    }
+    field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 0.8, align: 'right', editable: true, 
+    // type: 'number',
+    // valueFormatter: (value: any) => {
+    //   return Number(value).toFixed(2);
+    // }
+    renderCell: renderDBHCell,
+    renderEditCell: renderEditDBHCell,
+    // valueFormatter: (params: any) => {
+    //   const value = params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null';
+    //   const units = params.row.dbhUnits || '';
+    //   return `${value} ${units}`;
+    // }
   },
-  { field: 'dbhUnits', headerName: 'DBH Units', headerClassName: 'header', flex: 0.4, renderHeader: () => formatHeader("DBH", "Units"), align: 'center', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions },
   {
-    field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 0.5, align: 'left', editable: true,
-    valueFormatter: (params: any) => {
-      if (!params || !params.value) return 0;
-      const value = Number(params.value);
-      return value.toFixed(2); // limit trailing decimals to 2 places
-    }
+    field: 'dbhUnits', headerName: 'DBH Units', headerClassName: 'header', flex: 0.4, maxWidth: 65,
+    renderHeader: () => formatHeader("DBH", "Units"), align: 'center', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions },
+  {
+    field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 0.5, align: 'right', headerAlign: 'left', editable: true,
+    // type: 'number',
+    // valueFormatter: (value: any) => {
+    //   return Number(value).toFixed(2);
+    // }
+    renderCell: renderHOMCell,
+    renderEditCell: renderEditHOMCell,
+    // valueFormatter: (params: any) => {
+    //   const value = params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null';
+    //   const units = params.row.dbhUnits || '';
+    //   return `${value} ${units}`;
+    // }
   },
-  { field: 'homUnits', headerName: 'HOM Units', headerClassName: 'header', flex: 0.4, renderHeader: () => formatHeader("HOM", "Units"), align: 'center', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions },
+  {
+    field: 'homUnits', headerName: 'HOM Units', headerClassName: 'header', flex: 0.4, maxWidth: 65,
+    renderHeader: () => formatHeader("HOM", "Units"), align: 'center', editable: true, type: 'singleSelect', valueOptions: unitSelectionOptions },
   { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true }
 ];
 
 export const CensusGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'censusID', headerName: 'ID', type: 'number', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'plotCensusNumber', headerName: 'PlotCensusNumber', type: 'number', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   {
@@ -143,11 +320,13 @@ export const CensusGridColumns: GridColDef[] = [
 ];
 
 export const ValidationErrorGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left', },
   { field: 'validationErrorDescription', headerName: 'ValidationErrorDescription', headerClassName: 'header', flex: 1, align: 'left', },
 ];
 
 export const CoreMeasurementsGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'isValidated', headerName: 'IsValidated', headerClassName: 'header', flex: 1, align: 'left', editable: false },
@@ -164,6 +343,7 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
 ];
 
 export const SubquadratGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'ordering', headerName: 'Order', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'subquadratName', headerName: 'Name', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'quadratID', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left', editable: false },
@@ -175,6 +355,7 @@ export const SubquadratGridColumns: GridColDef[] = [
 ];
 
 export const StemGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'stemTag', headerName: 'Stem Tag', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
   { field: 'localX', headerName: 'Plot X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
   { field: 'localY', headerName: 'Plot Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
@@ -184,6 +365,7 @@ export const StemGridColumns: GridColDef[] = [
 ];
 
 export const SpeciesInventoryGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'speciesInventoryID', headerName: 'SpeciesInventoryID', headerClassName: 'header', flex: 1, align: 'left', },
   { field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left', },
   { field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left', },
@@ -192,6 +374,7 @@ export const SpeciesInventoryGridColumns: GridColDef[] = [
 ];
 
 export const SpeciesGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   // { field: 'id', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', maxWidth: 50},
   { field: 'speciesCode', headerName: 'SpCode', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true, maxWidth: 125 },
   // {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
@@ -209,12 +392,14 @@ export const SpeciesGridColumns: GridColDef[] = [
 ];
 
 export const RolesGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'roleID', headerName: 'RoleID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'roleDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: false },
 ];
 
 export const ReferenceGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', },
   { field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1, align: 'left', },
   { field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1, align: 'left', },
@@ -228,6 +413,7 @@ export const ReferenceGridColumns: GridColDef[] = [
 ];
 
 export const PlotGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'plotName', headerName: 'PlotName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'locationName', headerName: 'LocationName', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
@@ -244,6 +430,7 @@ export const PlotGridColumns: GridColDef[] = [
 ];
 
 export const GenusGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
@@ -252,17 +439,20 @@ export const GenusGridColumns: GridColDef[] = [
 ];
 
 export const FamilyGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
 ];
 export const CMVErrorGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'cmvErrorID', headerName: 'CMVErrorID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left' },
 ];
 
 export const CMAttributeGridColumns: GridColDef[] = [
+  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'cmaID', headerName: 'CMAID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1, align: 'left' },

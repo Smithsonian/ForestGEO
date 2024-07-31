@@ -1,4 +1,5 @@
 // attributes custom data type
+import { createInitialObject, ResultType } from "@/config/utils";
 import {IDataMapper} from "../../datamapper";
 import {FileRow, RowValidationErrors, ValidationFunction} from '@/config/macros/formdetails';
 
@@ -26,38 +27,10 @@ export type AttributesRDS = {
   status?: string;
 };
 
-export const initialAttributesRDSRow = {
-  id: 0,
-  code: '',
-  description: '',
-  status: '',
-};
+export const initialAttributesRDSRow = createInitialObject<AttributesRDS>();
 
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
 
-export interface AttributesResult {
-  Code: any;
-  Description: any;
-  Status: any;
-}
-
-export class AttributesMapper implements IDataMapper<AttributesResult, AttributesRDS> {
-  mapData(results: AttributesResult[], indexOffset: number = 1): AttributesRDS[] {
-    return results.map((item, index) => ({
-      id: index + indexOffset,
-      code: item.Code != null ? String(item.Code) : undefined,
-      description: item.Description != null ? String(item.Description) : undefined,
-      status: item.Status != null ? String(item.Status) : undefined,
-    }));
-  }
-
-  demapData(results: AttributesRDS[]): AttributesResult[] {
-    return results.map((item) => ({
-      Code: item.code !== undefined ? String(item.code) : null,
-      Description: item.description !== undefined ? String(item.description) : null,
-      Status: item.status !== undefined ? String(item.status) : null,
-    }));
-  }
-}
+export type AttributesResult = ResultType<AttributesRDS>;
 
 export const attributesFields = ['code', 'description', 'status'];

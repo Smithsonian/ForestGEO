@@ -87,7 +87,8 @@ function MenuRenderToggle(
         if (setMenuOpen) {
           setMenuOpen(!menuOpen);
         }
-      }}>
+      }}
+      sx={{ width: '100%', padding: 0, margin: 0 }}>
       <Tooltip title={isParentDataIncomplete ? "Missing Core Data!" : "Requirements Met"} arrow>
         <Badge
           color="danger"
@@ -217,9 +218,9 @@ export default function Sidebar(props: SidebarProps) {
       const mapper = new OrgCensusToCensusResultMapper();
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
       if (!newCensusID) throw new Error("census creation failure");
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500)); // debounce
     } else {
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500)); // debounce
       // if (rolledOverQuadrats) { // passing census list loading trigger to stems rollover function:
       //   setIsRolloverStemsModalOpen(true);
       // } else setCensusListLoaded(false);
@@ -359,12 +360,12 @@ export default function Sidebar(props: SidebarProps) {
             <Stack direction={"column"} alignItems={'start'}>
               <Typography color={(!census) ? "danger" : "primary"} level="body-sm" className="sidebar-item">
                 {(census !== undefined) && (
-                  <>{(census.dateRanges[0]?.startDate !== undefined) ? `\u2014 First Measurement: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : 'No Measurements'}</>
+                  <>{(census.dateRanges[0]?.startDate !== undefined) ? `\u2014 First Record: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}` : 'No Records'}</>
                 )}
               </Typography>
               <Typography color={(!census) ? "danger" : "primary"} level="body-sm" className="sidebar-item">
                 {(census !== undefined) && (
-                  <>{(census.dateRanges[0]?.endDate !== undefined) ? `\u2014 Last Measurement ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : ``}</>
+                  <>{(census.dateRanges[0]?.endDate !== undefined) ? `\u2014 Last Record ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : ``}</>
                 )}
               </Typography>
             </Stack>
@@ -702,14 +703,14 @@ export default function Sidebar(props: SidebarProps) {
                   display: 'flex',
                   flexDirection: 'column',
                   [`& .${listItemButtonClasses.root}`]: {
-                    gap: 1.5,
+                    // gap: 1.5,
                   },
                 }}
               >
                 <List
                   size="lg"
                   sx={{
-                    gap: 1,
+                    // gap: 1,
                     '--List-nestedInsetStart': '30px',
                     '--ListItem-radius': (theme) => theme.vars.radius.sm,
                   }}
@@ -756,14 +757,14 @@ export default function Sidebar(props: SidebarProps) {
                       return (
                         <TransitionComponent key={item.href} in={site !== undefined && plot !== undefined} style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem
-                            className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : ''}`}
+                            // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : ''}`}
                             onMouseEnter={() => setHoveredIndex(index)}
                             onMouseLeave={() => setHoveredIndex(null)}
                           >
                             {site !== undefined && plot !== undefined && census !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }}>
-                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }} disabled={isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
+                                  <ListItemButton selected={pathname === item.href} sx={{ flex: 1, width: '100%' }} disabled={isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
                                     if (!isLinkDisabled) {
                                       router.push(item.href);
                                     }
@@ -779,7 +780,7 @@ export default function Sidebar(props: SidebarProps) {
                               </Tooltip>
                             ) : (
                               <Box sx={{ display: 'flex', flex: 1 }}>
-                                <ListItemButton selected={pathname === item.href} sx={{ flex: 1 }} disabled={plot === undefined || census === undefined || isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
+                                <ListItemButton selected={pathname === item.href} sx={{ flex: 1, width: '100%' }} disabled={plot === undefined || census === undefined || isLinkDisabled} color={pathname === item.href ? 'primary' : undefined} onClick={() => {
                                   if (!isLinkDisabled) {
                                     router.push(item.href);
                                   }
@@ -805,7 +806,7 @@ export default function Sidebar(props: SidebarProps) {
                           style={{ transitionDelay: `${delay}ms` }} direction="down">
                           <ListItem
                             nested
-                            className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
+                            // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
                             onMouseEnter={() => setHoveredIndex(index)}
                             onMouseLeave={() => setHoveredIndex(null)}
                           >
@@ -815,7 +816,7 @@ export default function Sidebar(props: SidebarProps) {
                               pathname, isParentDataIncomplete
                             }, item, toggle, setToggle)}
                               isOpen={!!toggle}>
-                              <List sx={{ gap: 0.75 }} size={"sm"}>
+                              <List size={"md"}>
                                 {item.expanded.map((link, subIndex) => {
                                   if (link.href === '/subquadrats' && !currentPlot?.usesSubquadrats) return null;
                                   const SubIcon = link.icon;
@@ -832,11 +833,11 @@ export default function Sidebar(props: SidebarProps) {
                                         onMouseLeave={() => setHoveredIndex(null)}
                                         sx={{ marginTop: 0.75 }}
                                       > */}
-                                      <ListItem sx={{ marginTop: 0.75 }} >
+                                      <ListItem>
                                         {site !== undefined && plot !== undefined && census !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }}>
-                                              <ListItemButton sx={{ flex: 1 }} selected={pathname == (item.href + link.href)} color={pathname === item.href ? 'primary' : undefined}
+                                              <ListItemButton sx={{ flex: 1, width: '100%' }} selected={pathname == (item.href + link.href)} color={pathname === item.href ? 'primary' : undefined}
                                                 disabled={isLinkDisabled} onClick={() => {
                                                   if (!isLinkDisabled) {
                                                     router.push(item.href + link.href);
@@ -856,7 +857,7 @@ export default function Sidebar(props: SidebarProps) {
                                           </Tooltip>
                                         ) : (
                                           <Box sx={{ display: 'flex', flex: 1 }}>
-                                            <ListItemButton sx={{ flex: 1 }} selected={pathname == (item.href + link.href)} color={pathname === item.href ? 'primary' : undefined}
+                                            <ListItemButton sx={{ flex: 1, width: '100%' }} selected={pathname == (item.href + link.href)} color={pathname === item.href ? 'primary' : undefined}
                                               disabled={plot === undefined || census === undefined || isLinkDisabled} onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);
@@ -901,7 +902,7 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
-      </Stack>
+      </Stack >
     </>
   );
 }

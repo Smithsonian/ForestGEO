@@ -1,27 +1,22 @@
 // cmattributes custom data type
+
+import { ResultType } from "@/config/utils";
+
 // cmverrors custom data type
 export type CMAttributesRDS = {
-  id: number;
-  cmaID: number;
-  coreMeasurementID: number | null;
-  code: string | null;
+  id?: number;
+  cmaID?: number;
+  coreMeasurementID?: number;
+  code?: string;
 };
 
-export interface CMAttributesResult {
-  CMAID: any;
-  CoreMeasurementID: any;
-  Code: any;
-}
+export type CMAttributesResult = ResultType<CMAttributesRDS>;
 
 export type CMVErrorRDS = {
-  id: number;
-  cmvErrorID: number;
-  coreMeasurementID: number | null;
-  validationErrorID: number | null;
+  id?: number;
+  cmvErrorID?: number;
+  coreMeasurementID?: number;
+  validationErrorID?: number;
 };
 
-export interface CMVErrorResult {
-  CMVErrorID: any;
-  CoreMeasurementID: any;
-  ValidationErrorID: any;
-}
+export type CMVErrorResult = ResultType<CMVErrorRDS>;

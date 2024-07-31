@@ -1,8 +1,8 @@
-import mysql, {PoolConnection} from "mysql2/promise";
-import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery} from "@/components/processors/processormacros";
-import {SitesResult} from '@/config/sqlrdsdefinitions/tables/sitesrds';
-import {processCensus} from "@/components/processors/processcensus";
-import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import mysql, { PoolConnection } from "mysql2/promise";
+import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from "@/components/processors/processormacros";
+import { SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { processCensus } from "@/components/processors/processcensus";
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import MapperFactory from "@/config/datamapper";
 
 export async function getPersonnelIDByName(
@@ -40,17 +40,17 @@ export async function getPersonnelIDByName(
 }
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | undefined> {
-  const {formType, schema, ...subProps} = props;
-  const {connection, rowData} = subProps;
+  const { formType, schema, ...subProps } = props;
+  const { connection, rowData } = subProps;
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
   if (formType === 'measurements') {
-    return await processCensus({...subProps, schema});
+    return await processCensus({ ...subProps, schema });
   } else {
     if (mapping.specialProcessing) {
-      await mapping.specialProcessing({...subProps, schema});
+      await mapping.specialProcessing({ ...subProps, schema });
     } else {
       const columns = Object.keys(mapping.columnMappings);
       if (columns.includes('plotID')) rowData['plotID'] = subProps.plotID?.toString() ?? null;
@@ -116,7 +116,7 @@ export async function runValidationProcedure(
       totalRows: validationSummary.TotalRows,
       failedRows: validationSummary.FailedRows,
       message: validationSummary.Message,
-      ...(failedValidationIds.length > 0 && {failedCoreMeasurementIDs: failedValidationIds})
+      ...(failedValidationIds.length > 0 && { failedCoreMeasurementIDs: failedValidationIds })
     };
 
     await conn.commit();
@@ -142,7 +142,7 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
     const emailVerified = results.length > 0;
     const userStatus = results[0].UserStatus;
 
-    return {emailVerified, userStatus};
+    return { emailVerified, userStatus };
   } catch (error: any) {
     console.error('Error verifying email in database: ', error);
     throw error;
@@ -163,7 +163,7 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
     console.log('getallschemas: ', sitesResults);
 
-    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('sites');
+    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>('sites');
     return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
@@ -199,7 +199,7 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     const sitesParams = [userID];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    const mapper = MapperFactory.getMapper<SitesResult, SitesRDS>('sites');
+    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>('sites');
     return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
@@ -244,7 +244,7 @@ interface UpdateQueryConfig {
 }
 
 export function generateUpdateOperations(schema: string, newRow: any, oldRow: any, config: UpdateQueryConfig): string[] {
-  const {fieldList, slices} = config;
+  const { fieldList, slices } = config;
   const changedFields = detectFieldChanges(newRow, oldRow, fieldList);
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string[] => {
@@ -252,7 +252,7 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
     if (!sliceConfig) {
       return []; // Safety check in case of an undefined slice
     }
-    const {range, primaryKey} = sliceConfig;
+    const { range, primaryKey } = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
     const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
     return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
@@ -266,14 +266,14 @@ export function generateUpdateOperations(schema: string, newRow: any, oldRow: an
 }
 
 export function generateInsertOperations(schema: string, newRow: any, config: UpdateQueryConfig): string[] {
-  const {fieldList, slices} = config;
+  const { fieldList, slices } = config;
 
   const generateQueriesFromSlice = (type: keyof typeof slices): string => {
     const sliceConfig = slices[type];
     if (!sliceConfig) {
       return ''; // Safety check in case of an undefined slice
     }
-    const {range} = sliceConfig;
+    const { range } = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
     return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
   };
@@ -296,33 +296,6 @@ export function generateInsertQuery(schema: string, table: string, fields: strin
 }
 
 // Field definitions and configurations
-export const stemDimensionsViewFields = [
-  'treeTag', // slice (0, 1)
-  'stemTag', // slice (1, 5)
-  'stemLocalX',
-  'stemLocalY',
-  'stemUnits',
-  'subquadratName', // slice (5, 12)
-  'subquadratDimensionX',
-  'subquadratDimensionY',
-  'subquadratX',
-  'subquadratY',
-  'subquadratUnits',
-  'subquadratOrderPosition',
-  'quadratName', // slice (12, 16)
-  'quadratDimensionX',
-  'quadratDimensionY',
-  'quadratUnits',
-  'plotName', // slice (16, )
-  'locationName',
-  'countryName',
-  'plotDimensionX',
-  'plotDimensionY',
-  'plotGlobalX',
-  'plotGlobalY',
-  'plotGlobalZ',
-  'plotUnits',
-];
 
 export const allTaxonomiesFields = [
   'family',
@@ -359,34 +332,24 @@ export const stemTaxonomiesViewFields = [
   'speciesFieldFamily'
 ];
 
-export const StemDimensionsViewQueryConfig: UpdateQueryConfig = {
-  fieldList: stemDimensionsViewFields,
-  slices: {
-    trees: {range: [0, 1], primaryKey: 'TreeID'},
-    stems: {range: [1, 5], primaryKey: 'StemID'},
-    subquadrats: {range: [5, 12], primaryKey: 'SubquadratID'},
-    quadrats: {range: [12, 16], primaryKey: 'QuadratID'},
-    plots: {range: [16, stemDimensionsViewFields.length], primaryKey: 'PlotID'},
-  }
-};
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
-    family: {range: [0, 1], primaryKey: 'FamilyID'},
-    genus: {range: [1, 3], primaryKey: 'GenusID'},
-    species: {range: [3, 11], primaryKey: 'SpeciesID'},
-    reference: {range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID'},
+    family: { range: [0, 1], primaryKey: 'FamilyID' },
+    genus: { range: [1, 3], primaryKey: 'GenusID' },
+    species: { range: [3, 11], primaryKey: 'SpeciesID' },
+    reference: { range: [11, allTaxonomiesFields.length], primaryKey: 'ReferenceID' },
   }
 };
 
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
-    trees: {range: [0, 1], primaryKey: 'TreeID'},
-    stems: {range: [1, 2], primaryKey: 'StemID'},
-    family: {range: [2, 3], primaryKey: 'FamilyID'},
-    genus: {range: [3, 5], primaryKey: 'GenusID'},
-    species: {range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID'},
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 2], primaryKey: 'StemID' },
+    family: { range: [2, 3], primaryKey: 'FamilyID' },
+    genus: { range: [3, 5], primaryKey: 'GenusID' },
+    species: { range: [5, stemTaxonomiesViewFields.length], primaryKey: 'SpeciesID' },
   }
 };

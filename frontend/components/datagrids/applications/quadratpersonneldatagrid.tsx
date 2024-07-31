@@ -1,15 +1,15 @@
 // quadratpersonnel datagrid
 "use client";
-import {Box, Typography, Button} from "@mui/joy";
-import {AlertProps} from "@mui/material";
-import {GridColDef, GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {randomId} from "@mui/x-data-grid-generator";
-import {useSession} from "next-auth/react";
-import React, {useEffect, useState} from "react";
+import { Box, Typography, Button } from "@mui/joy";
+import { AlertProps } from "@mui/material";
+import { GridColDef, GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { randomId } from "@mui/x-data-grid-generator";
+import { useSession } from "next-auth/react";
+import React, { useEffect, useState } from "react";
 import DataGridCommons from "../datagridcommons";
-import { useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
-import {useDataValidityContext} from "@/app/contexts/datavalidityprovider";
-import {GridSelections} from "@/config/macros";
+import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
+import { GridSelections } from "@/config/macros";
 import { initialQuadratPersonnelRDSRow } from "@/config/sqlrdsdefinitions/tables/quadratpersonnelrds";
 import { useRouter } from 'next/navigation';
 
@@ -28,7 +28,7 @@ export default function QuadratPersonnelDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const router = useRouter();
 
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
@@ -37,7 +37,7 @@ export default function QuadratPersonnelDataGrid() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const {validity} = useDataValidityContext();
+  const { validity } = useDataValidityContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -55,7 +55,7 @@ export default function QuadratPersonnelDataGrid() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratID'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratID' },
     }));
   };
 
@@ -115,7 +115,7 @@ export default function QuadratPersonnelDataGrid() {
 
   return (
     <>
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -125,9 +125,9 @@ export default function QuadratPersonnelDataGrid() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{flexGrow: 1}}>
+          <Box sx={{ flexGrow: 1 }}>
             {session?.user.userStatus !== 'fieldcrew' && (
-              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
+              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}

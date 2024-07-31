@@ -23,7 +23,7 @@ export interface SitesResult {
   DefaultUOMHOM: any;
 }
 
-export class SitesMapper implements IDataMapper<SitesResult, SitesRDS> {
+export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
   demapData(results: SitesRDS[]): SitesResult[] {
     return results.map(item => ({
       SiteID: item.siteID != undefined ? String(item.siteID) : null,

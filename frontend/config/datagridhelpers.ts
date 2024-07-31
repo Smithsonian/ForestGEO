@@ -12,12 +12,10 @@ import {speciesFields} from './sqlrdsdefinitions/tables/speciesrds';
 import {subquadratsFields} from './sqlrdsdefinitions/tables/subquadratrds';
 import {
   allTaxonomiesFields,
-  stemDimensionsViewFields,
   stemTaxonomiesViewFields
 } from '@/components/processors/processorhelperfunctions';
 import {getAllTaxonomiesViewHCs} from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
 import {getMeasurementsSummaryViewHCs} from './sqlrdsdefinitions/views/measurementssummaryviewrds';
-import {getStemDimensionsViewHCs} from './sqlrdsdefinitions/views/stemdimensionsviewrds';
 import {getStemTaxonomiesViewHCs} from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
 import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltableviewrds';
 
@@ -76,10 +74,6 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getMeasurementsSummaryViewHCs()
   },
-  stemdimensionsview: {
-    id: false,
-    ...getStemDimensionsViewHCs()
-  },
   stemtaxonomiesview: {
     id: false,
     ...getStemTaxonomiesViewHCs()
@@ -122,8 +116,9 @@ export function getGridID(gridType: string): string {
     case 'coremeasurements':
     case 'measurementssummaryview':
     case 'viewfulltableview':
+    case 'measurementssummary': // materialized view --> should not be modified
+    case 'viewfulltable': // materialized view --> should not be modified
       return 'coreMeasurementID';
-    case 'stemdimensionsview':
     case 'stemtaxonomiesview':
       return 'stemID';
     case 'attributes':
@@ -177,8 +172,6 @@ export function computeMutation(
     case 'species':
       return speciesFields.some(field => newRow[field] !== oldRow[field]);
     // views
-    case 'stemdimensionsview':
-      return stemDimensionsViewFields.some(field => newRow[field] !== oldRow[field]);
     case 'stemtaxonomiesview':
       return stemTaxonomiesViewFields.some(field => newRow[field] !== oldRow[field]);
     case 'alltaxonomiesview':

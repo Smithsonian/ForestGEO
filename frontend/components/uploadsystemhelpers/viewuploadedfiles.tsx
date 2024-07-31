@@ -1,39 +1,40 @@
 "use client";
-import React, {Dispatch, SetStateAction, useCallback, useEffect, useState} from 'react';
-import {tableHeaderSettings} from "@/config/macros";
-import {fileColumns} from "@/config/macros/formdetails";
-import {UploadedFileData} from "@/config/macros/formdetails";
-import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
-import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow} from "@mui/material";
-import {DeleteIcon, DownloadIcon, EditIcon} from "@/components/icons";
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import { tableHeaderSettings } from "@/config/macros";
+import { fileColumns } from "@/config/macros/formdetails";
+import { UploadedFileData } from "@/config/macros/formdetails";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
+import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { DeleteIcon, DownloadIcon, EditIcon } from "@/components/icons";
 import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
-import {CensusRDS} from '@/config/sqlrdsdefinitions/tables/censusrds';
+import { CensusRDS } from '@/config/sqlrdsdefinitions/tables/censusrds';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
 interface LoadingFilesProps {
   currentPlot: Plot | null;
-  currentCensus: CensusRDS | null;
+  currentCensus: OrgCensus;
   refreshFiles: () => void;
 }
 
 function LoadingFiles(props: Readonly<LoadingFilesProps>) {
-  const {currentPlot, currentCensus, refreshFiles} = props;
+  const { currentPlot, currentCensus, refreshFiles } = props;
   useEffect(() => {
     refreshFiles();
   }, []); // on mount
 
   return (
-    <Box sx={{display: 'flex', flexDirection: "column"}}>
+    <Box sx={{ display: 'flex', flexDirection: "column" }}>
       <Typography level={"title-lg"}>
         Accessing
         Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
-        <br/>
-        <Button sx={{width: 'fit-content'}} onClick={refreshFiles}>Refresh Files</Button>
-        <br/>
+        <br />
+        <Button sx={{ width: 'fit-content' }} onClick={refreshFiles}>Refresh Files</Button>
+        <br />
         Uploaded CSV Files
       </Typography>
       <Card className="flex flex-col items-center justify-center gap-4 py-8 md:py-10">
@@ -42,10 +43,10 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
             <h5 className="text-md">Loading Files...</h5>
           </div>
         </CardHeader>
-        <Divider className={"mt-6 mb-6"}/>
+        <Divider className={"mt-6 mb-6"} />
         <CardContent>
-          <Box sx={{display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
-            <CircularProgress size={"lg"} color={"danger"} variant={"soft"}/>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <CircularProgress size={"lg"} color={"danger"} variant={"soft"} />
             <Typography variant={"soft"} color={"warning"}>Retrieving files...</Typography>
           </Box>
         </CardContent>
@@ -56,13 +57,13 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
 
 interface VUFProps {
   currentPlot: Plot | null;
-  currentCensus: CensusRDS | null;
+  currentCensus: OrgCensus;
   refreshFileList: boolean;
   setRefreshFileList: Dispatch<SetStateAction<boolean>>;
 }
 
 export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
-  const {currentPlot, currentCensus, refreshFileList, setRefreshFileList} = props;
+  const { currentPlot, currentCensus, refreshFileList, setRefreshFileList } = props;
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   const [openSnackbar, setOpenSnackbar] = useState(false);
@@ -153,7 +154,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   }, [errorMessage]);
 
   if (!isLoaded || !fileRows) {
-    return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles}/>;
+    return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles} />;
   } else {
     const sortedFileData: UploadedFileData[] = fileRows;
     if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date ? b.date : '').getTime() - new Date(a.date ? a.date : '').getTime());
@@ -168,20 +169,20 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     return (
       <>
         {/*CSV FILES*/}
-        <Box sx={{display: 'flex', flex: 1, flexDirection: "column", mb: 10}}>
-          <Box sx={{display: 'flex', flexDirection: "column"}}>
+        <Box sx={{ display: 'flex', flex: 1, flexDirection: "column", mb: 10 }}>
+          <Box sx={{ display: 'flex', flexDirection: "column" }}>
             <Typography level={"title-lg"} marginBottom={2}>
               Accessing
               Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
             </Typography>
-            <Button variant={"contained"} sx={{width: 'fit-content', marginBottom: 2}}
-                    onClick={refreshFiles}>Refresh
+            <Button variant={"contained"} sx={{ width: 'fit-content', marginBottom: 2 }}
+              onClick={refreshFiles}>Refresh
               Files</Button>
             <Typography level={"title-lg"}>
               Uploaded CSV Files
             </Typography>
           </Box>
-          <Box sx={{display: 'flex', flexDirection: "column", marginTop: 1}}>
+          <Box sx={{ display: 'flex', flexDirection: "column", marginTop: 1 }}>
             <TableContainer component={Paper}>
               <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
                 <TableHead>
@@ -233,11 +234,11 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           <TableCell align="center">
                             <Button
                               onClick={() => handleDownload(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                              <DownloadIcon/>
+                              <DownloadIcon />
                             </Button>
                             <Button
                               onClick={() => handleDelete(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                              <DeleteIcon/>
+                              <DeleteIcon />
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -282,14 +283,14 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                           <TableCell align="center">
                             <Button
                               onClick={() => handleDownload(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                              <DownloadIcon/>
+                              <DownloadIcon />
                             </Button>
                             <Button>
-                              <EditIcon/>
+                              <EditIcon />
                             </Button>
                             <Button
                               onClick={() => handleDelete(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
-                              <DeleteIcon/>
+                              <DeleteIcon />
                             </Button>
                           </TableCell>
                         </TableRow>

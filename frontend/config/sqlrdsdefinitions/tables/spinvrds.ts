@@ -1,5 +1,7 @@
 // species inventory custom data type
 
+import { ResultType } from "@/config/utils";
+
 export type SpeciesInventoryRDS = {
   id: number;
   speciesInventoryID: number;
@@ -9,10 +11,4 @@ export type SpeciesInventoryRDS = {
   subSpeciesID: number | null;
 };
 
-export interface SpeciesInventoryResult {
-  SpeciesInventoryID: any;
-  CensusID: any;
-  PlotID: any;
-  SpeciesID: any;
-  SubSpeciesID: any;
-}
+export type SpeciesInventoryResult = ResultType<SpeciesInventoryRDS>;

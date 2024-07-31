@@ -128,12 +128,6 @@ export const siteConfigNav: SiteConfigProps[] = [
       //   tip: '',
       //   icon: BugReportIcon,
       // },
-      // {
-      //   label: "View Stem Dimensions",
-      //   href: "/stemdimensions",
-      //   tip: '',
-      //   icon: PlaceIcon
-      // },
       {
         label: "Species List",
         href: "/alltaxonomies",
