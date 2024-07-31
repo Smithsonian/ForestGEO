@@ -10,7 +10,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return new NextResponse('File is required', {status: 400});
   }
-  console.log("formData: ", formData);
   const fileName = request.nextUrl.searchParams.get('fileName')?.trim() ;
   const plot = request.nextUrl.searchParams.get("plot")?.trim();
   const census = request.nextUrl.searchParams.get("census")?.trim();

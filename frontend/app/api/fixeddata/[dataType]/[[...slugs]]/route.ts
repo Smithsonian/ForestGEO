@@ -6,7 +6,6 @@ import {NextRequest, NextResponse} from "next/server";
 import {
   generateInsertOperations,
   generateUpdateOperations,
-  StemDimensionsViewQueryConfig,
   AllTaxonomiesViewQueryConfig,
   StemTaxonomiesViewQueryConfig
 } from '@/components/processors/processorhelperfunctions';
@@ -54,29 +53,37 @@ export async function GET(request: NextRequest, {params}: {
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
-            WHERE q.CensusID IN (
-                SELECT c.CensusID
-                FROM ${schema}.census c
-                WHERE c.PlotID = ?
-                  AND c.PlotCensusNumber = ?
-              )
-            LIMIT ?, ?`;
+            JOIN ${schema}.census c ON q.CensusID = c.CensusID
+            WHERE c.PlotID = ?
+              AND c.PlotCensusNumber = ?
+            LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      case 'measurementssummaryview':
-      case 'viewfulltableview':
       case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
+            JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
             WHERE q.PlotID = ?
-              AND q.CensusID IN (
-                SELECT c.CensusID
-                FROM ${schema}.census c
-                WHERE c.PlotID = ?
-                  AND c.PlotCensusNumber = ?
-              )
-            LIMIT ?, ?`;
+              AND c.PlotID = ?
+              AND c.PlotCensusNumber = ?
+            LIMIT ?, ?;`;
+        queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
+        break;
+      case 'measurementssummary':
+      case 'measurementssummaryview':
+      case 'viewfulltable':
+      case 'viewfulltableview':
+        paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS q.*
+            FROM ${schema}.${params.dataType} q
+            JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
+            WHERE q.PlotID = ?
+              AND c.PlotID = ?
+              AND c.PlotCensusNumber = ?
+              AND q.MeasuredDBH IS NOT NULL
+              AND q.MeasuredHOM IS NOT NULL
+            LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'subquadrats':
@@ -87,15 +94,12 @@ export async function GET(request: NextRequest, {params}: {
             SELECT SQL_CALC_FOUND_ROWS s.*
             FROM ${schema}.subquadrats s
             JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+            JOIN ${schema}.census c ON q.CensusID = c.CensusID
             WHERE q.QuadratID = ?
               AND q.PlotID = ?
-              AND q.CensusID IN (
-                SELECT c.CensusID
-                FROM ${schema}.census c
-                WHERE c.PlotID = ?
-                  AND c.PlotCensusNumber = ?
-              )
-            LIMIT ?, ?`;
+              AND c.PlotID = ?
+              AND c.PlotCensusNumber = ?
+            LIMIT ?, ?;`;
         queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'census':
@@ -159,6 +163,7 @@ export async function GET(request: NextRequest, {params}: {
     }
 
     const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
+    console.log('query: ', format(paginatedQuery, queryParams));
 
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
@@ -221,9 +226,6 @@ export async function POST(request: NextRequest, {params}: { params: { dataType:
     if (params.dataType.includes('view')) {
       let queryConfig;
       switch (params.dataType) {
-        case 'stemdimensionsview':
-          queryConfig = StemDimensionsViewQueryConfig;
-          break;
         case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
           break;
@@ -268,7 +270,7 @@ export async function PATCH(request: NextRequest, {params}: { params: { dataType
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    if (!['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
+    if (!['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
       const {[demappedGridID]: gridIDKey, ...remainingProperties} = newRowData;
@@ -280,9 +282,6 @@ export async function PATCH(request: NextRequest, {params}: { params: { dataType
     } else {
       let queryConfig;
       switch (params.dataType) {
-        case 'stemdimensionsview':
-          queryConfig = StemDimensionsViewQueryConfig;
-          break;
         case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
           break;
@@ -309,7 +308,6 @@ export async function PATCH(request: NextRequest, {params}: { params: { dataType
 // Define mappings for views to base tables and primary keys
 const viewToTableMappings: Record<string, { table: string, primaryKey: string }> = {
   'alltaxonomiesview': {table: 'species', primaryKey: 'SpeciesID'},
-  'stemdimensionsview': {table: 'stems', primaryKey: 'StemID'},
   'stemtaxonomiesview': {table: 'stems', primaryKey: 'StemID'},
   'measurementssummaryview': {table: 'coremeasurements', primaryKey: 'CoreMeasurementID'},
 };
@@ -328,7 +326,7 @@ export async function DELETE(request: NextRequest, {params}: { params: { dataTyp
     await conn.beginTransaction();
 
     // Handle deletion for views
-    if (['alltaxonomiesview', 'stemdimensionsview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
+    if (['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const deleteRowData = mapper.demapData([newRow])[0];
       const viewConfig = viewToTableMappings[params.dataType];

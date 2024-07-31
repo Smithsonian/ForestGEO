@@ -5,6 +5,7 @@
  * Redirects authenticated users to the dashboard page from the home page.
  * Allows the request to continue if no redirect conditions are met.
  */
+
 import {getToken} from 'next-auth/jwt';
 import type {NextRequest} from 'next/server';
 import {NextResponse} from 'next/server';
@@ -19,7 +20,7 @@ export async function middleware(request: NextRequest) {
   if (
     url.pathname.startsWith('/dashboard') ||
     url.pathname.startsWith('/measurementshub') ||
-    url.pathname.startsWith('/properties') ||
+    url.pathname.startsWith('/fixeddatainput') ||
     url.pathname.startsWith('/admin')
   ) {
     if (!session) {
@@ -42,11 +43,12 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  runtime: 'experimental-edge',
   matcher: [
     '/',
     '/dashboard',
     '/measurementshub',
-    '/properties',
+    '/fixeddatainput',
     '/admin'
   ]
 };

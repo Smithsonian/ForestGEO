@@ -25,12 +25,20 @@ import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { CensusDateRange, OrgCensusRDS } from '@/config/sqlrdsdefinitions/orgcensusrds';
-import { HTTPResponses, unitSelectionOptions } from '@/config/macros';
+import { HTTPResponses } from '@/config/macros';
 import { MeasurementSummaryGridProps, sortRowsByMeasurementDate, PendingAction, CellItemContainer, errorMapping, filterColumns, EditToolbarCustomProps } from './datagridmacros';
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
+
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  return ((...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  }) as T;
+}
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
@@ -218,49 +226,13 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     return rows.filter(row => rowHasError(row.id)).length;
   }, [rows, gridColumns]);
 
-  // use effect loops, pulled from datagridcommons:
-  useEffect(() => {
-    if (currentCensus !== undefined) {
-      setLocked(currentCensus.dateRanges[0].endDate !== undefined);
-    }
-  }, [currentCensus]);
-
-  useEffect(() => {
-    if (!isNewRowAdded) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
-    }
-  }, [paginationModel.page, sortModel]);
-
-  useEffect(() => {
-    if (currentPlot?.plotID || currentCensus?.plotCensusNumber) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
-    }
-  }, [currentPlot, currentCensus, paginationModel.page]);
-
-  useEffect(() => {
-    if (refresh && currentSite) {
-      handleRefresh().then(() => {
-        setRefresh(false);
-      });
-    }
-  }, [refresh, setRefresh]);
-
   // custom useEffect loops for msvdatagrid --> setting date range filters
-  useEffect(() => {
-    if (currentCensus) {
-      const allDateRangeIDs = currentCensus.dateRanges.map(range => range.censusID);
-      setSelectedDateRanges(allDateRangeIDs);
-    }
-  }, [currentCensus]);
-
-  useEffect(() => {
-    if (errorRowCount > 0) {
-      setSnackbar({
-        children: `${errorRowCount} row(s) with validation errors detected.`,
-        severity: 'warning'
-      });
-    }
-  }, [errorRowCount]);
+  // useEffect(() => {
+  //   if (currentCensus) {
+  //     const allDateRangeIDs = currentCensus.dateRanges.map(range => range.censusID);
+  //     setSelectedDateRanges(allDateRangeIDs);
+  //   }
+  // }, [currentCensus]);
 
   // main system begins here:
 
@@ -353,7 +325,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setLoading(true, "Saving changes...");
     try {
       const updatedRow = await updateRow(
-        'measurementssummaryview',
+        'measurementssummary',
         currentSite?.schemaName,
         promiseArguments.newRow,
         promiseArguments.oldRow,
@@ -374,7 +346,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
     setLoading(false);
-    await fetchPaginatedData(paginationModel.page);
+    await fetchPaginatedData(paginationModel.page);1
   };
 
   const performDeleteAction = async (id: GridRowId) => {
@@ -384,8 +356,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (!deletionID) return;
     const deleteQuery = createDeleteQuery(
       currentSite?.schemaName ?? '',
-      'measurementssummaryview',
-      getGridID('measurementssummaryview'),
+      'measurementssummary',
+      getGridID('measurementssummary'),
       deletionID
     );
     const response = await fetch(deleteQuery, {
@@ -455,21 +427,22 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     }
   };
 
-  const handleRefresh = async () => {
-    await fetchPaginatedData(paginationModel.page);
-    await fetchValidationErrors();
-  };
-
   const handleError = (error: any, message: string) => {
     console.error(message, error);
     setSnackbar({ children: `Error: ${message}`, severity: 'error' });
   };
 
-  const fetchPaginatedData = async (pageToFetch: number) => {
+  const fetchPaginatedData = useCallback(debounce(async (pageToFetch: number) => {
+    if (!currentSite || !currentPlot || !currentCensus) {
+      console.warn('Missing necessary context for fetchPaginatedData');
+      return;
+    }
+
+    console.log('fetchPaginatedData called.');
     setRefresh(true);
     const paginatedQuery = createFetchQuery(
       currentSite?.schemaName ?? '',
-      'measurementssummaryview',
+      'measurementssummary',
       pageToFetch,
       paginationModel.pageSize,
       currentPlot?.plotID,
@@ -478,27 +451,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     );
     try {
       const response = await fetch(paginatedQuery, { method: 'GET' });
+      if (!response.ok) throw new Error(response.statusText || 'Error fetching data');
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Error fetching data');
 
-      // Apply date range filtering and sorting
-      const filteredRows = data.output.filter((row: any) => {
-        if (selectedDateRanges.length === 0) return false;
-        return selectedDateRanges.some(id => {
-          const range = currentCensus?.dateRanges.find(r => r.censusID === id);
-          const measurementDate = moment.utc(row.measurementDate);
-          if (range) {
-            const startDate = moment.utc(range.startDate);
-            const endDate = moment.utc(range.endDate);
-            return measurementDate.isBetween(startDate, endDate, undefined, '[]');
-          }
-          return false;
-        });
-      });
-
-      const sortedRows = sortRowsByMeasurementDate(filteredRows, sortModel[0]?.sort || 'asc');
-
-      setRows(sortedRows.length > 0 ? sortedRows : []);
+      setRows(data.output);
       setRowCount(data.totalCount);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
@@ -508,9 +464,37 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     } catch (error) {
       handleError(error, 'Error fetching data');
     } finally {
-      setRefresh(false);
+      setRefresh(false); // Reset refresh state here
     }
-  };
+  }, 500), [currentSite?.schemaName, paginationModel.pageSize, currentPlot?.plotID, currentCensus?.plotCensusNumber, currentQuadrat?.quadratID, isNewRowAdded, newLastPage, setRows, setRowCount, setRefresh]);
+
+  useEffect(() => {
+    if (currentPlot && currentCensus && paginationModel.page >= 0) {
+      fetchPaginatedData(paginationModel.page);
+    }
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel, isNewRowAdded, fetchPaginatedData]);
+
+  // use effect loops, pulled from datagridcommons:
+  useEffect(() => {
+    if (currentCensus !== undefined) {
+      setLocked(currentCensus.dateRanges[0].endDate !== undefined);
+    }
+  }, [currentCensus]);
+
+  useEffect(() => {
+    if (errorRowCount > 0) {
+      setSnackbar({
+        children: `${errorRowCount} row(s) with validation errors detected.`,
+        severity: 'warning'
+      });
+    }
+  }, [errorRowCount]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefresh(true);
+    await fetchPaginatedData(paginationModel.page);
+    setRefresh(false);
+  }, [fetchPaginatedData, paginationModel.page]);
 
   const processRowUpdate = useCallback((newRow: GridRowModel, oldRow: GridRowModel) => new Promise<GridRowModel>((resolve, reject) => {
     setLoading(true, "Processing changes...");
@@ -530,7 +514,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (rowInEditMode) {
       const [id] = rowInEditMode;
       const row = rows.find(row => String(row.id) === String(id));
-      console.log('handleRowModesModelChange triggered on row: ', row);
     }
   };
 
@@ -685,7 +668,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
     if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
     if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
-    const fullDataQuery = `/api/fetchall/${'measurementssummaryview'}` + partialQuery + `?schema=${currentSite?.schemaName}`;
+    const fullDataQuery = `/api/fetchall/${'measurementssummary'}` + partialQuery + `?schema=${currentSite?.schemaName}`;
 
     try {
       const response = await fetch(fullDataQuery, { method: 'GET', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(filterModel) });
@@ -769,60 +752,14 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       <Typography level='body-xs'>YYYY-MM-DD</Typography>
     </Box>,
     valueFormatter: (value) => {
-      console.log('params: ', value);
       // Check if the date is present and valid
       if (!value || !moment(value).utc().isValid()) {
-        console.log('value: ', value);
-        console.log('moment-converted: ', moment(value).utc().format('YYYY-MM-DD'));
         return '';
       }
       // Format the date as a dash-separated set of numbers
       return moment(value).utc().format('YYYY-MM-DD');
     },
   };
-  const stemUnitsColumn: GridColDef = {
-    field: 'stemUnits',
-    headerName: 'Stem Units',
-    headerClassName: 'header',
-    flex: 0.4,
-    renderHeader: () => <Stack direction={'column'} sx={{alignItems: 'center', justifyContent: 'center'}}>
-      <Typography level='body-sm' fontWeight={'xl'}>Stem</Typography>
-      <Typography level='body-xs'>Units</Typography>
-    </Stack>,
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  };
-  const dbhUnitsColumn: GridColDef = {
-    field: 'dbhUnits',
-    headerName: 'DBH Units',
-    headerClassName: 'header',
-    flex: 0.4,
-    renderHeader: () => <Stack direction={'column'} sx={{alignItems: 'center', justifyContent: 'center'}}>
-      <Typography level='body-sm' fontWeight={'xl'}>DBH</Typography>
-      <Typography level='body-xs'>Units</Typography>
-    </Stack>,
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  };
-  const homUnitsColumn: GridColDef = {
-    field: 'homUnits',
-    headerName: 'HOM Units',
-    headerClassName: 'header',
-    flex: 0.4,
-    renderHeader: () => <Stack direction={'column'} sx={{alignItems: 'center', justifyContent: 'center'}}>
-      <Typography level='body-sm' fontWeight={'xl'}>HOM</Typography>
-      <Typography level='body-xs'>Units</Typography>
-    </Stack>,
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  };
-
   const columns = useMemo(() => {
     const commonColumns = modifiedColumns;
     if (locked) {
@@ -931,11 +868,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
               </Typography>
             </Stack>
           </Stack>
-          <Stack direction={'column'} marginTop={2}>
+          {/* <Stack direction={'column'} marginTop={2}>
             <Typography level='title-lg'>Filtering &mdash;</Typography>
             <Typography level="body-xs">Select or deselect filters to filter by date ranges within a census</Typography>
           </Stack>
-          {renderDateRangeFilters(getDateRangesForCensus(currentCensus))}
+          {renderDateRangeFilters(getDateRangesForCensus(currentCensus))} */}
           <StyledDataGrid
             sx={{ width: '100%' }}
             rows={visibleRows}
@@ -977,6 +914,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
                   treeID: false,
                   stemID: false,
                   personnelID: false,
+                  // dbhUnits: false,
+                  // homUnits: false,
                 }
               },
             }}

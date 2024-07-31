@@ -1,16 +1,16 @@
 // census datagrid
 "use client";
-import {GridRowModes, GridRowModesModel, GridRowsProp} from "@mui/x-data-grid";
-import {AlertProps} from "@mui/material";
-import React, {useEffect, useState} from "react";
-import { usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
-import {randomId} from "@mui/x-data-grid-generator";
+import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
+import { AlertProps } from "@mui/material";
+import React, { useEffect, useState } from "react";
+import { usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {Button} from "@mui/joy";
-import {useSession} from "next-auth/react";
-import {redirect} from "next/navigation";
-import {useLoading} from "@/app/contexts/loadingprovider";
-import {DatePicker} from '@mui/x-date-pickers';
+import { Button } from "@mui/joy";
+import { useSession } from "next-auth/react";
+import { redirect } from "next/navigation";
+import { useLoading } from "@/app/contexts/loadingprovider";
+import { DatePicker } from '@mui/x-date-pickers';
 import moment from "moment";
 import { CensusGridColumns } from "@/components/client/datagridcolumns";
 
@@ -43,8 +43,8 @@ export default function CensusDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const currentPlot = usePlotContext();
   const currentSite = useSiteContext();
-  const {setLoading} = useLoading();
-  const {data: session} = useSession();
+  const { setLoading } = useLoading();
+  const { data: session } = useSession();
   const [openCensusId, setOpenCensusId] = useState<number | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
 
@@ -76,7 +76,7 @@ export default function CensusDataGrid() {
   const closeOpenCensus = async (censusId: number) => {
     // Close the open census
     if (!validateEndDate(censusId, endDate)) {
-      setSnackbar({children: 'End date must be after the start date', severity: 'error'});
+      setSnackbar({ children: 'End date must be after the start date', severity: 'error' });
       return;
     }
     try {
@@ -85,7 +85,7 @@ export default function CensusDataGrid() {
       };
       const response = await fetch(`/api/fixeddata/census?schema=${currentSite?.schemaName ?? ''}&censusID=${censusId}`, {
         method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData)
       });
       if (!response.ok) throw new Error('Failed to close open-ended census');
@@ -95,7 +95,7 @@ export default function CensusDataGrid() {
       setEndDate(null);
     } catch (error) {
       console.error('Error closing open-ended census:', error);
-      setSnackbar({children: 'Error closing open-ended census', severity: 'error'});
+      setSnackbar({ children: 'Error closing open-ended census', severity: 'error' });
     }
   };
 
@@ -124,14 +124,14 @@ export default function CensusDataGrid() {
       // Replace with your actual API call
       const response = await fetch(`/api/fixeddata/census?schema=${currentSite?.schemaName ?? ''}`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newOpenCensus)
       });
       if (!response.ok) throw new Error('Failed to add open-ended census');
       setRefresh(true);
     } catch (error) {
       console.error('Error adding open-ended census:', error);
-      setSnackbar({children: 'Error adding open-ended census', severity: 'error'});
+      setSnackbar({ children: 'Error adding open-ended census', severity: 'error' });
     }
   };
 
@@ -155,13 +155,13 @@ export default function CensusDataGrid() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'StartDate'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'StartDate' },
     }));
   };
 
   return (
     <>
-      <Button variant="outlined" onClick={handleToggleCensus} sx={{marginBottom: 2}}>
+      <Button variant="outlined" onClick={handleToggleCensus} sx={{ marginBottom: 2 }}>
         {openCensusId !== null ? "Close Open Census" : "Add Open Census"}
       </Button>
       {openCensusId !== null && (

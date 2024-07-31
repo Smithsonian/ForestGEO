@@ -41,7 +41,6 @@ export default function SummaryPage() {
   const quadratListContext = useQuadratListContext();
   const quadratDispatch = useQuadratDispatch();
   const { validity, recheckValidityIfNeeded } = useDataValidityContext();
-  const [progressDialogOpen, setProgressDialogOpen] = useState(false);
   const [isUploadAllowed, setIsUploadAllowed] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
@@ -66,16 +65,6 @@ export default function SummaryPage() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
 
-  useEffect(() => {
-    const verifyPreconditions = async () => {
-      setIsUploadAllowed(!Object.entries(validity).filter(item => item[0] !== 'subquadrats').map(item => item[1]).includes(false));
-    };
-
-    if (progressDialogOpen) {
-      verifyPreconditions().catch(console.error);
-    }
-  }, [progressDialogOpen, validity]);
-
   const addNewRowToGrid = () => {
     const id = randomId();
     // Define new row structure based on MeasurementsSummaryRDS type
@@ -98,97 +87,6 @@ export default function SummaryPage() {
     setGlobalError(null);
     setTriggerGlobalError(false);
   };
-
-  const handleCloseProgressDialog = () => {
-    setProgressDialogOpen(false);
-    if (isUploadAllowed) {
-      setTimeout(() => {
-        setIsUploadModalOpen(true);
-      }, 300);
-    } else {
-      setGlobalError('Missing prerequisites! Please upload supporting data before submitting measurements!');
-      setTriggerGlobalError(true);
-    }
-  };
-
-  const checklistItems: (keyof UnifiedValidityFlags)[] = ['attributes', 'species', 'personnel', 'quadrats'];
-
-  const ProgressDialog = () => (
-    <Modal
-      open={progressDialogOpen}
-      onClose={() => {
-      }}
-      sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-    >
-      <ModalDialog
-        size="lg"
-        sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }}
-        role="alertdialog"
-      >
-        <DialogTitle>Pre-Validation Systems Check</DialogTitle>
-        <DialogContent>
-          <Typography level={'title-lg'}>Measurements Upload Warning:</Typography>
-          <Typography level={'body-lg'}>
-            In order to upload measurements, all of the following tables must be populated!
-          </Typography>
-          <List>
-            {checklistItems.map((item) => {
-              const isValid = validity[item];
-              const progressData = isValid
-                ? {
-                  progress: 100,
-                  message: `Passed: ${item.charAt(0).toUpperCase() + item.substring(1)}`,
-                  error: undefined
-                }
-                : {
-                  progress: 0,
-                  message: `Failure: ${item.charAt(0).toUpperCase() + item.substring(1)}`,
-                  error: `${item.charAt(0).toUpperCase() + item.substring(1)} is invalid or missing.`
-                };
-              const tooltipMessage = progressData.error
-                ? `${progressData.error}`
-                : progressData.message;
-
-              return (
-                <ListItem sx={{ alignItems: 'center', display: 'flex', flexDirection: 'row' }} key={item}>
-                  <ListItemContent sx={{ minWidth: '160px', mr: 2, my: 'auto' }}>
-                    <Typography level={'body-md'}>{progressData.message}</Typography>
-                  </ListItemContent>
-                  <LargeTooltip title={tooltipMessage} placement="top" arrow>
-                    <Box sx={{ width: '100%', maxWidth: 'calc(100% - 180px)', my: 'auto' }}>
-                      <LinearProgress
-                        variant="determinate"
-                        value={progressData.progress}
-                        color={isValid ? 'primary' : 'error'}
-                        sx={{ width: '100%', height: 8 }}
-                      />
-                    </Box>
-                  </LargeTooltip>
-                </ListItem>
-              );
-            })}
-          </List>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => {
-              setProgressDialogOpen(false);
-            }}
-            color="primary"
-          >
-            Cancel
-          </Button>
-          <Button
-            disabled={!isUploadAllowed}
-            onClick={handleCloseProgressDialog}
-            color={!isUploadAllowed ? 'danger' : 'success'}
-          >
-            {isUploadAllowed ? 'Continue to Upload' : 'Key Data Missing!'}
-          </Button>
-        </DialogActions>
-      </ModalDialog>
-    </Modal>
-  );
 
   const renderQuadratValue = (option: SelectOption<string> | null) => {
     if (!option) {
@@ -262,7 +160,6 @@ export default function SummaryPage() {
         </Snackbar>
       )}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <ProgressDialog />
         <Box sx={{
           width: '100%', display: 'flex', justifyContent: 'space-between',
           alignItems: 'center', backgroundColor: 'warning.main', borderRadius: '4px', p: 2

@@ -1,16 +1,16 @@
 // alltaxonomiesview datagrid
 "use client";
-import {GridRowsProp} from "@mui/x-data-grid";
-import {AlertProps} from "@mui/material";
-import React, {useState} from "react";
-import {randomId} from "@mui/x-data-grid-generator";
+import { GridRowsProp } from "@mui/x-data-grid";
+import { AlertProps } from "@mui/material";
+import React, { useState } from "react";
+import { randomId } from "@mui/x-data-grid-generator";
 import DataGridCommons from "@/components/datagrids/datagridcommons";
-import {Box, Button, Typography} from "@mui/joy";
-import {useSession} from "next-auth/react";
+import { Box, Button, Typography } from "@mui/joy";
+import { useSession } from "next-auth/react";
 import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import {initialAllTaxonomiesViewRDSRow} from "@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds";
 import { useOrgCensusContext } from "@/app/contexts/userselectionprovider";
 import { AllTaxonomiesViewGridColumns } from "@/components/client/datagridcolumns";
+import { initialAllTaxonomiesViewRDSRow } from "@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds";
 
 export default function AllTaxonomiesViewDataGrid() {
   const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);
@@ -25,7 +25,7 @@ export default function AllTaxonomiesViewDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const {data: session} = useSession();
+  const { data: session } = useSession();
   const currentCensus = useOrgCensusContext();
 
   const addNewRowToGrid = () => {
@@ -39,14 +39,14 @@ export default function AllTaxonomiesViewDataGrid() {
     setRows(oldRows => [...oldRows ?? [], newRow]);
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: {mode: 'edit', fieldToFocus: 'speciesCode'},
+      [id]: { mode: 'edit', fieldToFocus: 'speciesCode' },
     }));
     console.log('alltaxonomiesview addnewrowtogrid triggered');
   };
 
   return (
     <>
-      <Box sx={{display: 'flex', alignItems: 'center', mb: 3, width: '100%'}}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box sx={{
           width: '100%',
           display: 'flex',
@@ -56,9 +56,9 @@ export default function AllTaxonomiesViewDataGrid() {
           borderRadius: '4px',
           p: 2
         }}>
-          <Box sx={{flexGrow: 1}}>
+          <Box sx={{ flexGrow: 1 }}>
             {session?.user.userStatus !== 'fieldcrew' && (
-              <Typography level={"title-lg"} sx={{color: "#ffa726"}}>
+              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}
@@ -73,7 +73,7 @@ export default function AllTaxonomiesViewDataGrid() {
       <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
         setIsUploadModalOpen(false);
         setRefresh(true);
-      }} formType={"species"}/>
+      }} formType={"species"} />
 
       <DataGridCommons
         gridType="alltaxonomiesview"

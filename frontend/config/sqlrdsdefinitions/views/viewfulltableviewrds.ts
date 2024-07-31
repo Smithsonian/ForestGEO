@@ -1,91 +1,107 @@
 // viewfulltableview custom data type
-import {ColumnStates, Common, Unique} from "@/config/macros";
-import {
-  MeasurementsSummaryMapper,
-  MeasurementsSummaryRDS,
-  MeasurementsSummaryResult
-} from "./measurementssummaryviewrds";
-import {StemTaxonomiesMapper, StemTaxonomiesViewRDS, StemTaxonomiesViewResult} from "./stemtaxonomiesviewrds";
-import {IDataMapper} from "@/config/datamapper";
+import {ColumnStates } from "@/config/macros";
+import { createInitialObject, ResultType } from "@/config/utils";
 
-export type ViewFullTableViewRDS =
-  Common<MeasurementsSummaryRDS, StemTaxonomiesViewRDS>
-  & Unique<MeasurementsSummaryRDS, StemTaxonomiesViewRDS>;
-export type ViewFullTableViewResult =
-  Common<MeasurementsSummaryResult, StemTaxonomiesViewResult>
-  & Unique<MeasurementsSummaryResult, StemTaxonomiesViewResult>;
+/**
+ * materialized view --> do this before batch updates to make sure that refresh function isn't called for each row
+ * INSERT INTO batchprocessingflag (flag_status) VALUES ('STARTED')
+    ON DUPLICATE KEY UPDATE flag_status = 'STARTED';
+ */
 
-export class ViewFullTableMapper implements IDataMapper<ViewFullTableViewResult, ViewFullTableViewRDS> {
-  private measurementsSummaryMapper = new MeasurementsSummaryMapper();
-  private stemTaxonomiesMapper = new StemTaxonomiesMapper();
-
-  demapData(results: ViewFullTableViewRDS[]): ViewFullTableViewResult[] {
-    const measurementsResults = this.measurementsSummaryMapper.demapData(results as MeasurementsSummaryRDS[]);
-    const stemTaxonomiesResults = this.stemTaxonomiesMapper.demapData(results as StemTaxonomiesViewRDS[]);
-
-    return results.map((item, index) => ({
-      ...measurementsResults[index],
-      ...stemTaxonomiesResults[index]
-    }));
-  }
-
-  mapData(results: ViewFullTableViewResult[], indexOffset: number = 1): ViewFullTableViewRDS[] {
-    // Convert results to unknown to bypass type checks
-    const measurementsResults = results as unknown as MeasurementsSummaryResult[];
-    const stemTaxonomiesResults = results as unknown as StemTaxonomiesViewResult[];
-
-    const measurementsMapped = this.measurementsSummaryMapper.mapData(measurementsResults, indexOffset);
-    const stemTaxonomiesMapped = this.stemTaxonomiesMapper.mapData(stemTaxonomiesResults, indexOffset);
-
-    return measurementsMapped.map((measurementResult, index) => ({
-      ...measurementResult,
-      ...stemTaxonomiesMapped[index]
-    }));
-  }
+export type ViewFullTableViewRDS = {
+  // datagrid
+  id?: number;
+  // IDs 
+  coreMeasurementID?: number;
+  plotID?: number;
+  censusID?: number;
+  quadratID?: number;
+  subquadratID?: number;
+  treeID?: number;
+  stemID?: number;
+  personnelID?: number;
+  speciesID?: number;
+  genusID?: number;
+  familyID?: number;
+  // coremeasurements
+  measurementDate: any;
+  measuredDBH: number;
+  dbhUnits: string;
+  measuredHOM: number;
+  homUnits: string;
+  description: string;
+  isValidated: boolean;
+  // plots
+  plotName?: string;
+  locationName?: string;
+  countryName?: string;
+  dimensionX?: number;
+  dimensionY?: number;
+  PlotDimensionUnits?: string;
+  plotArea?: number;
+  plotAreaUnits?: string;
+  plotGlobalX?: number;
+  plotGlobalY?: number;
+  plotGlobalZ?: number;
+  plotCoordinateUnits?: string;
+  plotShape?: string;
+  plotDescription?: string;
+  // census
+  censusStartDate?: any;
+  censusEndDate?: any;
+  censusDescription?: string;
+  plotCensusNumber?: number;
+  // quadrats
+  quadratName?: string;
+  quadratDimensionX?: number;
+  quadratDimensionY?: number;
+  quadratDimensionUnits?: string;
+  quadratArea?: number;
+  quadratAreaUnits?: string;
+  quadratStartX?: number;
+  quadratStartY?: number;
+  quadratCoordinateUnits?: string;
+  quadratShape?: string;
+  // subquadrats
+  subquadratName?: string;
+  subquadratDimensionX?: number;
+  subquadratDimensionY?: number;
+  subquadratDimensionUnits?: string;
+  subquadratX?: number;
+  subquadratY?: number;
+  subquadratCoordinateUnits?: string;
+  // trees
+  treeTag?: string;
+  // stems
+  stemTag?: string;
+  stemLocalX?: number;
+  stemLocalY?: number;
+  stemCoordinateUnits?: string;
+  // personnel
+  firstName?: string;
+  lastName?: string;
+  // roles
+  personnelRoles?: string;
+  // species
+  speciesCode?: string;
+  speciesName?: string;
+  subspeciesName?: string;
+  subspeciesAuthority?: string;
+  idLevel?: string;
+  // genus
+  genus?: string;
+  genusAuthority?: string;
+  // family
+  family?: string;
+  // attributes
+  attributeCode?: string;
+  attributeDescription?: string;
+  attributeStatus?: string;
 }
 
-export const initialViewFullTableViewRDS: ViewFullTableViewRDS = {
-  id: 0,
-  coreMeasurementID: 0,
-  plotID: 0,
-  plotName: '',
-  censusID: 0,
-  quadratID: 0,
-  quadratName: '',
-  subquadratID: 0,
-  subquadratName: '',
-  speciesID: 0,
-  speciesCode: '',
-  treeID: 0,
-  treeTag: '',
-  stemID: 0,
-  stemTag: '',
-  stemLocalX: 0,
-  stemLocalY: 0,
-  stemUnits: '',
-  personnelID: 0,
-  personnelName: '',
-  measurementDate: null,
-  measuredDBH: 0,
-  dbhUnits: '',
-  measuredHOM: 0,
-  homUnits: '',
-  isValidated: false,
-  description: '',
-  attributes: '',
-  familyID: 0,
-  genusID: 0,
-  speciesName: '',
-  subspeciesName: '',
-  validCode: '',
-  genusAuthority: '',
-  speciesAuthority: '',
-  subspeciesAuthority: '',
-  speciesIDLevel: '',
-  speciesFieldFamily: '',
-  family: '',
-  genus: '',
-};
+export type ViewFullTableViewResult = ResultType<ViewFullTableViewRDS>;
+
+export const initialViewFullTableViewRDS: ViewFullTableViewRDS = createInitialObject<ViewFullTableViewRDS>();
 
 export function getAllViewFullTableViewsHCs(): ColumnStates {
   return {
@@ -99,6 +115,12 @@ export function getAllViewFullTableViewsHCs(): ColumnStates {
     personnelID: false,
     familyID: false,
     genusID: false,
-    subquadratName: false,
+    subquadratName: false, 
+    subquadratDimensionX: false,
+    subquadratDimensionY: false,
+    subquadratDimensionUnits: false,
+    subquadratX: false,
+    subquadratY: false,
+    subquadratCoordinateUnits: false,
   };
 }

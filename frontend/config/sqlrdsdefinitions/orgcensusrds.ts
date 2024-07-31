@@ -1,5 +1,6 @@
+import MapperFactory, { IDataMapper } from '../datamapper';
 import { GridSelections } from '../macros';
-import { CensusMapper, CensusRDS, CensusResult } from './tables/censusrds';
+import { CensusRDS, CensusResult } from './tables/censusrds';
 
 interface CensusDateRange {
   censusID: number;
@@ -37,10 +38,9 @@ function collapseCensusDataToGridSelections(orgCensusList: OrgCensus[]): GridSel
 }
 
 class OrgCensusToCensusResultMapper {
-  private censusMapper: CensusMapper;
-
+  private censusMapper: IDataMapper<CensusRDS, CensusResult>;
   constructor() {
-    this.censusMapper = new CensusMapper();
+    this.censusMapper = MapperFactory.getMapper('census');
   }
 
   mapData(orgCensusList: OrgCensusRDS[]): CensusResult[] {
@@ -70,7 +70,7 @@ class OrgCensusToCensusResultMapper {
     const uniqueCensusMap = new Map<number, OrgCensusRDS>();
 
     censusRDSList.forEach(censusRDS => {
-      if (!censusRDS) return;
+      if (!censusRDS) throw new Error("censusRDS is undefined");
 
       const plotCensusNumber = censusRDS.plotCensusNumber!;
       const censusID = censusRDS.censusID!;
@@ -198,9 +198,9 @@ class OrgCensusToCensusResultMapper {
 // Function to create and update OrgCensusRDS list from CensusRDS
 async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<OrgCensusRDS[]> {
   const orgCensusMapper = new OrgCensusToCensusResultMapper();
-  // Convert CensusRDS to CensusResult first
-  const censusResultList: CensusResult[] = new CensusMapper().demapData(censusRDSLoad.filter(data => data !== undefined));
-  // Convert CensusResult to OrgCensusRDS
+  const censusMapper = MapperFactory.getMapper<CensusRDS, CensusResult>('census');
+
+  const censusResultList: CensusResult[] = censusMapper.demapData(censusRDSLoad.filter(data => data !== undefined));
   return orgCensusMapper.demapData(censusResultList);
 }
 

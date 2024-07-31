@@ -28,7 +28,7 @@ export interface ValidationChangelogResult {
   AdditionalDetails: any;
 }
 
-export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogResult, ValidationChangelogRDS> {
+export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogRDS, ValidationChangelogResult> {
   demapData(results: ValidationChangelogRDS[]): ValidationChangelogResult[] {
     return results.map((item) => ({
       ValidationRunID: item.validationRunID != undefined ? String(item.validationRunID) : null,

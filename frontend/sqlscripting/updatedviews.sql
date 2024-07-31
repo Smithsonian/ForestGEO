@@ -3,7 +3,6 @@ SELECT
     s.SpeciesID AS SpeciesID,
     f.FamilyID AS FamilyID,
     g.GenusID AS GenusID,
-    r.ReferenceID AS ReferenceID,
     s.SpeciesCode AS SpeciesCode,
     f.Family AS Family,
     g.Genus AS Genus,
@@ -15,76 +14,21 @@ SELECT
     s.SubspeciesAuthority AS SubspeciesAuthority,
     s.ValidCode AS ValidCode,
     s.FieldFamily AS FieldFamily,
-    s.Description AS SpeciesDescription,
-    r.PublicationTitle AS PublicationTitle,
-    r.FullReference AS FullReference,
-    r.DateOfPublication AS DateOfPublication,
-    r.Citation AS Citation
+    s.Description AS SpeciesDescription
 FROM
     family f
     JOIN genus g ON f.FamilyID = g.FamilyID
-    JOIN species s ON g.GenusID = s.GenusID
-    LEFT JOIN reference r ON s.ReferenceID = r.ReferenceID;
-
-
-CREATE VIEW measurementssummaryview AS
-SELECT
-    cm.CoreMeasurementID AS CoreMeasurementID,
-    p.PlotID AS PlotID,
-    cm.CensusID AS CensusID,
-    q.QuadratID AS QuadratID,
-    s.SpeciesID AS SpeciesID,
-    t.TreeID AS TreeID,
-    st.StemID AS StemID,
-    qp.PersonnelID AS PersonnelID,
-    p.PlotName AS PlotName,
-    q.QuadratName AS QuadratName,
-    s.SpeciesCode AS SpeciesCode,
-    t.TreeTag AS TreeTag,
-    st.StemTag AS StemTag,
-    st.LocalX AS StemLocalX,
-    st.LocalY AS StemLocalY,
-    st.CoordinateUnits AS StemUnits,
-    COALESCE(CONCAT(pe.FirstName, ' ', pe.LastName), 'Unknown') AS PersonnelName,
-    cm.MeasurementDate AS MeasurementDate,
-    cm.MeasuredDBH AS MeasuredDBH,
-    cm.DBHUnit AS DBHUnits,
-    cm.MeasuredHOM AS MeasuredHOM,
-    cm.HOMUnit AS HOMUnits,
-    cm.IsValidated AS IsValidated,
-    cm.Description AS Description,
-    (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
-     FROM cmattributes ca
-     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes
-FROM
-    coremeasurements cm
-    LEFT JOIN stems st ON cm.StemID = st.StemID
-    LEFT JOIN trees t ON st.TreeID = t.TreeID
-    LEFT JOIN species s ON t.SpeciesID = s.SpeciesID
-    LEFT JOIN genus g ON s.GenusID = g.GenusID
-    LEFT JOIN family f ON g.FamilyID = f.FamilyID
-    LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
-    LEFT JOIN plots p ON q.PlotID = p.PlotID
-    LEFT JOIN census c ON cm.CensusID = c.CensusID
-    LEFT JOIN quadratpersonnel qp ON q.QuadratID = qp.QuadratID
-    LEFT JOIN personnel pe ON qp.PersonnelID = pe.PersonnelID
-GROUP BY
-    cm.CoreMeasurementID, p.PlotID, cm.CensusID, q.QuadratID, s.SpeciesID, t.TreeID, st.StemID, qp.PersonnelID,
-    p.PlotName, q.QuadratName, s.SpeciesCode, t.TreeTag, st.StemTag, st.LocalX, st.LocalY, st.CoordinateUnits,
-    pe.FirstName, pe.LastName, cm.MeasurementDate, cm.MeasuredDBH, cm.DBHUnit, cm.MeasuredHOM, cm.HOMUnit,
-    cm.IsValidated, cm.Description;
-
+    JOIN species s ON g.GenusID = s.GenusID;
 
 CREATE VIEW stemtaxonomiesview AS
 SELECT
     s.StemID AS StemID,
     t.TreeID AS TreeID,
     q.QuadratID AS QuadratID,
-    c.CensusID AS CensusID,
-    p.PlotID AS PlotID,
     f.FamilyID AS FamilyID,
     g.GenusID AS GenusID,
     sp.SpeciesID AS SpeciesID,
+    q.QuadratName AS QuadratName,
     s.StemTag AS StemTag,
     t.TreeTag AS TreeTag,
     sp.SpeciesCode AS SpeciesCode,
@@ -108,6 +52,41 @@ FROM
     JOIN genus g ON sp.GenusID = g.GenusID
     LEFT JOIN family f ON g.FamilyID = f.FamilyID;
 
+CREATE VIEW measurementssummaryview AS
+SELECT
+    cm.CoreMeasurementID AS CoreMeasurementID,
+    st.StemID AS StemID,
+    t.TreeID AS TreeID,
+    s.SpeciesID AS SpeciesID,
+    q.QuadratID AS QuadratID,
+    q.PlotID AS PlotID,
+    cm.CensusID AS CensusID,
+    s.SpeciesName AS SpeciesName,
+    s.SubspeciesName AS SubspeciesName,
+    s.SpeciesCode AS SpeciesCode,
+    t.TreeTag AS TreeTag,
+    st.StemTag AS StemTag,
+    st.LocalX AS StemLocalX,
+    st.LocalY AS StemLocalY,
+    st.CoordinateUnits AS StemUnits,
+    q.QuadratName AS QuadratName,
+    cm.MeasurementDate AS MeasurementDate,
+    cm.MeasuredDBH AS MeasuredDBH,
+    cm.DBHUnit AS DBHUnits,
+    cm.MeasuredHOM AS MeasuredHOM,
+    cm.HOMUnit AS HOMUnits,
+    cm.IsValidated AS IsValidated,
+    cm.Description AS Description,
+    (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
+     FROM cmattributes ca
+     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes
+FROM
+    coremeasurements cm
+    LEFT JOIN stems st ON cm.StemID = st.StemID
+    LEFT JOIN trees t ON st.TreeID = t.TreeID
+    LEFT JOIN species s ON t.SpeciesID = s.SpeciesID
+    LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
+    LEFT JOIN census c ON cm.CensusID = c.CensusID;
 
 CREATE VIEW viewfulltableview AS
 SELECT
@@ -125,11 +104,13 @@ SELECT
     p.CountryName AS CountryName,
     p.DimensionX AS DimensionX,
     p.DimensionY AS DimensionY,
+    p.DimensionUnits AS PlotDimensionUnits,
     p.Area AS PlotArea,
-    p.GlobalX AS GlobalX,
-    p.GlobalY AS GlobalY,
-    p.GlobalZ AS GlobalZ,
-    p.DimensionUnits AS PlotUnit,
+    p.AreaUnits AS PlotAreaUnits,
+    p.GlobalX AS PlotGlobalX,
+    p.GlobalY AS PlotGlobalY,
+    p.GlobalZ AS PlotGlobalZ,
+    p.CoordinateUnits AS PlotCoordinateUnits,
     p.PlotShape AS PlotShape,
     p.PlotDescription AS PlotDescription,
     c.CensusID AS CensusID,
@@ -141,23 +122,28 @@ SELECT
     q.QuadratName AS QuadratName,
     q.DimensionX AS QuadratDimensionX,
     q.DimensionY AS QuadratDimensionY,
+    q.DimensionUnits AS QuadratDimensionUnits,
     q.Area AS QuadratArea,
+    q.AreaUnits AS QuadratAreaUnits,
+    q.StartX AS QuadratStartX,
+    q.StartY AS QuadratStartY,
+    q.CoordinateUnits AS QuadratCoordinateUnits,
     q.QuadratShape AS QuadratShape,
-    q.DimensionUnits AS QuadratUnit,
     sq.SubquadratID AS SubquadratID,
     sq.SubquadratName AS SubquadratName,
     sq.DimensionX AS SubquadratDimensionX,
     sq.DimensionY AS SubquadratDimensionY,
-    sq.QX AS QX,
-    sq.QY AS QY,
-    sq.CoordinateUnits AS SubquadratUnit,
+    sq.DimensionUnits AS SubquadratDimensionUnits,
+    sq.QX AS SubquadratX,
+    sq.QY AS SubquadratY,
+    sq.CoordinateUnits AS SubquadratCoordinateUnits,
     t.TreeID AS TreeID,
     t.TreeTag AS TreeTag,
     s.StemID AS StemID,
     s.StemTag AS StemTag,
     s.LocalX AS StemLocalX,
     s.LocalY AS StemLocalY,
-    s.CoordinateUnits AS StemUnits,
+    s.CoordinateUnits AS StemCoordinateUnits,
     per.PersonnelID AS PersonnelID,
     per.FirstName AS FirstName,
     per.LastName AS LastName,
@@ -191,5 +177,5 @@ FROM
     LEFT JOIN subquadrats sq ON q.QuadratID = sq.QuadratID
     LEFT JOIN census c ON cm.CensusID = c.CensusID
     LEFT JOIN roles r ON per.RoleID = r.RoleID
-    LEFT JOIN attributes attr ON cm.CoreMeasurementID = attr.Code
-    LEFT JOIN cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID AND attr.Code = cma.Code;
+    LEFT JOIN cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
+    LEFT JOIN attributes attr ON cma.Code = attr.Code;

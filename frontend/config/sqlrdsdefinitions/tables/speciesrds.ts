@@ -1,4 +1,5 @@
 // species custom data type
+import { ResultType } from "@/config/utils";
 import {IDataMapper} from "../../datamapper";
 import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetails';
 
@@ -18,20 +19,7 @@ export type SpeciesRDS = {
   referenceID?: number;
 };
 
-export interface SpeciesResult {
-  SpeciesID: any;
-  GenusID: any;
-  SpeciesName: any;
-  SubspeciesName: any;
-  SpeciesCode: any;
-  IDLevel: any;
-  SpeciesAuthority: any;
-  SubspeciesAuthority: any;
-  FieldFamily: any;
-  Description: any;
-  ValidCode: any;
-  ReferenceID: any;
-}
+export type SpeciesResult = ResultType<SpeciesRDS>;
 
 const SPECIES_SPECIESCODE_LIMIT = 25;
 const SPECIES_SPECIESNAME_LIMIT = 64;
@@ -72,7 +60,7 @@ export const validateSpeciesFormRow: ValidationFunction = (row) => {
   return Object.keys(errors).length > 0 ? errors : null;
 };
 
-export class SpeciesMapper implements IDataMapper<SpeciesResult, SpeciesRDS> {
+export class SpeciesMapper implements IDataMapper<SpeciesRDS, SpeciesResult> {
   mapData(results: SpeciesResult[], indexOffset: number = 1): SpeciesRDS[] {
     return results.map((item, index) => ({
       id: index + indexOffset,
