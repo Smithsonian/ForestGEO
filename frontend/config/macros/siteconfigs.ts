@@ -65,12 +65,6 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: VisibilityIcon
       },
-      // {
-      //   label: "Validation History",
-      //   href: "/validationhistory",
-      //   tip: '',
-      //   icon: HistoryEduIcon
-      // },
       {
         label: "Uploaded Files",
         href: "/uploadedfiles",
@@ -82,7 +76,13 @@ export const siteConfigNav: SiteConfigProps[] = [
         href: "/viewfulltable",
         tip: "all historical data view",
         icon: HistoryIcon
-      }
+      },
+      // {
+      //   label: "Validation History",
+      //   href: "/validationhistory",
+      //   tip: '',
+      //   icon: HistoryEduIcon
+      // },
     ],
   },
 
@@ -110,6 +110,18 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: WidgetsIcon,
       },
+      {
+        label: "Species List",
+        href: "/alltaxonomies",
+        tip: '',
+        icon: SchemaIcon
+      },
+      {
+        label: "Plot-Species List",
+        href: "/stemtaxonomies",
+        tip: '',
+        icon: FilterIcon
+      },
       // {
       //   label: 'Subquadrats',
       //   href: '/subquadrats',
@@ -128,18 +140,6 @@ export const siteConfigNav: SiteConfigProps[] = [
       //   tip: '',
       //   icon: BugReportIcon,
       // },
-      {
-        label: "Species List",
-        href: "/alltaxonomies",
-        tip: '',
-        icon: SchemaIcon
-      },
-      {
-        label: "Plot-Species List",
-        href: "/stemtaxonomies",
-        tip: '',
-        icon: FilterIcon
-      },
       // {
       //   label: 'Measurements Form',
       //   href: '/measurementsform',

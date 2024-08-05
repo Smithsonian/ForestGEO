@@ -1,18 +1,4 @@
 create
-    definer = azureroot@`%` procedure StartBatchProcessing()
-BEGIN
-    INSERT INTO batchprocessingstate (status) VALUES ('STARTED');
-    UPDATE batchprocessingflag SET flag_status = 'STARTED', needs_refresh = FALSE;
-END;
-
-create
-    definer = azureroot@`%` procedure EndBatchProcessing()
-BEGIN
-    INSERT INTO batchprocessingstate (status) VALUES ('ENDED');
-    UPDATE batchprocessingflag SET flag_status = 'ENDED';
-END;
-
-create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
 BEGIN
     TRUNCATE TABLE measurementssummary;

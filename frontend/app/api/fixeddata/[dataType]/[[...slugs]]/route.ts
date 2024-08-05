@@ -163,7 +163,6 @@ export async function GET(request: NextRequest, {params}: {
     }
 
     const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
-    console.log('query: ', format(paginatedQuery, queryParams));
 
     const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
     const totalRowsResult = await runQuery(conn, totalRowsQuery);

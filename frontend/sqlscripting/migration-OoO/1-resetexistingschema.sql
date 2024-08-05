@@ -24,7 +24,6 @@ drop table if exists validationchangelog;
 # materialized view tables
 drop table if exists measurementssummary;
 drop table if exists viewfulltable;
-drop table if exists batchprocessingflag;
 
 DROP VIEW IF EXISTS `alltaxonomiesview`;
 DROP VIEW IF EXISTS `measurementssummaryview`;
@@ -53,14 +52,6 @@ create table attributes
         primary key,
     Description varchar(255)                                                                                                    null,
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
-);
-
-create table batchprocessingflag
-(
-    id       int auto_increment
-        primary key,
-    flag_status   enum ('STARTED', 'ENDED') not null,
-    needs_refresh tinyint(1) default 0      null
 );
 
 create table measurementssummary

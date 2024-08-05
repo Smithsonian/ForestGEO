@@ -1,6 +1,6 @@
 set foreign_key_checks = 0;
 
--- stable_crc: old ctfsweb schema
+-- stable_sinharaja: old ctfsweb schema
 -- forestgeo_scbi: new schema.
 -- make sure you replace this for each new schema you pull/push from/to.
 
@@ -22,9 +22,9 @@ SELECT s.PlotID,
        IF(s.GUOM IN ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'), s.GUOM, 'm'),
        s.ShapeOfSite,
        LEFT(s.DescriptionOfSite, 65535)
-FROM stable_crc.Site s
-         LEFT JOIN stable_crc.Country c ON s.CountryID = c.CountryID
-         LEFT JOIN stable_crc.Coordinates co ON s.PlotID = co.PlotID
+FROM stable_sinharaja.Site s
+         LEFT JOIN stable_sinharaja.Country c ON s.CountryID = c.CountryID
+         LEFT JOIN stable_sinharaja.Coordinates co ON s.PlotID = co.PlotID
 GROUP BY s.PlotID, s.PlotName, s.LocationName, c.CountryName, s.QDimX, s.QDimY, s.PUOM, s.Area, s.GUOM, co.GX, co.GY,
          co.GZ, s.ShapeOfSite, s.DescriptionOfSite
 ON DUPLICATE KEY UPDATE PlotName        = IF(VALUES(PlotName) != '', VALUES(PlotName), plots.PlotName),
@@ -50,7 +50,7 @@ SELECT r.ReferenceID,
        r.FullReference,
        IF(CAST(r.DateofPublication AS CHAR) = '0000-00-00', NULL, r.DateofPublication) AS DateOfPublication,
        NULL
-FROM stable_crc.reference r
+FROM stable_sinharaja.reference r
 ON DUPLICATE KEY UPDATE PublicationTitle            = IF(VALUES(PublicationTitle) != '', VALUES(PublicationTitle),
                                                          reference.PublicationTitle),
                         FullReference               = IF(VALUES(FullReference) != '', VALUES(FullReference),
@@ -60,14 +60,14 @@ ON DUPLICATE KEY UPDATE PublicationTitle            = IF(VALUES(PublicationTitle
 -- Insert into family with ON DUPLICATE KEY UPDATE
 INSERT INTO family (FamilyID, Family, ReferenceID)
 SELECT f.FamilyID, f.Family, f.ReferenceID
-FROM stable_crc.family f
+FROM stable_sinharaja.family f
 ON DUPLICATE KEY UPDATE Family      = IF(VALUES(Family) != '', VALUES(Family), family.Family),
                         ReferenceID = VALUES(ReferenceID);
 
 -- Insert into genus with ON DUPLICATE KEY UPDATE
 INSERT INTO genus (GenusID, FamilyID, Genus, ReferenceID, GenusAuthority)
 SELECT g.GenusID, g.FamilyID, g.Genus, g.ReferenceID, g.Authority
-FROM stable_crc.genus g
+FROM stable_sinharaja.genus g
 ON DUPLICATE KEY UPDATE FamilyID       = VALUES(FamilyID),
                         Genus          = IF(VALUES(Genus) != '', VALUES(Genus), genus.Genus),
                         ReferenceID    = VALUES(ReferenceID),
@@ -88,9 +88,9 @@ SELECT sp.SpeciesID,
        LEFT(sp.Description, 65535),
        NULL,
        sp.ReferenceID
-FROM stable_crc.species sp
-         LEFT JOIN stable_crc.subspecies subs ON sp.SpeciesID = subs.SpeciesID
-         LEFT JOIN stable_crc.reference ref ON sp.ReferenceID = ref.ReferenceID
+FROM stable_sinharaja.species sp
+         LEFT JOIN stable_sinharaja.subspecies subs ON sp.SpeciesID = subs.SpeciesID
+         LEFT JOIN stable_sinharaja.reference ref ON sp.ReferenceID = ref.ReferenceID
 GROUP BY sp.SpeciesID, sp.GenusID, sp.Mnemonic, sp.IDLevel, sp.Authority, sp.FieldFamily, sp.Description, sp.ReferenceID
 ON DUPLICATE KEY UPDATE GenusID             = VALUES(GenusID),
                         SpeciesCode         = VALUES(SpeciesCode),
@@ -107,7 +107,7 @@ ON DUPLICATE KEY UPDATE GenusID             = VALUES(GenusID),
                         ValidCode           = VALUES(ValidCode),
                         ReferenceID         = VALUES(ReferenceID);
 
-UPDATE stable_crc.census
+UPDATE stable_sinharaja.census
 SET StartDate = NULL
 WHERE CAST(StartDate AS CHAR(10)) = '0000-00-00';
 
@@ -121,9 +121,9 @@ SELECT
     LEFT(c.Description, 65535),
     c.PlotCensusNumber
 FROM
-    stable_crc.census c
+    stable_sinharaja.census c
 LEFT JOIN
-    stable_crc.dbh d ON c.CensusID = d.CensusID
+    stable_sinharaja.dbh d ON c.CensusID = d.CensusID
 GROUP BY
     c.CensusID
 ON DUPLICATE KEY UPDATE
@@ -136,7 +136,7 @@ ON DUPLICATE KEY UPDATE
 -- Insert into roles table
 INSERT INTO roles (RoleID, RoleName, RoleDescription)
 SELECT RoleID, Description, NULL
-FROM stable_crc.rolereference
+FROM stable_sinharaja.rolereference
 ON DUPLICATE KEY UPDATE RoleName        = VALUES(RoleName),
                         RoleDescription = VALUES(RoleDescription);
 
@@ -149,11 +149,11 @@ SELECT
     p.LastName,
     pr.RoleID
 FROM
-    stable_crc.personnel p
+    stable_sinharaja.personnel p
 CROSS JOIN
-    stable_crc.census c
+    stable_sinharaja.census c
 JOIN
-    stable_crc.personnelrole pr ON p.PersonnelID = pr.PersonnelID;
+    stable_sinharaja.personnelrole pr ON p.PersonnelID = pr.PersonnelID;
 
 -- Step 2: Insert into personnel from the temporary table, handling duplicates
 INSERT INTO personnel (CensusID, FirstName, LastName, RoleID)
@@ -186,10 +186,10 @@ SELECT q.QuadratID,
        IF(s.QUOM IN ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'), s.QUOM, 'm2'),
        IF(q.IsStandardShape = 'Y', 'standard', 'not standard'),
        IF(s.GUOM IN ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'), s.GUOM, 'm')
-FROM stable_crc.quadrat q
-         LEFT JOIN stable_crc.censusquadrat cq ON q.QuadratID = cq.QuadratID
-         LEFT JOIN stable_crc.Coordinates co ON q.QuadratID = co.QuadratID
-         LEFT JOIN stable_crc.Site s ON q.PlotID = s.PlotID
+FROM stable_sinharaja.quadrat q
+         LEFT JOIN stable_sinharaja.censusquadrat cq ON q.QuadratID = cq.QuadratID
+         LEFT JOIN stable_sinharaja.Coordinates co ON q.QuadratID = co.QuadratID
+         LEFT JOIN stable_sinharaja.Site s ON q.PlotID = s.PlotID
 GROUP BY q.QuadratID, q.PlotID, cq.CensusID, q.QuadratName, s.QDimX, s.QDimY, s.QUOM, q.Area, q.IsStandardShape, s.GUOM
 ON DUPLICATE KEY UPDATE PlotID          = VALUES(PlotID),
                         CensusID        = VALUES(CensusID),
@@ -207,7 +207,7 @@ ON DUPLICATE KEY UPDATE PlotID          = VALUES(PlotID),
 -- Insert into trees with ON DUPLICATE KEY UPDATE
 INSERT INTO trees (TreeID, TreeTag, SpeciesID)
 SELECT t.TreeID, t.Tag, t.SpeciesID
-FROM stable_crc.tree t
+FROM stable_sinharaja.tree t
 ON DUPLICATE KEY UPDATE TreeTag   = IF(VALUES(TreeTag) != '', VALUES(TreeTag), trees.TreeTag),
                         SpeciesID = VALUES(SpeciesID);
 
@@ -224,9 +224,9 @@ SELECT s.StemID,
        IF(si.QUOM IN ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'), si.QUOM, 'm') AS CoordinateUnits,
        IF(s.Moved = 'Y', 1, 0)                                                 AS Moved,
        LEFT(s.StemDescription, 65535)
-FROM stable_crc.stem s
-         LEFT JOIN stable_crc.quadrat q ON q.QuadratID = s.QuadratID
-         LEFT JOIN stable_crc.Site si ON q.PlotID = si.PlotID
+FROM stable_sinharaja.stem s
+         LEFT JOIN stable_sinharaja.quadrat q ON q.QuadratID = s.QuadratID
+         LEFT JOIN stable_sinharaja.Site si ON q.PlotID = si.PlotID
 GROUP BY s.StemID, s.TreeID, s.QuadratID, s.StemNumber, s.StemTag, s.Moved, s.StemDescription, si.QUOM
 ON DUPLICATE KEY UPDATE TreeID          = VALUES(TreeID),
                         QuadratID       = VALUES(QuadratID),
@@ -253,7 +253,7 @@ SELECT dbh.DBHID,
        'm',
        LEFT(dbh.Comments, 65535),
        NULL
-FROM stable_crc.dbh dbh
+FROM stable_sinharaja.dbh dbh
 ON DUPLICATE KEY UPDATE StemID            = VALUES(StemID),
                         IsValidated       = VALUES(IsValidated),
                         MeasurementDate   = VALUES(MeasurementDate),
@@ -268,8 +268,8 @@ ON DUPLICATE KEY UPDATE StemID            = VALUES(StemID),
 -- Insert into quadratpersonnel with ON DUPLICATE KEY UPDATE
 INSERT INTO quadratpersonnel (QuadratPersonnelID, QuadratID, PersonnelID, CensusID)
 SELECT dc.DataCollectionID, dc.QuadratID, pr.PersonnelID, dc.CensusID
-FROM stable_crc.datacollection dc
-         JOIN stable_crc.personnelrole pr ON dc.PersonnelRoleID = pr.PersonnelRoleID
+FROM stable_sinharaja.datacollection dc
+         JOIN stable_sinharaja.personnelrole pr ON dc.PersonnelRoleID = pr.PersonnelRoleID
 ON DUPLICATE KEY UPDATE QuadratID   = VALUES(QuadratID),
                         PersonnelID = VALUES(PersonnelID),
                         CensusID    = VALUES(CensusID);
@@ -280,7 +280,7 @@ SELECT ta.TSMCode,
        LEFT(ta.Description, 65535),
        IF(ta.Status IN ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing'),
           ta.Status, NULL)
-FROM stable_crc.tsmattributes ta
+FROM stable_sinharaja.tsmattributes ta
 GROUP BY ta.TSMCode, ta.Description, ta.Status
 ON DUPLICATE KEY UPDATE Description = IF(VALUES(Description) != '', VALUES(Description), attributes.Description),
                         Status      = VALUES(Status);
@@ -288,8 +288,8 @@ ON DUPLICATE KEY UPDATE Description = IF(VALUES(Description) != '', VALUES(Descr
 -- Insert into cmattributes with ON DUPLICATE KEY UPDATE
 INSERT INTO cmattributes (CMAID, CoreMeasurementID, Code)
 SELECT dbha.DBHAttID, dbha.DBHID, ta.TSMCode
-FROM stable_crc.dbhattributes dbha
-         JOIN stable_crc.tsmattributes ta ON dbha.TSMID = ta.TSMID
+FROM stable_sinharaja.dbhattributes dbha
+         JOIN stable_sinharaja.tsmattributes ta ON dbha.TSMID = ta.TSMID
 ON DUPLICATE KEY UPDATE CoreMeasurementID = VALUES(CoreMeasurementID),
                         Code              = VALUES(Code);
 
@@ -306,9 +306,9 @@ SELECT sp.SpecimenID,
        sp.CollectionDate,
        sp.DeterminedBy,
        LEFT(sp.Description, 65535)
-FROM stable_crc.specimen sp
-         LEFT JOIN stable_crc.stem st ON st.TreeID = sp.TreeID
-         LEFT JOIN stable_crc.personnel pr ON sp.Collector = CONCAT(pr.FirstName, ' ', pr.LastName)
+FROM stable_sinharaja.specimen sp
+         LEFT JOIN stable_sinharaja.stem st ON st.TreeID = sp.TreeID
+         LEFT JOIN stable_sinharaja.personnel pr ON sp.Collector = CONCAT(pr.FirstName, ' ', pr.LastName)
 ON DUPLICATE KEY UPDATE StemID         = VALUES(StemID),
                         PersonnelID    = VALUES(PersonnelID),
                         SpecimenNumber = VALUES(SpecimenNumber),
