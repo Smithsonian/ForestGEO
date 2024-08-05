@@ -473,14 +473,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       fetchPaginatedData(paginationModel.page);
     }
   }, [currentPlot, currentCensus, paginationModel.page, sortModel, isNewRowAdded, fetchPaginatedData]);
-
-  // use effect loops, pulled from datagridcommons:
-  useEffect(() => {
-    if (currentCensus !== undefined) {
-      setLocked(currentCensus.dateRanges[0].endDate !== undefined);
-    }
-  }, [currentCensus]);
-
+  
   useEffect(() => {
     if (errorRowCount > 0) {
       setSnackbar({

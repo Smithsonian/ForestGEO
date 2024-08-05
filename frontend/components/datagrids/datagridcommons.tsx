@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridToolbar, GridToolbarContainer, GridToolbarProps, ToolbarPropsOverrides, useGridApiRef, GridCellParams, GridFilterModel, } from '@mui/x-data-grid';
+import { GridActionsCellItem, GridColDef, GridEventListener, GridRowEditStopReasons, GridRowId, GridRowModel, GridRowModes, GridRowModesModel, GridToolbar, GridToolbarContainer, GridToolbarProps, ToolbarPropsOverrides, useGridApiRef, GridCellParams, GridFilterModel, useGridApiEventHandler, } from '@mui/x-data-grid';
 import { Alert, Button, Snackbar, } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -95,18 +95,10 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
   const { setLoading } = useLoading();
   const { triggerRefresh } = useDataValidityContext();
-  const { triggerPulse } = useLockAnimation();
-  const handleLockedClick = () => triggerPulse();
 
   useSession();
 
   const apiRef = useGridApiRef();
-
-  useEffect(() => {
-    if (currentCensus !== undefined) {
-      setLocked(currentCensus.dateRanges[0].endDate !== undefined);
-    }
-  }, [currentCensus]);
 
   useEffect(() => {
     if (!isNewRowAdded) {
@@ -127,6 +119,15 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       });
     }
   }, [refresh, setRefresh]);
+
+  useEffect(() => {
+    const initialRowModesModel = rows.reduce((acc, row) => {
+      acc[row.id] = { mode: GridRowModes.View };
+      return acc;
+    }, {} as GridRowModesModel);
+    setRowModesModel(initialRowModesModel);
+  }, [rows]);
+
 
   const fetchFullData = async () => {
     setLoading(true, "Fetching full dataset...");
@@ -266,6 +267,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   };
 
   const handleDeleteClick = (id: GridRowId) => () => {
+    console.log('handle delete click: ', id);
     if (locked) return;
     if (gridType === 'census') {
       const rowToDelete = rows.find(row => String(row.id) === String(id));
@@ -392,12 +394,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   }), [gridType, currentSite?.schemaName, setSnackbar, setIsNewRowAdded, setShouldAddRowAfterFetch, fetchPaginatedData, paginationModel]);
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
+    console.log('new row modes model: ', newRowModesModel);
     setRowModesModel(newRowModesModel);
-
-    const rowInEditMode = Object.entries(newRowModesModel).find(([, mode]) => mode.mode === GridRowModes.Edit);
-    if (rowInEditMode) {
-      const [id] = rowInEditMode;
-    }
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -430,7 +428,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     });
   };
 
-  const handleCancelClick = (id: GridRowId, event?: React.MouseEvent) => {
+  const handleCancelClick = (id: GridRowId, event?: React.MouseEvent | React.KeyboardEvent) => {
     if (locked) return;
     event?.preventDefault();
     const row = rows.find(row => String(row.id) === String(id));
@@ -450,6 +448,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     if (handleSelectQuadrat) handleSelectQuadrat(null);
   };
 
+
   const getEnhancedCellAction = (type: string, icon: any, onClick: any) => (
     <CellItemContainer>
       <Tooltip
@@ -467,25 +466,12 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         arrow
         placement="top"
       >
-        <span
-          onClick={(e) => {
-            const iconElement = e.currentTarget.querySelector('svg');
-            if (iconElement) {
-              iconElement.classList.add('animate-bounce');
-              setTimeout(() => {
-                iconElement.classList.remove('animate-bounce');
-              }, 500);
-            }
-            onClick();
-          }}
-        >
-          <GridActionsCellItem icon={icon} label={type} />
-        </span>
+        <GridActionsCellItem icon={icon} label={type} onClick={onClick} />
       </Tooltip>
     </CellItemContainer>
   );
 
-  function getGridActionsColumn(): GridColDef {
+  const getGridActionsColumn = useCallback((): GridColDef => {
     return {
       field: 'actions',
       type: 'actions',
@@ -493,8 +479,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       width: 100,
       cellClassName: 'actions',
       getActions: ({ id }) => {
-        const isInEditMode = rowModesModel[id]?.mode === 'edit';
-
+        const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
         if (isInEditMode && !locked) {
           return [
             getEnhancedCellAction('Save', <SaveIcon />, handleSaveClick(id)),
@@ -508,12 +493,12 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         ];
       },
     };
-  }
+  }, [rowModesModel, locked]);
 
   const columns = useMemo(() => {
     const commonColumns = gridColumns;
     return [...commonColumns, getGridActionsColumn()];
-  }, [gridColumns, rowModesModel]);
+  }, [gridColumns, rowModesModel, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
     if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns);
@@ -545,6 +530,33 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     }
   };
 
+  const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = (params) => {
+    if (locked) return;
+    console.log('params: ', params);
+    setRowModesModel((prevModel) => ({
+      ...prevModel,
+      [params.id]: { mode: GridRowModes.Edit },
+    }));
+  };
+
+  const handleCellKeyDown: GridEventListener<'cellKeyDown'> = (params, event) => {
+    if (event.key === 'Enter' && !locked) {
+      console.log('params: ', params);
+      setRowModesModel((prevModel) => ({
+        ...prevModel,
+        [params.id]: { mode: GridRowModes.Edit },
+      }));
+    }
+    if (event.key === 'Escape') {
+      console.log('params: ', params);
+      setRowModesModel((prevModel) => ({
+        ...prevModel,
+        [params.id]: { mode: GridRowModes.View, ignoreModifications: true },
+      }));
+      handleCancelClick(params.id, event);
+    }
+  };
+
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
   } else {
@@ -569,23 +581,20 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
-            editMode='row'
+            editMode="row"
             rowModesModel={rowModesModel}
             disableColumnSelector
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
+            onCellDoubleClick={handleCellDoubleClick}
+            onCellKeyDown={handleCellKeyDown}
             processRowUpdate={processRowUpdate}
             onProcessRowUpdateError={(error) => {
               console.error('Row update error:', error);
               setSnackbar({ children: 'Error updating row', severity: 'error' });
             }}
-            onCellKeyDown={(params, event) => {
-              if (event.key === 'Enter') {
-                handleEnterKeyNavigation(params, event);
-              }
-            }}
             loading={refresh}
-            paginationMode='server'
+            paginationMode="server"
             onPaginationModelChange={setPaginationModel}
             paginationModel={paginationModel}
             rowCount={rowCount}

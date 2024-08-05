@@ -27,10 +27,10 @@ export type AttributesRDS = {
   status?: string;
 };
 
+export type AttributesResult = ResultType<AttributesRDS>;
+
 export const initialAttributesRDSRow = createInitialObject<AttributesRDS>();
 
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
-
-export type AttributesResult = ResultType<AttributesRDS>;
 
 export const attributesFields = ['code', 'description', 'status'];

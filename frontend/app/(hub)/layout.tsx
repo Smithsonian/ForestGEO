@@ -31,6 +31,7 @@ import { useDataValidityContext } from "../contexts/datavalidityprovider";
 import { AcaciaVersionTypography } from "@/styles/versions/acaciaversion";
 import GithubFeedbackModal from "@/components/client/githubfeedbackmodal";
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
+import { useLockAnimation } from "../contexts/lockanimationcontext";
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -105,11 +106,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
-
   const pathname = usePathname();
-
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && (quadratListLoaded || subquadratListLoaded);
-
+  const { isPulsing } = useLockAnimation();
   const loadCensusData = useCallback(async () => {
     if (!currentPlot) return { success: false, message: 'Plot must be selected to load census data' };
     if (censusListContext !== undefined && censusListContext.length > 0) return { success: true };
@@ -286,7 +285,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Box
-        className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'}`}
+        className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
         sx={{ position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 1000 }}
       >
         <Sidebar
@@ -326,6 +325,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         </Box>
         <Divider orientation={"horizontal"} sx={{ my: '5px' }} />
         <Box
+          className={isPulsing ? 'animate-fade-blur-in' : ''}
           sx={{
             display: 'flex',
             flexGrow: 1,
@@ -334,19 +334,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             flexDirection: 'column',
             paddingLeft: 2,
           }}>
-          {coreDataLoaded && (
-            <>
-              {children}
-            </>
-          )}
+          {children}
         </Box>
         <Divider orientation={"horizontal"} />
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2, position: 'relative' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 2, position: 'relative' }} >
           <Stack
             spacing={1}
             direction="row"
             sx={{ alignItems: 'center', justifyContent: 'center', width: '100%' }}
             divider={<Divider orientation="vertical" />}
+            className={isPulsing ? 'animate-fade-blur-in' : ''}
           >
             <Typography level="h1" sx={{ color: 'plum', display: 'inline-block', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' }}>
               {siteConfig.name}
@@ -361,6 +358,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           </Stack>
           <IconButton
             onClick={() => setIsFeedbackModalOpen(true)}
+            className={isPulsing ? 'animate-pulse-no-opacity' : ''}
             sx={{
               position: 'fixed',
               bottom: 20,
@@ -373,7 +371,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               },
             }}
           >
-            <HelpOutlineOutlinedIcon />
+            <HelpOutlineOutlinedIcon fontSize="large" />
           </IconButton>
         </Box>
       </Box>

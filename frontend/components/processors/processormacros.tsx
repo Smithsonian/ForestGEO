@@ -1,13 +1,12 @@
 import { PoolConnection, PoolOptions } from 'mysql2/promise';
-import { booleanToBit } from "@/config/macros";
 import { FileRow } from "@/config/macros/formdetails";
 
 import { processSpecies } from "@/components/processors/processspecies";
-import { NextRequest } from "next/server";
 import { processCensus } from "@/components/processors/processcensus";
 import { PoolMonitor } from "@/config/poolmonitor";
-import { AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
-import { GridValidRowModel } from '@mui/x-data-grid';
+import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/tables/attributerds';
+import { PersonnelRDS, PersonnelResult } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { QuadratRDS, QuadratsResult } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
@@ -175,55 +174,6 @@ export async function runQuery(connection: PoolConnection, query: string, params
   } catch (error: any) {
     console.error('Error executing query:', error.message);
     throw error;
-  }
-}
-
-// Helper function to get value or default
-function getValueOrDefault(value: any, defaultValue = null) {
-  return value ?? defaultValue;
-}
-
-// Function to transform request body into data object
-function transformRequestBody(requestBody: any) {
-  return {
-    CoreMeasurementID: getValueOrDefault(requestBody.coreMeasurementID),
-    CensusID: getValueOrDefault(requestBody.censusID),
-    PlotID: getValueOrDefault(requestBody.plotID),
-    QuadratID: getValueOrDefault(requestBody.quadratID),
-    SubQuadratID: getValueOrDefault(requestBody.subQuadratID),
-    TreeID: getValueOrDefault(requestBody.treeID),
-    StemID: getValueOrDefault(requestBody.stemID),
-    PersonnelID: getValueOrDefault(requestBody.personnelID),
-    IsRemeasurement: booleanToBit(getValueOrDefault(requestBody.isRemeasurement)),
-    IsCurrent: booleanToBit(getValueOrDefault(requestBody.isCurrent)),
-    IsPrimaryStem: booleanToBit(getValueOrDefault(requestBody.IsPrimaryStem)),
-    IsValidated: booleanToBit(getValueOrDefault(requestBody.IsValidated)),
-    MeasurementDate: requestBody.measurementDate ? new Date(requestBody.measurementDate) : null,
-    MeasuredDBH: getValueOrDefault(requestBody.measuredDBH),
-    MeasuredHOM: getValueOrDefault(requestBody.measuredHOM),
-    Description: getValueOrDefault(requestBody.description),
-    UserDefinedFields: getValueOrDefault(requestBody.userDefinedFields),
-  };
-}
-
-export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return transformRequestBody(requestBody);
-}
-
-export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
-  const { newRow: requestBody }: { newRow: GridValidRowModel } = await request.json();
-  switch (parseType) {
-    case 'POST':
-    case 'PATCH': {
-      return {
-        Code: requestBody.code,
-        Description: requestBody.description ?? null,
-        Status: requestBody.status ?? null,
-      };
-    }
-    default:
-      throw new Error("Invalid parse type -- attributes");
   }
 }
 

@@ -64,6 +64,7 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
         UPDATE
           ${tableColumns.split(', ').map(column => `${column} = VALUES(${column})`).join(', ')};
       `;
+
       try {
         // Execute the query using the provided connection
         await connection.beginTransaction();

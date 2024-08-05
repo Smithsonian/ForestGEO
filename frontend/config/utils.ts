@@ -87,3 +87,37 @@ export type CommonKeys<T, U> = {
 }[keyof T & keyof U];
 
 export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
+
+export function getColumnMappings<RDS, Result extends ResultType<RDS>>(): { [key in keyof Result]: string } {
+  const mappings: { [key in keyof Result]: string } = {} as { [key in keyof Result]: string };
+
+  for (const key in mappings) {
+    mappings[key] = key;
+  }
+
+  return mappings;
+}
+
+export function createSelectQuery<RDS, Result extends ResultType<RDS>>(schema: string, tableName: string, whereClause: Partial<Result>): string {
+  const columnMappings = getColumnMappings<RDS, Result>();
+  const whereConditions = Object.keys(whereClause)
+    .map(key => `${columnMappings[key as keyof Result]} = ?`)
+    .join(' AND ');
+
+  return `SELECT * FROM ${schema}.${tableName} WHERE ${whereConditions}`;
+}
+
+export function createInsertOrUpdateQuery<RDS, Result extends ResultType<RDS>>(schema: string, tableName: string, data: Partial<Result>): string {
+  const columnMappings = getColumnMappings<RDS, Result>();
+  const columns = Object.keys(data)
+    .map(key => columnMappings[key as keyof Result])
+    .join(', ');
+  const values = Object.keys(data)
+    .map(() => '?')
+    .join(', ');
+  const updates = Object.keys(data)
+    .map(key => `${columnMappings[key as keyof Result]} = VALUES(${columnMappings[key as keyof Result]})`)
+    .join(', ');
+
+  return `INSERT INTO ${schema}.${tableName} (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${updates}`;
+}

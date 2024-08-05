@@ -6,7 +6,7 @@ import {ValidationFunction, RowValidationErrors} from '@/config/macros/formdetai
 export type SpeciesRDS = {
   id?: number;
   speciesID?: number;
-  genusID?: number;
+  genusID?: number; 
   speciesName?: string;
   subspeciesName?: string;
   speciesCode?: string;
@@ -60,42 +60,6 @@ export const validateSpeciesFormRow: ValidationFunction = (row) => {
   return Object.keys(errors).length > 0 ? errors : null;
 };
 
-export class SpeciesMapper implements IDataMapper<SpeciesRDS, SpeciesResult> {
-  mapData(results: SpeciesResult[], indexOffset: number = 1): SpeciesRDS[] {
-    return results.map((item, index) => ({
-      id: index + indexOffset,
-      speciesID: item.SpeciesID != null ? Number(item.SpeciesID) : undefined,
-      genusID: item.GenusID != null ? Number(item.GenusID) : undefined,
-      speciesName: item.SpeciesName != null ? String(item.SpeciesName) : undefined,
-      subspeciesName: item.SubspeciesName != null ? String(item.SubspeciesName) : undefined,
-      speciesCode: item.SpeciesCode != null ? String(item.SpeciesCode) : undefined,
-      idLevel: item.IDLevel != null ? String(item.IDLevel) : undefined,
-      speciesAuthority: item.SpeciesAuthority != null ? String(item.SpeciesAuthority) : undefined,
-      subspeciesAuthority: item.SubspeciesAuthority != null ? String(item.SubspeciesAuthority) : undefined,
-      fieldFamily: item.FieldFamily != null ? String(item.FieldFamily) : undefined,
-      description: item.Description != null ? String(item.Description) : undefined,
-      validCode: item.ValidCode != null ? String(item.ValidCode) : undefined,
-      referenceID: item.ReferenceID != null ? Number(item.ReferenceID) : undefined,
-    }));
-  }
-
-  demapData(results: SpeciesRDS[]): SpeciesResult[] {
-    return results.map((item) => ({
-      SpeciesID: item.speciesID != undefined ? Number(item.speciesID) : null,
-      GenusID: item.genusID != undefined ? Number(item.genusID) : null,
-      SpeciesName: item.speciesName != undefined ? String(item.speciesName) : null,
-      SubspeciesName: item.subspeciesName != undefined ? String(item.subspeciesName) : null,
-      SpeciesCode: item.speciesCode != undefined ? String(item.speciesCode) : null,
-      IDLevel: item.idLevel != undefined ? String(item.idLevel) : null,
-      SpeciesAuthority: item.speciesAuthority != undefined ? String(item.speciesAuthority) : null,
-      SubspeciesAuthority: item.subspeciesAuthority != undefined ? String(item.subspeciesAuthority) : null,
-      FieldFamily: item.fieldFamily != undefined ? String(item.fieldFamily) : null,
-      Description: item.description != undefined ? String(item.description) : null,
-      ValidCode: item.validCode != undefined ? String(item.validCode) : null,
-      ReferenceID: item.referenceID != undefined ? Number(item.referenceID) : null,
-    }));
-  }
-}
 
 export const speciesFields = [
   'currentTaxonFlag',
