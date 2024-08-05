@@ -1,6 +1,6 @@
 // reference custom data type
-import { ResultType } from "@/config/utils";
-import { IDataMapper, parseDate } from "../../datamapper";
+import { ResultType } from '@/config/utils';
+import { IDataMapper, parseDate } from '../../datamapper';
 
 export type ReferenceRDS = {
   id?: number;

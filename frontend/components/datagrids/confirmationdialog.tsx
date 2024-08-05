@@ -1,6 +1,6 @@
-"use client";
-import React from "react";
-import { Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Button } from "@mui/material";
+'use client';
+import React from 'react';
+import { Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Button } from '@mui/material';
 
 interface ConfirmationDialogProps {
   open: boolean;

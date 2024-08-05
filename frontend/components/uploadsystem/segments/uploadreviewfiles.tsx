@@ -1,16 +1,16 @@
-"use client";
+'use client';
 
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Grid, Pagination } from "@mui/material";
-import { Box, Checkbox, Modal, Typography } from "@mui/joy";
-import { DisplayParsedDataGridInline } from "@/components/uploadsystemhelpers/displayparseddatagrid";
-import Divider from "@mui/joy/Divider";
-import React, { useState, useEffect } from "react";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadReviewFilesProps } from "@/config/macros/uploadsystemmacros";
-import { FileWithPath } from "react-dropzone";
-import { DropzoneLogic } from "@/components/uploadsystemhelpers/dropzone";
-import { FileList } from "@/components/uploadsystemhelpers/filelist";
-import CircularProgress from "@mui/joy/CircularProgress";
+import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Grid, Pagination } from '@mui/material';
+import { Box, Checkbox, Modal, Typography } from '@mui/joy';
+import { DisplayParsedDataGridInline } from '@/components/uploadsystemhelpers/displayparseddatagrid';
+import Divider from '@mui/joy/Divider';
+import React, { useState, useEffect } from 'react';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { UploadReviewFilesProps } from '@/config/macros/uploadsystemmacros';
+import { FileWithPath } from 'react-dropzone';
+import { DropzoneLogic } from '@/components/uploadsystemhelpers/dropzone';
+import { FileList } from '@/components/uploadsystemhelpers/filelist';
+import CircularProgress from '@mui/joy/CircularProgress';
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
@@ -46,7 +46,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const requiredHeadersTrimmed = expectedHeaders.map(item => item.trim());
 
   useEffect(() => {
-    if (currentFileHeaders.length === 0 || currentFileHeaders.some(header => header === "")) {
+    if (currentFileHeaders.length === 0 || currentFileHeaders.some(header => header === '')) {
       setRequireReupload(true);
     } else {
       setRequireReupload(false);
@@ -57,7 +57,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     setReuploadInProgress(true);
     const newFile = newFiles[0];
     if (newFile.name !== currentFileName) {
-      alert("Please upload a corrected version of the current file.");
+      alert('Please upload a corrected version of the current file.');
       setIsReuploadDialogOpen(false);
       return;
     }
@@ -74,28 +74,28 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     setMissingHeaders(missingHeaders);
 
     if (!isValid) {
-      alert("The file headers are invalid or missing. Please re-upload a corrected file.");
+      alert('The file headers are invalid or missing. Please re-upload a corrected file.');
       return;
     }
     const updatedParsedData = JSON.parse(JSON.stringify(parsedData));
 
-    if (uploadForm === "species") {
+    if (uploadForm === 'species') {
       Object.keys(updatedParsedData).forEach(fileName => {
         Object.keys(updatedParsedData[fileName]).forEach(rowKey => {
           const row = updatedParsedData[fileName][rowKey];
-          const speciesField = row["species"];
-          const genusField = row["genus"];
+          const speciesField = row['species'];
+          const genusField = row['genus'];
           if (speciesField && !genusField) {
             const speciesWords = speciesField.trim().split(/\s+/);
             if (speciesWords.length === 2) {
               const [genus, species] = speciesWords;
-              updatedParsedData[fileName][rowKey]["genus"] = genus;
-              updatedParsedData[fileName][rowKey]["species"] = species;
+              updatedParsedData[fileName][rowKey]['genus'] = genus;
+              updatedParsedData[fileName][rowKey]['species'] = species;
               if (!errors[fileName][rowKey]) {
                 errors[fileName][rowKey] = {};
               }
-              errors[fileName][rowKey]["genus"] = "Genus was auto-filled based on species field.";
-              errors[fileName][rowKey]["species"] = "Species field was split into genus and species.";
+              errors[fileName][rowKey]['genus'] = 'Genus was auto-filled based on species field.';
+              errors[fileName][rowKey]['species'] = 'Species field was split into genus and species.';
             }
           }
         });
@@ -104,12 +104,12 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
 
     setParsedData(updatedParsedData);
 
-    console.log("Updated parsedData:", updatedParsedData); // Debug log
+    console.log('Updated parsedData:', updatedParsedData); // Debug log
 
     try {
       await handleApproval();
     } catch (error) {
-      console.error("Error during approval:", error);
+      console.error('Error during approval:', error);
       setUploadError(error);
       setReviewState(ReviewStates.ERRORS);
     }
@@ -119,9 +119,9 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     return requiredHeadersTrimmed.map(header => {
       const isChecked = currentFileHeaders.map(item => item.trim().toLowerCase()).includes(header.trim().toLowerCase());
       return (
-        <Box key={header} sx={{ display: "flex", flex: 1, alignItems: "center" }}>
-          <Checkbox size={"lg"} disabled checked={isChecked} label={header} color={isChecked ? "success" : "danger"} />
-          <Divider orientation={"vertical"} sx={{ marginX: 2 }} />
+        <Box key={header} sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
+          <Checkbox size={'lg'} disabled checked={isChecked} label={header} color={isChecked ? 'success' : 'danger'} />
+          <Divider orientation={'vertical'} sx={{ marginX: 2 }} />
         </Box>
       );
     });
@@ -137,12 +137,12 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
 
   return (
     <>
-      <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+      <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
         {reuploadInProgress ? (
           <CircularProgress />
         ) : (
           <>
-            <Button variant="contained" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)} sx={{ mb: 2, width: "fit-content" }}>
+            <Button variant="contained" onClick={() => setReviewState(ReviewStates.UPLOAD_FILES)} sx={{ mb: 2, width: 'fit-content' }}>
               Back
             </Button>
             <Grid container spacing={2}>
@@ -150,17 +150,17 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Grid item xs={4}>
                 <Box
                   sx={{
-                    display: "flex",
+                    display: 'flex',
                     flex: 1,
-                    flexDirection: "column",
-                    alignItems: "center"
+                    flexDirection: 'column',
+                    alignItems: 'center'
                   }}
                 >
-                  <Button variant="contained" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)} sx={{ width: "fit-content" }}>
+                  <Button variant="contained" color="primary" onClick={async () => handleRemoveFile(dataViewActive - 1)} sx={{ width: 'fit-content' }}>
                     Remove Current File
                   </Button>
-                  <Box sx={{ display: "flex", flexDirection: "row", mb: 2 }}>
-                    <Divider orientation={"vertical"} sx={{ marginX: 2 }} />
+                  <Box sx={{ display: 'flex', flexDirection: 'row', mb: 2 }}>
+                    <Divider orientation={'vertical'} sx={{ marginX: 2 }} />
                     {currentFileHeaders.length > 0 ? renderHeaderCheckboxes() : <Typography>No file selected or file has no headers.</Typography>}
                   </Box>
                   <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
@@ -168,13 +168,13 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               </Grid>
               <Grid item xs={4} />
               <Grid item xs={12}>
-                <Box sx={{ display: "flex", flexDirection: "column", mr: 10 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', mr: 10 }}>
                   {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && currentFileHeaders.length > 0 ? (
                     <>
-                      <Typography level={"title-md"} color={"primary"} sx={{ marginBottom: 1 }}>
+                      <Typography level={'title-md'} color={'primary'} sx={{ marginBottom: 1 }}>
                         Form: {uploadForm}
                       </Typography>
-                      <Typography level={"title-sm"}>File: {acceptedFiles[dataViewActive - 1].name}</Typography>
+                      <Typography level={'title-sm'}>File: {acceptedFiles[dataViewActive - 1].name}</Typography>
                       <DisplayParsedDataGridInline
                         parsedData={parsedData}
                         setParsedData={setParsedData}
@@ -190,14 +190,14 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     <Typography level="body-lg" bgcolor="error">
                       The selected file is missing required headers or the headers cannot be read. Please check the file and re-upload.
                       <br />
-                      Your file&apos;s headers were: {currentFileHeaders.join(", ")}
+                      Your file&apos;s headers were: {currentFileHeaders.join(', ')}
                       <br />
-                      The expected headers were {expectedHeaders.join(", ")}
+                      The expected headers were {expectedHeaders.join(', ')}
                     </Typography>
                   )}
                 </Box>
                 <Pagination count={acceptedFiles.length} page={dataViewActive} onChange={(_, page) => setDataViewActive(page)} />
-                <Button onClick={() => setIsReuploadDialogOpen(true)} variant={"outlined"} color="primary" sx={{ marginTop: 2 }}>
+                <Button onClick={() => setIsReuploadDialogOpen(true)} variant={'outlined'} color="primary" sx={{ marginTop: 2 }}>
                   Re-upload Corrected File
                 </Button>
               </Grid>
@@ -205,13 +205,13 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Grid item xs={4}>
                 <Box
                   sx={{
-                    display: "flex",
+                    display: 'flex',
                     flex: 1,
-                    flexDirection: "column",
-                    alignItems: "center"
+                    flexDirection: 'column',
+                    alignItems: 'center'
                   }}
                 >
-                  <Button variant={"contained"} disabled={!isFileUploadAllowed() || requireReupload} onClick={handleApproveClick} sx={{ width: "fit-content" }}>
+                  <Button variant={'contained'} disabled={!isFileUploadAllowed() || requireReupload} onClick={handleApproveClick} sx={{ width: 'fit-content' }}>
                     Confirm Changes
                   </Button>
                 </Box>
@@ -219,11 +219,11 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Grid item xs={4} />
               <Modal open={isReuploadDialogOpen || requireReupload} onClose={() => setIsReuploadDialogOpen(false)}>
                 <Box>
-                  <DialogTitle>{requireReupload ? "Headers Missing or Corrupted" : "Re-upload Corrected File"}</DialogTitle>
+                  <DialogTitle>{requireReupload ? 'Headers Missing or Corrupted' : 'Re-upload Corrected File'}</DialogTitle>
                   <DialogContent>
                     <DialogContentText>
                       {requireReupload
-                        ? "The selected file is missing required headers or the headers cannot be read. Please upload a corrected version of the file."
+                        ? 'The selected file is missing required headers or the headers cannot be read. Please upload a corrected version of the file.'
                         : `Please upload the corrected version of the file: ${currentFileName}`}
                     </DialogContentText>
                     <DropzoneLogic onChange={handleReUploadFileChange} />
@@ -232,18 +232,18 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                 </Box>
               </Modal>
               <Dialog open={confirmationDialogOpen} onClose={handleCancel} aria-labelledby="alert-dialog-title" aria-describedby="alert-dialog-description">
-                <DialogTitle id="alert-dialog-title">{"Do your files look correct?"}</DialogTitle>
+                <DialogTitle id="alert-dialog-title">{'Do your files look correct?'}</DialogTitle>
                 <DialogContent>
                   <DialogContentText id="alert-dialog-description">
                     {missingHeaders.length > 0 ? (
                       <>
-                        The following required headers are missing: {missingHeaders.join(", ")}.<br />
+                        The following required headers are missing: {missingHeaders.join(', ')}.<br />
                         You can still proceed with the upload, but consider re-uploading the files with the required headers.
                         <br />
                         If you would like to re-upload a corrected file, you can do so by clicking &quot;Re-upload Corrected File&quot;.
                       </>
                     ) : (
-                      "Please press Confirm to upload your files to storage."
+                      'Please press Confirm to upload your files to storage.'
                     )}
                   </DialogContentText>
                 </DialogContent>

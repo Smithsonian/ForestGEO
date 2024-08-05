@@ -1,21 +1,21 @@
-"use client";
+'use client';
 /**
  * GPT model-generated...
  */
 /** @jsxImportSource @emotion/react */
-import styled from "@emotion/styled";
-import { css, keyframes } from "@emotion/react";
-import React, { useEffect, useState } from "react";
-import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
-import { useLoading } from "@/app/contexts/loadingprovider";
+import styled from '@emotion/styled';
+import { css, keyframes } from '@emotion/react';
+import React, { useEffect, useState } from 'react';
+import Box from '@mui/joy/Box';
+import Typography from '@mui/joy/Typography';
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 interface StyledSegmentProps {
   gradientId: string;
 }
 
 const generateRandomColorOrder = (): string[] => {
-  const colors = ["hsl(0, 100%, 85%)", "hsl(39, 100%, 85%)", "hsl(60, 100%, 85%)", "hsl(120, 100%, 85%)", "hsl(240, 100%, 85%)", "hsl(300, 100%, 85%)"];
+  const colors = ['hsl(0, 100%, 85%)', 'hsl(39, 100%, 85%)', 'hsl(60, 100%, 85%)', 'hsl(120, 100%, 85%)', 'hsl(240, 100%, 85%)', 'hsl(300, 100%, 85%)'];
   for (let i = colors.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [colors[i], colors[j]] = [colors[j], colors[i]];
@@ -73,20 +73,20 @@ export const GlobalLoadingIndicator: React.FC = () => {
   return (
     <Box
       sx={{
-        position: "fixed",
+        position: 'fixed',
         top: 0,
         left: 0,
-        width: "100vw",
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        width: '100vw',
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
         zIndex: 2000
       }}
     >
-      <Box sx={{ textAlign: "center", marginBottom: 2 }}>
+      <Box sx={{ textAlign: 'center', marginBottom: 2 }}>
         <svg height={100} width={100} viewBox="0 0 52 52">
           <defs>{gradients}</defs>
           {randomColors.map((_, index) => (
@@ -103,7 +103,7 @@ export const GlobalLoadingIndicator: React.FC = () => {
         </svg>
       </Box>
       {loadingMessage && (
-        <Typography color={"danger"} level="h1">
+        <Typography color={'danger'} level="h1">
           {loadingMessage}
         </Typography>
       )}

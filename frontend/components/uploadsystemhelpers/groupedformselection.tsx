@@ -1,14 +1,14 @@
-import * as React from "react";
-import Select from "@mui/joy/Select";
-import Option, { optionClasses } from "@mui/joy/Option";
-import Chip from "@mui/joy/Chip";
-import List from "@mui/joy/List";
-import ListItemDecorator, { listItemDecoratorClasses } from "@mui/joy/ListItemDecorator";
-import ListDivider from "@mui/joy/ListDivider";
-import ListItem from "@mui/joy/ListItem";
-import Typography from "@mui/joy/Typography";
-import Check from "@mui/icons-material/Check";
-import { FormGroups, TableHeadersByFormType } from "@/config/macros/formdetails";
+import * as React from 'react';
+import Select from '@mui/joy/Select';
+import Option, { optionClasses } from '@mui/joy/Option';
+import Chip from '@mui/joy/Chip';
+import List from '@mui/joy/List';
+import ListItemDecorator, { listItemDecoratorClasses } from '@mui/joy/ListItemDecorator';
+import ListDivider from '@mui/joy/ListDivider';
+import ListItem from '@mui/joy/ListItem';
+import Typography from '@mui/joy/Typography';
+import Check from '@mui/icons-material/Check';
+import { FormGroups, TableHeadersByFormType } from '@/config/macros/formdetails';
 
 interface SelectFormTypeProps {
   externalState: string;
@@ -17,9 +17,9 @@ interface SelectFormTypeProps {
 }
 
 const SelectFormType: React.FC<SelectFormTypeProps> = ({ externalState, updateExternalState, updateExternalHeaders }) => {
-  const colors: Record<string, "neutral" | "primary"> = {
-    DatabaseForms: "neutral",
-    CTFSWebForms: "primary"
+  const colors: Record<string, 'neutral' | 'primary'> = {
+    DatabaseForms: 'neutral',
+    CTFSWebForms: 'primary'
   };
   const handleChange = (event: React.SyntheticEvent | null, newValue: string | null) => {
     if (newValue) {
@@ -33,23 +33,23 @@ const SelectFormType: React.FC<SelectFormTypeProps> = ({ externalState, updateEx
       placeholder="Choose a form"
       slotProps={{
         listbox: {
-          component: "div",
+          component: 'div',
           sx: {
             maxHeight: 240,
-            overflow: "auto",
-            "--List-padding": "0px",
-            "--ListItem-radius": "0px"
+            overflow: 'auto',
+            '--List-padding': '0px',
+            '--ListItem-radius': '0px'
           }
         }
       }}
       value={externalState}
       onChange={handleChange}
-      sx={{ display: "flex", flex: 1 }}
+      sx={{ display: 'flex', flex: 1 }}
     >
       {Object.entries(FormGroups).map(([name, forms], index) => (
         <React.Fragment key={name}>
           {index !== 0 && <ListDivider role="none" />}
-          <List aria-labelledby={`select-group-${name}`} sx={{ "--ListItemDecorator-size": "28px" }}>
+          <List aria-labelledby={`select-group-${name}`} sx={{ '--ListItemDecorator-size': '28px' }}>
             <ListItem id={`select-group-${name}`} sticky>
               <Typography level="body-xs" textTransform="uppercase">
                 {name} ({forms.length})
@@ -61,9 +61,9 @@ const SelectFormType: React.FC<SelectFormTypeProps> = ({ externalState, updateEx
                 value={form}
                 label={
                   <React.Fragment>
-                    <Chip size="sm" color={colors[name]} sx={{ borderRadius: "xs", mr: 1 }}>
+                    <Chip size="sm" color={colors[name]} sx={{ borderRadius: 'xs', mr: 1 }}>
                       {name}
-                    </Chip>{" "}
+                    </Chip>{' '}
                     {form}
                   </React.Fragment>
                 }

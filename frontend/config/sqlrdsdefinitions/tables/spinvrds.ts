@@ -1,6 +1,6 @@
 // species inventory custom data type
 
-import { ResultType } from "@/config/utils";
+import { ResultType } from '@/config/utils';
 
 export type SpeciesInventoryRDS = {
   id: number;

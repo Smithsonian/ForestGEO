@@ -1,21 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getContainerClient } from "@/config/macros/azurestorage";
-import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from "@azure/storage-blob";
-import { HTTPResponses } from "@/config/macros";
+import { NextRequest, NextResponse } from 'next/server';
+import { getContainerClient } from '@/config/macros/azurestorage';
+import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from '@azure/storage-blob';
+import { HTTPResponses } from '@/config/macros';
 
 export async function GET(request: NextRequest) {
-  const containerName = request.nextUrl.searchParams.get("container");
-  const filename = request.nextUrl.searchParams.get("filename");
+  const containerName = request.nextUrl.searchParams.get('container');
+  const filename = request.nextUrl.searchParams.get('filename');
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 
   if (!containerName || !filename || !storageAccountConnectionString) {
-    return new NextResponse("Container name, filename, and storage connection string are required", { status: 400 });
+    return new NextResponse('Container name, filename, and storage connection string are required', { status: 400 });
   }
 
   try {
     const containerClient = await getContainerClient(containerName.toLowerCase());
     if (!containerClient) {
-      return new NextResponse("Failed to get container client", {
+      return new NextResponse('Failed to get container client', {
         status: 400
       });
     }
@@ -29,9 +29,9 @@ export async function GET(request: NextRequest) {
       blobName: filename,
       startsOn: new Date(),
       expiresOn: new Date(new Date().valueOf() + 3600 * 1000), // 1 hour expiration
-      permissions: BlobSASPermissions.parse("r") // read-only permission
+      permissions: BlobSASPermissions.parse('r') // read-only permission
     };
-    let sasToken = "";
+    let sasToken = '';
     if (blobServiceClient.credential instanceof StorageSharedKeyCredential) {
       sasToken = generateBlobSASQueryParameters(sasOptions, blobServiceClient.credential).toString();
     }
@@ -40,11 +40,11 @@ export async function GET(request: NextRequest) {
     return new NextResponse(JSON.stringify({ url }), {
       status: HTTPResponses.OK,
       headers: {
-        "Content-Type": "application/json"
+        'Content-Type': 'application/json'
       }
     });
   } catch (error) {
-    console.error("Download file error:", error);
+    console.error('Download file error:', error);
     return new NextResponse((error as Error).message, { status: 500 });
   }
 }

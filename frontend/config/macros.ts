@@ -3,9 +3,9 @@
  *
  * This file defines types used throughout the upload system components to define props, state, contexts etc. It also defines some utility functions used in the upload flow.
  */
-import { FileRejection, FileWithPath } from "react-dropzone";
-import "@/styles/customtablesettings.css";
-import { GridColDef, GridValidRowModel } from "@mui/x-data-grid";
+import { FileRejection, FileWithPath } from 'react-dropzone';
+import '@/styles/customtablesettings.css';
+import { GridColDef, GridValidRowModel } from '@mui/x-data-grid';
 
 export type ColumnStates = {
   [key: string]: boolean;
@@ -27,15 +27,15 @@ export enum HTTPResponses {
 }
 
 export enum ErrorMessages {
-  SCF = "SQL Command Failure",
-  ICF = "Insertion Command Failed",
-  UCF = "Update Command Failed",
-  DCF = "Delete Command Failed",
-  UKAE = "Unique Key Already Exists"
+  SCF = 'SQL Command Failure',
+  ICF = 'Insertion Command Failed',
+  UCF = 'Update Command Failed',
+  DCF = 'Delete Command Failed',
+  UKAE = 'Unique Key Already Exists'
 }
 
 export const tableHeaderSettings = {
-  fontWeight: "bold",
+  fontWeight: 'bold',
   fontSize: 16
 };
 
@@ -97,15 +97,15 @@ export const booleanToBit = (value: boolean | undefined): number => (value ? 1 :
 
 export function formatDate(isoDateString: string): string {
   const options: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "long",
-    day: "numeric"
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
   };
   return new Date(isoDateString).toLocaleDateString(undefined, options);
 }
 
-export const unitSelectionOptions = ["km", "hm", "dam", "m", "dm", "cm", "mm"];
-export const areaSelectionOptions = ["km2", "hm2", "dam2", "m2", "dm2", "cm2", "mm2"];
+export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
 export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
   required?: boolean;
 };

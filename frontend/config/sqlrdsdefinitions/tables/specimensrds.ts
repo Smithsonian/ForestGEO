@@ -1,6 +1,6 @@
 // specimens custom data type
-import { IDataMapper, parseDate } from "@/config/datamapper";
-import { ResultType } from "@/config/utils";
+import { IDataMapper, parseDate } from '@/config/datamapper';
+import { ResultType } from '@/config/utils';
 
 export type SpecimensRDS = {
   id?: number;

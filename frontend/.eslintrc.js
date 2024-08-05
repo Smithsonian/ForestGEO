@@ -1,28 +1,22 @@
 module.exports = {
-  parser: "@typescript-eslint/parser",
-  extends: ["next", "plugin:@typescript-eslint/recommended", "plugin:prettier/recommended"],
+  parser: '@typescript-eslint/parser',
+  extends: ['next', 'plugin:@typescript-eslint/recommended', 'plugin:prettier/recommended'],
   settings: {
     next: {
-      rootDir: "."
+      rootDir: '.'
     }
   },
-  plugins: ["@typescript-eslint", "unused-imports", "prettier", "import"],
+  plugins: ['@typescript-eslint', 'unused-imports', 'prettier', 'import'],
   rules: {
-    "react-hooks/exhaustive-deps": "off",
-    semi: ["error", "always"],
-    "unused-imports/no-unused-imports": "error",
-    "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/no-unused-vars": "off",
-    "unused-imports/no-unused-vars": "off",
-    "react-hooks/rules-of-hooks": "off",
-    "no-case-declarations": "off",
-    "prettier/prettier": "error",
-    "import/order": [
-      "error",
-      {
-        groups: [["builtin", "external", "internal"]],
-        "newlines-between": "always"
-      }
-    ]
+    'react-hooks/exhaustive-deps': 'off',
+    semi: ['error', 'always'],
+    'unused-imports/no-unused-imports': 'error',
+    '@typescript-eslint/no-explicit-any': 'off',
+    '@typescript-eslint/no-unused-vars': 'off',
+    '@typescript-eslint/no-var-requires': 'off',
+    'unused-imports/no-unused-vars': 'off',
+    'react-hooks/rules-of-hooks': 'off',
+    'no-case-declarations': 'off',
+    'prettier/prettier': 'error'
   }
 };

@@ -1,24 +1,24 @@
 // quadratpersonnel datagrid
-"use client";
-import { Box, Typography, Button } from "@mui/joy";
-import { AlertProps } from "@mui/material";
-import { GridColDef, GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
-import { randomId } from "@mui/x-data-grid-generator";
-import { useSession } from "next-auth/react";
-import React, { useEffect, useState } from "react";
-import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
-import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
-import { GridSelections } from "@/config/macros";
-import { initialQuadratPersonnelRDSRow } from "@/config/sqlrdsdefinitions/tables/quadratpersonnelrds";
-import { useRouter } from "next/navigation";
+'use client';
+import { Box, Typography, Button } from '@mui/joy';
+import { AlertProps } from '@mui/material';
+import { GridColDef, GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
+import { randomId } from '@mui/x-data-grid-generator';
+import { useSession } from 'next-auth/react';
+import React, { useEffect, useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { GridSelections } from '@/config/macros';
+import { initialQuadratPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/quadratpersonnelrds';
+import { useRouter } from 'next/navigation';
 
-import DataGridCommons from "../datagridcommons";
+import DataGridCommons from '../datagridcommons';
 
 export default function QuadratPersonnelDataGrid() {
   const [rows, setRows] = useState([initialQuadratPersonnelRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
-  const [snackbar, setSnackbar] = useState<Pick<AlertProps, "children" | "severity"> | null>(null);
+  const [snackbar, setSnackbar] = useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
   const [refresh, setRefresh] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
@@ -51,7 +51,7 @@ export default function QuadratPersonnelDataGrid() {
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: "quadratID" }
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratID' }
     }));
   };
 
@@ -59,7 +59,7 @@ export default function QuadratPersonnelDataGrid() {
     const fetchOptions = async () => {
       const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`);
       const quadratData = await quadratResponse.json();
-      if (quadratData.length === 0) throw new Error("quadratData fetchall is empty");
+      if (quadratData.length === 0) throw new Error('quadratData fetchall is empty');
       setQuadratOptions(
         quadratData.map((item: any) => ({
           label: item.quadratName, // Adjust based on your data structure
@@ -69,7 +69,7 @@ export default function QuadratPersonnelDataGrid() {
 
       const personnelResponse = await fetch(`/api/fetchall/personnel?schema=${currentSite?.schemaName}`);
       const personnelData = await personnelResponse.json();
-      if (personnelData.length === 0) throw new Error("personnelData fetchall is empty");
+      if (personnelData.length === 0) throw new Error('personnelData fetchall is empty');
       setPersonnelOptions(
         personnelData.map((person: any) => ({
           label: `${person.firstName} ${person.lastName}`, // Adjust based on your data structure
@@ -82,32 +82,32 @@ export default function QuadratPersonnelDataGrid() {
 
   const QuadratPersonnelGridColumns: GridColDef[] = [
     {
-      field: "quadratPersonnelID",
-      headerName: "ID",
-      headerClassName: "header",
+      field: 'quadratPersonnelID',
+      headerName: 'ID',
+      headerClassName: 'header',
       minWidth: 75,
-      align: "left",
+      align: 'left',
       editable: false
     },
     {
-      field: "quadratID",
-      headerName: "Quadrat ID",
-      headerClassName: "header",
+      field: 'quadratID',
+      headerName: 'Quadrat ID',
+      headerClassName: 'header',
       flex: 1,
       minWidth: 140,
-      align: "left",
-      type: "singleSelect",
+      align: 'left',
+      type: 'singleSelect',
       valueOptions: quadratOptions,
       editable: true
     },
     {
-      field: "personnelID",
-      headerName: "Personnel ID",
-      headerClassName: "header",
+      field: 'personnelID',
+      headerName: 'Personnel ID',
+      headerClassName: 'header',
       flex: 1,
       minWidth: 140,
-      align: "left",
-      type: "singleSelect",
+      align: 'left',
+      type: 'singleSelect',
       valueOptions: personnelOptions,
       editable: true
     }
@@ -115,21 +115,21 @@ export default function QuadratPersonnelDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: "flex", alignItems: "center", mb: 3, width: "100%" }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box
           sx={{
-            width: "100%",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            backgroundColor: "warning.main",
-            borderRadius: "4px",
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: 'warning.main',
+            borderRadius: '4px',
             p: 2
           }}
         >
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== "fieldcrew" && (
-              <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
+            {session?.user.userStatus !== 'fieldcrew' && (
+              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
             )}

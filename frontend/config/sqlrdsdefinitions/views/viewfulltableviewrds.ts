@@ -1,6 +1,6 @@
 // viewfulltableview custom data type
-import { ColumnStates } from "@/config/macros";
-import { createInitialObject, ResultType } from "@/config/utils";
+import { ColumnStates } from '@/config/macros';
+import { createInitialObject, ResultType } from '@/config/utils';
 
 /**
  * materialized view --> do this before batch updates to make sure that refresh function isn't called for each row

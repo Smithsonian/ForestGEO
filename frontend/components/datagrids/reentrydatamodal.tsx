@@ -1,9 +1,9 @@
-"use client";
-import React, { useState, useEffect } from "react";
-import { GridRowModel, GridColDef, DataGrid, GridRenderCellParams } from "@mui/x-data-grid";
-import moment from "moment";
-import { unitSelectionOptions } from "@/config/macros";
-import { AttributeStatusOptions } from "@/config/sqlrdsdefinitions/tables/attributerds";
+'use client';
+import React, { useState, useEffect } from 'react';
+import { GridRowModel, GridColDef, DataGrid, GridRenderCellParams } from '@mui/x-data-grid';
+import moment from 'moment';
+import { unitSelectionOptions } from '@/config/macros';
+import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import {
   Button,
   DialogActions,
@@ -19,8 +19,8 @@ import {
   Stack,
   Typography,
   Box
-} from "@mui/joy";
-import { DatePicker } from "@mui/x-date-pickers";
+} from '@mui/joy';
+import { DatePicker } from '@mui/x-date-pickers';
 
 interface ReEnterDataModalProps {
   row: GridRowModel;
@@ -56,14 +56,14 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
         if (
           editable &&
           initialData[field] !== localData[field] &&
-          (initialData[field] !== "" ||
+          (initialData[field] !== '' ||
             initialData[field] !== null ||
             initialData[field] !== undefined ||
             initialData[field] !== false ||
             initialData[field] !== 0)
         ) {
           // empty/default value here means that this is a new entry, should be preserved
-          initialData[field] = "";
+          initialData[field] = '';
         }
       });
       setLocalData({ ...initialData });
@@ -97,20 +97,20 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
       <ModalDialog
         variant="outlined"
         role="alertdialog"
-        sx={{ width: "auto", maxWidth: "90vw", overflow: "auto" }} // Set dialog width dynamically
+        sx={{ width: 'auto', maxWidth: '90vw', overflow: 'auto' }} // Set dialog width dynamically
       >
         <DialogTitle>Confirm Changes</DialogTitle>
         <DialogContent>
           {!isConfirmStep ? (
-            <Stack direction={"row"} spacing={2} sx={{ width: "100%" }}>
+            <Stack direction={'row'} spacing={2} sx={{ width: '100%' }}>
               {columns.map(column => {
                 const { field, type, editable } = column;
                 const value = localData[field];
                 if (!editable) {
                   return null;
                 }
-                if (type === "singleSelect") {
-                  const valueOptions = field !== "status" ? unitSelectionOptions : AttributeStatusOptions;
+                if (type === 'singleSelect') {
+                  const valueOptions = field !== 'status' ? unitSelectionOptions : AttributeStatusOptions;
                   return (
                     <FormControl key={field}>
                       <FormLabel>{column.headerName}</FormLabel>
@@ -130,7 +130,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                     </FormControl>
                   );
                 }
-                if (type === "date") {
+                if (type === 'date') {
                   return (
                     <FormControl key={field}>
                       <FormLabel>{column.headerName}</FormLabel>
@@ -138,7 +138,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                         label={column.headerName}
                         value={value ? moment(value).utc() : null}
                         onChange={newValue => {
-                          if (newValue) handleInputChange(field, moment(newValue).utc().format("YYYY-MM-DD"));
+                          if (newValue) handleInputChange(field, moment(newValue).utc().format('YYYY-MM-DD'));
                         }}
                       />
                     </FormControl>
@@ -153,7 +153,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
               })}
             </Stack>
           ) : (
-            <Box className="mt-4" sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+            <Box className="mt-4" sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
               <Typography level="title-lg">Please choose from the following -- </Typography>
               <Typography level="body-md">
                 1. <b>Original</b> -- ignore all modifications made to the row.
@@ -164,28 +164,28 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
               <Typography level="body-md" sx={{ marginBottom: 2 }}>
                 3. <b>Second Modification</b> -- the initial change contained a type, proceed with the re-entered version.
               </Typography>
-              <Box sx={{ display: "flex", flex: 1, width: "100%" }}>
+              <Box sx={{ display: 'flex', flex: 1, width: '100%' }}>
                 <DataGrid
                   rows={[
-                    { ...row, id: "starter", label: "Original" },
+                    { ...row, id: 'starter', label: 'Original' },
                     {
                       ...reEnterData,
-                      id: "original",
-                      label: "First Modification"
+                      id: 'original',
+                      label: 'First Modification'
                     },
                     {
                       ...localData,
-                      id: "modified",
-                      label: "Second Modification (Re-entry)"
+                      id: 'modified',
+                      label: 'Second Modification (Re-entry)'
                     }
                   ]}
                   columns={[
                     {
-                      field: "label",
-                      headerName: "Row",
+                      field: 'label',
+                      headerName: 'Row',
                       width: 300,
                       renderCell: params => (
-                        <Typography level="body-md" sx={{ fontWeight: "bold" }}>
+                        <Typography level="body-md" sx={{ fontWeight: 'bold' }}>
                           {params.value}
                         </Typography>
                       )
@@ -197,9 +197,9 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                       renderCell: (params: GridRenderCellParams) => (
                         <Box
                           sx={{
-                            whiteSpace: "normal",
-                            wordWrap: "break-word",
-                            width: "100%"
+                            whiteSpace: 'normal',
+                            wordWrap: 'break-word',
+                            width: '100%'
                           }}
                         >
                           {params.value}
@@ -210,26 +210,26 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                   getRowId={row => row.id}
                   onRowClick={params => handleRowSelect(params.row)}
                   sx={{
-                    display: "flex",
+                    display: 'flex',
                     flex: 1,
-                    width: "100%",
-                    "& .MuiDataGrid-row": {
-                      cursor: "pointer"
+                    width: '100%',
+                    '& .MuiDataGrid-row': {
+                      cursor: 'pointer'
                     },
-                    "& .MuiDataGrid-row:hover": {
-                      backgroundColor: "rgba(0, 0, 0, 0.44)", // light gray background for better readability
-                      color: "inherit" // keep the text color unchanged
+                    '& .MuiDataGrid-row:hover': {
+                      backgroundColor: 'rgba(0, 0, 0, 0.44)', // light gray background for better readability
+                      color: 'inherit' // keep the text color unchanged
                     },
-                    "& .MuiDataGrid-row.selected": {
-                      backgroundColor: "rgba(0, 0, 255, 0.22)", // blue background for selected row
-                      color: "inherit" // keep the text color unchanged
+                    '& .MuiDataGrid-row.selected': {
+                      backgroundColor: 'rgba(0, 0, 255, 0.22)', // blue background for selected row
+                      color: 'inherit' // keep the text color unchanged
                     },
-                    "& .MuiDataGrid-cell": {
-                      padding: "8px" // add padding for better readability
+                    '& .MuiDataGrid-cell': {
+                      padding: '8px' // add padding for better readability
                     },
                     // Hide the footer that contains pagination controls and rows per page selector
-                    "& .MuiDataGrid-footerContainer": {
-                      display: "none"
+                    '& .MuiDataGrid-footerContainer': {
+                      display: 'none'
                     }
                   }}
                 />

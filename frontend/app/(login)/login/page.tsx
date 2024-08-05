@@ -1,13 +1,13 @@
-"use client";
-import React, { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
-import { animated, useTransition } from "@react-spring/web";
-import styles from "@/styles/styles.module.css";
-import Box from "@mui/joy/Box";
-import UnauthenticatedSidebar from "@/components/unauthenticatedsidebar";
-import { redirect } from "next/navigation";
+'use client';
+import React, { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import { animated, useTransition } from '@react-spring/web';
+import styles from '@/styles/styles.module.css';
+import Box from '@mui/joy/Box';
+import UnauthenticatedSidebar from '@/components/unauthenticatedsidebar';
+import { redirect } from 'next/navigation';
 
-const slides = ["background-1.jpg", "background-2.jpg", "background-3.jpg", "background-4.jpg"];
+const slides = ['background-1.jpg', 'background-2.jpg', 'background-3.jpg', 'background-4.jpg'];
 
 export default function LoginPage() {
   const { data: _session, status } = useSession();
@@ -31,9 +31,9 @@ export default function LoginPage() {
     setInterval(() => setIndex(state => (state + 1) % slides.length), 5000);
   }, []);
 
-  if (status === "unauthenticated") {
+  if (status === 'unauthenticated') {
     return (
-      <Box sx={{ display: "flex", minHeight: "100vh", minWidth: "100vh" }}>
+      <Box sx={{ display: 'flex', minHeight: '100vh', minWidth: '100vh' }}>
         {transitions((style, i) => (
           <animated.div
             className={styles.bg}
@@ -47,7 +47,7 @@ export default function LoginPage() {
         <UnauthenticatedSidebar />
       </Box>
     );
-  } else if (status === "authenticated") {
-    redirect("/dashboard");
+  } else if (status === 'authenticated') {
+    redirect('/dashboard');
   }
 }

@@ -1,5 +1,5 @@
 // validation changelog custom data type
-import { IDataMapper, parseDate } from "../../datamapper";
+import { IDataMapper, parseDate } from '../../datamapper';
 
 export type ValidationChangelogRDS = {
   id?: number;
@@ -7,7 +7,7 @@ export type ValidationChangelogRDS = {
   procedureName?: string;
   runDateTime?: Date;
   targetRowID?: number;
-  validationOutcome?: "Passed" | "Failed";
+  validationOutcome?: 'Passed' | 'Failed';
   errorMessage?: string;
   validationCriteria?: string;
   measuredValue?: string;
@@ -51,7 +51,7 @@ export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogR
       procedureName: item.ProcedureName != null ? String(item.ProcedureName) : undefined,
       runDateTime: item.RunDateTime != null ? parseDate(item.RunDateTime) : undefined,
       targetRowID: item.TargetRowID != null ? Number(item.TargetRowID) : undefined,
-      validationOutcome: item.ValidationOutcome != null ? (item.ValidationOutcome as "Passed" | "Failed") : undefined,
+      validationOutcome: item.ValidationOutcome != null ? (item.ValidationOutcome as 'Passed' | 'Failed') : undefined,
       errorMessage: item.ErrorMessage != null ? String(item.ErrorMessage) : undefined,
       validationCriteria: item.ValidationCriteria != null ? String(item.ValidationCriteria) : undefined,
       measuredValue: item.MeasuredValue != null ? String(item.MeasuredValue) : undefined,

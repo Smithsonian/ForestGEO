@@ -1,15 +1,15 @@
-import mysql, { PoolConnection } from "mysql2/promise";
-import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from "@/components/processors/processormacros";
-import { SitesResult } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { processCensus } from "@/components/processors/processcensus";
-import { SitesRDS } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import MapperFactory from "@/config/datamapper";
+import mysql, { PoolConnection } from 'mysql2/promise';
+import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from '@/components/processors/processormacros';
+import { SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { processCensus } from '@/components/processors/processcensus';
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import MapperFactory from '@/config/datamapper';
 
 export async function getPersonnelIDByName(connection: PoolConnection, schema: string, fullName: string): Promise<number | null> {
   // Split the full name into first and last names
-  const [firstName, lastName] = fullName.split(" ");
+  const [firstName, lastName] = fullName.split(' ');
   if (!firstName || !lastName) {
-    throw new Error("Full name must include both first and last names.");
+    throw new Error('Full name must include both first and last names.');
   }
 
   try {
@@ -25,12 +25,12 @@ export async function getPersonnelIDByName(connection: PoolConnection, schema: s
     const rows = await runQuery(connection, query, [firstName.trim(), lastName.trim()]);
 
     if (rows.length > 0) {
-      console.log("getpersonnelidbyname: ", rows);
+      console.log('getpersonnelidbyname: ', rows);
       return rows[0].PersonnelID as number;
     }
     return null; // No matching personnel found
   } catch (error: any) {
-    console.error("Error retrieving PersonnelID:", error.message);
+    console.error('Error retrieving PersonnelID:', error.message);
     throw error;
   }
 }
@@ -42,26 +42,26 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
   }
-  if (formType === "measurements") {
+  if (formType === 'measurements') {
     return await processCensus({ ...subProps, schema });
   } else {
     if (mapping.specialProcessing) {
       await mapping.specialProcessing({ ...subProps, schema });
     } else {
       const columns = Object.keys(mapping.columnMappings);
-      if (columns.includes("plotID")) rowData["plotID"] = subProps.plotID?.toString() ?? null;
-      if (columns.includes("censusID")) rowData["censusID"] = subProps.censusID?.toString() ?? null;
-      const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(", ");
-      const placeholders = columns.map(() => "?").join(", "); // Use '?' for placeholders in MySQL
+      if (columns.includes('plotID')) rowData['plotID'] = subProps.plotID?.toString() ?? null;
+      if (columns.includes('censusID')) rowData['censusID'] = subProps.censusID?.toString() ?? null;
+      const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
+      const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
       const values = columns.map(fileColumn => rowData[fileColumn]);
       const query = `
         INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
         VALUES (${placeholders}) ON DUPLICATE KEY
         UPDATE
           ${tableColumns
-            .split(", ")
+            .split(', ')
             .map(column => `${column} = VALUES(${column})`)
-            .join(", ")};
+            .join(', ')};
       `;
 
       try {
@@ -95,7 +95,7 @@ export async function runValidationProcedure(
   const minDBH = min;
   const maxDBH = max;
 
-  if (procedureName === "ValidateScreenMeasuredDiameterMinMax" || procedureName === "ValidateHOMUpperAndLowerBounds") {
+  if (procedureName === 'ValidateScreenMeasuredDiameterMinMax' || procedureName === 'ValidateHOMUpperAndLowerBounds') {
     // validation procedures have been updated to use new species limits tables
     query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
     parameters = [censusID, plotID, minDBH, maxDBH];
@@ -147,7 +147,7 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
 
     return { emailVerified, userStatus };
   } catch (error: any) {
-    console.error("Error verifying email in database: ", error);
+    console.error('Error verifying email in database: ', error);
     throw error;
   } finally {
     if (connection) connection.release();
@@ -164,9 +164,9 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     `;
     const sitesParams: any[] | undefined = [];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
-    console.log("getallschemas: ", sitesResults);
+    console.log('getallschemas: ', sitesResults);
 
-    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>("sites");
+    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>('sites');
     return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
@@ -188,7 +188,7 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     const userResults = await runQuery(connection, userQuery, userParams);
 
     if (userResults.length === 0) {
-      throw new Error("User not found");
+      throw new Error('User not found');
     }
     const userID = userResults[0].UserID;
 
@@ -202,7 +202,7 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     const sitesParams = [userID];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>("sites");
+    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>('sites');
     return mapper.mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
@@ -276,7 +276,7 @@ export function generateInsertOperations(schema: string, newRow: any, config: Up
   const generateQueriesFromSlice = (type: keyof typeof slices): string => {
     const sliceConfig = slices[type];
     if (!sliceConfig) {
-      return ""; // Safety check in case of an undefined slice
+      return ''; // Safety check in case of an undefined slice
     }
     const { range } = sliceConfig;
     const fieldsInSlice = fieldList.slice(range[0], range[1]);
@@ -308,49 +308,49 @@ export function generateInsertQuery(schema: string, table: string, fields: strin
 // Field definitions and configurations
 
 export const allTaxonomiesFields = [
-  "family",
-  "genus",
-  "genusAuthority",
-  "speciesCode",
-  "speciesName",
-  "subspeciesName",
-  "speciesAuthority",
-  "currentTaxonFlag",
-  "obsoleteTaxonFlag",
-  "fieldFamily",
-  "speciesDescription",
-  "publicationTitle",
-  "fullReference",
-  "dateOfPublication",
-  "citation"
+  'family',
+  'genus',
+  'genusAuthority',
+  'speciesCode',
+  'speciesName',
+  'subspeciesName',
+  'speciesAuthority',
+  'currentTaxonFlag',
+  'obsoleteTaxonFlag',
+  'fieldFamily',
+  'speciesDescription',
+  'publicationTitle',
+  'fullReference',
+  'dateOfPublication',
+  'citation'
 ];
 
 export const stemTaxonomiesViewFields = [
-  "treeTag",
-  "stemTag",
-  "family",
-  "genus",
-  "genusAuthority",
-  "speciesCode",
-  "speciesName",
-  "subspeciesName",
-  "currentTaxonFlag",
-  "obsoleteTaxonFlag",
-  "speciesAuthority",
-  "subspeciesAuthority",
-  "speciesIDLevel",
-  "speciesFieldFamily"
+  'treeTag',
+  'stemTag',
+  'family',
+  'genus',
+  'genusAuthority',
+  'speciesCode',
+  'speciesName',
+  'subspeciesName',
+  'currentTaxonFlag',
+  'obsoleteTaxonFlag',
+  'speciesAuthority',
+  'subspeciesAuthority',
+  'speciesIDLevel',
+  'speciesFieldFamily'
 ];
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
-    family: { range: [0, 1], primaryKey: "FamilyID" },
-    genus: { range: [1, 3], primaryKey: "GenusID" },
-    species: { range: [3, 11], primaryKey: "SpeciesID" },
+    family: { range: [0, 1], primaryKey: 'FamilyID' },
+    genus: { range: [1, 3], primaryKey: 'GenusID' },
+    species: { range: [3, 11], primaryKey: 'SpeciesID' },
     reference: {
       range: [11, allTaxonomiesFields.length],
-      primaryKey: "ReferenceID"
+      primaryKey: 'ReferenceID'
     }
   }
 };
@@ -358,13 +358,13 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
-    trees: { range: [0, 1], primaryKey: "TreeID" },
-    stems: { range: [1, 2], primaryKey: "StemID" },
-    family: { range: [2, 3], primaryKey: "FamilyID" },
-    genus: { range: [3, 5], primaryKey: "GenusID" },
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 2], primaryKey: 'StemID' },
+    family: { range: [2, 3], primaryKey: 'FamilyID' },
+    genus: { range: [3, 5], primaryKey: 'GenusID' },
     species: {
       range: [5, stemTaxonomiesViewFields.length],
-      primaryKey: "SpeciesID"
+      primaryKey: 'SpeciesID'
     }
   }
 };

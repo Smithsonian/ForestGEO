@@ -1,18 +1,18 @@
-"use client";
-import * as React from "react";
-import { useEffect, useState } from "react";
-import CloseIcon from "@mui/icons-material/Close";
-import { QuadratRDS } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import { PersonnelRDS } from "@/config/sqlrdsdefinitions/tables/personnelrds";
-import { usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
-import { Stack } from "@mui/material";
-import { Button, Checkbox, IconButton, Modal, ModalDialog, Typography, Alert, DialogContent, DialogTitle, DialogActions, Select, Option, Grid } from "@mui/joy";
-import { DataGrid, GridRowSelectionModel } from "@mui/x-data-grid";
-import { useOrgCensusListContext } from "@/app/contexts/listselectionprovider";
-import { OrgCensusToCensusResultMapper } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { Box } from "@mui/system";
+'use client';
+import * as React from 'react';
+import { useEffect, useState } from 'react';
+import CloseIcon from '@mui/icons-material/Close';
+import { QuadratRDS } from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import { PersonnelRDS } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { Stack } from '@mui/material';
+import { Button, Checkbox, IconButton, Modal, ModalDialog, Typography, Alert, DialogContent, DialogTitle, DialogActions, Select, Option, Grid } from '@mui/joy';
+import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
+import { useOrgCensusListContext } from '@/app/contexts/listselectionprovider';
+import { OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { Box } from '@mui/system';
 
-import { PersonnelGridColumns, quadratGridColumns } from "./datagridcolumns";
+import { PersonnelGridColumns, quadratGridColumns } from './datagridcolumns';
 
 interface RolloverModalProps {
   open: boolean;
@@ -64,8 +64,8 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
 
       setLoading(false);
     } catch (error) {
-      console.error("Failed to fetch previous data", error);
-      setError("Failed to fetch previous data. Please try again.");
+      console.error('Failed to fetch previous data', error);
+      setError('Failed to fetch previous data. Please try again.');
       setLoading(false);
     }
   };
@@ -78,8 +78,8 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
       setPreviousPersonnel(personnelData);
       setLoading(false);
     } catch (error) {
-      console.error("Failed to fetch previous data", error);
-      setError("Failed to fetch previous data. Please try again.");
+      console.error('Failed to fetch previous data', error);
+      setError('Failed to fetch previous data. Please try again.');
       setLoading(false);
     }
   };
@@ -172,28 +172,28 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
 
   const handleConfirm = async () => {
     if (confirmNoQuadratsRollover && confirmNoPersonnelRollover && selectedPersonnelCensus.censusID === 0 && selectedQuadratsCensus.censusID === 0) {
-      console.log("confirm no rollover");
+      console.log('confirm no rollover');
       onConfirm(rolloverPersonnel, rolloverQuadrats);
       resetState();
       return;
     } else if (selectedPersonnelCensus.censusID === 0 && !confirmNoPersonnelRollover) {
-      alert("Please confirm that you do not wish to rollover personnel to proceed");
+      alert('Please confirm that you do not wish to rollover personnel to proceed');
     } else if (selectedQuadratsCensus.censusID === 0 && !confirmNoQuadratsRollover) {
-      alert("Please confirm that you do not wish to rollover quadrats to proceed");
+      alert('Please confirm that you do not wish to rollover quadrats to proceed');
     }
 
     if (!rolloverPersonnel && !rolloverQuadrats) {
-      alert("You must select at least one option to roll over or confirm no rollover.");
+      alert('You must select at least one option to roll over or confirm no rollover.');
       return;
     } else if (rolloverQuadrats && selectedQuadrats.length === 0 && customizeQuadrats) {
-      alert("You must select at least one quadrat to roll over.");
+      alert('You must select at least one quadrat to roll over.');
       return;
     } else if (rolloverPersonnel && selectedPersonnel.length === 0 && customizePersonnel) {
-      alert("You must select at least one person to roll over.");
+      alert('You must select at least one person to roll over.');
       return;
     }
 
-    if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error("site context and plot context are undefined.");
+    if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error('site context and plot context are undefined.');
 
     setLoading(true);
 
@@ -206,19 +206,19 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                 censusListContext[0]?.plotCensusNumber ?? 0
               )
             : 0;
-        if (!highestPlotCensusNumber) throw new Error("highest plot census number calculation failed");
+        if (!highestPlotCensusNumber) throw new Error('highest plot census number calculation failed');
 
         const mapper = new OrgCensusToCensusResultMapper();
         const newCensusID = await mapper.startNewCensus(currentSite?.schemaName, currentPlot?.plotID, highestPlotCensusNumber + 1);
-        if (!newCensusID) throw new Error("census creation failure");
+        if (!newCensusID) throw new Error('census creation failure');
         // Perform the rollover
         if (rolloverPersonnel) {
           // passing source censusID to rollover endpoint
-          console.log("rollover personnel");
+          console.log('rollover personnel');
           await fetch(`/api/rollover/personnel/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedPersonnelCensus?.censusID}/${newCensusID}`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-              "Content-Type": "application/json"
+              'Content-Type': 'application/json'
             },
             body: JSON.stringify({
               incoming: customizePersonnel ? selectedPersonnel.map(person => person.personnelID) : previousPersonnel.map(person => person.personnelID)
@@ -229,9 +229,9 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
         if (rolloverQuadrats) {
           // passing source censusID to rollover endpoint
           await fetch(`/api/rollover/quadrats/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedQuadratsCensus?.censusID}/${newCensusID}`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-              "Content-Type": "application/json"
+              'Content-Type': 'application/json'
             },
             body: JSON.stringify({
               incoming: customizeQuadrats ? selectedQuadrats.map(quadrat => quadrat.quadratID) : previousQuadrats.map(quadrat => quadrat.quadratID)
@@ -241,7 +241,7 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
         onConfirm(rolloverPersonnel, rolloverQuadrats, newCensusID);
       } else onConfirm(false, false);
     } catch (error) {
-      console.error("Failed to perform rollover", error);
+      console.error('Failed to perform rollover', error);
       setError(`Failed to perform rollover: ${error}. Please try again.`);
       onConfirm(false, false);
     } finally {
@@ -278,33 +278,33 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
       <ModalDialog
         role="alertdialog"
         sx={{
-          width: "90vw",
-          height: "90vh",
-          display: "flex",
-          flexDirection: "column",
+          width: '90vw',
+          height: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
           flex: 1,
-          overflow: "auto"
+          overflow: 'auto'
         }}
       >
         <DialogTitle>
           <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography level="title-lg">Rollover Census Data</Typography>
-            <IconButton variant="plain" size="sm" onClick={onClose} sx={{ position: "absolute", top: 8, right: 8 }}>
+            <IconButton variant="plain" size="sm" onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8 }}>
               <CloseIcon />
             </IconButton>
           </Stack>
         </DialogTitle>
         <DialogContent
           sx={{
-            width: "100%",
-            height: "100%",
-            overflow: "auto"
+            width: '100%',
+            height: '100%',
+            overflow: 'auto'
           }}
         >
           {error && <Alert color="danger">{error}</Alert>}
-          <Grid container spacing={2} sx={{ flex: 1, display: "flex", flexDirection: "row", width: "100%", height: "100%" }}>
-            <Grid xs={"auto"} sx={{ width: "50%", height: "50%" }}>
-              <Typography mb={2} level="title-md" fontWeight={"xl"}>
+          <Grid container spacing={2} sx={{ flex: 1, display: 'flex', flexDirection: 'row', width: '100%', height: '100%' }}>
+            <Grid xs={'auto'} sx={{ width: '50%', height: '50%' }}>
+              <Typography mb={2} level="title-md" fontWeight={'xl'}>
                 Roll over <b>Personnel</b> data:
               </Typography>
               <Select
@@ -321,17 +321,17 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                 </Option>
                 {censusValidationStatus.map(census => (
                   <Option key={census.censusID} value={census.censusID} disabled={!census.hasPersonnelData}>
-                    {`Census ${census.plotCensusNumber} - Personnel: ${census.hasPersonnelData ? "Yes" : "No"}`}
+                    {`Census ${census.plotCensusNumber} - Personnel: ${census.hasPersonnelData ? 'Yes' : 'No'}`}
                   </Option>
                 ))}
               </Select>
               {selectedPersonnelCensus.censusID === 0 ? (
-                <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                   <Alert color="warning" sx={{ my: 2 }}>
                     You have selected to not roll over any Personnel data. <br /> Please confirm to proceed.
                   </Alert>
                   <Button
-                    variant={confirmNoPersonnelRollover ? "solid" : "outlined"}
+                    variant={confirmNoPersonnelRollover ? 'solid' : 'outlined'}
                     color="warning"
                     onClick={() => {
                       setConfirmNoPersonnelRollover(!confirmNoPersonnelRollover);
@@ -341,7 +341,7 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                   </Button>
                 </Box>
               ) : (
-                <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                   <Stack direction="row" spacing={2} alignItems="center">
                     <Checkbox
                       checked={rolloverPersonnel}
@@ -351,9 +351,9 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                     <Typography>Roll over personnel data</Typography>
                   </Stack>
                   {rolloverPersonnel && (
-                    <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+                    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                       <Button onClick={() => setCustomizePersonnel(!customizePersonnel)}>
-                        {customizePersonnel ? "Roll over all personnel" : "Customize personnel selection"}
+                        {customizePersonnel ? 'Roll over all personnel' : 'Customize personnel selection'}
                       </Button>
                       {customizePersonnel && (
                         <DataGrid
@@ -375,8 +375,8 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                 </Box>
               )}
             </Grid>
-            <Grid xs={"auto"} sx={{ width: "50%", height: "50%" }}>
-              <Typography mb={2} level="title-md" fontWeight={"xl"}>
+            <Grid xs={'auto'} sx={{ width: '50%', height: '50%' }}>
+              <Typography mb={2} level="title-md" fontWeight={'xl'}>
                 Roll over <b>Quadrats</b> data
               </Typography>
               <Select
@@ -393,17 +393,17 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                 </Option>
                 {censusValidationStatus.map(census => (
                   <Option key={census.censusID} value={census.censusID} disabled={!census.hasQuadratsData}>
-                    {`Census ${census.plotCensusNumber} - Quadrats: ${census.hasQuadratsData ? "Yes" : "No"}`}
+                    {`Census ${census.plotCensusNumber} - Quadrats: ${census.hasQuadratsData ? 'Yes' : 'No'}`}
                   </Option>
                 ))}
               </Select>
               {selectedQuadratsCensus.censusID === 0 ? (
-                <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                   <Alert color="warning" sx={{ my: 2 }}>
                     You have selected to not roll over any Quadrats data. <br /> Please confirm to proceed.
                   </Alert>
                   <Button
-                    variant={confirmNoQuadratsRollover ? "solid" : "outlined"}
+                    variant={confirmNoQuadratsRollover ? 'solid' : 'outlined'}
                     color="warning"
                     onClick={() => {
                       setConfirmNoQuadratsRollover(!confirmNoQuadratsRollover);
@@ -413,7 +413,7 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                   </Button>
                 </Box>
               ) : (
-                <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                   <Stack direction="row" spacing={2} alignItems="center">
                     <Checkbox
                       checked={rolloverQuadrats}
@@ -423,9 +423,9 @@ export default function RolloverModal({ open, onClose, onConfirm }: RolloverModa
                     <Typography>Roll over quadrats data</Typography>
                   </Stack>
                   {rolloverQuadrats && (
-                    <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+                    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                       <Button onClick={() => setCustomizeQuadrats(!customizeQuadrats)}>
-                        {customizeQuadrats ? "Roll over all quadrats" : "Customize quadrats selection"}
+                        {customizeQuadrats ? 'Roll over all quadrats' : 'Customize quadrats selection'}
                       </Button>
                       {customizeQuadrats && (
                         <DataGrid

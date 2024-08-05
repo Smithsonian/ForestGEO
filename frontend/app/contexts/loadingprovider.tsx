@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useState } from 'react';
 
 const LoadingContext = createContext<{
   isLoading: boolean;
@@ -8,15 +8,15 @@ const LoadingContext = createContext<{
   setLoading: (isLoading: boolean, loadingMessage?: string) => void;
 }>({
   isLoading: false,
-  loadingMessage: "",
+  loadingMessage: '',
   setLoading: () => {}
 });
 
 export function LoadingProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState("");
+  const [loadingMessage, setLoadingMessage] = useState('');
 
-  const setLoading = (isLoading: boolean, message = "") => {
+  const setLoading = (isLoading: boolean, message = '') => {
     setIsLoading(isLoading);
     setLoadingMessage(message);
   };

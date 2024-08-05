@@ -1,6 +1,6 @@
-import { IDataMapper } from "@/config/datamapper";
-import { ColumnStates } from "@/config/macros";
-import { createInitialObject, ResultType } from "@/config/utils";
+import { IDataMapper } from '@/config/datamapper';
+import { ColumnStates } from '@/config/macros';
+import { createInitialObject, ResultType } from '@/config/utils';
 
 export const initialStemTaxonomiesViewRDSRow = createInitialObject<StemTaxonomiesViewRDS>();
 

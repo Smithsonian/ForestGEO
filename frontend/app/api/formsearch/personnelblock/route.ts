@@ -1,18 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
-import { PoolConnection } from "mysql2/promise";
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import { PersonnelRDS, PersonnelResult } from "@/config/sqlrdsdefinitions/tables/personnelrds";
-import { FORMSEARCH_LIMIT } from "@/config/macros/azurestorage";
-import { HTTPResponses } from "@/config/macros";
+import { NextRequest, NextResponse } from 'next/server';
+import { PoolConnection } from 'mysql2/promise';
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import { PersonnelRDS, PersonnelResult } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { FORMSEARCH_LIMIT } from '@/config/macros/azurestorage';
+import { HTTPResponses } from '@/config/macros';
 
 export async function GET(request: NextRequest): Promise<NextResponse<PersonnelRDS[]>> {
-  const schema = request.nextUrl.searchParams.get("schema");
-  if (!schema) throw new Error("no schema provided!");
-  const partialLastName = request.nextUrl.searchParams.get("searchfor")!;
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema provided!');
+  const partialLastName = request.nextUrl.searchParams.get('searchfor')!;
   const conn = await getConn();
   try {
     const query =
-      partialLastName === ""
+      partialLastName === ''
         ? `SELECT DISTINCT PersonnelID, FirstName, LastName, Role
       FROM ${schema}.personnel
       ORDER BY LastName
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
       WHERE LastName LIKE ?
       ORDER BY LastName
       LIMIT ${FORMSEARCH_LIMIT}`;
-    const queryParams = partialLastName === "" ? [] : [`%${partialLastName}%`];
+    const queryParams = partialLastName === '' ? [] : [`%${partialLastName}%`];
     const results = await runQuery(conn, query, queryParams);
 
     const personnelRows: PersonnelRDS[] = results.map((row: PersonnelResult, index: number) => ({
@@ -38,8 +38,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
       status: HTTPResponses.OK
     });
   } catch (error: any) {
-    console.error("Error in GET Personnel:", error.message || error);
-    throw new Error("Failed to fetch personnel data");
+    console.error('Error in GET Personnel:', error.message || error);
+    throw new Error('Failed to fetch personnel data');
   } finally {
     if (conn) conn.release();
   }
@@ -47,9 +47,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   let conn: PoolConnection | null = null;
-  const schema = request.nextUrl.searchParams.get("schema");
-  const quadratID = parseInt(request.nextUrl.searchParams.get("quadratID")!, 10);
-  if (!schema || schema === "undefined" || isNaN(quadratID)) throw new Error("Missing required parameters");
+  const schema = request.nextUrl.searchParams.get('schema');
+  const quadratID = parseInt(request.nextUrl.searchParams.get('quadratID')!, 10);
+  if (!schema || schema === 'undefined' || isNaN(quadratID)) throw new Error('Missing required parameters');
 
   try {
     const updatedPersonnelIDs: number[] = await request.json();
@@ -79,11 +79,11 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     // Commit the transaction
     await conn.commit();
 
-    return NextResponse.json({ message: "Personnel updated successfully" }, { status: HTTPResponses.OK });
+    return NextResponse.json({ message: 'Personnel updated successfully' }, { status: HTTPResponses.OK });
   } catch (error) {
     await conn?.rollback();
-    console.error("Error:", error);
-    throw new Error("Personnel update failed");
+    console.error('Error:', error);
+    throw new Error('Personnel update failed');
   } finally {
     if (conn) conn.release();
   }

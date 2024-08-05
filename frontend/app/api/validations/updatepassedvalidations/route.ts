@@ -1,13 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getConn, runQuery, UpdateValidationResponse } from "@/components/processors/processormacros";
-import { HTTPResponses } from "@/config/macros";
+import { NextRequest, NextResponse } from 'next/server';
+import { getConn, runQuery, UpdateValidationResponse } from '@/components/processors/processormacros';
+import { HTTPResponses } from '@/config/macros';
 
 export async function GET(request: NextRequest) {
   const conn = await getConn();
-  const schema = request.nextUrl.searchParams.get("schema");
-  if (!schema) throw new Error("no schema variable provided!");
-  const plotIDParam = request.nextUrl.searchParams.get("plotID");
-  const censusIDParam = request.nextUrl.searchParams.get("censusID");
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('no schema variable provided!');
+  const plotIDParam = request.nextUrl.searchParams.get('plotID');
+  const censusIDParam = request.nextUrl.searchParams.get('censusID');
 
   try {
     await conn.beginTransaction();
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     await conn.rollback();
-    console.error("Error in update operation:", error.message);
+    console.error('Error in update operation:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

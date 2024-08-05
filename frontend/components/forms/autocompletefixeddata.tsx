@@ -1,8 +1,8 @@
-"use client";
-import Autocomplete from "@mui/material/Autocomplete";
-import { useEffect, useState } from "react";
-import { CircularProgress, Popper, TextField } from "@mui/material";
-import { useSiteContext } from "@/app/contexts/userselectionprovider";
+'use client';
+import Autocomplete from '@mui/material/Autocomplete';
+import { useEffect, useState } from 'react';
+import { CircularProgress, Popper, TextField } from '@mui/material';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 interface AutocompleteFixedDataProps {
   dataType: string;
@@ -13,12 +13,12 @@ interface AutocompleteFixedDataProps {
 export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedDataProps>) {
   const { value, dataType, onChange } = props;
   const [options, setOptions] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
 
   const currentSite = useSiteContext();
-  if (!currentSite) throw new Error("Site must be selected!");
+  if (!currentSite) throw new Error('Site must be selected!');
 
   // Function to refresh data
   const refreshData = () => {
@@ -29,7 +29,7 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
         setOptions(data);
       })
       .catch(error => {
-        console.error("Error fetching data:", error);
+        console.error('Error fetching data:', error);
       })
       .finally(() => setLoading(false));
   };
@@ -57,13 +57,13 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
 
   return (
     <Autocomplete
-      className={"fullWidthAutoComplete"}
+      className={'fullWidthAutoComplete'}
       value={value}
-      onChange={(_event, newValue) => onChange(newValue ?? "")}
+      onChange={(_event, newValue) => onChange(newValue ?? '')}
       inputValue={inputValue}
       onInputChange={(_event, newInputValue) => setInputValue(newInputValue)}
       options={options}
-      isOptionEqualToValue={(option, value) => (value !== "" ? value === option : value === "")}
+      isOptionEqualToValue={(option, value) => (value !== '' ? value === option : value === '')}
       renderInput={params => (
         <TextField
           {...params}

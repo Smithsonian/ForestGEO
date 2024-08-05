@@ -1,5 +1,5 @@
 // contextreducers.ts
-import { Dispatch } from "react";
+import { Dispatch } from 'react';
 
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | undefined }) => Promise<void>;
@@ -21,11 +21,11 @@ export type LoadAction<T> = {
 // Generic reducer function
 export function genericLoadReducer<T>(state: T | undefined, action: LoadAction<T>): T | undefined {
   switch (action.type) {
-    case "censusList":
-    case "plotList":
-    case "quadratList":
-    case "subquadratList":
-    case "siteList":
+    case 'censusList':
+    case 'plotList':
+    case 'quadratList':
+    case 'subquadratList':
+    case 'siteList':
       if (action.payload && action.type in action.payload) {
         return action.payload[action.type];
       } else {
@@ -43,7 +43,7 @@ export function genericLoadContextReducer<T>(
   validationFunction?: (list: T[], item: T) => boolean
 ): T | undefined {
   // Check if the action type is one of the specified types
-  const isRecognizedActionType = ["plot", "census", "quadrat", "site", "subquadrat"].includes(action.type);
+  const isRecognizedActionType = ['plot', 'census', 'quadrat', 'site', 'subquadrat'].includes(action.type);
   if (!isRecognizedActionType) {
     return currentState;
   }

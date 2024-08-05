@@ -1,15 +1,15 @@
-"use client";
-import { Alert, Box, DialogActions, DialogContent, DialogTitle, List, ListItem, Modal, ModalDialog, Stack, Tooltip, Typography } from "@mui/joy";
-import { UploadParseFilesProps } from "@/config/macros/uploadsystemmacros";
-import { getTableHeaders } from "@/config/macros/formdetails";
-import { Button, Grid } from "@mui/material";
-import { DropzoneLogic } from "@/components/uploadsystemhelpers/dropzone";
-import { FileList } from "@/components/uploadsystemhelpers/filelist";
-import { LoadingButton } from "@mui/lab";
-import React, { useState } from "react";
-import { FileWithPath } from "react-dropzone";
-import WarningIcon from "@mui/icons-material/Warning";
-import { usePlotContext } from "@/app/contexts/userselectionprovider";
+'use client';
+import { Alert, Box, DialogActions, DialogContent, DialogTitle, List, ListItem, Modal, ModalDialog, Stack, Tooltip, Typography } from '@mui/joy';
+import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
+import { getTableHeaders } from '@/config/macros/formdetails';
+import { Button, Grid } from '@mui/material';
+import { DropzoneLogic } from '@/components/uploadsystemhelpers/dropzone';
+import { FileList } from '@/components/uploadsystemhelpers/filelist';
+import { LoadingButton } from '@mui/lab';
+import React, { useState } from 'react';
+import { FileWithPath } from 'react-dropzone';
+import WarningIcon from '@mui/icons-material/Warning';
+import { usePlotContext } from '@/app/contexts/userselectionprovider';
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
   const {
@@ -41,10 +41,10 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   };
 
   return (
-    <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
       <Grid container spacing={2}>
         <Grid item xs={6}>
-          <Box sx={{ display: "flex", flexDirection: "column", mb: 10, mr: 10 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', mb: 10, mr: 10 }}>
             <DropzoneLogic onChange={handleFileChange} />
             <Modal open={Boolean(fileToReplace)} onClose={() => setFileToReplace(null)}>
               <ModalDialog>
@@ -70,16 +70,16 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           </Box>
         </Grid>
         <Grid item xs={6}>
-          <Stack direction={"column"} sx={{ display: "flex", flexDirection: "column", mb: 10 }}>
+          <Stack direction={'column'} sx={{ display: 'flex', flexDirection: 'column', mb: 10 }}>
             <Typography sx={{ mb: 2 }}>
               You have selected {uploadForm}. Please ensure that your file has the following headers before continuing: <br />
-              {uploadForm !== "" &&
+              {uploadForm !== '' &&
                 getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false)
                   .map(obj => obj.label)
-                  .join(", ")}
+                  .join(', ')}
               <br />
             </Typography>
-            {uploadForm === "measurements" && (
+            {uploadForm === 'measurements' && (
               <>
                 <Alert startDecorator={<WarningIcon fontSize="large" />} variant="soft" color="danger" sx={{ mb: 2 }}>
                   <Typography>
@@ -106,15 +106,15 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             )}
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
                 mt: 2
               }}
             >
               <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
               {acceptedFiles.length > 0 && (
-                <Button variant="contained" color="error" onClick={() => handleRemoveFile(dataViewActive - 1)} sx={{ mt: 2, alignSelf: "center" }}>
+                <Button variant="contained" color="error" onClick={() => handleRemoveFile(dataViewActive - 1)} sx={{ mt: 2, alignSelf: 'center' }}>
                   Delete Selected File
                 </Button>
               )}

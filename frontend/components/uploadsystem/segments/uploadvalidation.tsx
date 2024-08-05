@@ -1,11 +1,11 @@
-"use client";
-import React, { useEffect, useState } from "react";
-import { Box, LinearProgress, Typography } from "@mui/material";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadValidationProps } from "@/config/macros/uploadsystemmacros";
-import { ValidationResponse } from "@/components/processors/processormacros";
-import CircularProgress from "@mui/joy/CircularProgress";
-import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
+'use client';
+import React, { useEffect, useState } from 'react';
+import { Box, LinearProgress, Typography } from '@mui/material';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { UploadValidationProps } from '@/config/macros/uploadsystemmacros';
+import { ValidationResponse } from '@/components/processors/processormacros';
+import CircularProgress from '@mui/joy/CircularProgress';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 
 type ValidationMessages = {
   [key: string]: string;
@@ -29,18 +29,18 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
   };
 
   useEffect(() => {
-    console.log("Loading Validations...");
-    fetch("/api/validations/validationlist", { method: "GET" })
+    console.log('Loading Validations...');
+    fetch('/api/validations/validationlist', { method: 'GET' })
       .then(response => response.json())
       .then(data => {
-        console.log("Validation Messages:", data);
+        console.log('Validation Messages:', data);
         setValidationMessages(data);
         const initialProgress = Object.keys(data).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
         setValidationProgress(initialProgress);
-        console.log("Initial Progress:", initialProgress);
+        console.log('Initial Progress:', initialProgress);
       })
       .catch(error => {
-        console.error("Error fetching validation messages:", error);
+        console.error('Error fetching validation messages:', error);
       });
   }, []);
 
@@ -52,21 +52,21 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
 
   const showNextPrompt = async (index: number, foundError: boolean = false) => {
     console.log(`showNextPrompt called with index: ${index}, foundError: ${foundError}`);
-    console.log("Current validationMessages length:", Object.keys(validationMessages).length);
+    console.log('Current validationMessages length:', Object.keys(validationMessages).length);
 
     if (index >= Object.keys(validationMessages).length) {
       setIsValidationComplete(true);
       setErrorsFound(foundError);
-      console.log("Validation Complete. Errors Found:", foundError);
+      console.log('Validation Complete. Errors Found:', foundError);
       return;
     }
 
     const api = Object.keys(validationMessages)[index];
-    console.log("Performing Validation for:", api);
+    console.log('Performing Validation for:', api);
 
     try {
       const { response, hasError } = await performValidation(api);
-      console.log(`Validation ${api} Result:`, response, "Has Error:", hasError);
+      console.log(`Validation ${api} Result:`, response, 'Has Error:', hasError);
 
       setValidationResults(prevResults => ({
         ...prevResults,
@@ -81,20 +81,20 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
   };
 
   const performValidation = async (api: string): Promise<{ response: ValidationResponse; hasError: boolean }> => {
-    console.log("Performing validation for:", api);
-    console.log("Current Plot:", currentPlot);
-    console.log("Current Census:", currentCensus);
+    console.log('Performing validation for:', api);
+    console.log('Current Plot:', currentPlot);
+    console.log('Current Census:', currentCensus);
 
     let queryParams = `schema=${schema}&plotID=${currentPlot?.id}&censusID=${currentCensus?.dateRanges[0].censusID}`;
-    if (["ValidateScreenMeasuredDiameterMinMax", "ValidateHOMUpperAndLowerBounds"].includes(api)) {
+    if (['ValidateScreenMeasuredDiameterMinMax', 'ValidateHOMUpperAndLowerBounds'].includes(api)) {
       const values = minMaxValues[api] || defaultMinMaxValues[api];
       queryParams += `&minValue=${values.min}&maxValue=${values.max}`;
     }
 
     try {
-      console.log("Validation URL:", `/api/validations/${api}?${queryParams}`);
+      console.log('Validation URL:', `/api/validations/${api}?${queryParams}`);
       const response = await fetch(`/api/validations/${api}?${queryParams}`);
-      console.log("Response Status:", response.status);
+      console.log('Response Status:', response.status);
       if (!response.ok) {
         console.log(`Response not OK for ${api}:`, response.statusText);
         throw new Error(`Error executing ${api}`);
@@ -140,20 +140,20 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
       {Object.keys(validationMessages).length > 0 && (
         <Box
           sx={{
-            width: "100%",
+            width: '100%',
             p: 2,
-            display: "flex",
+            display: 'flex',
             flex: 1,
-            flexDirection: "column"
+            flexDirection: 'column'
           }}
         >
           {!isValidationComplete ? (
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center"
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
             >
               <Typography variant="h6">Validating data...</Typography>
@@ -162,17 +162,17 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
           ) : (
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center"
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
             >
               <Box
                 sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}
               >
                 <CircularProgress />
@@ -195,7 +195,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
                   {result.failedRows > 0 ? (
                     <>
                       <Typography color="error">- {result.message}</Typography>
-                      <Typography color="error">Failed Core Measurement IDs: {result.failedCoreMeasurementIDs?.join(", ") ?? "None"}</Typography>
+                      <Typography color="error">Failed Core Measurement IDs: {result.failedCoreMeasurementIDs?.join(', ') ?? 'None'}</Typography>
                     </>
                   ) : (
                     <Typography>

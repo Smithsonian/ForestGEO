@@ -1,9 +1,9 @@
-import * as React from "react";
-import { SVGProps } from "react";
-import { IconSvgProps } from "@/types";
+import * as React from 'react';
+import { SVGProps } from 'react';
+import { IconSvgProps } from '@/types';
 
 export const CensusLogo: React.FC<SVGProps<SVGSVGElement> & { size?: string }> = ({
-  size = "1em", // default size is 1em, it can be overridden
+  size = '1em', // default size is 1em, it can be overridden
   ...props
 }) => (
   <svg viewBox="0 0 15 15" fill="currentColor" height={size} width={size} {...props}>
@@ -17,7 +17,7 @@ export const CensusLogo: React.FC<SVGProps<SVGSVGElement> & { size?: string }> =
 );
 
 export const PlotLogo: React.FC<SVGProps<SVGSVGElement> & { size?: string }> = ({
-  size = "1em", // default size is 1em, it can be overridden
+  size = '1em', // default size is 1em, it can be overridden
   ...props
 }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" height={size} width={size} {...props}>
@@ -26,7 +26,7 @@ export const PlotLogo: React.FC<SVGProps<SVGSVGElement> & { size?: string }> = (
 );
 
 export const Logo: React.FC<SVGProps<SVGSVGElement> & { size?: string }> = ({
-  size = "1em", // default size is 1em, it can be overridden
+  size = '1em', // default size is 1em, it can be overridden
   ...props
 }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" height={size} width={size} {...props}>

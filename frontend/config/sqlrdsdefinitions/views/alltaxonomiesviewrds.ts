@@ -1,6 +1,6 @@
 // alltaxonomiesview custom data type
-import { createInitialObject, ResultType } from "@/config/utils";
-import { ColumnStates } from "@/config/macros";
+import { createInitialObject, ResultType } from '@/config/utils';
+import { ColumnStates } from '@/config/macros';
 
 export const initialAllTaxonomiesViewRDSRow = createInitialObject<AllTaxonomiesViewRDS>();
 

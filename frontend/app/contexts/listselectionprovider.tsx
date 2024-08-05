@@ -1,12 +1,12 @@
 // ListSelectionProvider.tsx
-"use client";
-import React, { createContext, Dispatch, useContext, useReducer } from "react";
-import { createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction } from "@/config/macros/contextreducers";
-import { QuadratRDS } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import { PlotRDS } from "@/config/sqlrdsdefinitions/tables/plotrds";
-import { SubquadratRDS } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
-import { SitesRDS } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { OrgCensus } from "@/config/sqlrdsdefinitions/orgcensusrds";
+'use client';
+import React, { createContext, Dispatch, useContext, useReducer } from 'react';
+import { createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction } from '@/config/macros/contextreducers';
+import { QuadratRDS } from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import { PlotRDS } from '@/config/sqlrdsdefinitions/tables/plotrds';
+import { SubquadratRDS } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
+import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
 
 // contexts
 export const PlotListContext = createContext<PlotRDS[] | undefined>([]);
@@ -36,11 +36,11 @@ export function ListSelectionProvider({ children }: Readonly<{ children: React.R
 
   const [firstLoad, firstLoadDispatch] = useReducer(firstLoadReducer, true);
 
-  const enhancedPlotListDispatch = createEnhancedDispatch(plotListDispatch, "plotList");
-  const enhancedOrgCensusListDispatch = createEnhancedDispatch(orgCensusListDispatch, "censusList");
-  const enhancedQuadratListDispatch = createEnhancedDispatch(quadratListDispatch, "quadratList");
-  const enhancedSubquadratListDispatch = createEnhancedDispatch(subquadratListDispatch, "subquadratList");
-  const enhancedSiteListDispatch = createEnhancedDispatch(siteListDispatch, "siteList");
+  const enhancedPlotListDispatch = createEnhancedDispatch(plotListDispatch, 'plotList');
+  const enhancedOrgCensusListDispatch = createEnhancedDispatch(orgCensusListDispatch, 'censusList');
+  const enhancedQuadratListDispatch = createEnhancedDispatch(quadratListDispatch, 'quadratList');
+  const enhancedSubquadratListDispatch = createEnhancedDispatch(subquadratListDispatch, 'subquadratList');
+  const enhancedSiteListDispatch = createEnhancedDispatch(siteListDispatch, 'siteList');
 
   return (
     <SiteListContext.Provider value={siteList}>

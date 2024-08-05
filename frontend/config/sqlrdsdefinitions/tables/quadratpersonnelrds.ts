@@ -1,6 +1,6 @@
 // quadratpersonnel custom data type
-import { IDataMapper } from "@/config/datamapper";
-import { createInitialObject, ResultType } from "@/config/utils";
+import { IDataMapper } from '@/config/datamapper';
+import { createInitialObject, ResultType } from '@/config/utils';
 
 export interface QuadratPersonnelRDS {
   id?: number;
@@ -14,4 +14,4 @@ export const initialQuadratPersonnelRDSRow = createInitialObject<QuadratPersonne
 
 export type QuadratPersonnelResult = ResultType<QuadratPersonnelRDS>;
 
-export const quadratPersonnelFields = ["quadratPersonnelID", "quadratID", "personnelID", "censusID"];
+export const quadratPersonnelFields = ['quadratPersonnelID', 'quadratID', 'personnelID', 'censusID'];

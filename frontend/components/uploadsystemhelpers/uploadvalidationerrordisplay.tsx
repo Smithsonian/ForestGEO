@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
-import { Box, Pagination, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
-import { formatDate } from "@/config/macros";
-import { CMError } from "@/config/macros/uploadsystemmacros";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadValidationErrorDisplayProps } from "@/config/macros/uploadsystemmacros";
-import { FileRow } from "@/config/macros/formdetails";
-import { DetailedCMIDRow } from "@/components/uploadsystem/uploadparent";
-import { Button, CircularProgress } from "@mui/joy";
+import React, { useEffect, useState } from 'react';
+import { Box, Pagination, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
+import { formatDate } from '@/config/macros';
+import { CMError } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { UploadValidationErrorDisplayProps } from '@/config/macros/uploadsystemmacros';
+import { FileRow } from '@/config/macros/formdetails';
+import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
+import { Button, CircularProgress } from '@mui/joy';
 
 function isFileRowKey(key: string, cmidRow: DetailedCMIDRow): boolean {
   return key in cmidRow.row;
@@ -38,9 +38,9 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
     const fetchData = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch("/api/validations/validationerrordisplay");
+        const response = await fetch('/api/validations/validationerrordisplay');
         if (!response.ok) {
-          throw new Error("Error fetching CMError data");
+          throw new Error('Error fetching CMError data');
         }
         const data = await response.json();
         setCMErrors(data);
@@ -60,40 +60,40 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
 
   // Updated tableHeaders to include new fields
   const tableHeaders = [
-    { key: "tag", header: "Tree" },
-    { key: "stemtag", header: "Stem" },
-    { key: "speciesName", header: "Species" }, // for detailedCMIDRow
-    { key: "plotName", header: "Plot" }, // for detailedCMIDRow
-    { key: "plotCensusNumber", header: "Plot Census" }, // for detailedCMIDRow
-    { key: "quadratName", header: "Quadrat" }, // for detailedCMIDRow
-    { key: "censusStart", header: "Census Start" }, // for detailedCMIDRow
-    { key: "date", header: "Date" },
-    { key: "censusEnd", header: "Census End" }, // for detailedCMIDRow
-    { key: "lx", header: "X-coord" },
-    { key: "ly", header: "Y-coord" },
-    { key: "personnelName", header: "Personnel" }, // for detailedCMIDRow
-    { key: "dbh", header: "Diameter at Breast Height" },
-    { key: "hom", header: "Height of Measure" },
-    { key: "codes", header: "Attributes" }
+    { key: 'tag', header: 'Tree' },
+    { key: 'stemtag', header: 'Stem' },
+    { key: 'speciesName', header: 'Species' }, // for detailedCMIDRow
+    { key: 'plotName', header: 'Plot' }, // for detailedCMIDRow
+    { key: 'plotCensusNumber', header: 'Plot Census' }, // for detailedCMIDRow
+    { key: 'quadratName', header: 'Quadrat' }, // for detailedCMIDRow
+    { key: 'censusStart', header: 'Census Start' }, // for detailedCMIDRow
+    { key: 'date', header: 'Date' },
+    { key: 'censusEnd', header: 'Census End' }, // for detailedCMIDRow
+    { key: 'lx', header: 'X-coord' },
+    { key: 'ly', header: 'Y-coord' },
+    { key: 'personnelName', header: 'Personnel' }, // for detailedCMIDRow
+    { key: 'dbh', header: 'Diameter at Breast Height' },
+    { key: 'hom', header: 'Height of Measure' },
+    { key: 'codes', header: 'Attributes' }
   ];
 
   const errorMapping: { [key: string]: string[] } = {
-    "1": ["codes"],
-    "2": ["dbh"],
-    "3": ["hom"],
-    "4": ["tag", "stemtag"],
-    "5": ["tag", "stemtag", "quadratName"],
-    "6": ["lx", "ly"],
-    "7": ["speciesName"],
-    "8": ["date"],
-    "9": ["tag", "stemtag", "plotCensusNumber"],
-    "10": ["tag", "stemtag", "plotCensusNumber"],
-    "11": ["quadratName"],
-    "12": ["speciesName"],
-    "13": ["dbh"],
-    "14": ["dbh"],
-    "15": ["tag"],
-    "16": ["quadratName"]
+    '1': ['codes'],
+    '2': ['dbh'],
+    '3': ['hom'],
+    '4': ['tag', 'stemtag'],
+    '5': ['tag', 'stemtag', 'quadratName'],
+    '6': ['lx', 'ly'],
+    '7': ['speciesName'],
+    '8': ['date'],
+    '9': ['tag', 'stemtag', 'plotCensusNumber'],
+    '10': ['tag', 'stemtag', 'plotCensusNumber'],
+    '11': ['quadratName'],
+    '12': ['speciesName'],
+    '13': ['dbh'],
+    '14': ['dbh'],
+    '15': ['tag'],
+    '16': ['quadratName']
   };
 
   const getCellStyles = (cmError: CMError, key: string) => {
@@ -105,7 +105,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
         shouldHighlight = true;
       }
     });
-    return shouldHighlight ? { backgroundColor: "#eaf436", color: "black", fontWeight: "bold" } : {};
+    return shouldHighlight ? { backgroundColor: '#eaf436', color: 'black', fontWeight: 'bold' } : {};
   };
 
   if (error) {
@@ -135,7 +135,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
     const cellStyle = cmError ? getCellStyles(cmError, itemKeyString) : undefined;
     return (
       <TableCell key={itemKeyString} style={cellStyle}>
-        {itemKey === "date" ? formatDate(cellValue) : cellValue}
+        {itemKey === 'date' ? formatDate(cellValue) : cellValue}
       </TableCell>
     );
   };
@@ -149,17 +149,17 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
   return (
     <Box
       sx={{
-        width: "100%",
+        width: '100%',
         p: 2,
-        display: "flex",
+        display: 'flex',
         flex: 1,
-        flexDirection: "column"
+        flexDirection: 'column'
       }}
     >
       <Typography variant="h6">Core Measurement Errors</Typography>
       <Pagination count={fileNames.length} page={currentPage} onChange={handleChangePage} />
       <TableContainer component={Paper}>
-        <Table sx={{ tableLayout: "auto" }}>
+        <Table sx={{ tableLayout: 'auto' }}>
           <TableHead>
             <TableRow>
               {tableHeaders.map(item => (
@@ -182,9 +182,9 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
                           <TableRow
                             key={`error-${cmidRow.coreMeasurementID}`}
                             sx={{
-                              backgroundColor: "crimson",
-                              color: "white",
-                              fontWeight: "bold"
+                              backgroundColor: 'crimson',
+                              color: 'white',
+                              fontWeight: 'bold'
                             }}
                           >
                             <TableCell colSpan={tableHeaders.length}>{description}</TableCell>
@@ -199,7 +199,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
           </TableBody>
         </Table>
       </TableContainer>
-      <Button variant="outlined" color="primary" onClick={handleProceedToUpdate} sx={{ mt: 2, width: "fit-content" }}>
+      <Button variant="outlined" color="primary" onClick={handleProceedToUpdate} sx={{ mt: 2, width: 'fit-content' }}>
         Proceed to Update
       </Button>
     </Box>

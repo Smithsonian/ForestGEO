@@ -1,10 +1,10 @@
-"use client";
-import React, { useEffect, useState } from "react";
-import Autocomplete from "@mui/material/Autocomplete";
-import TextField from "@mui/material/TextField";
-import CircularProgress from "@mui/material/CircularProgress";
-import { useSiteContext } from "@/app/contexts/userselectionprovider";
-import { PersonnelRDS } from "@/config/sqlrdsdefinitions/tables/personnelrds";
+'use client';
+import React, { useEffect, useState } from 'react';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
+import CircularProgress from '@mui/material/CircularProgress';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { PersonnelRDS } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 
 export interface PersonnelAutocompleteMultiSelectProps {
   initialValue: PersonnelRDS[];
@@ -16,13 +16,13 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
   const { locked, onChange } = props;
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<PersonnelRDS[]>([]);
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState('');
   const [tempSelectedPersonnel, setTempSelectedPersonnel] = useState<PersonnelRDS[]>([]);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
 
   const loading = open && options.length === 0;
   const currentSite = useSiteContext();
-  if (!currentSite) throw new Error("Site must be selected!");
+  if (!currentSite) throw new Error('Site must be selected!');
 
   // Function to refresh data
   const refreshData = () => {
@@ -32,7 +32,7 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         setOptions(data);
       })
       .catch(error => {
-        console.error("Error fetching data:", error);
+        console.error('Error fetching data:', error);
       });
   };
   const handleConfirm = () => {
@@ -58,7 +58,7 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
 
     (async () => {
       const response = await fetch(`/api/formsearch/personnelblock?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`, {
-        method: "GET"
+        method: 'GET'
       });
       const items = await response.json();
       console.log(items);
@@ -87,7 +87,7 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
     <>
       <Autocomplete
         multiple
-        className={"fullWidthAutoComplete"}
+        className={'fullWidthAutoComplete'}
         open={open}
         onOpen={() => setOpen(true)}
         onClose={() => setOpen(false)}
@@ -100,14 +100,14 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         onChange={(_event, newValue) => {
           setTempSelectedPersonnel(newValue);
           handleConfirm();
-          setInputValue("");
+          setInputValue('');
         }}
         inputValue={inputValue}
         onInputChange={(_event, newInputValue) => setInputValue(newInputValue)}
         filterSelectedOptions
         renderInput={params => (
           <TextField
-            sx={{ marginTop: "10px", marginBottom: "5px" }}
+            sx={{ marginTop: '10px', marginBottom: '5px' }}
             {...params}
             fullWidth
             label="Select Personnel"

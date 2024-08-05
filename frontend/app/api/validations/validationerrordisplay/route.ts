@@ -1,14 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import { PoolConnection } from "mysql2/promise";
-import { CMError } from "@/config/macros/uploadsystemmacros";
-import MapperFactory from "@/config/datamapper";
-import { HTTPResponses } from "@/config/macros";
+import { NextRequest, NextResponse } from 'next/server';
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import { PoolConnection } from 'mysql2/promise';
+import { CMError } from '@/config/macros/uploadsystemmacros';
+import MapperFactory from '@/config/datamapper';
+import { HTTPResponses } from '@/config/macros';
 
 export async function GET(request: NextRequest) {
   let conn: PoolConnection | null = null;
-  const schema = request.nextUrl.searchParams.get("schema");
-  if (!schema) throw new Error("No schema variable provided!");
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('No schema variable provided!');
 
   try {
     conn = await getConn();
@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
 
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
       CoreMeasurementID: row.CoreMeasurementID,
-      ValidationErrorIDs: row.ValidationErrorIDs.split(",").map(Number),
-      Descriptions: row.Descriptions.split(",")
+      ValidationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
+      Descriptions: row.Descriptions.split(',')
     }));
 
     // Query to fetch coremeasurements pending validation (no errors)
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
         cm.IsValidated = b'0' AND cme.CMVErrorID IS NULL;
     `;
     const pendingValidationRows = await runQuery(conn, pendingValidationQuery);
-    const mapper = MapperFactory.getMapper<any, any>("coremeasurements");
+    const mapper = MapperFactory.getMapper<any, any>('coremeasurements');
     const mappedPending = mapper.mapData(pendingValidationRows);
     return new NextResponse(
       JSON.stringify({
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
       {
         status: HTTPResponses.OK,
         headers: {
-          "Content-Type": "application/json"
+          'Content-Type': 'application/json'
         }
       }
     );

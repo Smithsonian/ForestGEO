@@ -1,20 +1,20 @@
-"use client";
-import React, { useEffect, useState } from "react";
-import { GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/x-data-grid";
-import { Alert, AlertProps, Tooltip, TooltipProps, styled, tooltipClasses } from "@mui/material";
-import { initialMeasurementsSummaryViewRDSRow } from "@/config/sqlrdsdefinitions/views/measurementssummaryviewrds";
-import { Box, Typography, Button, Snackbar, Stack } from "@mui/joy";
-import Select, { SelectOption } from "@mui/joy/Select";
-import { useSession } from "next-auth/react";
-import { useOrgCensusContext, usePlotContext, useQuadratDispatch, useSiteContext } from "@/app/contexts/userselectionprovider";
-import { randomId } from "@mui/x-data-grid-generator";
-import UploadParentModal from "@/components/uploadsystemhelpers/uploadparentmodal";
-import { useQuadratListContext } from "@/app/contexts/listselectionprovider";
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import Option from "@mui/joy/Option";
-import MeasurementSummaryGrid from "@/components/datagrids/msvdatagrid";
-import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
-import { msvGridColumns } from "@/components/client/datagridcolumns";
+'use client';
+import React, { useEffect, useState } from 'react';
+import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
+import { Alert, AlertProps, Tooltip, TooltipProps, styled, tooltipClasses } from '@mui/material';
+import { initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { Box, Typography, Button, Snackbar, Stack } from '@mui/joy';
+import Select, { SelectOption } from '@mui/joy/Select';
+import { useSession } from 'next-auth/react';
+import { useOrgCensusContext, usePlotContext, useQuadratDispatch, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { randomId } from '@mui/x-data-grid-generator';
+import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
+import { useQuadratListContext } from '@/app/contexts/listselectionprovider';
+import { Quadrat } from '@/config/sqlrdsdefinitions/tables/quadratrds';
+import Option from '@mui/joy/Option';
+import MeasurementSummaryGrid from '@/components/datagrids/msvdatagrid';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { msvGridColumns } from '@/components/client/datagridcolumns';
 const LargeTooltip = styled(({ className, ...props }: TooltipProps) => <Tooltip {...props} classes={{ popper: className }} />)(({ theme }) => ({
   [`& .${tooltipClasses.tooltip}`]: {
     fontSize: 16,
@@ -53,7 +53,7 @@ export default function SummaryPage() {
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
-  const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, "children" | "severity"> | null>(null);
+  const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
   const [refresh, setRefresh] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
@@ -116,7 +116,7 @@ export default function SummaryPage() {
     <Stack direction="column" spacing={2} marginBottom={2}>
       <Typography level="title-sm">Select Quadrat:</Typography>
       <Select
-        disabled={!validity["quadrats"]}
+        disabled={!validity['quadrats']}
         placeholder="Select a Quadrat"
         name="None"
         required
@@ -133,9 +133,9 @@ export default function SummaryPage() {
           <Option value={item?.quadratName} key={item?.quadratName}>
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start"
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start'
               }}
             >
               <Typography level="body-lg">{item?.quadratName}</Typography>
@@ -143,10 +143,10 @@ export default function SummaryPage() {
           </Option>
         ))}
       </Select>
-      <Button onClick={handleConfirmQuadrat} size="sm" color="primary" disabled={!validity["quadrats"]}>
+      <Button onClick={handleConfirmQuadrat} size="sm" color="primary" disabled={!validity['quadrats']}>
         Confirm
       </Button>
-      {!validity["quadrats"] && (
+      {!validity['quadrats'] && (
         <Alert severity="warning" sx={{ mt: 2 }}>
           <Typography level="body-lg" color="warning">
             No quadrats exist to be selected.
@@ -165,34 +165,34 @@ export default function SummaryPage() {
           </Alert>
         </Snackbar>
       )}
-      <Box sx={{ display: "flex", alignItems: "center", mb: 3, width: "100%" }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
         <Box
           sx={{
-            width: "100%",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            backgroundColor: "warning.main",
-            borderRadius: "4px",
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: 'warning.main',
+            borderRadius: '4px',
             p: 2
           }}
         >
           <Stack direction="column">
-            <Box sx={{ display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
               <Box
                 sx={{
                   flex: 1,
-                  display: "flex",
-                  justifyContent: "left",
-                  flexDirection: "column",
+                  display: 'flex',
+                  justifyContent: 'left',
+                  flexDirection: 'column',
                   marginTop: 2
                 }}
               >
-                <Typography level={"title-md"} sx={{ color: "#ffa726" }}>
+                <Typography level={'title-md'} sx={{ color: '#ffa726' }}>
                   Note: This plot does not accept subquadrats. <br />
                   Please ensure that you use quadrat names when submitting new measurements instead of subquadrat names
                 </Typography>
-                {session?.user.userStatus !== "fieldcrew" ? (
+                {session?.user.userStatus !== 'fieldcrew' ? (
                   <Stack direction="column">
                     {/* <Typography level={"title-lg"} sx={{color: "#ffa726"}}>Note: ADMINISTRATOR VIEW</Typography>
                     <Stack direction="row" spacing={4}>
@@ -215,18 +215,18 @@ export default function SummaryPage() {
                     </Stack> */}
                   </Stack>
                 ) : (
-                  <Typography level={"title-md"} sx={{ color: "#ffa726" }}>
+                  <Typography level={'title-md'} sx={{ color: '#ffa726' }}>
                     If this setting is inaccurate, please contact an administrator.
                   </Typography>
                 )}
               </Box>
             </Box>
           </Stack>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Button
               onClick={() => {
                 if (currentCensus?.dateRanges[0].endDate === undefined) setIsUploadModalOpen(true);
-                else alert("census must be opened before upload allowed");
+                else alert('census must be opened before upload allowed');
               }}
               variant="solid"
               color="primary"
@@ -242,7 +242,7 @@ export default function SummaryPage() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={"measurements"}
+        formType={'measurements'}
       />
       <MeasurementSummaryGrid
         gridColumns={msvGridColumns}

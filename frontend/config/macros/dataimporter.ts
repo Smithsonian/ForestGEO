@@ -1,7 +1,7 @@
 // data import class --> currently unused, earmarked for future implementation
 // intended to simplify the process of shifting quadrats in a PCN from one census to another (full OR partial)
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import { format } from "mysql2/promise";
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import { format } from 'mysql2/promise';
 
 interface CensusData {
   censusID: number;
