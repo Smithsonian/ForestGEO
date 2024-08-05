@@ -1,11 +1,11 @@
 class DynamicQueryBuilder {
   private schema: string;
-  private selectClause: string = 'SELECT SQL_CALC_FOUND_ROWS *';
-  private fromClause: string = '';
+  private selectClause: string = "SELECT SQL_CALC_FOUND_ROWS *";
+  private fromClause: string = "";
   private whereConditions: string[] = [];
   private joins: string[] = [];
-  private limit: string = '';
-  private groupBy: string = '';
+  private limit: string = "";
+  private groupBy: string = "";
   private customSelects: string[] = [];
 
   constructor(schema: string) {
@@ -18,7 +18,7 @@ class DynamicQueryBuilder {
   }
 
   from(table: string, alias?: string): this {
-    this.fromClause = `FROM ${this.schema}.${table}` + (alias ? ` ${alias}` : '');
+    this.fromClause = `FROM ${this.schema}.${table}` + (alias ? ` ${alias}` : "");
     return this;
   }
 
@@ -29,7 +29,7 @@ class DynamicQueryBuilder {
     return this;
   }
 
-  join(table: string, on: string, type: string = 'LEFT JOIN'): this {
+  join(table: string, on: string, type: string = "LEFT JOIN"): this {
     this.joins.push(`${type} ${this.schema}.${table} ON ${on}`);
     return this;
   }
@@ -50,17 +50,17 @@ class DynamicQueryBuilder {
   }
 
   build(): string {
-    let query = `${this.selectClause}, ${this.customSelects.join(', ')} ${this.fromClause}`;
+    let query = `${this.selectClause}, ${this.customSelects.join(", ")} ${this.fromClause}`;
     if (this.joins.length > 0) {
-      query += ' ' + this.joins.join(' ');
+      query += " " + this.joins.join(" ");
     }
     if (this.whereConditions.length > 0) {
-      query += ' WHERE ' + this.whereConditions.join(' AND ');
+      query += " WHERE " + this.whereConditions.join(" AND ");
     }
     if (this.groupBy) {
       query += ` GROUP BY ${this.groupBy}`;
     }
-    query += ' ' + this.limit;
+    query += " " + this.limit;
     return query;
   }
 }

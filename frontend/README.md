@@ -32,12 +32,12 @@ documentation [here](https://github.com/ForestGeoHack/ForestGEO/wiki/ForestGEO-A
 
 1. Before running the project, you must create an `.env.local` file in the overhead directory with
    the following values:
-    - `AZURE_AD_CLIENT_ID`
-    - `AZURE_AD_CLIENT_SECRET`
-    - `AZURE_AD_TENANT_ID`
-    - `NEXTAUTH_SECRET`
-    - `NEXTAUTH_URL`
-    - all `AZURE_` values must be created/populated from Azure's App Registration portal
+   - `AZURE_AD_CLIENT_ID`
+   - `AZURE_AD_CLIENT_SECRET`
+   - `AZURE_AD_TENANT_ID`
+   - `NEXTAUTH_SECRET`
+   - `NEXTAUTH_URL`
+   - all `AZURE_` values must be created/populated from Azure's App Registration portal
 2. Once `.env.local` is made, run `npm install` from the overhead directory to install dependencies
 3. Run `npm run build` to compile/optimize the application for running
 4. Run `npm run dev` to create a dev instance of the application locally on your machine
@@ -65,12 +65,12 @@ In order from left to right, please note the following points of interest:
 - `[plotKey]`: this is the first required variable when accessing this endpoint -- you will have to
   add some string `plotKey` to the end of the URL: `.../browse/[your plot key]` in order to
   successfully view the page.
-    - wrapping a folder in `[]` will designate that folder as a **required** dynamic parameter
-    - wrapping in `[...folderName]` designates `folderName` as a catch-all route. All following
-      values after `folderName` (i.e., `.../a/b` will return `folderName = [a, b]` )
-    - wrapping in `[[...folderName]]` designates `folderName` as an *optional* catch-all route. As
-      expected, all values for/after `folderName` will be returned as part of the dynamic route,
-      but `undefined` will also be returned if no value is entered at all (instead of a 404 error)
+  - wrapping a folder in `[]` will designate that folder as a **required** dynamic parameter
+  - wrapping in `[...folderName]` designates `folderName` as a catch-all route. All following
+    values after `folderName` (i.e., `.../a/b` will return `folderName = [a, b]` )
+  - wrapping in `[[...folderName]]` designates `folderName` as an _optional_ catch-all route. As
+    expected, all values for/after `folderName` will be returned as part of the dynamic route,
+    but `undefined` will also be returned if no value is entered at all (instead of a 404 error)
 - `[plotNum]`: second required variable when accessing this endpoint - your resulting endpoint will
   look like (example) `http://localhost:3000/browse/plotKey/plotNum`.
 
@@ -79,21 +79,21 @@ In order from left to right, please note the following points of interest:
 ### Release Notes (v0.1.0):
 
 - endpoints have been added and routed to require a plot key/number combination for access
-    - initial state has been converted to new `Plot {key: 'none', num: 0}` instead of `''`
+  - initial state has been converted to new `Plot {key: 'none', num: 0}` instead of `''`
 - MUI JoyUI has been partially implemented as a replacement for MaterialUI. However, due to time
   limitations, MaterialUI has still been incorporated into converted sections from ForestGeoHack
-    - The current plan is to solely implement either NextUI or ChakraUI instead of either of these
-      options, and future updates will include this information.
+  - The current plan is to solely implement either NextUI or ChakraUI instead of either of these
+    options, and future updates will include this information.
 - `SelectPlotProps` has been removed and replaced with NextJS dynamic routing (each endpoint will
   dynamically retrieve plot information). Endpoints have been updated to reflect dynamic param-based
   retrieval
-    - The navigation bar has been updated to use useEffect to push live endpoint updates when the
-      plot is changed (if you are at an endpoint and the plot is changed, the page will be reloaded
-      to reflect that)
+  - The navigation bar has been updated to use useEffect to push live endpoint updates when the
+    plot is changed (if you are at an endpoint and the plot is changed, the page will be reloaded
+    to reflect that)
 - New components/moved-over information:
-    - `Fileuploadcomponents` --> css code has been udpated to be dark theme-friendly
-    - `FileList` --> moved over
-    - `Loginlogout` --> created component, login/logout process has been relegated to avatar icon
-      dropdown menu
-    - `Plotselection` --> partially created from SelectPlot, changed to utilize dynamic
-      routing/selection instead of requiring a new dropdown in each page
+  - `Fileuploadcomponents` --> css code has been udpated to be dark theme-friendly
+  - `FileList` --> moved over
+  - `Loginlogout` --> created component, login/logout process has been relegated to avatar icon
+    dropdown menu
+  - `Plotselection` --> partially created from SelectPlot, changed to utilize dynamic
+    routing/selection instead of requiring a new dropdown in each page

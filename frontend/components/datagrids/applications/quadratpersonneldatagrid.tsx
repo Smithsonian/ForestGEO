@@ -6,25 +6,23 @@ import { GridColDef, GridRowModes, GridRowModesModel, GridRowsProp } from "@mui/
 import { randomId } from "@mui/x-data-grid-generator";
 import { useSession } from "next-auth/react";
 import React, { useEffect, useState } from "react";
-import DataGridCommons from "../datagridcommons";
 import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
 import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
 import { GridSelections } from "@/config/macros";
 import { initialQuadratPersonnelRDSRow } from "@/config/sqlrdsdefinitions/tables/quadratpersonnelrds";
-import { useRouter } from 'next/navigation';
+import { useRouter } from "next/navigation";
+
+import DataGridCommons from "../datagridcommons";
 
 export default function QuadratPersonnelDataGrid() {
   const [rows, setRows] = useState([initialQuadratPersonnelRDSRow] as GridRowsProp);
-  const [rowCount, setRowCount] = useState(0);  // total number of rows
+  const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
-  const [snackbar, setSnackbar] = useState<Pick<
-    AlertProps,
-    'children' | 'severity'
-  > | null>(null);
+  const [snackbar, setSnackbar] = useState<Pick<AlertProps, "children" | "severity"> | null>(null);
   const [refresh, setRefresh] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
-    pageSize: 10,
+    pageSize: 10
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
@@ -41,21 +39,19 @@ export default function QuadratPersonnelDataGrid() {
 
   const addNewRowToGrid = () => {
     const id = randomId();
-    const nextQuadratPersonnelID = (rows.length > 0
-      ? rows.reduce((max, row) => Math.max(row.quadratPersonnelID, max), 0)
-      : 0) + 1;
+    const nextQuadratPersonnelID = (rows.length > 0 ? rows.reduce((max, row) => Math.max(row.quadratPersonnelID, max), 0) : 0) + 1;
     const newRow = {
       ...initialQuadratPersonnelRDSRow,
       id: id,
       quadratPersonnelID: nextQuadratPersonnelID + 1,
-      isNew: true,
+      isNew: true
     };
     // Add the new row to the state
     setRows(oldRows => [...oldRows, newRow]);
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratID' },
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: "quadratID" }
     }));
   };
 
@@ -64,69 +60,75 @@ export default function QuadratPersonnelDataGrid() {
       const quadratResponse = await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`);
       const quadratData = await quadratResponse.json();
       if (quadratData.length === 0) throw new Error("quadratData fetchall is empty");
-      setQuadratOptions(quadratData.map((item: any) => ({
-        label: item.quadratName, // Adjust based on your data structure
-        value: item.quadratID,
-      })));
+      setQuadratOptions(
+        quadratData.map((item: any) => ({
+          label: item.quadratName, // Adjust based on your data structure
+          value: item.quadratID
+        }))
+      );
 
       const personnelResponse = await fetch(`/api/fetchall/personnel?schema=${currentSite?.schemaName}`);
       const personnelData = await personnelResponse.json();
       if (personnelData.length === 0) throw new Error("personnelData fetchall is empty");
-      setPersonnelOptions(personnelData.map((person: any) => ({
-        label: `${person.firstName} ${person.lastName}`, // Adjust based on your data structure
-        value: person.personnelID,
-      })));
+      setPersonnelOptions(
+        personnelData.map((person: any) => ({
+          label: `${person.firstName} ${person.lastName}`, // Adjust based on your data structure
+          value: person.personnelID
+        }))
+      );
     };
     if (currentSite && currentPlot && currentCensus) fetchOptions().catch(console.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   const QuadratPersonnelGridColumns: GridColDef[] = [
     {
-      field: 'quadratPersonnelID',
-      headerName: 'ID',
-      headerClassName: 'header',
+      field: "quadratPersonnelID",
+      headerName: "ID",
+      headerClassName: "header",
       minWidth: 75,
-      align: 'left',
+      align: "left",
       editable: false
     },
     {
-      field: 'quadratID',
-      headerName: 'Quadrat ID',
-      headerClassName: 'header',
+      field: "quadratID",
+      headerName: "Quadrat ID",
+      headerClassName: "header",
       flex: 1,
       minWidth: 140,
-      align: 'left',
-      type: 'singleSelect',
+      align: "left",
+      type: "singleSelect",
       valueOptions: quadratOptions,
-      editable: true,
+      editable: true
     },
     {
-      field: 'personnelID',
-      headerName: 'Personnel ID',
-      headerClassName: 'header',
+      field: "personnelID",
+      headerName: "Personnel ID",
+      headerClassName: "header",
       flex: 1,
       minWidth: 140,
-      align: 'left',
-      type: 'singleSelect',
+      align: "left",
+      type: "singleSelect",
       valueOptions: personnelOptions,
-      editable: true,
-    },
+      editable: true
+    }
   ];
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box sx={{
-          width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backgroundColor: 'warning.main',
-          borderRadius: '4px',
-          p: 2
-        }}>
+      <Box sx={{ display: "flex", alignItems: "center", mb: 3, width: "100%" }}>
+        <Box
+          sx={{
+            width: "100%",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            backgroundColor: "warning.main",
+            borderRadius: "4px",
+            p: 2
+          }}
+        >
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'fieldcrew' && (
+            {session?.user.userStatus !== "fieldcrew" && (
               <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>

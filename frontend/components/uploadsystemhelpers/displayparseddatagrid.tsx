@@ -1,20 +1,20 @@
-'use client';
+"use client";
 
-import {Box, Paper, Typography} from '@mui/material';
-import React, {Dispatch, SetStateAction, useState, useEffect} from 'react';
-import {FileWithPath} from 'react-dropzone';
-import '@/styles/validationtable.css';
-import moment from 'moment';
-import { GridCellParams, GridColDef, GridRowModel, GridRowsProp} from '@mui/x-data-grid';
-import {StyledDataGrid} from '@/config/styleddatagrid';
-import { FileErrors, FileRow, FileCollectionRowSet, RowValidationErrors, ValidationFunction, getTableHeaders} from '@/config/macros/formdetails';
-import {validateAttributesRow} from '@/config/sqlrdsdefinitions/tables/attributerds';
-import {validatePersonnelRow} from '@/config/sqlrdsdefinitions/tables/personnelrds';
-import {validateQuadratsRow} from '@/config/sqlrdsdefinitions/tables/quadratrds';
-import {validateSpeciesFormRow} from '@/config/sqlrdsdefinitions/tables/speciesrds';
-import {validateSubquadratsRow} from '@/config/sqlrdsdefinitions/tables/subquadratrds';
-import {validateMeasurementsRow} from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
-import {usePlotContext} from '@/app/contexts/userselectionprovider';
+import { Box, Paper, Typography } from "@mui/material";
+import React, { Dispatch, SetStateAction, useState, useEffect } from "react";
+import { FileWithPath } from "react-dropzone";
+import "@/styles/validationtable.css";
+import moment from "moment";
+import { GridCellParams, GridColDef, GridRowModel, GridRowsProp } from "@mui/x-data-grid";
+import { StyledDataGrid } from "@/config/styleddatagrid";
+import { FileErrors, FileRow, FileCollectionRowSet, RowValidationErrors, ValidationFunction, getTableHeaders } from "@/config/macros/formdetails";
+import { validateAttributesRow } from "@/config/sqlrdsdefinitions/tables/attributerds";
+import { validatePersonnelRow } from "@/config/sqlrdsdefinitions/tables/personnelrds";
+import { validateQuadratsRow } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { validateSpeciesFormRow } from "@/config/sqlrdsdefinitions/tables/speciesrds";
+import { validateSubquadratsRow } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
+import { validateMeasurementsRow } from "@/config/sqlrdsdefinitions/views/measurementssummaryviewrds";
+import { usePlotContext } from "@/app/contexts/userselectionprovider";
 
 export interface ValidationTableProps {
   uploadedData: FileWithPath[];
@@ -35,12 +35,12 @@ export interface DataStructure {
 }
 
 const validationFunctions: Record<string, ValidationFunction> = {
-  "attributes": validateAttributesRow,
-  "personnel": validatePersonnelRow,
-  "species": validateSpeciesFormRow,
-  "quadrats": validateQuadratsRow,
-  "subquadrats": validateSubquadratsRow,
-  "measurements": validateMeasurementsRow,
+  attributes: validateAttributesRow,
+  personnel: validatePersonnelRow,
+  species: validateSpeciesFormRow,
+  quadrats: validateQuadratsRow,
+  subquadrats: validateSubquadratsRow,
+  measurements: validateMeasurementsRow
 };
 
 export const validateRowByFormType = (formType: string, row: FileRow): RowValidationErrors | null => {
@@ -62,19 +62,8 @@ export interface DisplayParsedDataProps {
   formType: string;
 }
 
-export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
-  props: Readonly<DisplayParsedDataProps>
-) => {
-  const {
-    parsedData,
-    setParsedData,
-    errors,
-    setErrors,
-    errorRows,
-    setErrorRows,
-    fileName,
-    formType
-  } = props;
+export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (props: Readonly<DisplayParsedDataProps>) => {
+  const { parsedData, setParsedData, errors, setErrors, errorRows, setErrorRows, fileName, formType } = props;
   const singleFileData = parsedData[fileName] || {};
 
   const currentPlot = usePlotContext();
@@ -88,51 +77,49 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
     headerName: header.label,
     flex: 1,
     getCellClassName: (params: GridCellParams) => {
-      const rowIndex = params.id.toString().split('-')[1];
+      const rowIndex = params.id.toString().split("-")[1];
       const errorKey = `row-${rowIndex}`;
       const cellError = errors[fileName]?.[errorKey]?.[header.label];
-      return cellError ? 'error-cell' : '';
+      return cellError ? "error-cell" : "";
     },
     renderCell: (params: GridCellParams) => {
-      if (header.label === 'date') {
-        const formattedDate = params.value ? moment(params.value).format('YYYY-MM-DD') : '';
-        return (
-          <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
-            {formattedDate}
-          </Typography>
-        );
+      if (header.label === "date") {
+        const formattedDate = params.value ? moment(params.value).format("YYYY-MM-DD") : "";
+        return <Typography sx={{ whiteSpace: "normal", lineHeight: "normal" }}>{formattedDate}</Typography>;
       }
 
-      const rowIndex = params.id.toString().split('-')[1];
+      const rowIndex = params.id.toString().split("-")[1];
       const errorKey = `row-${rowIndex}`;
       const cellError = errors[fileName]?.[errorKey]?.[header.label];
 
       // Extract the display value
       const displayValue = params.value;
-      const isAutoFillCorrection = cellError && (cellError === 'Genus was auto-filled based on species field.' || cellError === 'Species field was split into genus and species.');
+      const isAutoFillCorrection =
+        cellError && (cellError === "Genus was auto-filled based on species field." || cellError === "Species field was split into genus and species.");
 
       return (
-        <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5}}>
+        <Box
+          sx={{
+            display: "flex",
+            flex: 1,
+            flexDirection: "column",
+            marginY: 1.5
+          }}
+        >
           {cellError ? (
             <>
               {isAutoFillCorrection ? (
-                <Typography className="auto-fill-correction">
-                  {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
-                </Typography>
+                <Typography className="auto-fill-correction">{displayValue !== undefined && displayValue !== null ? displayValue.toString() : ""}</Typography>
               ) : (
                 <>
-                  <Typography className="error-cell">
-                    {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
-                  </Typography>
-                  <Typography className="null-cell">
-                    NULL
-                  </Typography>
+                  <Typography className="error-cell">{displayValue !== undefined && displayValue !== null ? displayValue.toString() : ""}</Typography>
+                  <Typography className="null-cell">NULL</Typography>
                 </>
               )}
             </>
           ) : (
-            <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
-              {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
+            <Typography sx={{ whiteSpace: "normal", lineHeight: "normal" }}>
+              {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ""}
             </Typography>
           )}
         </Box>
@@ -147,8 +134,8 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
     const tempErrors: FileErrors = {};
 
     Object.entries(singleFileData).forEach(([rowKey, rowData], index) => {
-      if (typeof rowData === 'object' && rowData !== null) {
-        const row = {id: `${fileName}-${index}`, ...rowData} as FileRow;
+      if (typeof rowData === "object" && rowData !== null) {
+        const row = { id: `${fileName}-${index}`, ...rowData } as FileRow;
         let rowErrors = validateRowByFormType(formType, row);
 
         // Check species/genus condition independently
@@ -189,11 +176,8 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
   }, [singleFileData, fileName, formType, setErrors]);
 
   const processRowUpdate = React.useCallback(
-    async (
-      newRow: GridRowModel,
-      oldRow: GridRowModel
-    ): Promise<GridRowModel> => {
-      const updatedRow = {...newRow};
+    async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
+      const updatedRow = { ...newRow };
       const rowId = `row-${newRow.id}`;
       if (!errorRows[fileName]?.[rowId]) {
         return oldRow;
@@ -203,14 +187,14 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
       if (rowErrors) {
         setErrorRows(prevErrors => ({
           ...prevErrors,
-          [fileName]: {...prevErrors[fileName], [updatedRow.id]: rowErrors}
+          [fileName]: { ...prevErrors[fileName], [updatedRow.id]: rowErrors }
         }));
         Object.keys(rowErrors).forEach(key => {
           updatedRow[key] = null; // Set invalid values to null
         });
       } else {
         setErrorRows(prevErrors => {
-          const newErrors = {...prevErrors};
+          const newErrors = { ...prevErrors };
           if (newErrors[fileName]?.[updatedRow.id]) {
             delete newErrors[fileName][updatedRow.id];
           }
@@ -220,7 +204,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
 
       setParsedData(prevData => ({
         ...prevData,
-        [fileName]: {...prevData[fileName], [updatedRow.id]: updatedRow}
+        [fileName]: { ...prevData[fileName], [updatedRow.id]: updatedRow }
       }));
 
       return updatedRow;
@@ -229,10 +213,10 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
   );
 
   return (
-    <Paper style={{height: '100%', width: '100%'}}>
+    <Paper style={{ height: "100%", width: "100%" }}>
       {validRows.length > 0 && (
         <StyledDataGrid
-          sx={{display: 'flex', flex: 1, width: '100%'}}
+          sx={{ display: "flex", flex: 1, width: "100%" }}
           rows={validRows}
           columns={columns}
           processRowUpdate={processRowUpdate}
@@ -240,38 +224,37 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (
           initialState={{
             pagination: {
               paginationModel: {
-                pageSize: 5,
-              },
-            },
+                pageSize: 5
+              }
+            }
           }}
           autoHeight
-          getRowHeight={() => 'auto'}
+          getRowHeight={() => "auto"}
         />
       )}
       {invalidRows.length > 0 && (
-        <Box sx={{mt: 2}}>
+        <Box sx={{ mt: 2 }}>
           <Typography color="gold">
-            The following rows have been autocorrected to fit the schema.
-            Please review the corrected rows and make sure they are correct.
-            <br/>
-            <span style={{color: 'red'}}>Red-highlighted text indicates invalid values that were detected and will be replaced with NULL.</span>
-            <br/>
-            <span style={{color: 'lightblue'}}>Light blue text indicates values that were auto-filled or auto-corrected based on other fields.</span>
+            The following rows have been autocorrected to fit the schema. Please review the corrected rows and make sure they are correct.
+            <br />
+            <span style={{ color: "red" }}>Red-highlighted text indicates invalid values that were detected and will be replaced with NULL.</span>
+            <br />
+            <span style={{ color: "lightblue" }}>Light blue text indicates values that were auto-filled or auto-corrected based on other fields.</span>
           </Typography>
           <StyledDataGrid
-            sx={{display: 'flex', flex: 1, width: '100%'}}
+            sx={{ display: "flex", flex: 1, width: "100%" }}
             rows={invalidRows}
             columns={columns}
             pageSizeOptions={[5]}
             initialState={{
               pagination: {
                 paginationModel: {
-                  pageSize: 5,
-                },
-              },
+                  pageSize: 5
+                }
+              }
             }}
             autoHeight
-            getRowHeight={() => 'auto'}
+            getRowHeight={() => "auto"}
           />
         </Box>
       )}

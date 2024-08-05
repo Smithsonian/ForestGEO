@@ -1,18 +1,15 @@
 // contextreducers.ts
-import {Dispatch} from "react";
+import { Dispatch } from "react";
 
 // Define a type for the enhanced dispatch function
 export type EnhancedDispatch<T> = (payload: { [key: string]: T | undefined }) => Promise<void>;
 
-export function createEnhancedDispatch<T>(
-  dispatch: Dispatch<LoadAction<T>>,
-  actionType: string
-): EnhancedDispatch<T> {
+export function createEnhancedDispatch<T>(dispatch: Dispatch<LoadAction<T>>, actionType: string): EnhancedDispatch<T> {
   return async (payload: { [key: string]: T | undefined }) => {
     // Save to IndexedDB only if payload is not undefined
     // await setData(actionType, payload[actionType] !== undefined ? payload[actionType] : undefined); // gonna comment this out temporarily, it seems to be causing issues
     // Dispatch the action
-    dispatch({type: actionType, payload});
+    dispatch({ type: actionType, payload });
   };
 }
 
@@ -24,11 +21,11 @@ export type LoadAction<T> = {
 // Generic reducer function
 export function genericLoadReducer<T>(state: T | undefined, action: LoadAction<T>): T | undefined {
   switch (action.type) {
-    case 'censusList':
-    case 'plotList':
-    case 'quadratList':
-    case 'subquadratList':
-    case 'siteList':
+    case "censusList":
+    case "plotList":
+    case "quadratList":
+    case "subquadratList":
+    case "siteList":
       if (action.payload && action.type in action.payload) {
         return action.payload[action.type];
       } else {
@@ -46,7 +43,7 @@ export function genericLoadContextReducer<T>(
   validationFunction?: (list: T[], item: T) => boolean
 ): T | undefined {
   // Check if the action type is one of the specified types
-  const isRecognizedActionType = ['plot', 'census', 'quadrat', 'site', 'subquadrat'].includes(action.type);
+  const isRecognizedActionType = ["plot", "census", "quadrat", "site", "subquadrat"].includes(action.type);
   if (!isRecognizedActionType) {
     return currentState;
   }
@@ -66,5 +63,5 @@ export function genericLoadContextReducer<T>(
   }
 
   // Return the item if it's in the list context or no validation is needed
-  return (!validationFunction || listContext.includes(item)) ? item : currentState;
+  return !validationFunction || listContext.includes(item) ? item : currentState;
 }

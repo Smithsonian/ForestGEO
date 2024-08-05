@@ -1,7 +1,7 @@
 // trees custom data type
 import { ResultType } from "@/config/utils";
 import { IDataMapper } from "../../datamapper";
-import { bitToBoolean, booleanToBit, unitSelectionOptions } from '../../macros';
+import { bitToBoolean, booleanToBit, unitSelectionOptions } from "../../macros";
 
 export type TreeRDS = {
   id?: number;
@@ -11,5 +11,3 @@ export type TreeRDS = {
 };
 
 export type TreeResult = ResultType<TreeRDS>;
-
-

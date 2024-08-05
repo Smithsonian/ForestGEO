@@ -1,5 +1,5 @@
 // viewfulltableview custom data type
-import {ColumnStates } from "@/config/macros";
+import { ColumnStates } from "@/config/macros";
 import { createInitialObject, ResultType } from "@/config/utils";
 
 /**
@@ -11,7 +11,7 @@ import { createInitialObject, ResultType } from "@/config/utils";
 export type ViewFullTableViewRDS = {
   // datagrid
   id?: number;
-  // IDs 
+  // IDs
   coreMeasurementID?: number;
   plotID?: number;
   censusID?: number;
@@ -97,7 +97,7 @@ export type ViewFullTableViewRDS = {
   attributeCode?: string;
   attributeDescription?: string;
   attributeStatus?: string;
-}
+};
 
 export type ViewFullTableViewResult = ResultType<ViewFullTableViewRDS>;
 
@@ -115,12 +115,12 @@ export function getAllViewFullTableViewsHCs(): ColumnStates {
     personnelID: false,
     familyID: false,
     genusID: false,
-    subquadratName: false, 
+    subquadratName: false,
     subquadratDimensionX: false,
     subquadratDimensionY: false,
     subquadratDimensionUnits: false,
     subquadratX: false,
     subquadratY: false,
-    subquadratCoordinateUnits: false,
+    subquadratCoordinateUnits: false
   };
 }

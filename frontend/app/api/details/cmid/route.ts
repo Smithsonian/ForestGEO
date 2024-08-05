@@ -1,12 +1,12 @@
-import {NextRequest, NextResponse} from "next/server";
-import {getConn, runQuery} from "@/components/processors/processormacros";
-import {PoolConnection} from "mysql2/promise";
+import { NextRequest, NextResponse } from "next/server";
+import { getConn, runQuery } from "@/components/processors/processormacros";
+import { PoolConnection } from "mysql2/promise";
 import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
-  const cmID = parseInt(request.nextUrl.searchParams.get('cmid')!);
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('no schema variable provided!');
+  const cmID = parseInt(request.nextUrl.searchParams.get("cmid")!);
+  const schema = request.nextUrl.searchParams.get("schema");
+  if (!schema) throw new Error("no schema variable provided!");
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
@@ -47,12 +47,14 @@ export async function GET(request: NextRequest) {
           plotCensusNumber: row.PlotCensusNumber,
           censusStart: row.StartDate,
           censusEnd: row.EndDate,
-          personnelName: row.FirstName + ' ' + row.LastName,
+          personnelName: row.FirstName + " " + row.LastName,
           speciesName: row.SpeciesName
         }))
-      ), {status: HTTPResponses.OK});
+      ),
+      { status: HTTPResponses.OK }
+    );
   } catch (error: any) {
-    throw new Error('SQL query failed: ' + error.message);
+    throw new Error("SQL query failed: " + error.message);
   } finally {
     if (conn) conn.release();
   }

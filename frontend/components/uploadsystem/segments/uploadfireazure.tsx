@@ -1,26 +1,26 @@
 "use client";
 
-import React, {useCallback, useEffect, useRef, useState} from "react";
-import {ReviewStates} from "@/config/macros/uploadsystemmacros";
-import {UploadFireAzureProps} from "@/config/macros/uploadsystemmacros";
-import {FileWithPath} from "react-dropzone";
-import {Box, Typography} from "@mui/material";
-import {Stack} from "@mui/joy";
-import {LinearProgressWithLabel} from "@/components/client/clientmacros";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ReviewStates } from "@/config/macros/uploadsystemmacros";
+import { UploadFireAzureProps } from "@/config/macros/uploadsystemmacros";
+import { FileWithPath } from "react-dropzone";
+import { Box, Typography } from "@mui/material";
+import { Stack } from "@mui/joy";
+import { LinearProgressWithLabel } from "@/components/client/clientmacros";
 import CircularProgress from "@mui/joy/CircularProgress";
-import {useOrgCensusContext, usePlotContext} from "@/app/contexts/userselectionprovider";
+import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
-                                                           acceptedFiles,
-                                                           uploadForm,
-                                                           setIsDataUnsaved,
-                                                           user,
-                                                           setUploadError,
-                                                           setErrorComponent,
-                                                           setReviewState,
-                                                           allRowToCMID,
-                                                           cmErrors,
-                                                         }) => {
+  acceptedFiles,
+  uploadForm,
+  setIsDataUnsaved,
+  user,
+  setUploadError,
+  setErrorComponent,
+  setReviewState,
+  allRowToCMID,
+  cmErrors
+}) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
@@ -46,29 +46,34 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       });
   };
 
-  const uploadToStorage = useCallback(async (file: FileWithPath) => {
-    try {
-      setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`);
-      const formData = new FormData();
-      formData.append(file.name, file);
-      if (uploadForm === 'measurements') {
-        const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
-        formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
+  const uploadToStorage = useCallback(
+    async (file: FileWithPath) => {
+      try {
+        setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`);
+        const formData = new FormData();
+        formData.append(file.name, file);
+        if (uploadForm === "measurements") {
+          const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
+          formData.append("fileRowErrors", JSON.stringify(fileRowErrors)); // Append validation errors to formData
+        }
+        const response = await fetch(
+          `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
+          {
+            method: "POST",
+            body: formData
+          }
+        );
+        // Increment completedOperations when an operation is completed
+        setCompletedOperations(prevCompleted => prevCompleted + 1);
+        return response.ok ? "Storage load successful" : "Storage load failed";
+      } catch (error) {
+        setUploadError(error);
+        setErrorComponent("UploadFire");
+        setReviewState(ReviewStates.ERRORS);
       }
-      const response = await fetch(
-        `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`, {
-          method: 'POST',
-          body: formData
-        });
-      // Increment completedOperations when an operation is completed
-      setCompletedOperations((prevCompleted) => prevCompleted + 1);
-      return response.ok ? 'Storage load successful' : 'Storage load failed';
-    } catch (error) {
-      setUploadError(error);
-      setErrorComponent('UploadFire');
-      setReviewState(ReviewStates.ERRORS);
-    }
-  }, [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]);
+    },
+    [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]
+  );
 
   useEffect(() => {
     const calculateTotalOperations = () => {
@@ -126,34 +131,59 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     }
   }, [loading, completedOperations, totalOperations]);
 
-  return <>
-    {loading ? (
-      <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
-        <Stack direction={"column"}>
-          <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-          <LinearProgressWithLabel variant={"determinate"}
-                                   value={(completedOperations / totalOperations) * 100}
-                                   currentlyrunningmsg={currentlyRunning}/>
-        </Stack>
-      </Box>
-    ) : (
-      <Box sx={{display: 'flex', flex: 1, width: '100%', alignItems: 'center', mt: 4}}>
-        <Stack direction={"column"} sx={{display: 'inherit'}}>
-          <Typography variant="h5" gutterBottom>Upload Complete</Typography>
-          {results.map((result) => (
-            <Typography key={result}>{result}</Typography>
-          ))}
-          <Typography>Azure upload complete! Finalizing changes...</Typography>
-          {startCountdown && (
-            <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 0.5}}>
-              <CircularProgress/>
-              <Typography>{countdown} seconds remaining</Typography>
-            </Box>
-          )}
-        </Stack>
-      </Box>
-    )}
-  </>;
+  return (
+    <>
+      {loading ? (
+        <Box
+          sx={{
+            display: "flex",
+            flex: 1,
+            width: "100%",
+            alignItems: "center",
+            mt: 4
+          }}
+        >
+          <Stack direction={"column"}>
+            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
+            <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
+          </Stack>
+        </Box>
+      ) : (
+        <Box
+          sx={{
+            display: "flex",
+            flex: 1,
+            width: "100%",
+            alignItems: "center",
+            mt: 4
+          }}
+        >
+          <Stack direction={"column"} sx={{ display: "inherit" }}>
+            <Typography variant="h5" gutterBottom>
+              Upload Complete
+            </Typography>
+            {results.map(result => (
+              <Typography key={result}>{result}</Typography>
+            ))}
+            <Typography>Azure upload complete! Finalizing changes...</Typography>
+            {startCountdown && (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mb: 0.5
+                }}
+              >
+                <CircularProgress />
+                <Typography>{countdown} seconds remaining</Typography>
+              </Box>
+            )}
+          </Stack>
+        </Box>
+      )}
+    </>
+  );
 };
 
 export default UploadFireAzure;

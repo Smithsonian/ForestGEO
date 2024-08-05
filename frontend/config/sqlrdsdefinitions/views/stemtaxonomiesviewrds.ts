@@ -43,6 +43,6 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
     quadratDimensionY: false,
     stemQuadX: false,
     stemQuadY: false,
-    stemDescription: false,
+    stemDescription: false
   };
 }

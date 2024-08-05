@@ -1,5 +1,5 @@
 // sites custom data type
-import {IDataMapper} from "../../datamapper";
+import { IDataMapper } from "../../datamapper";
 
 export type SitesRDS = {
   siteID?: number;
@@ -32,7 +32,7 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
       SQDimX: item.subquadratDimX != undefined ? String(item.subquadratDimX) : null,
       SQDimY: item.subquadratDimY != undefined ? String(item.subquadratDimY) : null,
       DefaultUOMDBH: item.dbhUnits != undefined ? String(item.dbhUnits) : null,
-      DefaultUOMHOM: item.homUnits != undefined ? String(item.homUnits) : null,
+      DefaultUOMHOM: item.homUnits != undefined ? String(item.homUnits) : null
     }));
   }
 
@@ -44,7 +44,7 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
       subquadratDimX: item.SQDimX != null ? Number(item.SQDimX) : undefined,
       subquadratDimY: item.SQDimY != null ? Number(item.SQDimY) : undefined,
       dbhUnits: item.DefaultUOMDBH != null ? String(item.DefaultUOMDBH) : undefined,
-      homUnits: item.DefaultUOMHOM != null ? String(item.DefaultUOMHOM) : undefined,
+      homUnits: item.DefaultUOMHOM != null ? String(item.DefaultUOMHOM) : undefined
     }));
   }
 }

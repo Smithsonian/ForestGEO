@@ -1,33 +1,25 @@
 /** @type {import('next').NextConfig} */
-const withBundleAnalyzer = require('@next/bundle-analyzer')({
-  enabled: process.env.ANALYZE === 'true',
+const withBundleAnalyzer = require("@next/bundle-analyzer")({
+  enabled: process.env.ANALYZE === "true"
 });
 
 const nextConfig = withBundleAnalyzer({
   experimental: {
     serverMinification: false,
     turbo: {
-      resolveExtensions: [
-        '.mdx',
-        '.tsx',
-        '.ts',
-        '.jsx',
-        '.js',
-        '.mjs',
-        '.json',
-      ],
-    },
+      resolveExtensions: [".mdx", ".tsx", ".ts", ".jsx", ".js", ".mjs", ".json"]
+    }
   },
   logging: {
     fetches: {
-      fullUrl: true,
-    },
+      fullUrl: true
+    }
   },
-  output: 'standalone',
+  output: "standalone",
   reactStrictMode: true,
-  distDir: 'build',
+  distDir: "build",
   images: {
-    unoptimized: true, // since images are served from public directory
+    unoptimized: true // since images are served from public directory
   },
   env: {
     AZURE_SQL_USER: process.env.AZURE_SQL_USER,
@@ -38,8 +30,8 @@ const nextConfig = withBundleAnalyzer({
     AZURE_SQL_CATALOG_SCHEMA: process.env.AZURE_SQL_CATALOG_SCHEMA,
     FG_PAT: process.env.FG_PAT,
     OWNER: process.env.OWNER,
-    REPO: process.env.REPO,
-  },
+    REPO: process.env.REPO
+  }
 });
 
 module.exports = nextConfig;

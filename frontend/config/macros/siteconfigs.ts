@@ -1,16 +1,16 @@
-import DashboardIcon from '@mui/icons-material/Dashboard';
-import DataObjectIcon from '@mui/icons-material/DataObject';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import CloudCircleIcon from '@mui/icons-material/CloudCircle';
-import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest';
-import DescriptionIcon from '@mui/icons-material/Description';
-import AccountCircleIcon from '@mui/icons-material/AccountCircle';
-import WidgetsIcon from '@mui/icons-material/Widgets';
-import SchemaIcon from '@mui/icons-material/Schema';
-import FilterIcon from '@mui/icons-material/FilterList';
-import HistoryIcon from '@mui/icons-material/History';
+import DashboardIcon from "@mui/icons-material/Dashboard";
+import DataObjectIcon from "@mui/icons-material/DataObject";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import CloudCircleIcon from "@mui/icons-material/CloudCircle";
+import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
+import DescriptionIcon from "@mui/icons-material/Description";
+import AccountCircleIcon from "@mui/icons-material/AccountCircle";
+import WidgetsIcon from "@mui/icons-material/Widgets";
+import SchemaIcon from "@mui/icons-material/Schema";
+import FilterIcon from "@mui/icons-material/FilterList";
+import HistoryIcon from "@mui/icons-material/History";
 import React from "react";
-import {UnifiedValidityFlags} from '../macros';
+import { UnifiedValidityFlags } from "../macros";
 
 export type SiteConfigProps = {
   label: string;
@@ -38,90 +38,90 @@ type ValidityMapping = {
 };
 
 export const validityMapping: ValidityMapping = {
-  '/attributes': 'attributes',
-  '/personnel': 'personnel',
-  '/alltaxonomies': 'species',
-  '/quadrats': 'quadrats',
-  '/quadratpersonnel': 'quadratpersonnel'
+  "/attributes": "attributes",
+  "/personnel": "personnel",
+  "/alltaxonomies": "species",
+  "/quadrats": "quadrats",
+  "/quadratpersonnel": "quadratpersonnel"
 };
 
 export const siteConfigNav: SiteConfigProps[] = [
   {
-    label: 'Dashboard',
-    href: '/dashboard',
-    tip: 'Home Page',
+    label: "Dashboard",
+    href: "/dashboard",
+    tip: "Home Page",
     icon: DashboardIcon,
-    expanded: [],
+    expanded: []
   },
   {
     label: "Census Hub",
     href: "/measurementshub",
-    tip: 'View existing core measurement data for a given plot, census, and quadrat',
+    tip: "View existing core measurement data for a given plot, census, and quadrat",
     icon: DataObjectIcon,
     expanded: [
       {
         label: "View Data",
         href: "/summary",
-        tip: '',
+        tip: "",
         icon: VisibilityIcon
       },
       {
         label: "Uploaded Files",
         href: "/uploadedfiles",
         tip: "uploaded file display",
-        icon: CloudCircleIcon,
+        icon: CloudCircleIcon
       },
       {
         label: "View All Historical Data",
         href: "/viewfulltable",
         tip: "all historical data view",
         icon: HistoryIcon
-      },
+      }
       // {
       //   label: "Validation History",
       //   href: "/validationhistory",
       //   tip: '',
       //   icon: HistoryEduIcon
       // },
-    ],
+    ]
   },
 
   {
     label: "Stem & Plot Details",
     href: "/fixeddatainput",
-    tip: 'View Modifiable Properties',
+    tip: "View Modifiable Properties",
     icon: SettingsSuggestIcon,
     expanded: [
       {
-        label: 'Stem Codes',
-        href: '/attributes',
-        tip: '',
-        icon: DescriptionIcon,
+        label: "Stem Codes",
+        href: "/attributes",
+        tip: "",
+        icon: DescriptionIcon
       },
       {
-        label: 'Personnel',
-        href: '/personnel',
-        tip: '',
-        icon: AccountCircleIcon,
+        label: "Personnel",
+        href: "/personnel",
+        tip: "",
+        icon: AccountCircleIcon
       },
       {
-        label: 'Quadrats',
-        href: '/quadrats',
-        tip: '',
-        icon: WidgetsIcon,
+        label: "Quadrats",
+        href: "/quadrats",
+        tip: "",
+        icon: WidgetsIcon
       },
       {
         label: "Species List",
         href: "/alltaxonomies",
-        tip: '',
+        tip: "",
         icon: SchemaIcon
       },
       {
         label: "Plot-Species List",
         href: "/stemtaxonomies",
-        tip: '',
+        tip: "",
         icon: FilterIcon
-      },
+      }
       // {
       //   label: 'Subquadrats',
       //   href: '/subquadrats',
@@ -147,6 +147,5 @@ export const siteConfigNav: SiteConfigProps[] = [
       //   icon: DescriptionIcon,
       // },
     ]
-  },
+  }
 ];
-

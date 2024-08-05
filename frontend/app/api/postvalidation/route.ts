@@ -4,8 +4,8 @@ import { PoolConnection } from "mysql2/promise";
 import { HTTPResponses } from "@/config/macros";
 
 export async function GET(request: NextRequest) {
-  const schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('no schema variable provided!');
+  const schema = request.nextUrl.searchParams.get("schema");
+  if (!schema) throw new Error("no schema variable provided!");
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
@@ -63,12 +63,11 @@ export async function GET(request: NextRequest) {
       }
     };
 
-    return new NextResponse(
-      JSON.stringify(response),
-      { status: HTTPResponses.OK }
-    );
+    return new NextResponse(JSON.stringify(response), {
+      status: HTTPResponses.OK
+    });
   } catch (error: any) {
-    throw new Error('SQL query failed: ' + error.message);
+    throw new Error("SQL query failed: " + error.message);
   } finally {
     if (conn) conn.release();
   }

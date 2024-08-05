@@ -1,7 +1,7 @@
 // quadrat custom data type
 import { IDataMapper } from "../../datamapper";
-import { ColumnStates } from '@/config/macros';
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import { ColumnStates } from "@/config/macros";
+import { ValidationFunction, RowValidationErrors } from "@/config/macros/formdetails";
 import { createInitialObject, ResultType } from "@/config/utils";
 
 export type QuadratRDS = {
@@ -33,27 +33,27 @@ export interface QuadratRaw {
 
 export type Quadrat = QuadratRDS | undefined;
 
-export const validateQuadratsRow: ValidationFunction = (row) => {
+export const validateQuadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
 
-  if (row['unit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['unit'])) {
-    errors['unit'] = 'Invalid unit value.';
+  if (row["unit"] && !["km", "hm", "dam", "m", "dm", "cm", "mm"].includes(row["unit"])) {
+    errors["unit"] = "Invalid unit value.";
   }
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
 
 export const quadratsFields = [
-  'quadratName',
-  'startX',
-  'startY',
-  'coordinateUnits',
-  'dimensionX',
-  'dimensionY',
-  'dimensionUnits',
-  'area',
-  'areaUnits',
-  'quadratShape',
+  "quadratName",
+  "startX",
+  "startY",
+  "coordinateUnits",
+  "dimensionX",
+  "dimensionY",
+  "dimensionUnits",
+  "area",
+  "areaUnits",
+  "quadratShape"
 ];
 
 export function getQuadratHCs(): ColumnStates {

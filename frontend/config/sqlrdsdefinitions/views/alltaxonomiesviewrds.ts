@@ -1,6 +1,6 @@
 // alltaxonomiesview custom data type
 import { createInitialObject, ResultType } from "@/config/utils";
-import {ColumnStates} from "@/config/macros";
+import { ColumnStates } from "@/config/macros";
 
 export const initialAllTaxonomiesViewRDSRow = createInitialObject<AllTaxonomiesViewRDS>();
 
@@ -24,10 +24,9 @@ export type AllTaxonomiesViewRDS = {
 
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
-
 export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
     familyID: false,
-    genusID: false,
+    genusID: false
   };
-};
+}

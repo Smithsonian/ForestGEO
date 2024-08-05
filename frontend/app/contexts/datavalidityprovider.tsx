@@ -1,7 +1,8 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useOrgCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
 import { UnifiedValidityFlags } from "@/config/macros";
+
+import { useOrgCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
 import { useLoading } from "./loadingprovider";
 
 const initialValidityState: UnifiedValidityFlags = {
@@ -9,7 +10,7 @@ const initialValidityState: UnifiedValidityFlags = {
   personnel: false,
   species: false,
   quadrats: false,
-  quadratpersonnel: false,
+  quadratpersonnel: false
 };
 
 const DataValidityContext = createContext<{
@@ -19,12 +20,9 @@ const DataValidityContext = createContext<{
   recheckValidityIfNeeded: () => Promise<void>;
 }>({
   validity: initialValidityState,
-  setValidity: () => {
-  },
-  triggerRefresh: () => {
-  },
-  recheckValidityIfNeeded: async () => {
-  },
+  setValidity: () => {},
+  triggerRefresh: () => {},
+  recheckValidityIfNeeded: async () => {}
 });
 
 const debounce = (func: (...args: any[]) => void, wait: number) => {
@@ -49,23 +47,26 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     setValidityState(prev => ({ ...prev, [type]: value }));
   }, []);
 
-  const checkDataValidity = useCallback(async (type?: keyof UnifiedValidityFlags) => {
-    if (!currentSite || !currentPlot || !currentCensus) return;
-    setLoading(true, 'Pre-validation in progress...');
-    const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.plotCensusNumber}`;
-    let response;
-    try {
-      response = await fetch(url, { method: 'GET' });
-    } catch (error) {
-      console.error(error);
-      response = { ok: false };
-    }
-    setValidity(type as keyof UnifiedValidityFlags, response.ok);
-    setLoading(false);
-  }, [currentSite, currentPlot, currentCensus, setValidity, validity]);
+  const checkDataValidity = useCallback(
+    async (type?: keyof UnifiedValidityFlags) => {
+      if (!currentSite || !currentPlot || !currentCensus) return;
+      setLoading(true, "Pre-validation in progress...");
+      const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.plotCensusNumber}`;
+      let response;
+      try {
+        response = await fetch(url, { method: "GET" });
+      } catch (error) {
+        console.error(error);
+        response = { ok: false };
+      }
+      setValidity(type as keyof UnifiedValidityFlags, response.ok);
+      setLoading(false);
+    },
+    [currentSite, currentPlot, currentCensus, setValidity, validity]
+  );
 
   const recheckValidityIfNeeded = useCallback(async () => {
-    if ((Object.values(validity).some(flag => !flag)) || refreshNeeded) {
+    if (Object.values(validity).some(flag => !flag) || refreshNeeded) {
       const typesToRefresh = Object.entries(validity)
         .filter(([_, value]) => !value)
         .map(([key]) => key as keyof UnifiedValidityFlags);
@@ -73,7 +74,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
       await Promise.all(typesToRefresh.map(item => checkDataValidity(item)));
       setRefreshNeeded(false); // Reset the refresh flag after rechecking
     } else {
-      console.log('No flags set for rechecking, or missing site/plot/census data');
+      console.log("No flags set for rechecking, or missing site/plot/census data");
     }
   }, [validity, checkDataValidity, refreshNeeded]);
 
@@ -91,20 +92,19 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     }
   }, [currentSite, currentPlot, currentCensus]);
 
-  const triggerRefresh = useCallback((types?: (keyof UnifiedValidityFlags)[]) => {
-    if (types) {
-      types.forEach(type => setValidity(type, false));
-    } else {
-      Object.keys(validity).forEach(key => setValidity(key as keyof UnifiedValidityFlags, false));
-    }
-    setRefreshNeeded(true); // Trigger a refresh
-  }, [setValidity]);
-
-  return (
-    <DataValidityContext.Provider value={{ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }}>
-      {children}
-    </DataValidityContext.Provider>
+  const triggerRefresh = useCallback(
+    (types?: (keyof UnifiedValidityFlags)[]) => {
+      if (types) {
+        types.forEach(type => setValidity(type, false));
+      } else {
+        Object.keys(validity).forEach(key => setValidity(key as keyof UnifiedValidityFlags, false));
+      }
+      setRefreshNeeded(true); // Trigger a refresh
+    },
+    [setValidity]
   );
+
+  return <DataValidityContext.Provider value={{ validity, setValidity, triggerRefresh, recheckValidityIfNeeded }}>{children}</DataValidityContext.Provider>;
 };
 
 export const useDataValidityContext = () => useContext(DataValidityContext);

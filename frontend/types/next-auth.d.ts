@@ -1,8 +1,8 @@
-import 'next-auth';
-import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
-import {Profile} from "next-auth";
+import "next-auth";
+import { SitesRDS } from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import { Profile } from "next-auth";
 
-declare module 'next-auth' {
+declare module "next-auth" {
   /**
    * Extends the built-in session types to include the userStatus property.
    */
@@ -14,7 +14,7 @@ declare module 'next-auth' {
       image?: string;
       sites: SitesRDS[];
       allsites: SitesRDS[];
-    }
+    };
   }
 
   interface AzureADProfile extends Profile {

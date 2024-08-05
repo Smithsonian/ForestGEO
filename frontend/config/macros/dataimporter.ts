@@ -1,7 +1,7 @@
 // data import class --> currently unused, earmarked for future implementation
 // intended to simplify the process of shifting quadrats in a PCN from one census to another (full OR partial)
-import {getConn, runQuery} from "@/components/processors/processormacros";
-import {format} from "mysql2/promise";
+import { getConn, runQuery } from "@/components/processors/processormacros";
+import { format } from "mysql2/promise";
 
 interface CensusData {
   censusID: number;
@@ -35,7 +35,7 @@ class DataImporter<T extends Partial<CensusData>> {
   async insertData(data: T, newCensusID: number): Promise<void> {
     const conn = await getConn();
     try {
-      const newData = {...data, censusID: newCensusID} as CensusData & T;
+      const newData = { ...data, censusID: newCensusID } as CensusData & T;
       const values = Object.values(newData);
       await runQuery(conn, format(this.config.insertQuery, values));
     } finally {
@@ -50,10 +50,7 @@ class DataImporter<T extends Partial<CensusData>> {
 
     data.forEach(item => {
       const uniqueFieldValue = item[this.config.uniqueField];
-      if (
-        !uniqueDataMap.has(uniqueFieldValue as any) ||
-        uniqueDataMap.get(uniqueFieldValue as any)!.censusID! < item.censusID!
-      ) {
+      if (!uniqueDataMap.has(uniqueFieldValue as any) || uniqueDataMap.get(uniqueFieldValue as any)!.censusID! < item.censusID!) {
         uniqueDataMap.set(uniqueFieldValue as any, item);
       }
     });
