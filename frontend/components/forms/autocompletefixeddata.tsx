@@ -1,8 +1,8 @@
 "use client";
 import Autocomplete from "@mui/material/Autocomplete";
-import {useEffect, useState} from "react";
-import {CircularProgress, Popper, TextField} from "@mui/material";
-import {useSiteContext} from "@/app/contexts/userselectionprovider";
+import { useEffect, useState } from "react";
+import { CircularProgress, Popper, TextField } from "@mui/material";
+import { useSiteContext } from "@/app/contexts/userselectionprovider";
 
 interface AutocompleteFixedDataProps {
   dataType: string;
@@ -11,9 +11,9 @@ interface AutocompleteFixedDataProps {
 }
 
 export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedDataProps>) {
-  const {value, dataType, onChange} = props;
+  const { value, dataType, onChange } = props;
   const [options, setOptions] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
 
@@ -24,12 +24,12 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
   const refreshData = () => {
     setLoading(true);
     fetch(`/api/formsearch/${dataType}?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`)
-      .then((response) => response.json())
-      .then((data) => {
+      .then(response => response.json())
+      .then(data => {
         setOptions(data);
       })
-      .catch((error) => {
-        console.error('Error fetching data:', error);
+      .catch(error => {
+        console.error("Error fetching data:", error);
       })
       .finally(() => setLoading(false));
   };
@@ -59,12 +59,12 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
     <Autocomplete
       className={"fullWidthAutoComplete"}
       value={value}
-      onChange={(_event, newValue) => onChange(newValue ?? '')}
+      onChange={(_event, newValue) => onChange(newValue ?? "")}
       inputValue={inputValue}
       onInputChange={(_event, newInputValue) => setInputValue(newInputValue)}
       options={options}
-      isOptionEqualToValue={(option, value) => value !== '' ? value === option : value === ''}
-      renderInput={(params) => (
+      isOptionEqualToValue={(option, value) => (value !== "" ? value === option : value === "")}
+      renderInput={params => (
         <TextField
           {...params}
           fullWidth
@@ -73,16 +73,14 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
             ...params.InputProps,
             endAdornment: (
               <>
-                {loading ? <CircularProgress color="inherit" size={20}/> : null}
+                {loading ? <CircularProgress color="inherit" size={20} /> : null}
                 {params.InputProps.endAdornment}
               </>
-            ),
+            )
           }}
         />
       )}
-      PopperComponent={(popperProps) => (
-        <Popper {...popperProps} style={{zIndex: 9999}} placement="bottom-start"/>
-      )}
+      PopperComponent={popperProps => <Popper {...popperProps} style={{ zIndex: 9999 }} placement="bottom-start" />}
     />
   );
 }

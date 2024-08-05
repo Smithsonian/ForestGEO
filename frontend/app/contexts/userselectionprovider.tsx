@@ -1,15 +1,10 @@
 // userselectionprovider.tsx
 "use client";
-import React, {createContext, useContext, useReducer} from "react";
-import {
-  createEnhancedDispatch,
-  EnhancedDispatch,
-  genericLoadContextReducer,
-  LoadAction
-} from "@/config/macros/contextreducers";
-import {Site} from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import {Quadrat} from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import {Plot} from "@/config/sqlrdsdefinitions/tables/plotrds";
+import React, { createContext, useContext, useReducer } from "react";
+import { createEnhancedDispatch, EnhancedDispatch, genericLoadContextReducer, LoadAction } from "@/config/macros/contextreducers";
+import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
+import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
 import {
   useOrgCensusListContext,
   usePlotListContext,
@@ -17,8 +12,8 @@ import {
   useSiteListContext,
   useSubquadratListContext
 } from "@/app/contexts/listselectionprovider";
-import {OrgCensus} from "@/config/sqlrdsdefinitions/orgcensusrds";
-import {Subquadrat} from "@/config/sqlrdsdefinitions/tables/subquadratrds";
+import { OrgCensus } from "@/config/sqlrdsdefinitions/orgcensusrds";
+import { Subquadrat } from "@/config/sqlrdsdefinitions/tables/subquadratrds";
 
 export const PlotContext = createContext<Plot>(undefined);
 export const OrgCensusContext = createContext<OrgCensus>(undefined);
@@ -31,7 +26,7 @@ export const QuadratDispatchContext = createContext<EnhancedDispatch<Quadrat> | 
 export const SubquadratDispatchContext = createContext<EnhancedDispatch<Subquadrat> | undefined>(undefined);
 export const SiteDispatchContext = createContext<EnhancedDispatch<Site> | undefined>(undefined);
 
-export default function UserSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
+export default function UserSelectionProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const plotListContext = usePlotListContext();
   const orgCensusListContext = useOrgCensusListContext();
   const quadratListContext = useQuadratListContext();
@@ -60,11 +55,11 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
     undefined
   );
 
-  const enhancedPlotDispatch = createEnhancedDispatch(plotDispatch, 'plot');
-  const enhancedOrgCensusDispatch = createEnhancedDispatch(orgCensusDispatch, 'census');
-  const enhancedQuadratDispatch = createEnhancedDispatch(quadratDispatch, 'quadrat');
-  const enhancedSubquadratDispatch = createEnhancedDispatch(subquadratDispatch, 'subquadrat');
-  const enhancedSiteDispatch = createEnhancedDispatch(siteDispatch, 'site');
+  const enhancedPlotDispatch = createEnhancedDispatch(plotDispatch, "plot");
+  const enhancedOrgCensusDispatch = createEnhancedDispatch(orgCensusDispatch, "census");
+  const enhancedQuadratDispatch = createEnhancedDispatch(quadratDispatch, "quadrat");
+  const enhancedSubquadratDispatch = createEnhancedDispatch(subquadratDispatch, "subquadrat");
+  const enhancedSiteDispatch = createEnhancedDispatch(siteDispatch, "site");
 
   return (
     <SiteContext.Provider value={site}>
@@ -76,9 +71,7 @@ export default function UserSelectionProvider({children}: Readonly<{ children: R
                 <QuadratContext.Provider value={quadrat}>
                   <QuadratDispatchContext.Provider value={enhancedQuadratDispatch}>
                     <SubquadratContext.Provider value={subquadrat}>
-                      <SubquadratDispatchContext.Provider value={enhancedSubquadratDispatch}>
-                        {children}
-                      </SubquadratDispatchContext.Provider>
+                      <SubquadratDispatchContext.Provider value={enhancedSubquadratDispatch}>{children}</SubquadratDispatchContext.Provider>
                     </SubquadratContext.Provider>
                   </QuadratDispatchContext.Provider>
                 </QuadratContext.Provider>

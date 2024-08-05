@@ -4,14 +4,14 @@ import { bitToBoolean, booleanToBit, ColumnStates } from "@/config/macros";
 import { ValidationFunction, RowValidationErrors } from "@/config/macros/formdetails";
 import { createInitialObject, ResultType } from "@/config/utils";
 
-export const validateMeasurementsRow: ValidationFunction = (row) => {
+export const validateMeasurementsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
 
-  if (row['dbhunit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['dbhunit'])) {
-    errors['dbhunit'] = 'Invalid DBH unit value.';
+  if (row["dbhunit"] && !["km", "hm", "dam", "m", "dm", "cm", "mm"].includes(row["dbhunit"])) {
+    errors["dbhunit"] = "Invalid DBH unit value.";
   }
-  if (row['homunit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['homunit'])) {
-    errors['homunit'] = 'Invalid HOM unit value.';
+  if (row["homunit"] && !["km", "hm", "dam", "m", "dm", "cm", "mm"].includes(row["homunit"])) {
+    errors["homunit"] = "Invalid HOM unit value.";
   }
 
   return Object.keys(errors).length > 0 ? errors : null;
@@ -56,6 +56,6 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
     subquadratID: false,
     treeID: false,
     stemID: false,
-    personnelID: false,
+    personnelID: false
   };
 }

@@ -1,7 +1,7 @@
-import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
-import React, {Dispatch, SetStateAction} from "react";
-import {FileWithPath} from "react-dropzone";
-import {FileCollectionRowSet} from "./formdetails";
+import { DetailedCMIDRow } from "@/components/uploadsystem/uploadparent";
+import React, { Dispatch, SetStateAction } from "react";
+import { FileWithPath } from "react-dropzone";
+import { FileCollectionRowSet } from "./formdetails";
 
 export interface UploadStartProps {
   // state vars
@@ -54,7 +54,7 @@ export interface UploadReviewFilesProps {
   setUploadError: Dispatch<SetStateAction<any>>;
   setErrorComponent: Dispatch<SetStateAction<string>>;
   // centralized functions
-  areHeadersValid: (actualHeaders: string[]) => { isValid: boolean, missingHeaders: string[] };
+  areHeadersValid: (actualHeaders: string[]) => { isValid: boolean; missingHeaders: string[] };
   handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
   handleApproval: () => Promise<void>;
   handleCancel: () => Promise<void>;

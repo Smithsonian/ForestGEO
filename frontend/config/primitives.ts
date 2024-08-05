@@ -1,4 +1,4 @@
-import {tv} from "tailwind-variants";
+import { tv } from "tailwind-variants";
 
 export const title = tv({
   base: "tracking-tight inline font-semibold",
@@ -14,38 +14,26 @@ export const title = tv({
       fuchsia: "from-[#e879f9] to-[#c026d3]",
       sky: "from-[#7dd3fc] to-[#0ea5e9]",
       rose: "from-[#fb7185] to-[#e11d48]",
-      foreground: "dark:from-[#FFFFFF] dark:to-[#4B4B4B]",
+      foreground: "dark:from-[#FFFFFF] dark:to-[#4B4B4B]"
     },
     size: {
       sm: "text-3xl lg:text-4xl",
       md: "text-[2.3rem] lg:text-5xl leading-9",
-      lg: "text-4xl lg:text-6xl",
+      lg: "text-4xl lg:text-6xl"
     },
     fullWidth: {
-      true: "w-full block",
-    },
+      true: "w-full block"
+    }
   },
   defaultVariants: {
-    size: "md",
+    size: "md"
   },
   compoundVariants: [
     {
-      color: [
-        "violet",
-        "yellow",
-        "blue",
-        "cyan",
-        "green",
-        "pink",
-        "red",
-        "fuchsia",
-        "sky",
-        "rose",
-        "foreground",
-      ],
-      class: "bg-clip-text text-transparent bg-gradient-to-b",
-    },
-  ],
+      color: ["violet", "yellow", "blue", "cyan", "green", "pink", "red", "fuchsia", "sky", "rose", "foreground"],
+      class: "bg-clip-text text-transparent bg-gradient-to-b"
+    }
+  ]
 });
 
 export const subtitle = tv({
@@ -59,29 +47,20 @@ export const subtitle = tv({
       green: "from-[#6FEE8D] to-[#17c964]",
       pink: "from-[#FF72E1] to-[#F54C7A]",
       red: "from-[#FC2323] to-[#CB0A3C]",
-      foreground: "dark:from-[#FFFFFF] dark:to-[#4B4B4B]",
+      foreground: "dark:from-[#FFFFFF] dark:to-[#4B4B4B]"
     },
     fullWidth: {
-      true: "!w-full",
-    },
+      true: "!w-full"
+    }
   },
   defaultVariants: {
     fullWidth: true,
-    size: "sm",
+    size: "sm"
   },
   compoundVariants: [
     {
-      color: [
-        "violet",
-        "yellow",
-        "blue",
-        "cyan",
-        "green",
-        "pink",
-        "red",
-        "foreground",
-      ],
-      class: "bg-clip-text text-transparent bg-gradient-to-b",
-    },
-  ],
+      color: ["violet", "yellow", "blue", "cyan", "green", "pink", "red", "foreground"],
+      class: "bg-clip-text text-transparent bg-gradient-to-b"
+    }
+  ]
 });

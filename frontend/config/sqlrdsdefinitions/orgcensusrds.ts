@@ -1,11 +1,11 @@
-import MapperFactory, { IDataMapper } from '../datamapper';
-import { GridSelections } from '../macros';
-import { CensusRDS, CensusResult } from './tables/censusrds';
+import MapperFactory, { IDataMapper } from "../datamapper";
+import { GridSelections } from "../macros";
+import { CensusRDS, CensusResult } from "./tables/censusrds";
 
 interface CensusDateRange {
   censusID: number;
   startDate: Date | undefined;
-  endDate: Date | undefined
+  endDate: Date | undefined;
 }
 
 interface OrgCensusRDS {
@@ -27,7 +27,7 @@ function collapseCensusDataToGridSelections(orgCensusList: OrgCensus[]): GridSel
     }
 
     orgCensus.dateRanges.forEach(dateRange => {
-      const dateRangeStr = `(${dateRange.startDate?.toISOString() || ''}-${dateRange.endDate?.toISOString() || ''})`;
+      const dateRangeStr = `(${dateRange.startDate?.toISOString() || ""}-${dateRange.endDate?.toISOString() || ""})`;
       const label = `${orgCensus.plotCensusNumber}-${dateRange.censusID}-${dateRangeStr}`;
       const value = dateRange.censusID;
       result.push({ label, value });
@@ -40,7 +40,7 @@ function collapseCensusDataToGridSelections(orgCensusList: OrgCensus[]): GridSel
 class OrgCensusToCensusResultMapper {
   private censusMapper: IDataMapper<CensusRDS, CensusResult>;
   constructor() {
-    this.censusMapper = MapperFactory.getMapper('census');
+    this.censusMapper = MapperFactory.getMapper("census");
   }
 
   mapData(orgCensusList: OrgCensusRDS[]): CensusResult[] {
@@ -76,7 +76,7 @@ class OrgCensusToCensusResultMapper {
       const censusID = censusRDS.censusID!;
       const startDate = censusRDS.startDate ? new Date(censusRDS.startDate) : undefined;
       const endDate = censusRDS.endDate ? new Date(censusRDS.endDate) : undefined;
-      const description = censusRDS.description || '';
+      const description = censusRDS.description || "";
 
       let existingCensus = uniqueCensusMap.get(plotCensusNumber);
 
@@ -101,7 +101,6 @@ class OrgCensusToCensusResultMapper {
     // Convert the map to an array and sort by plotCensusNumber in descending order
     return Array.from(uniqueCensusMap.values()).sort((a, b) => b.plotCensusNumber - a.plotCensusNumber);
   }
-
 
   findOpenCensusID(orgCensus: OrgCensusRDS): number | undefined {
     const openDateRange = orgCensus.dateRanges.find(dateRange => dateRange.endDate === undefined);
@@ -137,9 +136,9 @@ class OrgCensusToCensusResultMapper {
 
     // Perform the PATCH request
     await fetch(`/api/fixeddata/census/${schema}/censusID`, {
-      method: 'PATCH',
+      method: "PATCH",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({ newRow: updatedCensusRDS })
     });
@@ -164,13 +163,13 @@ class OrgCensusToCensusResultMapper {
 
     // Perform the POST request
     await fetch(`/api/fixeddata/census/${schema}/censusID`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({ newRow: newCensusRDS })
     });
-    // trigger reload 
+    // trigger reload
   }
 
   async startNewCensus(schema: string, plotID: number, plotCensusNumber: number, description?: string): Promise<number | undefined> {
@@ -184,9 +183,9 @@ class OrgCensusToCensusResultMapper {
     };
     // Perform the POST request
     const response = await fetch(`/api/fixeddata/census/${schema}/censusID`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({ newRow: newCensusRDS })
     });
@@ -198,7 +197,7 @@ class OrgCensusToCensusResultMapper {
 // Function to create and update OrgCensusRDS list from CensusRDS
 async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<OrgCensusRDS[]> {
   const orgCensusMapper = new OrgCensusToCensusResultMapper();
-  const censusMapper = MapperFactory.getMapper<CensusRDS, CensusResult>('census');
+  const censusMapper = MapperFactory.getMapper<CensusRDS, CensusResult>("census");
 
   const censusResultList: CensusResult[] = censusMapper.demapData(censusRDSLoad.filter(data => data !== undefined));
   return orgCensusMapper.demapData(censusResultList);

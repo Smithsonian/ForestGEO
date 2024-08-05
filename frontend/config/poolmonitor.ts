@@ -1,5 +1,5 @@
-import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
-import chalk from 'chalk';
+import { Pool, PoolConnection, PoolOptions, createPool } from "mysql2/promise";
+import chalk from "chalk";
 
 export class PoolMonitor {
   public pool: Pool;
@@ -16,7 +16,7 @@ export class PoolMonitor {
     this.pool = createPool(config);
     this.poolClosed = false;
 
-    this.pool.on('acquire', (connection) => {
+    this.pool.on("acquire", connection => {
       if (!this.acquiredConnectionIds.has(connection.threadId)) {
         this.acquiredConnectionIds.add(connection.threadId);
         ++this.activeConnections;
@@ -27,7 +27,7 @@ export class PoolMonitor {
       }
     });
 
-    this.pool.on('release', (connection) => {
+    this.pool.on("release", connection => {
       if (this.acquiredConnectionIds.has(connection.threadId)) {
         this.acquiredConnectionIds.delete(connection.threadId);
         if (this.activeConnections > 0) {
@@ -39,16 +39,16 @@ export class PoolMonitor {
       }
     });
 
-    this.pool.on('connection', (connection) => {
+    this.pool.on("connection", connection => {
       ++this.totalConnectionsCreated;
       console.log(chalk.yellow(`New: ${connection.threadId}`));
       this.logPoolStatus();
       this.resetInactivityTimer();
     });
 
-    this.pool.on('enqueue', () => {
+    this.pool.on("enqueue", () => {
       ++this.waitingForConnection;
-      console.log(chalk.magenta('Enqueued.'));
+      console.log(chalk.magenta("Enqueued."));
       this.logPoolStatus();
       this.resetInactivityTimer();
     });
@@ -59,17 +59,17 @@ export class PoolMonitor {
 
   async getConnection(): Promise<PoolConnection> {
     if (this.poolClosed) {
-      throw new Error('Connection pool is closed');
+      throw new Error("Connection pool is closed");
     }
 
     try {
-      console.log(chalk.cyan('Requesting new connection...'));
+      console.log(chalk.cyan("Requesting new connection..."));
       const connection = await this.pool.getConnection();
-      console.log(chalk.green('Connection acquired'));
+      console.log(chalk.green("Connection acquired"));
       this.resetInactivityTimer();
       return connection;
     } catch (error) {
-      console.error(chalk.red('Error getting connection from pool:', error));
+      console.error(chalk.red("Error getting connection from pool:", error));
       throw error;
     }
   }
@@ -84,12 +84,12 @@ export class PoolMonitor {
 
   async closeAllConnections(): Promise<void> {
     try {
-      console.log(chalk.yellow('Ending pool connections...'));
+      console.log(chalk.yellow("Ending pool connections..."));
       await this.pool.end();
       this.poolClosed = true;
-      console.log(chalk.yellow('Pool connections ended.'));
+      console.log(chalk.yellow("Pool connections ended."));
     } catch (error) {
-      console.error(chalk.red('Error closing connections:', error));
+      console.error(chalk.red("Error closing connections:", error));
       throw error;
     }
   }
@@ -101,19 +101,19 @@ export class PoolMonitor {
 
     this.inactivityTimer = setTimeout(async () => {
       if (this.activeConnections === 0) {
-        console.log(chalk.red('Inactivity period exceeded. Initiating graceful shutdown...'));
+        console.log(chalk.red("Inactivity period exceeded. Initiating graceful shutdown..."));
         await this.closeAllConnections();
-        console.log(chalk.red('Graceful shutdown complete.'));
+        console.log(chalk.red("Graceful shutdown complete."));
       }
     }, 3600000); // 1 hour in milliseconds
   }
 
   public reinitializePool() {
-    console.log(chalk.cyan('Reinitializing connection pool...'));
+    console.log(chalk.cyan("Reinitializing connection pool..."));
     this.pool = createPool(this.config);
     this.poolClosed = false;
     this.acquiredConnectionIds.clear();
-    console.log(chalk.cyan('Connection pool reinitialized.'));
+    console.log(chalk.cyan("Connection pool reinitialized."));
   }
 
   public isPoolClosed(): boolean {

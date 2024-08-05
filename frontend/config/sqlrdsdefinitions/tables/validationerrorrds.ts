@@ -7,5 +7,5 @@ export type ValidationErrorRDS = {
 
 export interface ValidationErrorResult {
   ValidationErrorID: any;
-  ValidationErrorDescription: any
+  ValidationErrorDescription: any;
 }

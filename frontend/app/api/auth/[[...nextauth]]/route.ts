@@ -1,7 +1,7 @@
 import NextAuth, { AzureADProfile } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { getAllowedSchemas, getAllSchemas, verifyEmail } from "@/components/processors/processorhelperfunctions";
-import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { SitesRDS } from "@/config/sqlrdsdefinitions/tables/sitesrds";
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,
@@ -10,19 +10,19 @@ const handler = NextAuth({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
       tenantId: process.env.AZURE_AD_TENANT_ID!,
-      authorization: { params: { scope: "openid profile email user.Read" } },
-    }),
+      authorization: { params: { scope: "openid profile email user.Read" } }
+    })
   ],
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 hours (you can adjust this value as needed)
+    maxAge: 24 * 60 * 60 // 24 hours (you can adjust this value as needed)
   },
   callbacks: {
     async signIn({ user, account, profile, email: signInEmail, credentials }) {
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
-      if (typeof userEmail !== 'string') {
-        console.error('User email is not a string:', userEmail);
+      if (typeof userEmail !== "string") {
+        console.error("User email is not a string:", userEmail);
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
@@ -54,10 +54,10 @@ const handler = NextAuth({
     },
 
     async session({ session, token }) {
-      if (typeof token.userStatus === 'string') {
+      if (typeof token.userStatus === "string") {
         session.user.userStatus = token.userStatus;
       } else {
-        session.user.userStatus = 'fieldcrew'; // default no admin permissions
+        session.user.userStatus = "fieldcrew"; // default no admin permissions
       }
       if (token && token.allsites && Array.isArray(token.allsites)) {
         session.user.allsites = token.allsites as SitesRDS[];
@@ -66,10 +66,10 @@ const handler = NextAuth({
         session.user.sites = token.sites as SitesRDS[];
       }
       return session;
-    },
+    }
   },
   pages: {
-    error: '/loginfailed',
+    error: "/loginfailed"
   }
 });
 

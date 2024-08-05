@@ -3,14 +3,13 @@
  *
  * This file defines types used throughout the upload system components to define props, state, contexts etc. It also defines some utility functions used in the upload flow.
  */
-import {FileRejection, FileWithPath} from "react-dropzone";
-import '@/styles/customtablesettings.css';
-import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+import { FileRejection, FileWithPath } from "react-dropzone";
+import "@/styles/customtablesettings.css";
+import { GridColDef, GridValidRowModel } from "@mui/x-data-grid";
 
 export type ColumnStates = {
   [key: string]: boolean;
-}
-
+};
 
 export type ValidationErrorID = number;
 
@@ -24,7 +23,7 @@ export enum HTTPResponses {
   INVALID_REQUEST = 400,
   PRECONDITION_VALIDATION_FAILURE = 412,
   FOREIGN_KEY_CONFLICT = 555,
-  NOT_FOUND, // Custom code, example
+  NOT_FOUND // Custom code, example
 }
 
 export enum ErrorMessages {
@@ -32,12 +31,12 @@ export enum ErrorMessages {
   ICF = "Insertion Command Failed",
   UCF = "Update Command Failed",
   DCF = "Delete Command Failed",
-  UKAE = "Unique Key Already Exists",
+  UKAE = "Unique Key Already Exists"
 }
 
 export const tableHeaderSettings = {
-  fontWeight: 'bold',
-  fontSize: 16,
+  fontWeight: "bold",
+  fontSize: 16
 };
 
 export interface DropzonePureProps {
@@ -94,19 +93,19 @@ export function bitToBoolean(bitField: any): boolean {
   }
 }
 
-export const booleanToBit = (value: boolean | undefined): number => value ? 1 : 0;
+export const booleanToBit = (value: boolean | undefined): number => (value ? 1 : 0);
 
 export function formatDate(isoDateString: string): string {
   const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
+    year: "numeric",
+    month: "long",
+    day: "numeric"
   };
   return new Date(isoDateString).toLocaleDateString(undefined, options);
 }
 
-export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
-export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
+export const unitSelectionOptions = ["km", "hm", "dam", "m", "dm", "cm", "mm"];
+export const areaSelectionOptions = ["km2", "hm2", "dam2", "m2", "dm2", "cm2", "mm2"];
 export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
   required?: boolean;
 };
@@ -117,8 +116,9 @@ export type UnifiedValidityFlags = {
   species: boolean;
   quadrats: boolean;
   quadratpersonnel: boolean;
-}
+};
 
 export type GridSelections = {
-  label: string; value: number;
-}
+  label: string;
+  value: number;
+};

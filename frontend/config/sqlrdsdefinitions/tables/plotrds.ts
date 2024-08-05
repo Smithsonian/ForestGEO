@@ -1,6 +1,6 @@
 // plot custom data type
-import { ResultType } from '@/config/utils';
-import {IDataMapper} from '../../datamapper';
+import { ResultType } from "@/config/utils";
+import { IDataMapper } from "../../datamapper";
 
 export type PlotRDS = {
   id?: number;
@@ -26,4 +26,3 @@ export type PlotRDS = {
 export type Plot = PlotRDS | undefined;
 
 export type PlotsResult = ResultType<PlotRDS>;
-

@@ -146,7 +146,6 @@
 //   //   [rows, currentSite?.schemaName, setSnackbar, setRefresh, updatePersonnelInRows]
 //   // );
 
-
 //   const quadratsGridColumns: GridColDef[] = [...BaseQuadratsGridColumns,
 //     // {
 //     //   field: 'personnel',

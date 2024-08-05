@@ -186,7 +186,6 @@
 //     }
 //   };
 
-
 //   const handleCloseCensus = async () => {
 //     if (currentCensus && closeEndDate) {
 //       const mapper = new OrgCensusToCensusResultMapper();
@@ -232,7 +231,7 @@
 //   //       getData('census').then((savedCensus: OrgCensus) => setStoredCensus(savedCensus)).catch(console.error);
 //   //     }).catch(console.error);
 //   //   }
-//   // }, [siteListLoaded, session]);  
+//   // }, [siteListLoaded, session]);
 
 //   useEffect(() => {
 //     if (storedSite && session) {

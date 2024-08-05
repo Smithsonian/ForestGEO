@@ -1,5 +1,5 @@
 // validation changelog custom data type
-import {IDataMapper, parseDate} from "../../datamapper";
+import { IDataMapper, parseDate } from "../../datamapper";
 
 export type ValidationChangelogRDS = {
   id?: number;
@@ -7,7 +7,7 @@ export type ValidationChangelogRDS = {
   procedureName?: string;
   runDateTime?: Date;
   targetRowID?: number;
-  validationOutcome?: 'Passed' | 'Failed';
+  validationOutcome?: "Passed" | "Failed";
   errorMessage?: string;
   validationCriteria?: string;
   measuredValue?: string;
@@ -30,7 +30,7 @@ export interface ValidationChangelogResult {
 
 export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogRDS, ValidationChangelogResult> {
   demapData(results: ValidationChangelogRDS[]): ValidationChangelogResult[] {
-    return results.map((item) => ({
+    return results.map(item => ({
       ValidationRunID: item.validationRunID != undefined ? String(item.validationRunID) : null,
       ProcedureName: item.procedureName != undefined ? String(item.procedureName) : null,
       RunDateTime: item.runDateTime != undefined ? item.runDateTime.toISOString() : null,
@@ -40,7 +40,7 @@ export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogR
       ValidationCriteria: item.validationCriteria != undefined ? String(item.validationCriteria) : null,
       MeasuredValue: item.measuredValue != undefined ? String(item.measuredValue) : null,
       ExpectedValueRange: item.expectedValueRange != undefined ? String(item.expectedValueRange) : null,
-      AdditionalDetails: item.additionalDetails != undefined ? String(item.additionalDetails) : null,
+      AdditionalDetails: item.additionalDetails != undefined ? String(item.additionalDetails) : null
     }));
   }
 
@@ -51,13 +51,12 @@ export class ValidationHistoryMapper implements IDataMapper<ValidationChangelogR
       procedureName: item.ProcedureName != null ? String(item.ProcedureName) : undefined,
       runDateTime: item.RunDateTime != null ? parseDate(item.RunDateTime) : undefined,
       targetRowID: item.TargetRowID != null ? Number(item.TargetRowID) : undefined,
-      validationOutcome: item.ValidationOutcome != null ? item.ValidationOutcome as 'Passed' | 'Failed' : undefined,
+      validationOutcome: item.ValidationOutcome != null ? (item.ValidationOutcome as "Passed" | "Failed") : undefined,
       errorMessage: item.ErrorMessage != null ? String(item.ErrorMessage) : undefined,
       validationCriteria: item.ValidationCriteria != null ? String(item.ValidationCriteria) : undefined,
       measuredValue: item.MeasuredValue != null ? String(item.MeasuredValue) : undefined,
       expectedValueRange: item.ExpectedValueRange != null ? String(item.ExpectedValueRange) : undefined,
-      additionalDetails: item.AdditionalDetails != null ? String(item.AdditionalDetails) : undefined,
+      additionalDetails: item.AdditionalDetails != null ? String(item.AdditionalDetails) : undefined
     }));
   }
 }
-

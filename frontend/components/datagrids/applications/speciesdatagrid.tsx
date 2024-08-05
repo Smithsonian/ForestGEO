@@ -31,28 +31,25 @@ export default function SpeciesDataGrid() {
     {
       id: 0,
       speciesID: 0,
-      speciesCode: '',
-      speciesName: '',
-      subspeciesName: '',
+      speciesCode: "",
+      speciesName: "",
+      subspeciesName: "",
       defaultDBHMax: 0,
-      idLevel: '',
-      authority: '',
-      fieldFamily: '',
-      description: '',
-      referenceID: 0,
-    },
+      idLevel: "",
+      authority: "",
+      fieldFamily: "",
+      description: "",
+      referenceID: 0
+    }
   ];
   const [rows, setRows] = React.useState(initialRows);
-  const [rowCount, setRowCount] = useState(0);  // total number of rows
+  const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
-  const [snackbar, setSnackbar] = React.useState<Pick<
-    AlertProps,
-    'children' | 'severity'
-  > | null>(null);
+  const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, "children" | "severity"> | null>(null);
   const [refresh, setRefresh] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
-    pageSize: 10,
+    pageSize: 10
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
@@ -62,45 +59,45 @@ export default function SpeciesDataGrid() {
   const addNewRowToGrid = () => {
     const id = randomId();
     // New row object
-    const nextSpeciesID = (rows.length > 0
-      ? rows.reduce((max, row) => Math.max(row.speciesID, max), 0)
-      : 0) + 1;
+    const nextSpeciesID = (rows.length > 0 ? rows.reduce((max, row) => Math.max(row.speciesID, max), 0) : 0) + 1;
 
     const newRow = {
       id: id,
-      speciesCode: '',
+      speciesCode: "",
       speciesID: nextSpeciesID,
-      speciesName: '',
-      subSpeciesName: '',
+      speciesName: "",
+      subSpeciesName: "",
       defaultDBHMax: 0,
-      idLevel: '',
-      authority: '',
-      fieldFamily: '',
-      description: '',
-      isNew: true,
+      idLevel: "",
+      authority: "",
+      fieldFamily: "",
+      description: "",
+      isNew: true
     };
     // Add the new row to the state
     setRows(oldRows => [...oldRows, newRow]);
     // Set editing mode for the new row
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'speciesName' },
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: "speciesName" }
     }));
   };
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box sx={{
-          width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backgroundColor: 'warning.main',
-          borderRadius: '4px',
-          p: 2
-        }}>
+      <Box sx={{ display: "flex", alignItems: "center", mb: 3, width: "100%" }}>
+        <Box
+          sx={{
+            width: "100%",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            backgroundColor: "warning.main",
+            borderRadius: "4px",
+            p: 2
+          }}
+        >
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'fieldcrew' && (
+            {session?.user.userStatus !== "fieldcrew" && (
               <Typography level={"title-lg"} sx={{ color: "#ffa726" }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
@@ -114,14 +111,20 @@ export default function SpeciesDataGrid() {
           </Box>
 
           {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">Upload</Button>
+          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+            Upload
+          </Button>
         </Box>
       </Box>
 
-      <UploadParentModal isUploadModalOpen={isUploadModalOpen} handleCloseUploadModal={() => {
-        setIsUploadModalOpen(false);
-        setRefresh(true);
-      }} formType={'species'} />
+      <UploadParentModal
+        isUploadModalOpen={isUploadModalOpen}
+        handleCloseUploadModal={() => {
+          setIsUploadModalOpen(false);
+          setRefresh(true);
+        }}
+        formType={"species"}
+      />
 
       <DataGridCommons
         gridType="species"

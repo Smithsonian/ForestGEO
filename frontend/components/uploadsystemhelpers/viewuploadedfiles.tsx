@@ -1,5 +1,5 @@
 "use client";
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useState } from "react";
 import { tableHeaderSettings } from "@/config/macros";
 import { fileColumns } from "@/config/macros/formdetails";
 import { UploadedFileData } from "@/config/macros/formdetails";
@@ -10,8 +10,7 @@ import Divider from "@mui/joy/Divider";
 import CircularProgress from "@mui/joy/CircularProgress";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
-import { CensusRDS } from '@/config/sqlrdsdefinitions/tables/censusrds';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { OrgCensus } from "@/config/sqlrdsdefinitions/orgcensusrds";
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders
@@ -28,12 +27,13 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
   }, []); // on mount
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: "column" }}>
+    <Box sx={{ display: "flex", flexDirection: "column" }}>
       <Typography level={"title-lg"}>
-        Accessing
-        Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+        Accessing Container: {currentPlot?.plotName?.trim() ?? "none"}-{currentCensus?.plotCensusNumber?.toString() ?? "none"}
         <br />
-        <Button sx={{ width: 'fit-content' }} onClick={refreshFiles}>Refresh Files</Button>
+        <Button sx={{ width: "fit-content" }} onClick={refreshFiles}>
+          Refresh Files
+        </Button>
         <br />
         Uploaded CSV Files
       </Typography>
@@ -45,9 +45,17 @@ function LoadingFiles(props: Readonly<LoadingFilesProps>) {
         </CardHeader>
         <Divider className={"mt-6 mb-6"} />
         <CardContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center"
+            }}
+          >
             <CircularProgress size={"lg"} color={"danger"} variant={"soft"} />
-            <Typography variant={"soft"} color={"warning"}>Retrieving files...</Typography>
+            <Typography variant={"soft"} color={"warning"}>
+              Retrieving files...
+            </Typography>
           </Box>
         </CardContent>
       </Card>
@@ -67,17 +75,17 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [fileRows, setFileRows] = useState<UploadedFileData[]>();
   const [openSnackbar, setOpenSnackbar] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState("");
 
   const handleDownload = async (containerName: string, filename: string) => {
     try {
       const response = await fetch(`/api/filehandlers/downloadfile?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`);
-      if (!response.ok) throw new Error('Error getting download link');
+      if (!response.ok) throw new Error("Error getting download link");
 
       const data = await response.json();
       window.location.href = data.url; // Navigates to the pre-signed URL
     } catch (error: any) {
-      console.error('Download error:', error);
+      console.error("Download error:", error);
       setErrorMessage(error.message); // Set the error message
       setOpenSnackbar(true); // Open the snackbar
     }
@@ -86,14 +94,14 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
   const handleDelete = async (containerName: string, filename: string) => {
     try {
       const response = await fetch(`/api/filehandlers/deletefile?container=${containerName.toLowerCase()}&filename=${encodeURIComponent(filename)}`, {
-        method: 'DELETE',
+        method: "DELETE"
       });
-      if (!response.ok) throw new Error('Error deleting file');
+      if (!response.ok) throw new Error("Error deleting file");
 
       // Refresh the file list after successful deletion
       setRefreshFileList(true);
     } catch (error: any) {
-      console.error('Delete error:', error);
+      console.error("Delete error:", error);
       setErrorMessage(error.message); // Set the error message
       setOpenSnackbar(true); // Open the snackbar
     }
@@ -101,13 +109,16 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
 
   const getListOfFiles = useCallback(async () => {
     try {
-      const response = await fetch(`/api/filehandlers/downloadallfiles?plot=${currentPlot?.plotName?.trim() ?? 'none'}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, {
-        method: 'GET',
-      });
+      const response = await fetch(
+        `/api/filehandlers/downloadallfiles?plot=${currentPlot?.plotName?.trim() ?? "none"}&census=${currentCensus?.plotCensusNumber?.toString().trim() ?? "none"}`,
+        {
+          method: "GET"
+        }
+      );
 
       if (!response.ok) {
         const jsonOutput = await response.json();
-        console.error('response.statusText', jsonOutput.statusText);
+        console.error("response.statusText", jsonOutput.statusText);
         setErrorMessage(`API response: ${jsonOutput.statusText}`);
       } else {
         console.log(response.status + ", " + response.statusText);
@@ -145,7 +156,7 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
       // Reset the error message after a short delay
       // This delay ensures that the user has enough time to see the error message
       const timer = setTimeout(() => {
-        setErrorMessage('');
+        setErrorMessage("");
       }, 6000); // Adjust the delay as needed
 
       // Clear the timer if the component unmounts
@@ -157,39 +168,37 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
     return <LoadingFiles currentPlot={currentPlot} currentCensus={currentCensus} refreshFiles={refreshFiles} />;
   } else {
     const sortedFileData: UploadedFileData[] = fileRows;
-    if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date ? b.date : '').getTime() - new Date(a.date ? a.date : '').getTime());
+    if (fileRows.length > 1) sortedFileData.toSorted((a, b) => new Date(b.date ? b.date : "").getTime() - new Date(a.date ? a.date : "").getTime());
     let i = 1;
-    sortedFileData.forEach((row) => {
+    sortedFileData.forEach(row => {
       row.key = i;
       i++;
     });
-    const sortedFileTextCSV = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.csv') ||
-      row.name.toLowerCase().endsWith('.txt'));
-    const sortedFileArcGIS = sortedFileData.filter((row) => row.name.toLowerCase().endsWith('.xlsx'));
+    const sortedFileTextCSV = sortedFileData.filter(row => row.name.toLowerCase().endsWith(".csv") || row.name.toLowerCase().endsWith(".txt"));
+    const sortedFileArcGIS = sortedFileData.filter(row => row.name.toLowerCase().endsWith(".xlsx"));
     return (
       <>
         {/*CSV FILES*/}
-        <Box sx={{ display: 'flex', flex: 1, flexDirection: "column", mb: 10 }}>
-          <Box sx={{ display: 'flex', flexDirection: "column" }}>
+        <Box sx={{ display: "flex", flex: 1, flexDirection: "column", mb: 10 }}>
+          <Box sx={{ display: "flex", flexDirection: "column" }}>
             <Typography level={"title-lg"} marginBottom={2}>
-              Accessing
-              Container: {currentPlot?.plotName?.trim() ?? 'none'}-{currentCensus?.plotCensusNumber?.toString() ?? 'none'}
+              Accessing Container: {currentPlot?.plotName?.trim() ?? "none"}-{currentCensus?.plotCensusNumber?.toString() ?? "none"}
             </Typography>
-            <Button variant={"contained"} sx={{ width: 'fit-content', marginBottom: 2 }}
-              onClick={refreshFiles}>Refresh
-              Files</Button>
-            <Typography level={"title-lg"}>
-              Uploaded CSV Files
-            </Typography>
+            <Button variant={"contained"} sx={{ width: "fit-content", marginBottom: 2 }} onClick={refreshFiles}>
+              Refresh Files
+            </Button>
+            <Typography level={"title-lg"}>Uploaded CSV Files</Typography>
           </Box>
-          <Box sx={{ display: 'flex', flexDirection: "column", marginTop: 1 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", marginTop: 1 }}>
             <TableContainer component={Paper}>
               <Table aria-label={"Stored files"} stickyHeader size={"medium"}>
                 <TableHead>
                   <TableRow>
                     <TableCell sx={tableHeaderSettings}>File Count</TableCell>
-                    {fileColumns.map((item) => (
-                      <TableCell key={item.key} sx={tableHeaderSettings}>{item.label}</TableCell>
+                    {fileColumns.map(item => (
+                      <TableCell key={item.key} sx={tableHeaderSettings}>
+                        {item.label}
+                      </TableCell>
                     ))}
                     <TableCell sx={tableHeaderSettings}>Actions</TableCell>
                   </TableRow>
@@ -202,42 +211,102 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedFileTextCSV.map((row) => {
+                    sortedFileTextCSV.map(row => {
                       // let errs = row.errors == "false";
                       const errs = false;
                       return (
                         <TableRow key={row.key}>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.key}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.name}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.user}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.formType}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.fileErrors}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{new Date(row.date ? row.date : '').toString()}</TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.key}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.name}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.user}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.formType}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.fileErrors}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {new Date(row.date ? row.date : "").toString()}
+                          </TableCell>
                           <TableCell align="center">
                             <Button
-                              onClick={() => handleDownload(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() =>
+                                handleDownload(
+                                  `${currentPlot?.plotName?.trim() ?? "none"}-${currentCensus?.plotCensusNumber?.toString().trim() ?? "none"}`,
+                                  row.name
+                                )
+                              }
+                            >
                               <DownloadIcon />
                             </Button>
                             <Button
-                              onClick={() => handleDelete(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() =>
+                                handleDelete(
+                                  `${currentPlot?.plotName?.trim() ?? "none"}-${currentCensus?.plotCensusNumber?.toString().trim() ?? "none"}`,
+                                  row.name
+                                )
+                              }
+                            >
                               <DeleteIcon />
                             </Button>
                           </TableCell>
@@ -252,44 +321,104 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedFileArcGIS.map((row) => {
+                    sortedFileArcGIS.map(row => {
                       const errs = "false";
                       return (
                         <TableRow key={row.key}>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.key}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.name}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.user}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{new Date(row.date ? row.date : '').toString()}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.formType}</TableCell>
-                          <TableCell sx={(errs) ? {
-                            color: 'red',
-                            fontWeight: 'bold'
-                          } : {}}>{row.fileErrors}</TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.key}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.name}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.user}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {new Date(row.date ? row.date : "").toString()}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.formType}
+                          </TableCell>
+                          <TableCell
+                            sx={
+                              errs
+                                ? {
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }
+                                : {}
+                            }
+                          >
+                            {row.fileErrors}
+                          </TableCell>
                           <TableCell align="center">
                             <Button
-                              onClick={() => handleDownload(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() =>
+                                handleDownload(
+                                  `${currentPlot?.plotName?.trim() ?? "none"}-${currentCensus?.plotCensusNumber?.toString().trim() ?? "none"}`,
+                                  row.name
+                                )
+                              }
+                            >
                               <DownloadIcon />
                             </Button>
                             <Button>
                               <EditIcon />
                             </Button>
                             <Button
-                              onClick={() => handleDelete(`${currentPlot?.plotName?.trim() ?? 'none'}-${currentCensus?.plotCensusNumber?.toString().trim() ?? 'none'}`, row.name)}>
+                              onClick={() =>
+                                handleDelete(
+                                  `${currentPlot?.plotName?.trim() ?? "none"}-${currentCensus?.plotCensusNumber?.toString().trim() ?? "none"}`,
+                                  row.name
+                                )
+                              }
+                            >
                               <DeleteIcon />
                             </Button>
                           </TableCell>

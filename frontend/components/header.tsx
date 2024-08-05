@@ -1,50 +1,43 @@
 "use client";
-import * as React from 'react';
-import GlobalStyles from '@mui/joy/GlobalStyles';
-import Sheet from '@mui/joy/Sheet';
-import IconButton from '@mui/joy/IconButton';
-import MenuIcon from '@mui/icons-material/Menu';
-
-import {toggleSidebar} from '@/config/utils';
+import * as React from "react";
+import GlobalStyles from "@mui/joy/GlobalStyles";
+import Sheet from "@mui/joy/Sheet";
+import IconButton from "@mui/joy/IconButton";
+import MenuIcon from "@mui/icons-material/Menu";
+import { toggleSidebar } from "@/config/utils";
 
 export default function Header() {
   return (
     <Sheet
       role="banner"
       sx={{
-        display: {xs: 'flex', md: 'none'},
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'fixed',
+        display: { xs: "flex", md: "none" },
+        alignItems: "center",
+        justifyContent: "space-between",
+        position: "fixed",
         top: 0,
-        width: '100vw',
-        height: 'var(--Header-height)',
+        width: "100vw",
+        height: "var(--Header-height)",
         zIndex: 9995,
         p: 2,
         gap: 1,
-        borderBottom: '1px solid',
-        borderColor: 'background.level1',
-        boxShadow: 'sm',
+        borderBottom: "1px solid",
+        borderColor: "background.level1",
+        boxShadow: "sm"
       }}
     >
       <GlobalStyles
-        styles={(theme) => ({
-          ':root': {
-            '--Header-height': '52px',
-            [theme.breakpoints.up('md')]: {
-              '--Header-height': '0px',
-            },
-          },
+        styles={theme => ({
+          ":root": {
+            "--Header-height": "52px",
+            [theme.breakpoints.up("md")]: {
+              "--Header-height": "0px"
+            }
+          }
         })}
       />
-      <IconButton
-        role="button"
-        onClick={() => toggleSidebar()}
-        variant="outlined"
-        color="neutral"
-        size="sm"
-      >
-        <MenuIcon/>
+      <IconButton role="button" onClick={() => toggleSidebar()} variant="outlined" color="neutral" size="sm">
+        <MenuIcon />
       </IconButton>
     </Sheet>
   );
