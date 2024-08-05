@@ -1,20 +1,20 @@
-"use client";
-import * as React from "react";
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
-import GlobalStyles from "@mui/joy/GlobalStyles";
-import Box from "@mui/joy/Box";
-import Divider from "@mui/joy/Divider";
-import List from "@mui/joy/List";
-import ListItem from "@mui/joy/ListItem";
-import ListItemButton, { listItemButtonClasses } from "@mui/joy/ListItemButton";
-import ListItemContent from "@mui/joy/ListItemContent";
-import Typography from "@mui/joy/Typography";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import { LoginLogout } from "@/components/loginlogout";
-import { siteConfigNav, validityMapping } from "@/config/macros/siteconfigs";
-import { SiteConfigProps } from "@/config/macros/siteconfigs";
-import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
+'use client';
+import * as React from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
+import GlobalStyles from '@mui/joy/GlobalStyles';
+import Box from '@mui/joy/Box';
+import Divider from '@mui/joy/Divider';
+import List from '@mui/joy/List';
+import ListItem from '@mui/joy/ListItem';
+import ListItemButton, { listItemButtonClasses } from '@mui/joy/ListItemButton';
+import ListItemContent from '@mui/joy/ListItemContent';
+import Typography from '@mui/joy/Typography';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import { LoginLogout } from '@/components/loginlogout';
+import { siteConfigNav, validityMapping } from '@/config/macros/siteconfigs';
+import { SiteConfigProps } from '@/config/macros/siteconfigs';
+import { Site } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { Plot } from '@/config/sqlrdsdefinitions/tables/plotrds';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -22,26 +22,26 @@ import {
   usePlotDispatch,
   useSiteContext,
   useSiteDispatch
-} from "@/app/contexts/userselectionprovider";
-import { usePathname, useRouter } from "next/navigation";
-import { Button, SelectOption, Stack, Badge, Tooltip, IconButton } from "@mui/joy";
-import AddIcon from "@mui/icons-material/Add";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
-import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from "@/app/contexts/listselectionprovider";
-import { useSession } from "next-auth/react";
-import { TransitionComponent } from "@/components/client/clientmacros";
-import ListDivider from "@mui/joy/ListDivider";
-import TravelExploreIcon from "@mui/icons-material/TravelExplore";
-import Avatar from "@mui/joy/Avatar";
-import { CensusLogo, PlotLogo } from "@/components/icons";
-import { RainbowIcon } from "@/styles/rainbowicon";
-import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
-import { OrgCensus, OrgCensusToCensusResultMapper } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { useLockAnimation } from "@/app/contexts/lockanimationcontext";
+} from '@/app/contexts/userselectionprovider';
+import { usePathname, useRouter } from 'next/navigation';
+import { Button, SelectOption, Stack, Badge, Tooltip, IconButton } from '@mui/joy';
+import AddIcon from '@mui/icons-material/Add';
+import Select from '@mui/joy/Select';
+import Option from '@mui/joy/Option';
+import { useOrgCensusListContext, usePlotListContext, useSiteListContext } from '@/app/contexts/listselectionprovider';
+import { useSession } from 'next-auth/react';
+import { TransitionComponent } from '@/components/client/clientmacros';
+import ListDivider from '@mui/joy/ListDivider';
+import TravelExploreIcon from '@mui/icons-material/TravelExplore';
+import Avatar from '@mui/joy/Avatar';
+import { CensusLogo, PlotLogo } from '@/components/icons';
+import { RainbowIcon } from '@/styles/rainbowicon';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
-import RolloverModal from "./client/rollovermodal";
-import RolloverStemsModal from "./client/rolloverstemsmodal";
+import RolloverModal from './client/rollovermodal';
+import RolloverStemsModal from './client/rolloverstemsmodal';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -55,11 +55,11 @@ export function SimpleToggler({ isOpen, renderToggle, children }: Readonly<Simpl
       {renderToggle}
       <Box
         sx={{
-          display: "grid",
-          gridTemplateRows: isOpen ? "1fr" : "0fr",
-          transition: "0.2s ease",
-          "& > *": {
-            overflow: "hidden"
+          display: 'grid',
+          gridTemplateRows: isOpen ? '1fr' : '0fr',
+          transition: '0.2s ease',
+          '& > *': {
+            overflow: 'hidden'
           }
         }}
       >
@@ -90,28 +90,28 @@ function MenuRenderToggle(
   return (
     <ListItemButton
       disabled={plotSelectionRequired || censusSelectionRequired}
-      color={pathname === siteConfigProps.href ? "primary" : undefined}
+      color={pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
         if (setMenuOpen) {
           setMenuOpen(!menuOpen);
         }
       }}
-      sx={{ width: "100%", padding: 0, margin: 0 }}
+      sx={{ width: '100%', padding: 0, margin: 0 }}
     >
-      <Tooltip title={isParentDataIncomplete ? "Missing Core Data!" : "Requirements Met"} arrow>
+      <Tooltip title={isParentDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow>
         <Badge
           color="danger"
-          variant={isParentDataIncomplete ? "solid" : "soft"}
-          badgeContent={isParentDataIncomplete ? "!" : undefined}
+          variant={isParentDataIncomplete ? 'solid' : 'soft'}
+          badgeContent={isParentDataIncomplete ? '!' : undefined}
           invisible={!isParentDataIncomplete || !currentSite || !currentPlot || !currentCensus}
         >
           <Icon />
         </Badge>
       </Tooltip>
       <ListItemContent>
-        <Typography level={"title-sm"}>{siteConfigProps.label}</Typography>
+        <Typography level={'title-sm'}>{siteConfigProps.label}</Typography>
       </ListItemContent>
-      <KeyboardArrowDownIcon sx={{ transform: menuOpen ? "rotate(180deg)" : "none" }} />
+      <KeyboardArrowDownIcon sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }} />
     </ListItemButton>
   );
 }
@@ -136,7 +136,7 @@ export default function Sidebar(props: SidebarProps) {
   const plotListContext = usePlotListContext();
   const { validity } = useDataValidityContext();
   const isAllValiditiesTrue = Object.entries(validity)
-    .filter(([key]) => key !== "subquadrats")
+    .filter(([key]) => key !== 'subquadrats')
     .every(([, value]) => value);
 
   const [plot, setPlot] = useState<Plot>(currentPlot);
@@ -170,7 +170,7 @@ export default function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const updateSidebarWidth = () => {
       if (sidebarRef.current) {
-        const sidebarElements = sidebarRef.current.querySelectorAll("*");
+        const sidebarElements = sidebarRef.current.querySelectorAll('*');
         let maxWidth = 340; // Minimum width
 
         sidebarElements.forEach(element => {
@@ -194,7 +194,7 @@ export default function Sidebar(props: SidebarProps) {
     });
 
     if (sidebarRef.current) {
-      const sidebarElements = sidebarRef.current.querySelectorAll("*");
+      const sidebarElements = sidebarRef.current.querySelectorAll('*');
       sidebarElements.forEach(element => {
         resizeObserver.observe(element);
       });
@@ -209,7 +209,7 @@ export default function Sidebar(props: SidebarProps) {
   }, [site, plot, census]);
   const handleOpenNewCensus = async () => {
     if (site === undefined || site.schemaName === undefined || plot === undefined || plot.plotID === undefined)
-      throw new Error("new census start date was not set OR plot is undefined");
+      throw new Error('new census start date was not set OR plot is undefined');
     setIsRolloverModalOpen(true);
   };
 
@@ -224,11 +224,11 @@ export default function Sidebar(props: SidebarProps) {
               censusListContext[0]?.plotCensusNumber ?? 0
             )
           : 0;
-      if (!highestPlotCensusNumber) throw new Error("highest plot census number calculation failed");
+      if (!highestPlotCensusNumber) throw new Error('highest plot census number calculation failed');
 
       const mapper = new OrgCensusToCensusResultMapper();
-      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? "", currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-      if (!newCensusID) throw new Error("census creation failure");
+      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+      if (!newCensusID) throw new Error('census creation failure');
       await new Promise(resolve => setTimeout(resolve, 500)); // debounce
     } else {
       await new Promise(resolve => setTimeout(resolve, 500)); // debounce
@@ -313,10 +313,10 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedSite ? (
-          <Stack direction={"column"} alignItems={"start"}>
+          <Stack direction={'column'} alignItems={'start'}>
             <Typography level="body-lg" className="sidebar-item">{`Site: ${selectedSite?.siteName}`}</Typography>
-            <Stack direction={"column"} alignItems={"start"}>
-              <Typography level="body-sm" color={"primary"} className="sidebar-item">
+            <Stack direction={'column'} alignItems={'start'}>
+              <Typography level="body-sm" color={'primary'} className="sidebar-item">
                 &mdash; Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
@@ -343,8 +343,8 @@ export default function Sidebar(props: SidebarProps) {
         {selectedPlot ? (
           <Stack direction="column" alignItems="start">
             <Typography level="body-md" className="sidebar-item">{`Plot: ${selectedPlot?.plotName}`}</Typography>
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }} className="sidebar-item">
-              <Typography level="body-sm" color={"primary"}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
+              <Typography level="body-sm" color={'primary'}>
                 &mdash; Quadrats: {selectedPlot.numQuadrats}
               </Typography>
             </Box>
@@ -368,19 +368,19 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <>
         {selectedCensus ? (
-          <Stack direction={"column"} alignItems={"start"}>
+          <Stack direction={'column'} alignItems={'start'}>
             <Typography level="body-md" className="sidebar-item">{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
-            <Stack direction={"column"} alignItems={"start"}>
-              <Typography color={!census ? "danger" : "primary"} level="body-sm" className="sidebar-item">
+            <Stack direction={'column'} alignItems={'start'}>
+              <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item">
                 {census !== undefined && (
                   <>
                     {census.dateRanges[0]?.startDate !== undefined
                       ? `\u2014 First Record: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}`
-                      : "No Records"}
+                      : 'No Records'}
                   </>
                 )}
               </Typography>
-              <Typography color={!census ? "danger" : "primary"} level="body-sm" className="sidebar-item">
+              <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item">
                 {census !== undefined && (
                   <>{census.dateRanges[0]?.endDate !== undefined ? `\u2014 Last Record ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : ``}</>
                 )}
@@ -413,10 +413,10 @@ export default function Sidebar(props: SidebarProps) {
       name="None"
       required
       autoFocus
-      size={"md"}
+      size={'md'}
       renderValue={renderCensusValue}
       onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
-        if (selectedPlotCensusNumberStr === "" || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
+        if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
         else {
           const selectedPlotCensusNumber = parseInt(selectedPlotCensusNumberStr, 10);
           const selectedCensus = censusListContext?.find(census => census?.plotCensusNumber === selectedPlotCensusNumber) || undefined;
@@ -430,10 +430,10 @@ export default function Sidebar(props: SidebarProps) {
       >
         <Box
           sx={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            width: "100%"
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            width: '100%'
           }}
         >
           <Typography level="body-sm" color="primary">
@@ -451,35 +451,35 @@ export default function Sidebar(props: SidebarProps) {
           </IconButton>
         </Box>
       </ListItem>
-      <Divider orientation={"horizontal"} sx={{ my: 1 }} />
+      <Divider orientation={'horizontal'} sx={{ my: 1 }} />
       {censusListContext
         ?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
         .map(item => (
           <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
             <Box
               sx={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                width: "100%"
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%'
               }}
               className="sidebar-item"
             >
-              <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                 <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
                 {item?.dateRanges?.map((dateRange, index) => (
                   <React.Fragment key={index}>
-                    <Stack direction={"row"}>
-                      <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: "1em" }}>
-                        {`${dateRange.startDate ? `First Msmt: ${new Date(dateRange.startDate).toDateString()}` : "No Measurements"}`}
+                    <Stack direction={'row'}>
+                      <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em' }}>
+                        {`${dateRange.startDate ? `First Msmt: ${new Date(dateRange.startDate).toDateString()}` : 'No Measurements'}`}
                       </Typography>
                       {dateRange.endDate && (
-                        <Typography level="body-sm" color={"neutral"} sx={{ paddingLeft: "1em", paddingRight: "1em" }}>
+                        <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
                           &lt;===&gt;
                         </Typography>
                       )}
-                      <Typography level="body-sm" color={"neutral"}>
-                        {`${dateRange.endDate ? `Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ""}`}
+                      <Typography level="body-sm" color={'neutral'}>
+                        {`${dateRange.endDate ? `Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
                       </Typography>
                     </Stack>
                   </React.Fragment>
@@ -498,28 +498,28 @@ export default function Sidebar(props: SidebarProps) {
       name="None"
       required
       autoFocus
-      size={"md"}
+      size={'md'}
       renderValue={renderPlotValue}
       onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
         const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
         await handlePlotSelection(selectedPlot);
       }}
     >
-      <Option value={""}>None</Option>
+      <Option value={''}>None</Option>
       {plotListContext?.map(item => (
         <Option value={item?.plotName} key={item?.plotName}>
           <Box
             sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              width: "100%"
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              width: '100%'
             }}
             className="sidebar-item"
           >
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
               <Typography level="body-md">{item?.plotName}</Typography>
-              <Typography level="body-sm" color={"primary"} sx={{ paddingLeft: "1em" }}>
+              <Typography level="body-sm" color={'primary'} sx={{ paddingLeft: '1em' }}>
                 Quadrats: {item?.numQuadrats}
               </Typography>
             </Box>
@@ -532,8 +532,8 @@ export default function Sidebar(props: SidebarProps) {
     const allowedSites = siteListContext
       ?.filter(site => session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
       .sort((a, b) => {
-        const nameA = a.siteName?.toLowerCase() ?? "";
-        const nameB = b.siteName?.toLowerCase() ?? "";
+        const nameA = a.siteName?.toLowerCase() ?? '';
+        const nameB = b.siteName?.toLowerCase() ?? '';
         if (nameA < nameB) return -1;
         if (nameA > nameB) return 1;
         return 0;
@@ -541,8 +541,8 @@ export default function Sidebar(props: SidebarProps) {
     const otherSites = siteListContext
       ?.filter(site => !session?.user?.sites.some(allowedSite => allowedSite.siteID === site.siteID))
       .sort((a, b) => {
-        const nameA = a.siteName?.toLowerCase() ?? "";
-        const nameB = b.siteName?.toLowerCase() ?? "";
+        const nameA = a.siteName?.toLowerCase() ?? '';
+        const nameB = b.siteName?.toLowerCase() ?? '';
         if (nameA < nameB) return -1;
         if (nameA > nameB) return 1;
         return 0;
@@ -555,10 +555,10 @@ export default function Sidebar(props: SidebarProps) {
         name="None"
         required
         autoFocus
-        sx={{ marginRight: "1em" }}
-        size={"md"}
+        sx={{ marginRight: '1em' }}
+        size={'md'}
         renderValue={renderSiteValue}
-        value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ""}
+        value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ''}
         onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
           const selectedSite = siteListContext?.find(site => site?.siteName === newValue) || undefined;
           await handleSiteSelection(selectedSite);
@@ -575,7 +575,7 @@ export default function Sidebar(props: SidebarProps) {
           </Option>
         </List>
         <ListDivider role="none" />
-        <List sx={{ "--ListItemDecorator-size": "28px" }}>
+        <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="allowed-sites-group" sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
               Allowed Sites ({allowedSites?.length})
@@ -588,7 +588,7 @@ export default function Sidebar(props: SidebarProps) {
           ))}
         </List>
         <ListDivider role="none" />
-        <List sx={{ "--ListItemDecorator-size": "28px" }}>
+        <List sx={{ '--ListItemDecorator-size': '28px' }}>
           <ListItem id="other-sites-group" sticky className="sidebar-item">
             <Typography level="body-xs" textTransform="uppercase">
               Other Sites ({otherSites?.length})
@@ -608,12 +608,12 @@ export default function Sidebar(props: SidebarProps) {
     if (linkHref) {
       // Check for sub-links
       switch (linkHref) {
-        case "/summary":
+        case '/summary':
           return !isAllValiditiesTrue;
-        case "/subquadrats":
-          return !validity["quadrats"];
-        case "/quadratpersonnel":
-          return !(validity["quadrats"] && validity["personnel"]);
+        case '/subquadrats':
+          return !validity['quadrats'];
+        case '/quadratpersonnel':
+          return !(validity['quadrats'] && validity['personnel']);
         default:
           const dataKey = validityMapping[linkHref];
           return dataKey !== undefined && !validity[dataKey];
@@ -621,12 +621,12 @@ export default function Sidebar(props: SidebarProps) {
     } else {
       // Check for main links
       switch (item.href) {
-        case "/summary":
+        case '/summary':
           return !isAllValiditiesTrue;
-        case "/subquadrats":
-          return !validity["quadrats"];
-        case "/quadratpersonnel":
-          return !(validity["quadrats"] && validity["personnel"]);
+        case '/subquadrats':
+          return !validity['quadrats'];
+        case '/quadratpersonnel':
+          return !(validity['quadrats'] && validity['personnel']);
         default:
           return false;
       }
@@ -635,47 +635,47 @@ export default function Sidebar(props: SidebarProps) {
 
   return (
     <>
-      <Stack direction={"row"} sx={{ display: "flex", width: "fit-content" }}>
+      <Stack direction={'row'} sx={{ display: 'flex', width: 'fit-content' }}>
         <Box
           ref={sidebarRef}
           className="Sidebar"
           sx={{
-            position: "sticky",
+            position: 'sticky',
             top: 0,
             left: 0,
-            height: "100vh",
+            height: '100vh',
             width: `${sidebarWidth}px`,
             p: 2,
             flexShrink: 0,
-            display: "flex",
-            flexDirection: "column",
+            display: 'flex',
+            flexDirection: 'column',
             gap: 2,
-            borderRight: "1px solid",
-            borderColor: "divider",
-            overflowY: "auto"
+            borderRight: '1px solid',
+            borderColor: 'divider',
+            overflowY: 'auto'
           }}
         >
           <GlobalStyles
             styles={theme => ({
-              ":root": {
-                "--Sidebar-width": `${sidebarWidth}px`,
-                [theme.breakpoints.up("lg")]: {
-                  "--Sidebar-width": `${sidebarWidth}px`
+              ':root': {
+                '--Sidebar-width': `${sidebarWidth}px`,
+                [theme.breakpoints.up('lg')]: {
+                  '--Sidebar-width': `${sidebarWidth}px`
                 }
               }
             })}
           />
-          <Box sx={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: 1 }}>
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }} className="sidebar-item">
-              <Stack direction={"column"} sx={{ marginRight: "1em" }}>
+          <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
+              <Stack direction={'column'} sx={{ marginRight: '1em' }}>
                 <Typography level="h1">
-                  <Box sx={{ display: "flex", alignItems: "center" }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Box sx={{ marginRight: 1.5 }}>
                       <RainbowIcon />
                     </Box>
                     ForestGEO
                   </Box>
-                  {session?.user.userStatus !== "fieldcrew" && (
+                  {session?.user.userStatus !== 'fieldcrew' && (
                     <Typography level="h1" color="danger" sx={{ marginLeft: 0.5 }}>
                       (Admin)
                     </Typography>
@@ -683,7 +683,7 @@ export default function Sidebar(props: SidebarProps) {
                 </Typography>
               </Stack>
               <Divider orientation="horizontal" sx={{ my: 0.75 }} />
-              <Box sx={{ display: "flex", alignItems: "center", width: "100%", mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
                 <Avatar sx={{ marginRight: 1 }}>
                   <TravelExploreIcon />
                 </Avatar>
@@ -691,19 +691,19 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
               {site !== undefined && (
                 <>
-                  <Box sx={{ display: "flex", alignItems: "center", width: "100%", mb: 2 }}>
-                    <Avatar size={"sm"} sx={{ marginRight: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                    <Avatar size={'sm'} sx={{ marginRight: 1 }}>
                       <PlotLogo />
                     </Avatar>
-                    <Box sx={{ flexGrow: 1, marginLeft: "0.5em", alignItems: "center", marginRight: "1em" }}>{renderPlotOptions()}</Box>
+                    <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderPlotOptions()}</Box>
                   </Box>
                   {plot !== undefined && (
                     <>
-                      <Box sx={{ display: "flex", alignItems: "center", width: "100%", mb: 2 }}>
-                        <Avatar size={"sm"} sx={{ marginRight: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                        <Avatar size={'sm'} sx={{ marginRight: 1 }}>
                           <CensusLogo />
                         </Avatar>
-                        <Box sx={{ flexGrow: 1, marginLeft: "0.5em", alignItems: "center", marginRight: "1em" }}>{renderCensusOptions()}</Box>
+                        <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderCensusOptions()}</Box>
                       </Box>
                       <Divider orientation="horizontal" sx={{ marginTop: 2 }} />
                     </>
@@ -713,21 +713,21 @@ export default function Sidebar(props: SidebarProps) {
             </Box>
             <Box
               sx={{
-                display: "flex",
-                flexDirection: "column",
+                display: 'flex',
+                flexDirection: 'column',
                 gap: 1,
                 ml: -1
               }}
             >
-              {" "}
+              {' '}
               {/* Added ml: -1 to adjust the position of the navigation menu */}
               <Box
                 sx={{
                   minHeight: 0,
-                  overflow: "hidden auto",
+                  overflow: 'hidden auto',
                   flexGrow: 1,
-                  display: "flex",
-                  flexDirection: "column",
+                  display: 'flex',
+                  flexDirection: 'column',
                   [`& .${listItemButtonClasses.root}`]: {
                     // gap: 1.5,
                   }
@@ -737,8 +737,8 @@ export default function Sidebar(props: SidebarProps) {
                   size="lg"
                   sx={{
                     // gap: 1,
-                    "--List-nestedInsetStart": "30px",
-                    "--ListItem-radius": theme => theme.vars.radius.sm
+                    '--List-nestedInsetStart': '30px',
+                    '--ListItem-radius': theme => theme.vars.radius.sm
                   }}
                 >
                   {siteConfigNav.map((item, index: number) => {
@@ -749,28 +749,28 @@ export default function Sidebar(props: SidebarProps) {
                     const getTooltipMessage = (href: string, isDataIncomplete: boolean) => {
                       if (isDataIncomplete) {
                         switch (href) {
-                          case "/summary":
-                            return "You must resolve all supporting data warnings before adding measurements!";
-                          case "/subquadrats":
-                            return "Subquadrats cannot be viewed until quadrats are valid.";
-                          case "/quadratpersonnel":
-                            return "QuadratPersonnel cannot be viewed until both quadrats and personnel are valid.";
+                          case '/summary':
+                            return 'You must resolve all supporting data warnings before adding measurements!';
+                          case '/subquadrats':
+                            return 'Subquadrats cannot be viewed until quadrats are valid.';
+                          case '/quadratpersonnel':
+                            return 'QuadratPersonnel cannot be viewed until both quadrats and personnel are valid.';
                           default:
-                            return "Data needed to complete census!";
+                            return 'Data needed to complete census!';
                         }
                       } else {
-                        return "Requirements Met";
+                        return 'Requirements Met';
                       }
                     };
 
                     const getDisabledState = (href: string) => {
                       switch (href) {
-                        case "/summary":
+                        case '/summary':
                           return !isAllValiditiesTrue;
-                        case "/subquadrats":
-                          return !validity["quadrats"];
-                        case "/quadratpersonnel":
-                          return !(validity["quadrats"] && validity["personnel"]);
+                        case '/subquadrats':
+                          return !validity['quadrats'];
+                        case '/quadratpersonnel':
+                          return !(validity['quadrats'] && validity['personnel']);
                         default:
                           return false;
                       }
@@ -793,13 +793,13 @@ export default function Sidebar(props: SidebarProps) {
                             onMouseLeave={() => setHoveredIndex(null)}
                           >
                             {site !== undefined && plot !== undefined && census !== undefined ? (
-                              <Tooltip title={isDataIncomplete ? "Missing Core Data!" : "Requirements Met"} arrow disableHoverListener={!isDataIncomplete}>
-                                <Box sx={{ display: "flex", flex: 1 }}>
+                              <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow disableHoverListener={!isDataIncomplete}>
+                                <Box sx={{ display: 'flex', flex: 1 }}>
                                   <ListItemButton
                                     selected={pathname === item.href}
-                                    sx={{ flex: 1, width: "100%" }}
+                                    sx={{ flex: 1, width: '100%' }}
                                     disabled={isLinkDisabled}
-                                    color={pathname === item.href ? "primary" : undefined}
+                                    color={pathname === item.href ? 'primary' : undefined}
                                     onClick={() => {
                                       if (!isLinkDisabled) {
                                         router.push(item.href);
@@ -808,25 +808,25 @@ export default function Sidebar(props: SidebarProps) {
                                   >
                                     <Badge
                                       color="danger"
-                                      variant={isDataIncomplete ? "solid" : "soft"}
-                                      badgeContent={isDataIncomplete ? "!" : undefined}
+                                      variant={isDataIncomplete ? 'solid' : 'soft'}
+                                      badgeContent={isDataIncomplete ? '!' : undefined}
                                       invisible={!isDataIncomplete}
                                     >
                                       <Icon />
                                     </Badge>
                                     <ListItemContent>
-                                      <Typography level={"title-sm"}>{item.label}</Typography>
+                                      <Typography level={'title-sm'}>{item.label}</Typography>
                                     </ListItemContent>
                                   </ListItemButton>
                                 </Box>
                               </Tooltip>
                             ) : (
-                              <Box sx={{ display: "flex", flex: 1 }}>
+                              <Box sx={{ display: 'flex', flex: 1 }}>
                                 <ListItemButton
                                   selected={pathname === item.href}
-                                  sx={{ flex: 1, width: "100%" }}
+                                  sx={{ flex: 1, width: '100%' }}
                                   disabled={plot === undefined || census === undefined || isLinkDisabled}
-                                  color={pathname === item.href ? "primary" : undefined}
+                                  color={pathname === item.href ? 'primary' : undefined}
                                   onClick={() => {
                                     if (!isLinkDisabled) {
                                       router.push(item.href);
@@ -835,7 +835,7 @@ export default function Sidebar(props: SidebarProps) {
                                 >
                                   <Icon />
                                   <ListItemContent>
-                                    <Typography level={"title-sm"}>{item.label}</Typography>
+                                    <Typography level={'title-sm'}>{item.label}</Typography>
                                   </ListItemContent>
                                 </ListItemButton>
                               </Box>
@@ -876,14 +876,14 @@ export default function Sidebar(props: SidebarProps) {
                               )}
                               isOpen={!!toggle}
                             >
-                              <List size={"md"}>
+                              <List size={'md'}>
                                 {item.expanded.map((link, subIndex) => {
-                                  if (link.href === "/subquadrats" && !currentPlot?.usesSubquadrats) return null;
+                                  if (link.href === '/subquadrats' && !currentPlot?.usesSubquadrats) return null;
                                   const SubIcon = link.icon;
                                   const delay = (subIndex + 1) * 200;
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
-                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === "/summary" && !isAllValiditiesTrue));
+                                  const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
 
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} style={{ transitionDelay: `${delay}ms` }} direction="down">
@@ -896,11 +896,11 @@ export default function Sidebar(props: SidebarProps) {
                                       <ListItem>
                                         {site !== undefined && plot !== undefined && census !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
-                                            <Box sx={{ display: "flex", flex: 1 }}>
+                                            <Box sx={{ display: 'flex', flex: 1 }}>
                                               <ListItemButton
-                                                sx={{ flex: 1, width: "100%" }}
+                                                sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname == item.href + link.href}
-                                                color={pathname === item.href ? "primary" : undefined}
+                                                color={pathname === item.href ? 'primary' : undefined}
                                                 disabled={isLinkDisabled}
                                                 onClick={() => {
                                                   if (!isLinkDisabled) {
@@ -909,29 +909,29 @@ export default function Sidebar(props: SidebarProps) {
                                                 }}
                                               >
                                                 <Badge
-                                                  color={link.href === "/summary" ? "warning" : "danger"}
+                                                  color={link.href === '/summary' ? 'warning' : 'danger'}
                                                   variant={
-                                                    link.href === "/summary" ? (!isAllValiditiesTrue ? "solid" : "soft") : isDataIncomplete ? "solid" : "soft"
+                                                    link.href === '/summary' ? (!isAllValiditiesTrue ? 'solid' : 'soft') : isDataIncomplete ? 'solid' : 'soft'
                                                   }
                                                   badgeContent={
-                                                    link.href === "/summary" ? (!isAllValiditiesTrue ? "!" : undefined) : isDataIncomplete ? "!" : undefined
+                                                    link.href === '/summary' ? (!isAllValiditiesTrue ? '!' : undefined) : isDataIncomplete ? '!' : undefined
                                                   }
-                                                  invisible={link.href === "/summary" ? isAllValiditiesTrue : !isDataIncomplete}
+                                                  invisible={link.href === '/summary' ? isAllValiditiesTrue : !isDataIncomplete}
                                                 >
                                                   <SubIcon />
                                                 </Badge>
                                                 <ListItemContent>
-                                                  <Typography level={"title-sm"}>{link.label}</Typography>
+                                                  <Typography level={'title-sm'}>{link.label}</Typography>
                                                 </ListItemContent>
                                               </ListItemButton>
                                             </Box>
                                           </Tooltip>
                                         ) : (
-                                          <Box sx={{ display: "flex", flex: 1 }}>
+                                          <Box sx={{ display: 'flex', flex: 1 }}>
                                             <ListItemButton
-                                              sx={{ flex: 1, width: "100%" }}
+                                              sx={{ flex: 1, width: '100%' }}
                                               selected={pathname == item.href + link.href}
-                                              color={pathname === item.href ? "primary" : undefined}
+                                              color={pathname === item.href ? 'primary' : undefined}
                                               disabled={plot === undefined || census === undefined || isLinkDisabled}
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
@@ -941,7 +941,7 @@ export default function Sidebar(props: SidebarProps) {
                                             >
                                               <SubIcon />
                                               <ListItemContent>
-                                                <Typography level={"title-sm"}>{link.label}</Typography>
+                                                <Typography level={'title-sm'}>{link.label}</Typography>
                                               </ListItemContent>
                                             </ListItemButton>
                                           </Box>
@@ -963,9 +963,9 @@ export default function Sidebar(props: SidebarProps) {
           </Box>
           <RolloverModal open={isRolloverModalOpen} onClose={() => setIsRolloverModalOpen(false)} onConfirm={handleConfirmRollover} />
           <RolloverStemsModal open={isRolloverStemsModalOpen} onClose={() => setIsRolloverStemsModalOpen(false)} onConfirm={handleConfirmStemsRollover} />
-          <Divider orientation={"horizontal"} sx={{ mb: 2 }} />
+          <Divider orientation={'horizontal'} sx={{ mb: 2 }} />
           {site && plot && census && <Button onClick={() => triggerRefresh()}>Reload Prevalidation</Button>}
-          <Divider orientation={"horizontal"} sx={{ mb: 2, mt: 2 }} />
+          <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
       </Stack>

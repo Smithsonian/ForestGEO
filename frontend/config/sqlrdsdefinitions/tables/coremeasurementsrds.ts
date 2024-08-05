@@ -1,7 +1,7 @@
 // core measurements custom data type
-import { ResultType } from "@/config/utils";
-import { IDataMapper, parseDate } from "../../datamapper";
-import { bitToBoolean, booleanToBit } from "@/config/macros";
+import { ResultType } from '@/config/utils';
+import { IDataMapper, parseDate } from '../../datamapper';
+import { bitToBoolean, booleanToBit } from '@/config/macros';
 
 export type CoreMeasurementsRDS = {
   id?: number;
@@ -20,4 +20,4 @@ export type CoreMeasurementsRDS = {
 
 export type CoreMeasurementsResult = ResultType<CoreMeasurementsRDS>;
 
-export const coreMeasurementsFields = ["stemID", "isValidated", "measurementDate", "measuredDBH", "measuredHOM", "description", "userDefinedFields"];
+export const coreMeasurementsFields = ['stemID', 'isValidated', 'measurementDate', 'measuredDBH', 'measuredHOM', 'description', 'userDefinedFields'];

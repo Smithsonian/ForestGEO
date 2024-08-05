@@ -1,5 +1,5 @@
-"use client";
-import React, { createContext, useContext, useState, ReactNode } from "react";
+'use client';
+import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 interface LockAnimationContextProps {
   isPulsing: boolean;
@@ -15,7 +15,7 @@ export const LockAnimationProvider: React.FC<{ children: ReactNode }> = ({ child
     setIsPulsing(true);
     setTimeout(() => {
       setIsPulsing(false);
-    }, 3000);
+    }, 5000);
   };
 
   return <LockAnimationContext.Provider value={{ isPulsing, triggerPulse }}>{children}</LockAnimationContext.Provider>;
@@ -24,7 +24,7 @@ export const LockAnimationProvider: React.FC<{ children: ReactNode }> = ({ child
 export const useLockAnimation = () => {
   const context = useContext(LockAnimationContext);
   if (context === undefined) {
-    throw new Error("useLockAnimation must be used within a LockAnimationProvider");
+    throw new Error('useLockAnimation must be used within a LockAnimationProvider');
   }
   return context;
 };

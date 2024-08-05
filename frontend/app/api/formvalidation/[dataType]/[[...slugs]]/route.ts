@@ -1,7 +1,7 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import { HTTPResponses } from "@/config/macros";
-import { PoolConnection, format } from "mysql2/promise";
-import { NextRequest, NextResponse } from "next/server";
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import { HTTPResponses } from '@/config/macros';
+import { PoolConnection, format } from 'mysql2/promise';
+import { NextRequest, NextResponse } from 'next/server';
 
 // dataType
 // slugs: schema, columnName, value ONLY
@@ -9,8 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 // refit to match entire rows, using dataType convention to determine what columns need testing?
 export async function GET(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   // simple dynamic validation to confirm table input values:
-  if (!params.slugs || params.slugs.length !== 3) throw new Error("slugs missing -- formvalidation");
-  if (!params.dataType || params.dataType === "undefined") throw new Error("no schema provided");
+  if (!params.slugs || params.slugs.length !== 3) throw new Error('slugs missing -- formvalidation');
+  if (!params.dataType || params.dataType === 'undefined') throw new Error('no schema provided');
 
   const [schema, columnName, value] = params.slugs;
 

@@ -1,5 +1,5 @@
-"use client";
-import React, { useState } from "react";
+'use client';
+import React, { useState } from 'react';
 import {
   DataGrid,
   GridActionsCellItem,
@@ -15,25 +15,25 @@ import {
   GridToolbarContainer,
   GridToolbarProps,
   ToolbarPropsOverrides
-} from "@mui/x-data-grid";
-import { randomId } from "@mui/x-data-grid-generator";
-import AddIcon from "@mui/icons-material/Add";
-import SaveIcon from "@mui/icons-material/Save";
-import CancelIcon from "@mui/icons-material/Close";
-import EditIcon from "@mui/icons-material/Edit";
-import { DeleteIcon } from "@/components/icons";
-import { Box, Button } from "@mui/material";
-import AutocompleteFixedData from "@/components/forms/autocompletefixeddata";
-import { AutocompleteMultiSelect } from "@/components/forms/autocompletemultiselect";
-import Divider from "@mui/joy/Divider";
-import Typography from "@mui/joy/Typography";
-import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
-import { useSession } from "next-auth/react";
-import UploadValidation from "@/components/uploadsystem/segments/uploadvalidation";
-import UploadUpdateValidations from "@/components/uploadsystem/segments/uploadupdatevalidations";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { DialogContent, DialogTitle, Modal, ModalDialog } from "@mui/joy";
-import { unitSelectionOptions } from "@/config/macros";
+} from '@mui/x-data-grid';
+import { randomId } from '@mui/x-data-grid-generator';
+import AddIcon from '@mui/icons-material/Add';
+import SaveIcon from '@mui/icons-material/Save';
+import CancelIcon from '@mui/icons-material/Close';
+import EditIcon from '@mui/icons-material/Edit';
+import { DeleteIcon } from '@/components/icons';
+import { Box, Button } from '@mui/material';
+import AutocompleteFixedData from '@/components/forms/autocompletefixeddata';
+import { AutocompleteMultiSelect } from '@/components/forms/autocompletemultiselect';
+import Divider from '@mui/joy/Divider';
+import Typography from '@mui/joy/Typography';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSession } from 'next-auth/react';
+import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
+import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { DialogContent, DialogTitle, Modal, ModalDialog } from '@mui/joy';
+import { unitSelectionOptions } from '@/config/macros';
 
 interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -52,23 +52,23 @@ function EditToolbar(props: Readonly<EditToolbarProps>) {
       {
         id,
         date: new Date(),
-        personnel: "",
-        quadratName: "",
-        treeTag: "",
-        stemTag: "",
+        personnel: '',
+        quadratName: '',
+        treeTag: '',
+        stemTag: '',
         stemX: 0,
         stemY: 0,
-        speciesCode: "",
+        speciesCode: '',
         dbh: 0,
         hom: 0,
         codes: [], // Initialize codes as an empty array
-        comments: "",
+        comments: '',
         isNew: true
       }
     ]);
     setRowModesModel((oldModel: any) => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: "quadratName" }
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratName' }
     }));
   };
 
@@ -99,31 +99,31 @@ const CensusAutocompleteInputForm = () => {
   const initialRows: GridRowsProp = [
     {
       id: 0,
-      stemTag: "",
-      treeTag: "",
-      speciesCode: "",
-      subquadratName: "",
+      stemTag: '',
+      treeTag: '',
+      speciesCode: '',
+      subquadratName: '',
       stemX: 0,
       stemY: 0,
       date: new Date(),
       dbh: 0,
-      dbhUnit: "",
+      dbhUnit: '',
       hom: 0,
-      homUnit: "",
+      homUnit: '',
       codes: [], // Initialize codes as an empty array
-      personnel: "",
-      comments: ""
+      personnel: '',
+      comments: ''
     }
   ];
   const columns: GridColDef[] = [
     {
-      field: "date",
-      headerName: "Date",
-      type: "date",
-      headerClassName: "header",
+      field: 'date',
+      headerName: 'Date',
+      type: 'date',
+      headerClassName: 'header',
       maxWidth: 100,
       flex: 1,
-      align: "left",
+      align: 'left',
       editable: true,
       valueGetter: (params: any) => {
         if (!params.value) return null;
@@ -131,108 +131,108 @@ const CensusAutocompleteInputForm = () => {
       }
     },
     {
-      field: "personnel",
-      headerName: "Personnel",
+      field: 'personnel',
+      headerName: 'Personnel',
       flex: 1,
-      align: "right",
+      align: 'right',
       renderCell: (params: GridRenderCellParams) => (
-        <AutocompleteFixedData dataType={"personnel"} value={params.value || ""} onChange={newValue => handlePersonnelChange(params.id, newValue)} />
+        <AutocompleteFixedData dataType={'personnel'} value={params.value || ''} onChange={newValue => handlePersonnelChange(params.id, newValue)} />
       )
     },
     {
-      field: "quadrat",
-      headerName: "Quadrat",
+      field: 'quadrat',
+      headerName: 'Quadrat',
       flex: 1,
-      align: "right",
+      align: 'right',
       renderCell: (params: GridRenderCellParams) => (
-        <AutocompleteFixedData dataType={"quadrats"} value={params.value || ""} onChange={newValue => handleQuadratChange(params.id, newValue)} />
+        <AutocompleteFixedData dataType={'quadrats'} value={params.value || ''} onChange={newValue => handleQuadratChange(params.id, newValue)} />
       )
     },
     {
-      field: "treeTag",
-      headerName: "Tree Tag",
+      field: 'treeTag',
+      headerName: 'Tree Tag',
       flex: 1,
-      align: "right",
+      align: 'right',
       renderCell: (params: GridRenderCellParams) => (
-        <AutocompleteFixedData dataType={"trees"} value={params.value || ""} onChange={newValue => handleTreeTagChange(params.id, newValue)} />
+        <AutocompleteFixedData dataType={'trees'} value={params.value || ''} onChange={newValue => handleTreeTagChange(params.id, newValue)} />
       )
     },
     {
-      field: "stemTag",
-      headerName: "Stem Tag",
+      field: 'stemTag',
+      headerName: 'Stem Tag',
       flex: 1,
-      align: "right",
+      align: 'right',
       renderCell: (params: GridRenderCellParams) => (
-        <AutocompleteFixedData dataType={"stems"} value={params.value || ""} onChange={newValue => handleStemTagChange(params.id, newValue)} />
+        <AutocompleteFixedData dataType={'stems'} value={params.value || ''} onChange={newValue => handleStemTagChange(params.id, newValue)} />
       )
     },
     {
-      field: "speciesCode",
-      headerName: "Species Code",
+      field: 'speciesCode',
+      headerName: 'Species Code',
       flex: 1,
-      align: "right",
+      align: 'right',
       renderCell: (params: GridRenderCellParams) => (
-        <AutocompleteFixedData dataType={"species"} value={params.value || ""} onChange={newValue => handleSpeciesCodeChange(params.id, newValue)} />
+        <AutocompleteFixedData dataType={'species'} value={params.value || ''} onChange={newValue => handleSpeciesCodeChange(params.id, newValue)} />
       )
     },
     {
-      field: "dbh",
-      headerName: "DBH",
-      headerClassName: "header",
-      type: "number",
+      field: 'dbh',
+      headerName: 'DBH',
+      headerClassName: 'header',
+      type: 'number',
       editable: true,
       maxWidth: 75,
       flex: 1,
-      align: "right"
+      align: 'right'
     },
     {
-      field: "dbhUnit",
-      headerName: "<- Unit",
-      headerClassName: "header",
+      field: 'dbhUnit',
+      headerName: '<- Unit',
+      headerClassName: 'header',
       flex: 1,
-      align: "left",
+      align: 'left',
       editable: true,
-      type: "singleSelect",
+      type: 'singleSelect',
       valueOptions: unitSelectionOptions
     },
     {
-      field: "hom",
-      headerName: "HOM",
-      headerClassName: "header",
-      type: "number",
+      field: 'hom',
+      headerName: 'HOM',
+      headerClassName: 'header',
+      type: 'number',
       editable: true,
       maxWidth: 75,
       flex: 1,
-      align: "right"
+      align: 'right'
     },
     {
-      field: "homUnit",
-      headerName: "<- Unit",
-      headerClassName: "header",
+      field: 'homUnit',
+      headerName: '<- Unit',
+      headerClassName: 'header',
       flex: 1,
-      align: "left",
+      align: 'left',
       editable: true,
-      type: "singleSelect",
+      type: 'singleSelect',
       valueOptions: unitSelectionOptions
     },
     {
-      field: "codes",
-      headerName: "Codes",
+      field: 'codes',
+      headerName: 'Codes',
       width: 200,
       flex: 1,
-      align: "left",
+      align: 'left',
       renderCell: (params: GridRenderCellParams) => (
         <AutocompleteMultiSelect initialValue={params.value || []} onChange={(newCodes: string[]) => handleCodesChange(params.id, newCodes)} />
       )
     },
     {
-      field: "actions",
-      type: "actions",
-      headerName: "Actions",
+      field: 'actions',
+      type: 'actions',
+      headerName: 'Actions',
       maxWidth: 100,
-      cellClassName: "actions",
+      cellClassName: 'actions',
       flex: 1,
-      align: "center",
+      align: 'center',
       getActions: ({ id }) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
 
@@ -243,7 +243,7 @@ const CensusAutocompleteInputForm = () => {
               label="Save"
               key="Save"
               sx={{
-                color: "primary.main"
+                color: 'primary.main'
               }}
               onClick={handleSaveClick(id)}
             />,
@@ -263,7 +263,7 @@ const CensusAutocompleteInputForm = () => {
   // New state to track if the form is ready for submission
   const [isFormComplete, setIsFormComplete] = useState(false);
 
-  const [activeStep, setActiveStep] = useState("validation"); // 'validation', 'update', or 'summary'
+  const [activeStep, setActiveStep] = useState('validation'); // 'validation', 'update', or 'summary'
   const [validationResults, setValidationResults] = useState(null);
   const [updateResults, setUpdateResults] = useState(null);
 
@@ -292,7 +292,7 @@ const CensusAutocompleteInputForm = () => {
   const handleCodesChange = (id: GridRowId, newCodes: string[]) => {
     setRows(rows.map(row => (row.id === id ? { ...row, codes: newCodes } : row)));
   };
-  const handleRowEditStop: GridEventListener<"rowEditStop"> = (params, event) => {
+  const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
       event.defaultMuiPrevented = true;
     }
@@ -359,7 +359,7 @@ const CensusAutocompleteInputForm = () => {
         speciesCode: row.speciesCode,
         dbh: row.dbh.toString(),
         hom: row.hom.toString(),
-        codes: row.codes.join(";")
+        codes: row.codes.join(';')
       };
       return acc;
     }, {});
@@ -369,11 +369,11 @@ const CensusAutocompleteInputForm = () => {
     try {
       // Add code to retrieve additional required parameters like schema, fileName, etc.
       const response = await fetch(
-        `/api/sqlload?schema=${currentSite?.schemaName ?? ""}&fileName=censusData&plot=${currentPlot?.plotID}&census=${currentCensus?.dateRanges[0].censusID}&user=${session?.user?.name}&formType=measurements&uom=metric`,
+        `/api/sqlload?schema=${currentSite?.schemaName ?? ''}&fileName=censusData&plot=${currentPlot?.plotID}&census=${currentCensus?.dateRanges[0].censusID}&user=${session?.user?.name}&formType=measurements&uom=metric`,
         {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify(fileRowSet)
         }
@@ -384,21 +384,21 @@ const CensusAutocompleteInputForm = () => {
       if (response.ok) {
         setReviewState(ReviewStates.VALIDATE);
       } else {
-        console.error("Error submitting form:", responseData);
+        console.error('Error submitting form:', responseData);
         // Handle submission error
       }
     } catch (error) {
-      console.error("Error submitting form:", error);
+      console.error('Error submitting form:', error);
     }
   };
   // Render different components based on activeStep
   let content;
   switch (activeStep) {
-    case "validation":
-      content = <UploadValidation schema={currentSite?.schemaName ?? ""} setReviewState={setReviewState} />;
+    case 'validation':
+      content = <UploadValidation schema={currentSite?.schemaName ?? ''} setReviewState={setReviewState} />;
       break;
-    case "update":
-      content = <UploadUpdateValidations schema={currentSite?.schemaName ?? ""} setReviewState={setReviewState} />;
+    case 'update':
+      content = <UploadUpdateValidations schema={currentSite?.schemaName ?? ''} setReviewState={setReviewState} />;
       break;
     default:
       content = null;
@@ -406,23 +406,23 @@ const CensusAutocompleteInputForm = () => {
   return (
     <Box
       sx={{
-        display: "flex",
-        width: "100%",
-        height: "100%",
-        flexDirection: "column"
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        flexDirection: 'column'
       }}
     >
-      <Typography level={"title-md"} color={"primary"}>
-        Plot Name: {currentPlot?.plotName ?? "None"}, Census ID: {currentCensus?.dateRanges[0].censusID ?? "0"}
+      <Typography level={'title-md'} color={'primary'}>
+        Plot Name: {currentPlot?.plotName ?? 'None'}, Census ID: {currentCensus?.dateRanges[0].censusID ?? '0'}
       </Typography>
-      <Box sx={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
         <Button variant="contained" disabled={!isFormComplete} onClick={handleSubmit}>
           Submit
         </Button>
       </Box>
-      <Divider orientation={"horizontal"} />
+      <Divider orientation={'horizontal'} />
       <DataGrid
-        getCellClassName={() => "dataGridCell"}
+        getCellClassName={() => 'dataGridCell'}
         rowHeight={75}
         rows={rows}
         columns={columns}
@@ -445,8 +445,8 @@ const CensusAutocompleteInputForm = () => {
         <ModalDialog variant="outlined" role="alertdialog">
           <DialogTitle>Validation and Update Stages</DialogTitle>
           <DialogContent>
-            {reviewState === ReviewStates.VALIDATE && <UploadValidation schema={currentSite?.schemaName ?? ""} setReviewState={setReviewState} />}
-            {reviewState === ReviewStates.UPDATE && <UploadUpdateValidations schema={currentSite?.schemaName ?? ""} setReviewState={setReviewState} />}
+            {reviewState === ReviewStates.VALIDATE && <UploadValidation schema={currentSite?.schemaName ?? ''} setReviewState={setReviewState} />}
+            {reviewState === ReviewStates.UPDATE && <UploadUpdateValidations schema={currentSite?.schemaName ?? ''} setReviewState={setReviewState} />}
           </DialogContent>
         </ModalDialog>
       </Modal>

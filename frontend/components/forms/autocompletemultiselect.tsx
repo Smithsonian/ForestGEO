@@ -1,9 +1,9 @@
-"use client";
-import React, { useEffect, useState } from "react";
-import Autocomplete from "@mui/material/Autocomplete";
-import TextField from "@mui/material/TextField";
-import CircularProgress from "@mui/material/CircularProgress";
-import { useSiteContext } from "@/app/contexts/userselectionprovider";
+'use client';
+import React, { useEffect, useState } from 'react';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
+import CircularProgress from '@mui/material/CircularProgress';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export interface AutocompleteMultiSelectProps {
   initialValue: string[];
@@ -14,10 +14,10 @@ export const AutocompleteMultiSelect: React.FC<AutocompleteMultiSelectProps> = p
   const { initialValue, onChange } = props;
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<string[]>([]);
-  const [inputValue, _setInputValue] = useState("");
+  const [inputValue, _setInputValue] = useState('');
   const loading = open && options.length === 0;
   const currentSite = useSiteContext();
-  if (!currentSite) throw new Error("Site must be selected!");
+  if (!currentSite) throw new Error('Site must be selected!');
 
   useEffect(() => {
     let active = true;
@@ -49,7 +49,7 @@ export const AutocompleteMultiSelect: React.FC<AutocompleteMultiSelectProps> = p
   return (
     <Autocomplete
       multiple
-      className={"fullWidthAutoComplete"}
+      className={'fullWidthAutoComplete'}
       open={open}
       onOpen={() => setOpen(true)}
       onClose={() => setOpen(false)}

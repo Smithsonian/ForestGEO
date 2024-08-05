@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadFireAzureProps } from "@/config/macros/uploadsystemmacros";
-import { FileWithPath } from "react-dropzone";
-import { Box, Typography } from "@mui/material";
-import { Stack } from "@mui/joy";
-import { LinearProgressWithLabel } from "@/components/client/clientmacros";
-import CircularProgress from "@mui/joy/CircularProgress";
-import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
+import { FileWithPath } from 'react-dropzone';
+import { Box, Typography } from '@mui/material';
+import { Stack } from '@mui/joy';
+import { LinearProgressWithLabel } from '@/components/client/clientmacros';
+import CircularProgress from '@mui/joy/CircularProgress';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
@@ -25,7 +25,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [results, setResults] = useState<string[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
-  const [currentlyRunning, setCurrentlyRunning] = useState("");
+  const [currentlyRunning, setCurrentlyRunning] = useState('');
   const hasUploaded = useRef(false);
   const [countdown, setCountdown] = useState(5);
   const [startCountdown, setStartCountdown] = useState(false);
@@ -52,23 +52,23 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         setCurrentlyRunning(`File ${file.name} uploading to Azure Storage...`);
         const formData = new FormData();
         formData.append(file.name, file);
-        if (uploadForm === "measurements") {
+        if (uploadForm === 'measurements') {
           const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
-          formData.append("fileRowErrors", JSON.stringify(fileRowErrors)); // Append validation errors to formData
+          formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
         }
         const response = await fetch(
           `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,
           {
-            method: "POST",
+            method: 'POST',
             body: formData
           }
         );
         // Increment completedOperations when an operation is completed
         setCompletedOperations(prevCompleted => prevCompleted + 1);
-        return response.ok ? "Storage load successful" : "Storage load failed";
+        return response.ok ? 'Storage load successful' : 'Storage load failed';
       } catch (error) {
         setUploadError(error);
-        setErrorComponent("UploadFire");
+        setErrorComponent('UploadFire');
         setReviewState(ReviewStates.ERRORS);
       }
     },
@@ -136,29 +136,29 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       {loading ? (
         <Box
           sx={{
-            display: "flex",
+            display: 'flex',
             flex: 1,
-            width: "100%",
-            alignItems: "center",
+            width: '100%',
+            alignItems: 'center',
             mt: 4
           }}
         >
-          <Stack direction={"column"}>
+          <Stack direction={'column'}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
-            <LinearProgressWithLabel variant={"determinate"} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
+            <LinearProgressWithLabel variant={'determinate'} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
           </Stack>
         </Box>
       ) : (
         <Box
           sx={{
-            display: "flex",
+            display: 'flex',
             flex: 1,
-            width: "100%",
-            alignItems: "center",
+            width: '100%',
+            alignItems: 'center',
             mt: 4
           }}
         >
-          <Stack direction={"column"} sx={{ display: "inherit" }}>
+          <Stack direction={'column'} sx={{ display: 'inherit' }}>
             <Typography variant="h5" gutterBottom>
               Upload Complete
             </Typography>
@@ -169,9 +169,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             {startCountdown && (
               <Box
                 sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   mb: 0.5
                 }}
               >

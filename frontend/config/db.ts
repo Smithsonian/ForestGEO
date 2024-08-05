@@ -1,4 +1,4 @@
-import { openDB, IDBPDatabase, DBSchema } from "idb";
+import { openDB, IDBPDatabase, DBSchema } from 'idb';
 
 interface MyDB extends DBSchema {
   MyStore: {
@@ -7,13 +7,13 @@ interface MyDB extends DBSchema {
   };
 }
 
-const dbName = "MyDatabase";
-const storeName = "MyStore";
+const dbName = 'MyDatabase';
+const storeName = 'MyStore';
 
 async function getDb(): Promise<IDBPDatabase<MyDB>> {
   const db = await openDB<MyDB>(dbName, undefined, {
     upgrade(db, oldVersion, newVersion, transaction) {
-      console.log("db.ts: db object store names: ", db.objectStoreNames);
+      console.log('db.ts: db object store names: ', db.objectStoreNames);
       if (!db.objectStoreNames.contains(storeName)) {
         console.log(`Creating object store: ${storeName}`);
         db.createObjectStore(storeName);
@@ -38,7 +38,7 @@ export async function ensureObjectStore() {
     });
     db.close();
   } catch (err) {
-    console.error("Error ensuring object store:", err);
+    console.error('Error ensuring object store:', err);
     throw err;
   }
 }
@@ -52,7 +52,7 @@ export async function fetchDataFromMySQL(key: string, endpoint: string): Promise
     }
     return await response.json();
   } catch (err) {
-    console.error("Failed to fetch data from MySQL", err);
+    console.error('Failed to fetch data from MySQL', err);
     // Attempt IDB fetch (backup)
     try {
       const db = await getDb();
@@ -60,9 +60,9 @@ export async function fetchDataFromMySQL(key: string, endpoint: string): Promise
       if (idbData !== undefined) {
         return idbData;
       }
-      throw new Error("No data found in backup IDB");
+      throw new Error('No data found in backup IDB');
     } catch (error) {
-      console.error("Failed to retrieve data from backup IDB", error);
+      console.error('Failed to retrieve data from backup IDB', error);
       throw error;
     }
   }
@@ -87,7 +87,7 @@ export async function setData(key: string, val: any): Promise<void> {
   await ensureObjectStore();
   try {
     const db = await getDb();
-    const tx = db.transaction(storeName, "readwrite");
+    const tx = db.transaction(storeName, 'readwrite');
     await tx.objectStore(storeName).put(val, key);
     await tx.done;
   } catch (err) {
@@ -112,7 +112,7 @@ export async function clearAllIDBData(): Promise<void> {
     });
     newDb.close();
   } catch (err) {
-    console.error("Failed to clear all IDB data", err);
+    console.error('Failed to clear all IDB data', err);
     throw err;
   }
 }
@@ -141,7 +141,7 @@ export async function clearDataByKey(key: string): Promise<void> {
   await ensureObjectStore();
   try {
     const db = await getDb();
-    const tx = db.transaction(storeName, "readwrite");
+    const tx = db.transaction(storeName, 'readwrite');
     await tx.objectStore(storeName).delete(key);
     await tx.done;
   } catch (err) {

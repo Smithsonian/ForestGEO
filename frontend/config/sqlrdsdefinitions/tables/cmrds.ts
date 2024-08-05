@@ -1,6 +1,6 @@
 // cmattributes custom data type
 
-import { ResultType } from "@/config/utils";
+import { ResultType } from '@/config/utils';
 
 // cmverrors custom data type
 export type CMAttributesRDS = {

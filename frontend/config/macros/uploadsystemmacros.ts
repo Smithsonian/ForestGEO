@@ -1,7 +1,7 @@
-import { DetailedCMIDRow } from "@/components/uploadsystem/uploadparent";
-import React, { Dispatch, SetStateAction } from "react";
-import { FileWithPath } from "react-dropzone";
-import { FileCollectionRowSet } from "./formdetails";
+import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
+import React, { Dispatch, SetStateAction } from 'react';
+import { FileWithPath } from 'react-dropzone';
+import { FileCollectionRowSet } from './formdetails';
 
 export interface UploadStartProps {
   // state vars
@@ -150,17 +150,17 @@ export interface UploadErrorProps {
 }
 
 export enum ReviewStates {
-  START = "start",
-  UPLOAD_FILES = "upload_files",
-  REVIEW = "review",
-  UPLOAD_SQL = "upload_sql",
-  VALIDATE = "validate",
-  VALIDATE_ERRORS_FOUND = "validate_errors_found",
-  UPDATE = "update_rows",
-  UPLOAD_AZURE = "upload_azure",
-  COMPLETE = "complete",
-  ERRORS = "errors",
-  FILE_MISMATCH_ERROR = "file_mismatch_error"
+  START = 'start',
+  UPLOAD_FILES = 'upload_files',
+  REVIEW = 'review',
+  UPLOAD_SQL = 'upload_sql',
+  VALIDATE = 'validate',
+  VALIDATE_ERRORS_FOUND = 'validate_errors_found',
+  UPDATE = 'update_rows',
+  UPLOAD_AZURE = 'upload_azure',
+  COMPLETE = 'complete',
+  ERRORS = 'errors',
+  FILE_MISMATCH_ERROR = 'file_mismatch_error'
 }
 
 export enum ReviewProgress {

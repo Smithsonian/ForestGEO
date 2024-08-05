@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useOrgCensusContext, usePlotContext } from "@/app/contexts/userselectionprovider";
-import ViewUploadedFiles from "@/components/uploadsystemhelpers/viewuploadedfiles";
-import { useState } from "react";
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import ViewUploadedFiles from '@/components/uploadsystemhelpers/viewuploadedfiles';
+import { useState } from 'react';
 
 export default function UploadedFilesPage() {
   const [refreshFileList, setRefreshFileList] = useState(false);

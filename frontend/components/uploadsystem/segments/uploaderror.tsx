@@ -1,8 +1,8 @@
-import { Box } from "@mui/joy";
-import React from "react";
-import { FileWithPath } from "react-dropzone";
-import { ReviewStates } from "@/config/macros/uploadsystemmacros";
-import { UploadErrorProps } from "@/config/macros/uploadsystemmacros";
+import { Box } from '@mui/joy';
+import React from 'react';
+import { FileWithPath } from 'react-dropzone';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { UploadErrorProps } from '@/config/macros/uploadsystemmacros';
 
 const UploadError = (props: Readonly<UploadErrorProps>) => {
   const { error, component, acceptedFiles, setAcceptedFiles, setReviewState, handleReturnToStart, resetError } = props;
@@ -34,11 +34,11 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
 
   const renderErrorAction = () => {
     switch (component) {
-      case "UploadParseFiles":
+      case 'UploadParseFiles':
         return <button onClick={handleParseError}>Return to Parse</button>;
-      case "UploadReviewFiles":
+      case 'UploadReviewFiles':
         return <button onClick={() => handleReviewError(error.file)}>Retry Review</button>;
-      case "UploadFire":
+      case 'UploadFire':
         return (
           <div>
             <p>

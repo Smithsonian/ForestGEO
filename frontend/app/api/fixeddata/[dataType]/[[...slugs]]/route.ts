@@ -1,15 +1,15 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import MapperFactory from "@/config/datamapper";
-import { handleError } from "@/utils/errorhandler";
-import { PoolConnection, format } from "mysql2/promise";
-import { NextRequest, NextResponse } from "next/server";
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import MapperFactory from '@/config/datamapper';
+import { handleError } from '@/utils/errorhandler';
+import { PoolConnection, format } from 'mysql2/promise';
+import { NextRequest, NextResponse } from 'next/server';
 import {
   generateInsertOperations,
   generateUpdateOperations,
   AllTaxonomiesViewQueryConfig,
   StemTaxonomiesViewQueryConfig
-} from "@/components/processors/processorhelperfunctions";
-import { HTTPResponses } from "@/config/macros";
+} from '@/components/processors/processorhelperfunctions';
+import { HTTPResponses } from '@/config/macros';
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
 export async function GET(
@@ -20,15 +20,15 @@ export async function GET(
     params: { dataType: string; slugs?: string[] };
   }
 ): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number }>> {
-  if (!params.slugs || params.slugs.length < 5) throw new Error("slugs not received.");
+  if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam] = params.slugs;
-  if (!schema || schema === "undefined" || !pageParam || pageParam === "undefined" || !pageSizeParam || pageSizeParam === "undefined")
-    throw new Error("core slugs schema/page/pageSize not correctly received");
+  if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
+    throw new Error('core slugs schema/page/pageSize not correctly received');
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
 
-  if (!plotIDParam || plotIDParam === "0" || !plotCensusNumberParam || plotCensusNumberParam === "0")
-    throw new Error("Core plot/census information not received");
+  if (!plotIDParam || plotIDParam === '0' || !plotCensusNumberParam || plotCensusNumberParam === '0')
+    throw new Error('Core plot/census information not received');
   const plotID = parseInt(plotIDParam);
   const plotCensusNumber = parseInt(plotCensusNumberParam);
   const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
@@ -44,19 +44,19 @@ export async function GET(
     const queryParams: any[] = [];
 
     switch (params.dataType) {
-      case "attributes":
-      case "species":
-      case "stems":
-      case "alltaxonomiesview":
-      case "stemtaxonomiesview":
-      case "quadratpersonnel":
+      case 'attributes':
+      case 'species':
+      case 'stems':
+      case 'alltaxonomiesview':
+      case 'stemtaxonomiesview':
+      case 'quadratpersonnel':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
           FROM ${schema}.${params.dataType} 
           LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
         break;
-      case "personnel":
+      case 'personnel':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
@@ -66,7 +66,7 @@ export async function GET(
             LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      case "quadrats":
+      case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
@@ -77,10 +77,10 @@ export async function GET(
             LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      case "measurementssummary":
-      case "measurementssummaryview":
-      case "viewfulltable":
-      case "viewfulltableview":
+      case 'measurementssummary':
+      case 'measurementssummaryview':
+      case 'viewfulltable':
+      case 'viewfulltableview':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
@@ -93,9 +93,9 @@ export async function GET(
             LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      case "subquadrats":
+      case 'subquadrats':
         if (!quadratID || quadratID === 0) {
-          throw new Error("QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route");
+          throw new Error('QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route');
         }
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS s.*
@@ -109,7 +109,7 @@ export async function GET(
             LIMIT ?, ?;`;
         queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      case "census":
+      case 'census':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
           FROM ${schema}.census 
@@ -117,7 +117,7 @@ export async function GET(
           LIMIT ?, ?`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
-      case "coremeasurements":
+      case 'coremeasurements':
         // Retrieve multiple past CensusID for the given PlotCensusNumber
         const censusQuery = `
           SELECT CensusID
@@ -155,7 +155,7 @@ export async function GET(
             JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
             JOIN ${schema}.census c ON sp.CensusID = c.CensusID
             WHERE c.PlotID = ?
-              AND c.CensusID IN (${censusIDs.map(() => "?").join(", ")})
+              AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
             LIMIT ?, ?`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;
@@ -166,12 +166,12 @@ export async function GET(
 
     // Ensure query parameters match the placeholders in the query
     if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-      throw new Error("Mismatch between query placeholders and parameters");
+      throw new Error('Mismatch between query placeholders and parameters');
     }
 
     const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
 
-    const totalRowsQuery = "SELECT FOUND_ROWS() as totalRows";
+    const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
     const totalRowsResult = await runQuery(conn, totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
@@ -180,9 +180,9 @@ export async function GET(
       const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
 
       // Ensure deprecated measurements are duplicates
-      const uniqueKeys = ["PlotID", "QuadratID", "TreeID", "StemID"]; // Define unique keys that should match
-      const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join("|"));
-      const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join("|")));
+      const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemID']; // Define unique keys that should match
+      const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join('|'));
+      const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
       // Map data using the appropriate mapper
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const deprecatedRows = mapper.mapData(filteredDeprecated);
@@ -217,49 +217,49 @@ export async function GET(
 
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
-  if (!params.slugs) throw new Error("slugs not provided");
+  if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
-  if (!schema || !gridID) throw new Error("no schema or gridID provided");
+  if (!schema || !gridID) throw new Error('no schema or gridID provided');
   let conn: PoolConnection | null = null;
   const { newRow } = await request.json();
   let insertID: number | undefined = undefined;
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    if (Object.keys(newRow).includes("isNew")) delete newRow.isNew;
+    if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
     const newRowData = mapper.demapData([newRow])[0];
     const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
-    if (params.dataType.includes("view")) {
+    if (params.dataType.includes('view')) {
       let queryConfig;
       switch (params.dataType) {
-        case "alltaxonomiesview":
+        case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
           break;
-        case "stemtaxonomiesview":
+        case 'stemtaxonomiesview':
           queryConfig = StemTaxonomiesViewQueryConfig;
           break;
         default:
-          throw new Error("incorrect view call");
+          throw new Error('incorrect view call');
       }
       const insertQueries = generateInsertOperations(schema, newRow, queryConfig);
       for (const query of insertQueries) {
         await runQuery(conn, query);
       }
-    } else if (params.dataType === "attributes") {
-      const insertQuery = format("INSERT INTO ?? SET ?", [`${schema}.${params.dataType}`, newRowData]);
+    } else if (params.dataType === 'attributes') {
+      const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       const results = await runQuery(conn, insertQuery);
       insertID = results.insertId;
     } else {
       delete newRowData[demappedGridID];
-      if (params.dataType === "plots") delete newRowData.NumQuadrats;
-      const insertQuery = format("INSERT INTO ?? SET ?", [`${schema}.${params.dataType}`, newRowData]);
+      if (params.dataType === 'plots') delete newRowData.NumQuadrats;
+      const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       const results = await runQuery(conn, insertQuery);
       insertID = results.insertId;
     }
     await conn.commit();
-    return NextResponse.json({ message: "Insert successful", createdID: insertID }, { status: HTTPResponses.OK });
+    return NextResponse.json({ message: 'Insert successful', createdID: insertID }, { status: HTTPResponses.OK });
   } catch (error: any) {
     return handleError(error, conn, newRow);
   } finally {
@@ -269,16 +269,16 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
 
 // slugs: schema, gridID
 export async function PATCH(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
-  if (!params.slugs) throw new Error("slugs not provided");
+  if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
-  if (!schema || !gridID) throw new Error("no schema or gridID provided");
+  if (!schema || !gridID) throw new Error('no schema or gridID provided');
   let conn: PoolConnection | null = null;
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
   try {
     conn = await getConn();
     await conn.beginTransaction();
-    if (!["alltaxonomiesview", "stemtaxonomiesview", "measurementssummaryview"].includes(params.dataType)) {
+    if (!['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const newRowData = mapper.demapData([newRow])[0];
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
@@ -293,14 +293,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     } else {
       let queryConfig;
       switch (params.dataType) {
-        case "alltaxonomiesview":
+        case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
           break;
-        case "stemtaxonomiesview":
+        case 'stemtaxonomiesview':
           queryConfig = StemTaxonomiesViewQueryConfig;
           break;
         default:
-          throw new Error("incorrect view call");
+          throw new Error('incorrect view call');
       }
       const updateQueries = generateUpdateOperations(schema, newRow, oldRow, queryConfig);
       for (const query of updateQueries) {
@@ -308,7 +308,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       }
       await conn.commit();
     }
-    return NextResponse.json({ message: "Update successful" }, { status: HTTPResponses.OK });
+    return NextResponse.json({ message: 'Update successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
     return handleError(error, conn, newRow);
   } finally {
@@ -318,20 +318,20 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
 
 // Define mappings for views to base tables and primary keys
 const viewToTableMappings: Record<string, { table: string; primaryKey: string }> = {
-  alltaxonomiesview: { table: "species", primaryKey: "SpeciesID" },
-  stemtaxonomiesview: { table: "stems", primaryKey: "StemID" },
+  alltaxonomiesview: { table: 'species', primaryKey: 'SpeciesID' },
+  stemtaxonomiesview: { table: 'stems', primaryKey: 'StemID' },
   measurementssummaryview: {
-    table: "coremeasurements",
-    primaryKey: "CoreMeasurementID"
+    table: 'coremeasurements',
+    primaryKey: 'CoreMeasurementID'
   }
 };
 
 // slugs: schema, gridID
 // body: full data row, only need first item from it this time though
 export async function DELETE(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
-  if (!params.slugs) throw new Error("slugs not provided");
+  if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
-  if (!schema || !gridID) throw new Error("no schema or gridID provided");
+  if (!schema || !gridID) throw new Error('no schema or gridID provided');
   let conn: PoolConnection | null = null;
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
@@ -340,7 +340,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     await conn.beginTransaction();
 
     // Handle deletion for views
-    if (["alltaxonomiesview", "stemtaxonomiesview", "measurementssummaryview"].includes(params.dataType)) {
+    if (['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const mapper = MapperFactory.getMapper<any, any>(params.dataType);
       const deleteRowData = mapper.demapData([newRow])[0];
       const viewConfig = viewToTableMappings[params.dataType];
@@ -352,7 +352,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${viewConfig.table}`, viewConfig.primaryKey, primaryKeyValue]);
       await runQuery(conn, deleteQuery);
       await conn.commit();
-      return NextResponse.json({ message: "Delete successful" }, { status: HTTPResponses.OK });
+      return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
     }
     // Handle deletion for tables
     const mapper = MapperFactory.getMapper<any, any>(params.dataType);
@@ -361,14 +361,14 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);
     await conn.commit();
-    return NextResponse.json({ message: "Delete successful" }, { status: HTTPResponses.OK });
+    return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    if (error.code === "ER_ROW_IS_REFERENCED_2") {
+    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
-      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : "unknown";
+      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
       return NextResponse.json(
         {
-          message: "Foreign key conflict detected",
+          message: 'Foreign key conflict detected',
           referencingTable
         },
         { status: HTTPResponses.FOREIGN_KEY_CONFLICT }

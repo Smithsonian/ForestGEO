@@ -1,8 +1,8 @@
-import { PoolConnection, PoolOptions } from "mysql2/promise";
-import { FileRow } from "@/config/macros/formdetails";
-import { processSpecies } from "@/components/processors/processspecies";
-import { processCensus } from "@/components/processors/processcensus";
-import { PoolMonitor } from "@/config/poolmonitor";
+import { PoolConnection, PoolOptions } from 'mysql2/promise';
+import { FileRow } from '@/config/macros/formdetails';
+import { processSpecies } from '@/components/processors/processspecies';
+import { processCensus } from '@/components/processors/processcensus';
+import { PoolMonitor } from '@/config/poolmonitor';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
@@ -10,11 +10,11 @@ export async function getConn() {
     const i = 0;
     conn = await getSqlConnection(i);
   } catch (error: any) {
-    console.error("Error processing files:", error.message);
+    console.error('Error processing files:', error.message);
     throw new Error(error.message);
   }
   if (!conn) {
-    throw new Error("conn empty");
+    throw new Error('conn empty');
   }
   return conn;
 }
@@ -42,68 +42,68 @@ export type FileMapping = {
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
   attributes: {
-    tableName: "Attributes",
+    tableName: 'Attributes',
     columnMappings: {
-      code: "Code",
-      description: "Description",
-      status: "Status"
+      code: 'Code',
+      description: 'Description',
+      status: 'Status'
     }
   },
   personnel: {
-    tableName: "Personnel",
+    tableName: 'Personnel',
     columnMappings: {
-      firstname: "FirstName",
-      lastname: "LastName",
-      role: "Role"
+      firstname: 'FirstName',
+      lastname: 'LastName',
+      role: 'Role'
     }
   },
   species: {
-    tableName: "",
+    tableName: '',
     columnMappings: {
-      spcode: "Species.SpeciesCode",
-      family: "Family.Family",
-      genus: "Genus.GenusName",
-      species: "Species.SpeciesName",
-      subspecies: "Species.SubspeciesName", // optional
-      IDLevel: "Species.IDLevel",
-      authority: "Species.Authority",
-      subauthority: "Species.SubspeciesAuthority" // optional
+      spcode: 'Species.SpeciesCode',
+      family: 'Family.Family',
+      genus: 'Genus.GenusName',
+      species: 'Species.SpeciesName',
+      subspecies: 'Species.SubspeciesName', // optional
+      IDLevel: 'Species.IDLevel',
+      authority: 'Species.Authority',
+      subauthority: 'Species.SubspeciesAuthority' // optional
     },
     specialProcessing: processSpecies
   },
   quadrats: {
-    tableName: "quadrats",
+    tableName: 'quadrats',
     // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
     columnMappings: {
-      quadrat: "QuadratName",
-      plotID: "PlotID",
-      censusID: "CensusID",
-      startx: "StartX",
-      starty: "StartY",
-      dimx: "DimensionX",
-      dimy: "DimensionY",
-      unit: "Unit",
-      quadratshape: "QuadratShape"
+      quadrat: 'QuadratName',
+      plotID: 'PlotID',
+      censusID: 'CensusID',
+      startx: 'StartX',
+      starty: 'StartY',
+      dimx: 'DimensionX',
+      dimy: 'DimensionY',
+      unit: 'Unit',
+      quadratshape: 'QuadratShape'
     }
   },
   // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
   subquadrats: {
-    tableName: "subquadrats",
+    tableName: 'subquadrats',
     columnMappings: {
-      subquadrat: "SubquadratName",
-      quadrat: "QuadratID",
-      plotID: "PlotID",
-      censusID: "CensusID",
-      dimx: "DimensionX",
-      dimy: "DimensionY",
-      xindex: "X",
-      yindex: "Y",
-      unit: "Unit",
-      orderindex: "Ordering"
+      subquadrat: 'SubquadratName',
+      quadrat: 'QuadratID',
+      plotID: 'PlotID',
+      censusID: 'CensusID',
+      dimx: 'DimensionX',
+      dimy: 'DimensionY',
+      xindex: 'X',
+      yindex: 'Y',
+      unit: 'Unit',
+      orderindex: 'Ordering'
     }
   },
   measurements: {
-    tableName: "", // Multiple tables involved
+    tableName: '', // Multiple tables involved
     columnMappings: {},
     specialProcessing: processCensus
   }
@@ -129,21 +129,21 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
 
     // Check if the pool is closed and reinitialize if necessary
     if (poolMonitor.isPoolClosed()) {
-      console.log("Connection pool is closed. Reinitializing...");
+      console.log('Connection pool is closed. Reinitializing...');
       poolMonitor.reinitializePool();
     }
 
     const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
-    console.log("Connection successful");
+    console.log('Connection successful');
     return connection; // Resolve the connection when successful
   } catch (err) {
     console.error(`Connection attempt ${tries + 1} failed:`, err);
     if (tries == 5) {
-      console.error("!!! Cannot connect !!! Error:", err);
+      console.error('!!! Cannot connect !!! Error:', err);
       throw err;
     } else {
-      console.log("Retrying connection...");
+      console.log('Retrying connection...');
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
@@ -153,7 +153,7 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
   try {
     // Check if the query is for calling a stored procedure
-    if (query.trim().startsWith("CALL")) {
+    if (query.trim().startsWith('CALL')) {
       // Use `connection.query` for stored procedures
       const [rows] = await connection.query(query, params);
       return rows;
@@ -162,20 +162,20 @@ export async function runQuery(connection: PoolConnection, query: string, params
       const [rows, _fields] = await connection.execute(query, params);
 
       // Check if the query is an INSERT, UPDATE, or DELETE
-      if (query.trim().startsWith("INSERT") || query.trim().startsWith("UPDATE") || query.trim().startsWith("DELETE")) {
+      if (query.trim().startsWith('INSERT') || query.trim().startsWith('UPDATE') || query.trim().startsWith('DELETE')) {
         return rows; // This will include insertId, affectedRows, etc.
       }
       return rows; // This is for SELECT queries and will return RowDataPacket[]
     }
   } catch (error: any) {
-    console.error("Error executing query:", error.message);
+    console.error('Error executing query:', error.message);
     throw error;
   }
 }
 
 export function getCatalogSchema() {
   const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
-  if (!catalogSchema) throw new Error("Environmental variable extraction for catalog schema failed");
+  if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
   return catalogSchema;
 }
 

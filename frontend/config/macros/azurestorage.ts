@@ -1,21 +1,21 @@
-import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
+import { BlobServiceClient, ContainerClient } from '@azure/storage-blob';
 
 export async function getContainerClient(containerName: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
-  console.log("Connection String:", storageAccountConnectionString);
+  console.log('Connection String:', storageAccountConnectionString);
   console.log(`container name: ${containerName.toLowerCase()}`);
   if (!storageAccountConnectionString) {
-    console.error("process envs failed");
-    throw new Error("process envs failed");
+    console.error('process envs failed');
+    throw new Error('process envs failed');
   }
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) console.error("blob service client creation failed");
-  else console.error("blob service client created & connected");
+  if (!blobServiceClient) console.error('blob service client creation failed');
+  else console.error('blob service client created & connected');
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
   console.log(containerClient.url);
-  if (!(await containerClient.createIfNotExists())) console.error("container client createifnotexists failure");
+  if (!(await containerClient.createIfNotExists())) console.error('container client createifnotexists failure');
   else {
     console.log(`container client with name ${containerName.toLowerCase()} created and accessed.`);
     return containerClient;
@@ -65,9 +65,9 @@ export async function uploadValidFileAsBuffer(
         index = parseInt(match[3], 10) + 1;
         newFileName = `${match[1]}_${index}${match[4]}`;
       } else {
-        const parts = newFileName.split(".");
+        const parts = newFileName.split('.');
         parts[0] += `_${index + 1}`;
-        newFileName = parts.join(".");
+        newFileName = parts.join('.');
       }
     } while (true);
 

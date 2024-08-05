@@ -1,7 +1,7 @@
-import styled from "@emotion/styled";
-import { AlertProps } from "@mui/material";
-import { GridColDef, GridRowsProp, GridRowModesModel, GridRowId, GridSortDirection, GridRowModel, GridFilterModel } from "@mui/x-data-grid";
-import { Dispatch, SetStateAction } from "react";
+import styled from '@emotion/styled';
+import { AlertProps } from '@mui/material';
+import { GridColDef, GridRowsProp, GridRowModesModel, GridRowId, GridSortDirection, GridRowModel, GridFilterModel } from '@mui/x-data-grid';
+import { Dispatch, SetStateAction } from 'react';
 
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => void;
@@ -20,8 +20,8 @@ export interface DataGridCommonProps {
   setRowCount: Dispatch<SetStateAction<number>>;
   rowModesModel: GridRowModesModel;
   setRowModesModel: Dispatch<SetStateAction<GridRowModesModel>>;
-  snackbar: Pick<AlertProps, "children" | "severity"> | null;
-  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, "children" | "severity"> | null>>;
+  snackbar: Pick<AlertProps, 'children' | 'severity'> | null;
+  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, 'children' | 'severity'> | null>>;
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
   paginationModel: { pageSize: number; page: number };
@@ -37,7 +37,7 @@ export interface DataGridCommonProps {
 
 // Define types for the new states and props
 export type PendingAction = {
-  actionType: "save" | "delete" | "";
+  actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
 };
 
@@ -48,12 +48,12 @@ export interface ConfirmationDialogProps {
   message: string;
 }
 
-export const CellItemContainer = styled("div")({
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  height: "100%"
+export const CellItemContainer = styled('div')({
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  height: '100%'
 });
 
 /**
@@ -67,14 +67,14 @@ export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
  * Function to filter out columns where all entries are null, except the actions column.
  */
 export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === "actions" || !allValuesAreNull(rows, col.field));
+  return columns.filter(col => col.field === 'actions' || !allValuesAreNull(rows, col.field));
 }
 
 /**
  * Function to filter out columns where all entries are null, except the actions column.
  */
 export function filterMSVColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === "actions" || col.field === "subquadrats" || col.field === "isValidated" || !allValuesAreNull(rows, col.field));
+  return columns.filter(col => col.field === 'actions' || col.field === 'subquadrats' || col.field === 'isValidated' || !allValuesAreNull(rows, col.field));
 }
 
 export interface MeasurementSummaryGridProps {
@@ -85,8 +85,8 @@ export interface MeasurementSummaryGridProps {
   setRowCount: Dispatch<SetStateAction<number>>;
   rowModesModel: GridRowModesModel;
   setRowModesModel: Dispatch<SetStateAction<GridRowModesModel>>;
-  snackbar: Pick<AlertProps, "children" | "severity"> | null;
-  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, "children" | "severity"> | null>>;
+  snackbar: Pick<AlertProps, 'children' | 'severity'> | null;
+  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, 'children' | 'severity'> | null>>;
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
   paginationModel: { pageSize: number; page: number };
@@ -100,29 +100,29 @@ export interface MeasurementSummaryGridProps {
 }
 
 export const errorMapping: { [key: string]: string[] } = {
-  "1": ["attributes"],
-  "2": ["measuredDBH"],
-  "3": ["measuredHOM"],
-  "4": ["treeTag", "stemTag"],
-  "5": ["treeTag", "stemTag", "quadratName"],
-  "6": ["stemQuadX", "stemQuadY"],
-  "7": ["speciesName"],
-  "8": ["measurementDate"],
-  "9": ["treeTag", "stemTag", "plotCensusNumber"],
-  "10": ["treeTag", "stemTag", "plotCensusNumber"],
-  "11": ["quadratName"],
-  "12": ["speciesName"],
-  "13": ["measuredDBH"],
-  "14": ["measuredDBH"],
-  "15": ["treeTag"],
-  "16": ["quadratName"]
+  '1': ['attributes'],
+  '2': ['measuredDBH'],
+  '3': ['measuredHOM'],
+  '4': ['treeTag', 'stemTag'],
+  '5': ['treeTag', 'stemTag', 'quadratName'],
+  '6': ['stemQuadX', 'stemQuadY'],
+  '7': ['speciesName'],
+  '8': ['measurementDate'],
+  '9': ['treeTag', 'stemTag', 'plotCensusNumber'],
+  '10': ['treeTag', 'stemTag', 'plotCensusNumber'],
+  '11': ['quadratName'],
+  '12': ['speciesName'],
+  '13': ['measuredDBH'],
+  '14': ['measuredDBH'],
+  '15': ['treeTag'],
+  '16': ['quadratName']
 };
 
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
   return rows.slice().sort((a, b) => {
     const dateA = new Date(a.measurementDate).getTime();
     const dateB = new Date(b.measurementDate).getTime();
-    return direction === "asc" ? dateA - dateB : dateB - dateA;
+    return direction === 'asc' ? dateA - dateB : dateB - dateA;
   });
 };
 

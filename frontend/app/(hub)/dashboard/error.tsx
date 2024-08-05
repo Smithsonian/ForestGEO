@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import React, { useEffect } from "react";
-import { Box, Typography, Button } from "@mui/joy";
+import React, { useEffect } from 'react';
+import { Box, Typography, Button } from '@mui/joy';
 
 const ErrorPage = ({ error, reset }: { error: Error; reset: () => void }) => {
   useEffect(() => {
@@ -12,7 +12,7 @@ const ErrorPage = ({ error, reset }: { error: Error; reset: () => void }) => {
   }, [reset]);
 
   return (
-    <Box sx={{ p: 3, textAlign: "center" }}>
+    <Box sx={{ p: 3, textAlign: 'center' }}>
       <Typography level="h1">Something went wrong - Dashboard</Typography>
       <Typography level="body-lg">{error.message}</Typography>
       <Typography level="body-lg">Retrying in 5 seconds...</Typography>

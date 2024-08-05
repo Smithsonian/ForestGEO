@@ -1,9 +1,9 @@
-"use client";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { UnifiedValidityFlags } from "@/config/macros";
+'use client';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { UnifiedValidityFlags } from '@/config/macros';
 
-import { useOrgCensusContext, usePlotContext, useSiteContext } from "./userselectionprovider";
-import { useLoading } from "./loadingprovider";
+import { useOrgCensusContext, usePlotContext, useSiteContext } from './userselectionprovider';
+import { useLoading } from './loadingprovider';
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
@@ -50,11 +50,11 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const checkDataValidity = useCallback(
     async (type?: keyof UnifiedValidityFlags) => {
       if (!currentSite || !currentPlot || !currentCensus) return;
-      setLoading(true, "Pre-validation in progress...");
+      setLoading(true, 'Pre-validation in progress...');
       const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.plotCensusNumber}`;
       let response;
       try {
-        response = await fetch(url, { method: "GET" });
+        response = await fetch(url, { method: 'GET' });
       } catch (error) {
         console.error(error);
         response = { ok: false };
@@ -74,7 +74,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
       await Promise.all(typesToRefresh.map(item => checkDataValidity(item)));
       setRefreshNeeded(false); // Reset the refresh flag after rechecking
     } else {
-      console.log("No flags set for rechecking, or missing site/plot/census data");
+      console.log('No flags set for rechecking, or missing site/plot/census data');
     }
   }, [validity, checkDataValidity, refreshNeeded]);
 

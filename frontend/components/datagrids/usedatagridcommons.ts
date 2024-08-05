@@ -1,12 +1,12 @@
-import { useState, useCallback } from "react";
-import { GridRowModel, GridRowId } from "@mui/x-data-grid";
-import { createFetchQuery } from "@/config/datagridhelpers";
-import { Site } from "@/config/sqlrdsdefinitions/tables/sitesrds";
-import { Plot } from "@/config/sqlrdsdefinitions/tables/plotrds";
-import { OrgCensus } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { Quadrat } from "@/config/sqlrdsdefinitions/tables/quadratrds";
+import { useState, useCallback } from 'react';
+import { GridRowModel, GridRowId } from '@mui/x-data-grid';
+import { createFetchQuery } from '@/config/datagridhelpers';
+import { Site } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { Plot } from '@/config/sqlrdsdefinitions/tables/plotrds';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { Quadrat } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 
-import { DataGridCommonProps, PendingAction } from "./datagridmacros";
+import { DataGridCommonProps, PendingAction } from './datagridmacros';
 
 export interface DataGridCommonHookProps {
   currentSite: Site;
@@ -44,7 +44,7 @@ export const useDataGridCommons = (
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [locked, setLocked] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
-    actionType: "",
+    actionType: '',
     actionId: null
   });
   const [promiseArguments, setPromiseArguments] = useState<{
@@ -54,19 +54,19 @@ export const useDataGridCommons = (
     oldRow: GridRowModel;
   } | null>(null);
 
-  const openConfirmationDialog = (actionType: "save" | "delete", actionId: GridRowId) => {
+  const openConfirmationDialog = (actionType: 'save' | 'delete', actionId: GridRowId) => {
     setPendingAction({ actionType, actionId });
     setIsDialogOpen(true);
   };
 
   const handleSaveClick = (id: GridRowId) => () => {
     if (locked) return;
-    openConfirmationDialog("save", id);
+    openConfirmationDialog('save', id);
   };
 
   const handleDeleteClick = (id: GridRowId) => () => {
     if (locked) return;
-    openConfirmationDialog("delete", id);
+    openConfirmationDialog('delete', id);
   };
 
   const handleAddNewRow = async () => {
@@ -91,9 +91,9 @@ export const useDataGridCommons = (
   };
 
   const fetchPaginatedData = async (pageToFetch: number) => {
-    setLoading(true, "Loading data...");
+    setLoading(true, 'Loading data...');
     const paginatedQuery = createFetchQuery(
-      currentSite?.schemaName ?? "",
+      currentSite?.schemaName ?? '',
       gridType,
       pageToFetch,
       paginationModel.pageSize,
@@ -102,9 +102,9 @@ export const useDataGridCommons = (
       currentQuadrat?.quadratID
     );
     try {
-      const response = await fetch(paginatedQuery, { method: "GET" });
+      const response = await fetch(paginatedQuery, { method: 'GET' });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Error fetching data");
+      if (!response.ok) throw new Error(data.message || 'Error fetching data');
       setRows(data.output);
       setRowCount(data.totalCount);
 
@@ -113,8 +113,8 @@ export const useDataGridCommons = (
         setIsNewRowAdded(false);
       }
     } catch (error) {
-      console.error("Error fetching data:", error);
-      setSnackbar({ children: "Error fetching data", severity: "error" });
+      console.error('Error fetching data:', error);
+      setSnackbar({ children: 'Error fetching data', severity: 'error' });
     } finally {
       setLoading(false);
     }
@@ -123,10 +123,10 @@ export const useDataGridCommons = (
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
       new Promise<GridRowModel>((resolve, reject) => {
-        setLoading(true, "Processing changes...");
-        if (newRow.id === "") {
+        setLoading(true, 'Processing changes...');
+        if (newRow.id === '') {
           setLoading(false);
-          return reject(new Error("Primary key id cannot be empty!"));
+          return reject(new Error('Primary key id cannot be empty!'));
         }
 
         setPromiseArguments({ resolve, reject, newRow, oldRow });

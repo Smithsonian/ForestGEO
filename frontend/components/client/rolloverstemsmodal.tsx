@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
-import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from "@/config/sqlrdsdefinitions/orgcensusrds";
+import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import {
   Alert,
   Box,
@@ -17,13 +17,13 @@ import {
   Select,
   Stack,
   Typography
-} from "@mui/joy";
-import { DataGrid, GridRowSelectionModel } from "@mui/x-data-grid";
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
-import CloseIcon from "@mui/icons-material/Close";
-import { StemRDS } from "@/config/sqlrdsdefinitions/tables/stemrds";
+} from '@mui/joy';
+import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
+import { Dispatch, SetStateAction, useEffect, useState } from 'react';
+import CloseIcon from '@mui/icons-material/Close';
+import { StemRDS } from '@/config/sqlrdsdefinitions/tables/stemrds';
 
-import { StemGridColumns } from "./datagridcolumns";
+import { StemGridColumns } from './datagridcolumns';
 
 interface RolloverStemsModalProps {
   open: boolean;
@@ -65,14 +65,14 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
       setPreviousStems(stemsData);
       setLoading(false);
     } catch (error) {
-      console.error("failed to fetch previous data: ", error);
+      console.error('failed to fetch previous data: ', error);
       setLoading(false);
     }
   };
 
   const validatePreviousCensusData = async () => {
     // need to re-fetch the census list --> can't use list context here because it's outdated!
-    const response = await fetch(`/api/fetchall/census/${currentPlot?.plotID}?schema=${currentSite?.schemaName || ""}`);
+    const response = await fetch(`/api/fetchall/census/${currentPlot?.plotID}?schema=${currentSite?.schemaName || ''}`);
     const censusRDSLoad = await response.json();
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     setUpdatedCensusList(censusList);
@@ -127,23 +127,23 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
 
   const handleConfirm = async () => {
     if (confirmNoStemsRollover && selectedStemsCensus.censusID === 0) {
-      console.log("confirm no rollover (stems)");
+      console.log('confirm no rollover (stems)');
       onConfirm(false);
       resetState();
       return;
     } else if (selectedStemsCensus.censusID === 0 && !confirmNoStemsRollover) {
-      alert("Please confirm that you do not wish to rollover stems to proceed");
+      alert('Please confirm that you do not wish to rollover stems to proceed');
     }
 
     if (!rolloverStems) {
-      alert("You must select at least one option to roll over or confirm no rollover.");
+      alert('You must select at least one option to roll over or confirm no rollover.');
       return;
     } else if (rolloverStems && selectedStems.length === 0 && customizeStems) {
-      alert("You must select at least one stem to roll over");
+      alert('You must select at least one stem to roll over');
       return;
     }
 
-    if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error("site context OR plot context are undefined");
+    if (!currentSite?.schemaName || !currentPlot?.plotID) throw new Error('site context OR plot context are undefined');
 
     setLoading(true);
     try {
@@ -155,24 +155,24 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
                 updatedCensusList[0]?.plotCensusNumber ?? 0
               )
             : 0;
-        if (!highestPlotCensusNumber) throw new Error("highest plot census number calculation failed");
+        if (!highestPlotCensusNumber) throw new Error('highest plot census number calculation failed');
 
         const mapper = new OrgCensusToCensusResultMapper();
         const newCensusID = await mapper.startNewCensus(currentSite?.schemaName, currentPlot?.plotID, highestPlotCensusNumber + 1);
-        if (!newCensusID) throw new Error("census creation failure");
+        if (!newCensusID) throw new Error('census creation failure');
 
-        console.log("rollover personnel");
+        console.log('rollover personnel');
         await fetch(`/api/rollover/personnel/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedStemsCensus?.censusID}/${newCensusID}`, {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json"
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ incoming: customizeStems ? selectedStems.map(stem => stem.stemID) : previousStems.map(stem => stem.stemID) })
         });
       }
       onConfirm(rolloverStems);
     } catch (error) {
-      console.error("failed to perform stems rollover: ", error);
+      console.error('failed to perform stems rollover: ', error);
       onConfirm(false);
     } finally {
       setLoading(false);
@@ -204,16 +204,16 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
     <Modal open={open} onClose={undefined}>
       <ModalDialog role="alertdialog">
         <DialogTitle>
-          <Stack direction={"row"} justifyContent={"space-between"} alignItems={"center"} mb={2}>
+          <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} mb={2}>
             <Typography level="title-lg">Rollover Stems Data</Typography>
-            <IconButton variant="plain" size="sm" onClick={onClose} sx={{ position: "absolute", top: 8, right: 8 }}>
+            <IconButton variant="plain" size="sm" onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8 }}>
               <CloseIcon />
             </IconButton>
           </Stack>
         </DialogTitle>
         <DialogContent>
-          <Stack direction={"column"}>
-            <Typography mb={2} level="title-md" fontWeight={"xl"}>
+          <Stack direction={'column'}>
+            <Typography mb={2} level="title-md" fontWeight={'xl'}>
               Roll over <b>Stems</b> data:
             </Typography>
             <Select
@@ -233,12 +233,12 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
               ))}
             </Select>
             {selectedStemsCensus.censusID === 0 ? (
-              <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
+              <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                 <Alert color="warning" sx={{ my: 2 }}>
                   You have selected to not roll over any Stems data. <br /> Please confirm to proceed.
                 </Alert>
                 <Button
-                  variant={confirmNoStemsRollover ? "solid" : "soft"}
+                  variant={confirmNoStemsRollover ? 'solid' : 'soft'}
                   color="warning"
                   onClick={() => {
                     setConfirmNoStemsRollover(!confirmNoStemsRollover);
@@ -248,8 +248,8 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
                 </Button>
               </Box>
             ) : (
-              <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
-                <Stack direction={"row"} spacing={2} alignItems={"center"}>
+              <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                <Stack direction={'row'} spacing={2} alignItems={'center'}>
                   <Checkbox
                     checked={rolloverStems}
                     onChange={() => setRolloverStems(!rolloverStems)}
@@ -258,8 +258,8 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
                   <Typography>Rollover stems data</Typography>
                 </Stack>
                 {rolloverStems && (
-                  <Box sx={{ display: "flex", flex: 1, flexDirection: "column" }}>
-                    <Button onClick={() => setCustomizeStems(!customizeStems)}>{customizeStems ? "Roll over all stems" : "Customize stems selection"}</Button>
+                  <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <Button onClick={() => setCustomizeStems(!customizeStems)}>{customizeStems ? 'Roll over all stems' : 'Customize stems selection'}</Button>
                     {customizeStems && (
                       <DataGrid
                         rows={previousStems}
@@ -282,7 +282,7 @@ export default function RolloverStemsModal({ open, onClose, onConfirm }: Rollove
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Stack direction={"row"} justifyContent={"flex-end"} spacing={1} mt={2}>
+          <Stack direction={'row'} justifyContent={'flex-end'} spacing={1} mt={2}>
             <Button variant="plain" onClick={onClose}>
               Cancel
             </Button>

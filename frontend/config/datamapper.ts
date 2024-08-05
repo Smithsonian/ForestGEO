@@ -1,28 +1,28 @@
-import moment from "moment";
-import { booleanToBit } from "./macros";
-import { MeasurementsSummaryRDS, MeasurementsSummaryResult } from "./sqlrdsdefinitions/views/measurementssummaryviewrds";
-import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from "./sqlrdsdefinitions/views/alltaxonomiesviewrds";
-import { SitesMapper } from "./sqlrdsdefinitions/tables/sitesrds";
-import { SpeciesRDS, SpeciesResult } from "./sqlrdsdefinitions/tables/speciesrds";
-import { StemTaxonomiesViewRDS, StemTaxonomiesViewResult } from "./sqlrdsdefinitions/views/stemtaxonomiesviewrds";
-import { ViewFullTableViewRDS, ViewFullTableViewResult } from "./sqlrdsdefinitions/views/viewfulltableviewrds";
-import { CoreMeasurementsRDS, CoreMeasurementsResult } from "./sqlrdsdefinitions/tables/coremeasurementsrds";
-import { PlotRDS, PlotsResult } from "./sqlrdsdefinitions/tables/plotrds";
-import { AttributesRDS, AttributesResult } from "./sqlrdsdefinitions/tables/attributerds";
-import { QuadratPersonnelRDS, QuadratPersonnelResult } from "./sqlrdsdefinitions/tables/quadratpersonnelrds";
-import { CensusRDS, CensusResult } from "./sqlrdsdefinitions/tables/censusrds";
-import { PersonnelRDS, PersonnelResult } from "./sqlrdsdefinitions/tables/personnelrds";
-import { QuadratRDS, QuadratsResult } from "./sqlrdsdefinitions/tables/quadratrds";
-import { StemRDS, StemResult } from "./sqlrdsdefinitions/tables/stemrds";
+import moment from 'moment';
+import { booleanToBit } from './macros';
+import { MeasurementsSummaryRDS, MeasurementsSummaryResult } from './sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
+import { SitesMapper } from './sqlrdsdefinitions/tables/sitesrds';
+import { SpeciesRDS, SpeciesResult } from './sqlrdsdefinitions/tables/speciesrds';
+import { StemTaxonomiesViewRDS, StemTaxonomiesViewResult } from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
+import { ViewFullTableViewRDS, ViewFullTableViewResult } from './sqlrdsdefinitions/views/viewfulltableviewrds';
+import { CoreMeasurementsRDS, CoreMeasurementsResult } from './sqlrdsdefinitions/tables/coremeasurementsrds';
+import { PlotRDS, PlotsResult } from './sqlrdsdefinitions/tables/plotrds';
+import { AttributesRDS, AttributesResult } from './sqlrdsdefinitions/tables/attributerds';
+import { QuadratPersonnelRDS, QuadratPersonnelResult } from './sqlrdsdefinitions/tables/quadratpersonnelrds';
+import { CensusRDS, CensusResult } from './sqlrdsdefinitions/tables/censusrds';
+import { PersonnelRDS, PersonnelResult } from './sqlrdsdefinitions/tables/personnelrds';
+import { QuadratRDS, QuadratsResult } from './sqlrdsdefinitions/tables/quadratrds';
+import { StemRDS, StemResult } from './sqlrdsdefinitions/tables/stemrds';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
   // Check if date is a number (UNIX timestamp), string, or already a Date object
-  if (typeof date === "number") {
+  if (typeof date === 'number') {
     return moment(new Date(date * 1000))
       .utc()
       .toDate(); // Convert UNIX timestamp to milliseconds
-  } else if (typeof date === "string") {
+  } else if (typeof date === 'string') {
     return moment(new Date(date)).utc().toDate(); // Convert date string to Date object
   } else if (date instanceof Date) {
     return moment(date).utc().toDate(); // Already a Date object
@@ -58,7 +58,7 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
       const result: any = {};
       for (const key in item) {
         if (Object.prototype.hasOwnProperty.call(item, key)) {
-          if (key === "id") continue; // Ensure id is removed
+          if (key === 'id') continue; // Ensure id is removed
           const capitalizedKey = this.capitalizeAndTransformKey(key);
           result[capitalizedKey] = this.transformValue(item[key]);
         }
@@ -78,19 +78,19 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   }
 
   private transformSpecialCases(key: string): string {
-    return key.replace(/dbh/gi, "DBH").replace(/hom/gi, "HOM").replace(/id/gi, "ID");
+    return key.replace(/dbh/gi, 'DBH').replace(/hom/gi, 'HOM').replace(/id/gi, 'ID');
   }
 
   private detransformSpecialCases(key: string): string {
     return key
-      .replace(/DBHUnits/gi, "dbhUnits")
-      .replace(/HOMUnits/gi, "homUnits")
-      .replace(/measureddbh/gi, "measuredDBH")
-      .replace(/measuredhom/gi, "measuredHOM");
+      .replace(/DBHUnits/gi, 'dbhUnits')
+      .replace(/HOMUnits/gi, 'homUnits')
+      .replace(/measureddbh/gi, 'measuredDBH')
+      .replace(/measuredhom/gi, 'measuredHOM');
   }
 
   private transformValue(value: any): any {
-    if (typeof value === "boolean") {
+    if (typeof value === 'boolean') {
       return booleanToBit(value);
     } else if (value instanceof Date) {
       return value.toISOString();
@@ -102,15 +102,15 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   }
 
   private detransformValue(value: any, key: string, indexOffset: number): any {
-    if (key === "id") {
+    if (key === 'id') {
       return indexOffset;
-    } else if (typeof value === "number" && value === 0) {
+    } else if (typeof value === 'number' && value === 0) {
       return undefined;
-    } else if (typeof value === "boolean" && value === false) {
+    } else if (typeof value === 'boolean' && value === false) {
       return undefined;
-    } else if (typeof value === "string" && value === "") {
+    } else if (typeof value === 'string' && value === '') {
       return undefined;
-    } else if (key.toLowerCase().includes("date") && value !== null) {
+    } else if (key.toLowerCase().includes('date') && value !== null) {
       return parseDate(value);
     } else if (value !== undefined && value !== null) {
       return value;
@@ -124,39 +124,39 @@ class MapperFactory {
   static getMapper<RDS, Result>(type: string): IDataMapper<RDS, Result> {
     switch (type) {
       // tables
-      case "coremeasurements":
+      case 'coremeasurements':
         return new GenericMapper<CoreMeasurementsRDS, CoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
-      case "sites":
+      case 'sites':
         return new SitesMapper() as any;
-      case "plots":
+      case 'plots':
         return new GenericMapper<PlotRDS, PlotsResult>() as unknown as IDataMapper<RDS, Result>;
-      case "attributes":
+      case 'attributes':
         return new GenericMapper<AttributesRDS, AttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case "quadratpersonnel":
+      case 'quadratpersonnel':
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
-      case "census":
+      case 'census':
         return new GenericMapper<CensusRDS, CensusResult>() as unknown as IDataMapper<RDS, Result>;
-      case "personnel":
+      case 'personnel':
         return new GenericMapper<PersonnelRDS, PersonnelResult>() as unknown as IDataMapper<RDS, Result>;
-      case "quadrats":
+      case 'quadrats':
         return new GenericMapper<QuadratRDS, QuadratsResult>() as unknown as IDataMapper<RDS, Result>;
-      case "species":
+      case 'species':
         return new GenericMapper<SpeciesRDS, SpeciesResult>() as unknown as IDataMapper<RDS, Result>;
-      case "stems":
+      case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
       // views:
-      case "alltaxonomiesview":
+      case 'alltaxonomiesview':
         return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
-      case "stemtaxonomiesview":
+      case 'stemtaxonomiesview':
         return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
-      case "measurementssummaryview":
-      case "measurementssummary":
+      case 'measurementssummaryview':
+      case 'measurementssummary':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
-      case "viewfulltableview":
-      case "viewfulltable":
+      case 'viewfulltableview':
+      case 'viewfulltable':
         return new GenericMapper<ViewFullTableViewRDS, ViewFullTableViewResult>() as unknown as IDataMapper<RDS, Result>;
       default:
-        throw new Error("Mapper not found for type: " + type);
+        throw new Error('Mapper not found for type: ' + type);
     }
   }
 }

@@ -1,7 +1,7 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import { HTTPResponses } from "@/config/macros";
-import { PoolConnection } from "mysql2/promise";
-import { NextResponse } from "next/server";
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import { HTTPResponses } from '@/config/macros';
+import { PoolConnection } from 'mysql2/promise';
+import { NextResponse } from 'next/server';
 
 type ValidationProcedure = {
   ProcedureName: string;
@@ -26,10 +26,10 @@ export async function GET(): Promise<NextResponse<ValidationMessages>> {
 
     return new NextResponse(JSON.stringify(validationMessages), {
       status: HTTPResponses.OK,
-      headers: { "Content-Type": "application/json" }
+      headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
-    console.error("Error in GET request:", error.message);
+    console.error('Error in GET request:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

@@ -1,18 +1,18 @@
-import "@/styles/globals.css";
-import React from "react";
-import { ListSelectionProvider } from "@/app/contexts/listselectionprovider";
-import { Box } from "@mui/joy";
-import UserSelectionProvider from "@/app/contexts/userselectionprovider";
-import { LoadingProvider } from "@/app/contexts/loadingprovider";
-import { GlobalLoadingIndicator } from "@/styles/globalloadingindicator";
-import { DataValidityProvider } from "@/app/contexts/datavalidityprovider";
+import '@/styles/globals.css';
+import React from 'react';
+import { ListSelectionProvider } from '@/app/contexts/listselectionprovider';
+import { Box } from '@mui/joy';
+import UserSelectionProvider from '@/app/contexts/userselectionprovider';
+import { LoadingProvider } from '@/app/contexts/loadingprovider';
+import { GlobalLoadingIndicator } from '@/styles/globalloadingindicator';
+import { DataValidityProvider } from '@/app/contexts/datavalidityprovider';
 
-import { Providers } from "./providers";
-import { LockAnimationProvider } from "./contexts/lockanimationcontext";
+import { Providers } from './providers';
+import { LockAnimationProvider } from './contexts/lockanimationcontext';
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={"dark"}>
+    <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={'dark'}>
       <head>
         <title>ForestGEO Census</title>
         <link rel="icon" href="icon.jpg" />
@@ -25,7 +25,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <UserSelectionProvider>
                 <DataValidityProvider>
                   <LockAnimationProvider>
-                    <Box sx={{ display: "flex", width: "100%", height: "100%" }}>{children}</Box>
+                    <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>{children}</Box>
                   </LockAnimationProvider>
                 </DataValidityProvider>
               </UserSelectionProvider>

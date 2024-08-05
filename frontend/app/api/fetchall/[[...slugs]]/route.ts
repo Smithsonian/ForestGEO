@@ -1,11 +1,11 @@
-import { getConn, runQuery } from "@/components/processors/processormacros";
-import MapperFactory, { IDataMapper } from "@/config/datamapper";
-import { HTTPResponses } from "@/config/macros";
-import { PoolConnection } from "mysql2/promise";
-import { NextRequest, NextResponse } from "next/server";
+import { getConn, runQuery } from '@/components/processors/processormacros';
+import MapperFactory, { IDataMapper } from '@/config/datamapper';
+import { HTTPResponses } from '@/config/macros';
+import { PoolConnection } from 'mysql2/promise';
+import { NextRequest, NextResponse } from 'next/server';
 
 const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCensusNumber?: string, quadratID?: string): string => {
-  if (fetchType === "plots") {
+  if (fetchType === 'plots') {
     return `
       SELECT 
         p.*, 
@@ -16,37 +16,37 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
         ${schema}.quadrats q ON p.PlotID = q.PlotID
       GROUP BY 
         p.PlotID
-      ${plotID && plotID !== "undefined" && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ""}`;
+      ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ''}`;
   }
 
   let query = `SELECT * FROM ${schema}.${fetchType}`;
   const conditions = [];
 
-  if (plotID && plotID !== "undefined" && !isNaN(parseInt(plotID)) && fetchType !== "personnel") conditions.push(`PlotID = ${plotID}`);
-  if (plotCensusNumber && plotCensusNumber !== "undefined" && !isNaN(parseInt(plotCensusNumber))) {
+  if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) && fetchType !== 'personnel') conditions.push(`PlotID = ${plotID}`);
+  if (plotCensusNumber && plotCensusNumber !== 'undefined' && !isNaN(parseInt(plotCensusNumber))) {
     conditions.push(`CensusID IN ( SELECT c.CensusID FROM ${schema}.census c WHERE c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber})`);
   }
-  if (quadratID && quadratID !== "undefined" && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
+  if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
 
   if (conditions.length > 0) {
-    query += " WHERE " + conditions.join(" AND ");
+    query += ' WHERE ' + conditions.join(' AND ');
   }
   return query;
 };
 
 // ordering: PCQ
 export async function GET(request: NextRequest, { params }: { params: { slugs?: string[] } }) {
-  const schema = request.nextUrl.searchParams.get("schema");
-  if (!schema || schema === "undefined") {
-    throw new Error("Schema selection was not provided to API endpoint");
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema || schema === 'undefined') {
+    throw new Error('Schema selection was not provided to API endpoint');
   }
 
   const [dataType, plotID, censusID, quadratID] = params.slugs ?? [];
   if (!dataType) {
-    throw new Error("fetchType was not correctly provided");
+    throw new Error('fetchType was not correctly provided');
   }
 
-  console.log("fetchall --> slugs provided: fetchType: ", dataType, "plotID: ", plotID, "censusID: ", censusID, "quadratID: ", quadratID);
+  console.log('fetchall --> slugs provided: fetchType: ', dataType, 'plotID: ', plotID, 'censusID: ', censusID, 'quadratID: ', quadratID);
   const query = buildQuery(schema, dataType, plotID, censusID, quadratID);
   let conn: PoolConnection | null = null;
 
@@ -61,8 +61,8 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
     const rows = mapper.mapData(results);
     return new NextResponse(JSON.stringify(rows), { status: HTTPResponses.OK });
   } catch (error) {
-    console.error("Error:", error);
-    throw new Error("Call failed");
+    console.error('Error:', error);
+    throw new Error('Call failed');
   } finally {
     if (conn) conn.release();
   }

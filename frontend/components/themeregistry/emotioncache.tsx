@@ -1,13 +1,13 @@
-"use client";
-import * as React from "react";
-import type { EmotionCache, Options as OptionsOfCreateCache } from "@emotion/cache";
-import createCache from "@emotion/cache";
-import { useServerInsertedHTML } from "next/navigation";
-import { CacheProvider as DefaultCacheProvider } from "@emotion/react";
+'use client';
+import * as React from 'react';
+import type { EmotionCache, Options as OptionsOfCreateCache } from '@emotion/cache';
+import createCache from '@emotion/cache';
+import { useServerInsertedHTML } from 'next/navigation';
+import { CacheProvider as DefaultCacheProvider } from '@emotion/react';
 
 export type NextAppDirEmotionCacheProviderProps = {
   /** This is the options passed to createCache() from 'import createCache from "@emotion/cache"' */
-  options: Omit<OptionsOfCreateCache, "insertionPoint">;
+  options: Omit<OptionsOfCreateCache, 'insertionPoint'>;
   /** By default <CacheProvider /> from 'import { CacheProvider } from "@emotion/react"' */
   CacheProvider?: (props: { value: EmotionCache; children: React.ReactNode }) => React.JSX.Element | null;
   children: React.ReactNode;
@@ -45,7 +45,7 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
     if (inserted.length === 0) {
       return null;
     }
-    let styles = "";
+    let styles = '';
     let dataEmotionAttribute = registry.cache.key;
 
     const globals: {
@@ -56,7 +56,7 @@ export default function NextAppDirEmotionCacheProvider(props: NextAppDirEmotionC
     inserted.forEach(({ name, isGlobal }) => {
       const style = registry.cache.inserted[name];
 
-      if (typeof style === "string") {
+      if (typeof style === 'string') {
         if (isGlobal) {
           globals.push({ name, style });
         } else {

@@ -1,14 +1,14 @@
-"use client";
-import React, { useEffect, useCallback, useRef, useState } from "react";
-import { title } from "@/config/primitives";
-import { useSession } from "next-auth/react";
-import { redirect, usePathname } from "next/navigation";
-import dynamic from "next/dynamic";
-import { Box, IconButton, Stack, Tooltip, Typography } from "@mui/joy";
-import Divider from "@mui/joy/Divider";
-import { useLoading } from "@/app/contexts/loadingprovider";
-import { getAllSchemas } from "@/components/processors/processorhelperfunctions";
-import { useSiteContext, usePlotContext, useOrgCensusContext, useQuadratContext } from "@/app/contexts/userselectionprovider";
+'use client';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
+import { title } from '@/config/primitives';
+import { useSession } from 'next-auth/react';
+import { redirect, usePathname } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/joy';
+import Divider from '@mui/joy/Divider';
+import { useLoading } from '@/app/contexts/loadingprovider';
+import { getAllSchemas } from '@/components/processors/processorhelperfunctions';
+import { useSiteContext, usePlotContext, useOrgCensusContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 import {
   useOrgCensusListContext,
   useOrgCensusListDispatch,
@@ -19,67 +19,67 @@ import {
   useSiteListDispatch,
   useSubquadratListContext,
   useSubquadratListDispatch
-} from "@/app/contexts/listselectionprovider";
-import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { siteConfig } from "@/config/macros/siteconfigs";
-import { AcaciaVersionTypography } from "@/styles/versions/acaciaversion";
-import GithubFeedbackModal from "@/components/client/githubfeedbackmodal";
-import HelpOutlineOutlinedIcon from "@mui/icons-material/HelpOutlineOutlined";
+} from '@/app/contexts/listselectionprovider';
+import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { siteConfig } from '@/config/macros/siteconfigs';
+import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
+import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
+import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 
-import { useDataValidityContext } from "../contexts/datavalidityprovider";
-import { useLockAnimation } from "../contexts/lockanimationcontext";
+import { useDataValidityContext } from '../contexts/datavalidityprovider';
+import { useLockAnimation } from '../contexts/lockanimationcontext';
 
-const Sidebar = dynamic(() => import("@/components/sidebar"), { ssr: false });
-const Header = dynamic(() => import("@/components/header"), { ssr: false });
+const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
+const Header = dynamic(() => import('@/components/header'), { ssr: false });
 
 function renderSwitch(endpoint: string) {
   const commonStyle = {
-    display: "flex",
+    display: 'flex',
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    textAlign: "center",
-    minHeight: "50px"
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center',
+    minHeight: '50px'
   };
 
-  let output: string = "";
+  let output: string = '';
 
   switch (endpoint) {
-    case "/dashboard":
-      output = "Dashboard";
+    case '/dashboard':
+      output = 'Dashboard';
       break;
-    case "/measurementshub/summary":
-      output = "View Data";
+    case '/measurementshub/summary':
+      output = 'View Data';
       break;
-    case "/measurementshub/validationhistory":
-      output = "Validation History";
+    case '/measurementshub/validationhistory':
+      output = 'Validation History';
       break;
-    case "/fixeddatainput/attributes":
-      output = "Stem Codes";
+    case '/fixeddatainput/attributes':
+      output = 'Stem Codes';
       break;
-    case "/fixeddatainput/personnel":
-      output = "Personnel";
+    case '/fixeddatainput/personnel':
+      output = 'Personnel';
       break;
-    case "/fixeddatainput/quadrats":
-      output = "Quadrats";
+    case '/fixeddatainput/quadrats':
+      output = 'Quadrats';
       break;
-    case "/fixeddatainput/subquadrats":
-      output = "Subquadrats";
+    case '/fixeddatainput/subquadrats':
+      output = 'Subquadrats';
       break;
-    case "/fixeddatainput/stemtaxonomies":
-      output = "Plot-Species List";
+    case '/fixeddatainput/stemtaxonomies':
+      output = 'Plot-Species List';
       break;
-    case "/fixeddatainput/quadratpersonnel":
-      output = "Quadrat-Assigned Personnel";
+    case '/fixeddatainput/quadratpersonnel':
+      output = 'Quadrat-Assigned Personnel';
       break;
-    case "/fixeddatainput/alltaxonomies":
-      output = "Species List";
+    case '/fixeddatainput/alltaxonomies':
+      output = 'Species List';
       break;
   }
 
   return (
     <Box sx={commonStyle}>
-      <h1 style={{ lineHeight: "1.1em" }} className={title({ color: "cyan" })} key={endpoint}>
+      <h1 style={{ lineHeight: '1.1em' }} className={title({ color: 'cyan' })} key={endpoint}>
         {output}
       </h1>
     </Box>
@@ -124,16 +124,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!currentPlot)
       return {
         success: false,
-        message: "Plot must be selected to load census data"
+        message: 'Plot must be selected to load census data'
       };
     if (censusListContext !== undefined && censusListContext.length > 0) return { success: true };
 
-    setLoading(true, "Loading raw census data");
-    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ""}`);
+    setLoading(true, 'Loading raw census data');
+    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
     const censusRDSLoad = await response.json();
     setLoading(false);
 
-    setLoading(true, "Converting raw census data...");
+    setLoading(true, 'Converting raw census data...');
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     if (censusListDispatch) {
       await censusListDispatch({ censusList });
@@ -147,20 +147,20 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!currentSite)
       return {
         success: false,
-        message: "Site must be selected to load plot data"
+        message: 'Site must be selected to load plot data'
       };
     if (plotListContext !== undefined && plotListContext.length > 0) return { success: true };
 
-    setLoading(true, "Loading plot list information...");
-    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ""}`);
+    setLoading(true, 'Loading plot list information...');
+    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
     const plotsData = await plotsResponse.json();
-    if (!plotsData) return { success: false, message: "Failed to load plots data" };
+    if (!plotsData) return { success: false, message: 'Failed to load plots data' };
     setLoading(false);
 
-    setLoading(true, "Dispatching plot list information...");
+    setLoading(true, 'Dispatching plot list information...');
     if (plotListDispatch) {
       await plotListDispatch({ plotList: plotsData });
-    } else return { success: false, message: "Failed to dispatch plots data" };
+    } else return { success: false, message: 'Failed to dispatch plots data' };
     setLoading(false);
     setPlotListLoaded(true);
     return { success: true };
@@ -170,22 +170,22 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!currentPlot || !currentCensus)
       return {
         success: false,
-        message: "Plot and Census must be selected to load quadrat data"
+        message: 'Plot and Census must be selected to load quadrat data'
       };
     if (quadratListContext !== undefined && quadratListContext.length > 0) return { success: true };
 
-    setLoading(true, "Loading quadrat list information...");
+    setLoading(true, 'Loading quadrat list information...');
     const quadratsResponse = await fetch(
-      `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ""}`
+      `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
     );
     const quadratsData = await quadratsResponse.json();
-    if (!quadratsData) return { success: false, message: "Failed to load quadrats data" };
+    if (!quadratsData) return { success: false, message: 'Failed to load quadrats data' };
     setLoading(false);
 
-    setLoading(true, "Dispatching quadrat list information...");
+    setLoading(true, 'Dispatching quadrat list information...');
     if (quadratListDispatch) {
       await quadratListDispatch({ quadratList: quadratsData });
-    } else return { success: false, message: "Failed to dispatch quadrats data" };
+    } else return { success: false, message: 'Failed to dispatch quadrats data' };
     setLoading(false);
     setQuadratListLoaded(true);
     return { success: true };
@@ -195,34 +195,34 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!currentPlot || !currentCensus || !currentQuadrat)
       return {
         success: false,
-        message: "Plot, Census, and Quadrat must be selected to load subquadrat data"
+        message: 'Plot, Census, and Quadrat must be selected to load subquadrat data'
       };
     if (subquadratListContext !== undefined && subquadratListContext.length > 0) return { success: true };
 
-    setLoading(true, "Loading subquadrat list information...");
+    setLoading(true, 'Loading subquadrat list information...');
     const subquadratResponse = await fetch(
-      `/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ""}`
+      `/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`
     );
     const subquadratData = await subquadratResponse.json();
-    if (!subquadratData) return { success: false, message: "Failed to load subquadrats data" };
+    if (!subquadratData) return { success: false, message: 'Failed to load subquadrats data' };
     setLoading(false);
 
-    setLoading(true, "Dispatching subquadrat list information...");
+    setLoading(true, 'Dispatching subquadrat list information...');
     if (subquadratListDispatch) {
       await subquadratListDispatch({ subquadratList: subquadratData });
-    } else return { success: false, message: "Failed to dispatch subquadrat list" };
+    } else return { success: false, message: 'Failed to dispatch subquadrat list' };
     setLoading(false);
     setSubquadratListLoaded(true);
     return { success: true };
   }, [subquadratListContext, subquadratListDispatch, currentPlot, currentCensus, currentQuadrat, currentSite, setLoading, validity]);
 
   const fetchSiteList = useCallback(async () => {
-    setLoading(true, "Loading Sites...");
+    setLoading(true, 'Loading Sites...');
     try {
       if (session && !siteListLoaded) {
         const sites = session?.user?.allsites ?? [];
         if (sites.length === 0) {
-          throw new Error("Session sites undefined");
+          throw new Error('Session sites undefined');
         } else {
           siteListDispatch ? await siteListDispatch({ siteList: sites }) : undefined;
         }
@@ -293,7 +293,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (manualReset) {
-      setLoading(true, "Manual refresh beginning...");
+      setLoading(true, 'Manual refresh beginning...');
       setPlotListLoaded(false);
       setCensusListLoaded(false);
       setQuadratListLoaded(false);
@@ -306,7 +306,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // if contexts are reset due to website refresh, system needs to redirect user back to dashboard
-    if (currentSite === undefined && currentPlot === undefined && currentQuadrat === undefined && pathname !== "/dashboard") redirect("/dashboard");
+    if (currentSite === undefined && currentPlot === undefined && currentQuadrat === undefined && pathname !== '/dashboard') redirect('/dashboard');
   }, [pathname]);
 
   useEffect(() => {
@@ -321,12 +321,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Box
-        className={`sidebar ${isSidebarVisible ? "visible" : "hidden"} ${isPulsing ? `animate-fade-blur-in` : ``}`}
+        className={`sidebar ${isSidebarVisible ? 'visible' : 'hidden'} ${isPulsing ? `animate-fade-blur-in` : ``}`}
         sx={{
-          position: "fixed",
+          position: 'fixed',
           top: 0,
           left: 0,
-          height: "100vh",
+          height: '100vh',
           zIndex: 1000
         }}
       >
@@ -337,81 +337,82 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         component="main"
         className="MainContent"
         sx={{
-          marginTop: "var(--Header-height)",
-          display: "flex",
-          flexDirection: "column",
+          marginTop: 'var(--Header-height)',
+          display: 'flex',
+          flexDirection: 'column',
           minWidth: 0,
           gap: 1,
           flexGrow: 1,
           flexShrink: 1,
-          overflow: "hidden",
-          minHeight: "calc(100vh - var(--Header-height) - 30px)",
-          marginLeft: isSidebarVisible ? "calc(var(--Sidebar-width) + 5px)" : "0",
-          transition: "margin-left 0.3s ease-in-out"
+          overflow: 'hidden',
+          minHeight: 'calc(100vh - var(--Header-height) - 30px)',
+          marginLeft: isSidebarVisible ? 'calc(var(--Sidebar-width) + 5px)' : '0',
+          transition: 'margin-left 0.3s ease-in-out'
         }}
       >
         <Box
           sx={{
-            display: "flex",
-            alignItems: "left",
-            paddingTop: "25px",
-            paddingLeft: "5px",
-            paddingBottom: "20px",
-            flexDirection: "column"
+            display: 'flex',
+            alignItems: 'left',
+            paddingTop: '25px',
+            paddingLeft: '5px',
+            paddingBottom: '20px',
+            flexDirection: 'column'
           }}
+          className={isPulsing ? 'animate-fade-blur-in' : ''}
         >
           {renderSwitch(pathname)}
         </Box>
-        <Divider orientation={"horizontal"} sx={{ my: "5px" }} />
+        <Divider orientation={'horizontal'} sx={{ my: '5px' }} />
         <Box
-          className={isPulsing ? "animate-fade-blur-in" : ""}
+          className={isPulsing ? 'animate-fade-blur-in' : ''}
           sx={{
-            display: "flex",
+            display: 'flex',
             flexGrow: 1,
             flexShrink: 1,
-            alignItems: "flex-start",
-            flexDirection: "column",
+            alignItems: 'flex-start',
+            flexDirection: 'column',
             paddingLeft: 2
           }}
         >
           {children}
         </Box>
-        <Divider orientation={"horizontal"} />
+        <Divider orientation={'horizontal'} />
         <Box
           sx={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             mt: 2,
-            position: "relative"
+            position: 'relative'
           }}
         >
           <Stack
             spacing={1}
             direction="row"
             sx={{
-              alignItems: "center",
-              justifyContent: "center",
-              width: "100%"
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%'
             }}
             divider={<Divider orientation="vertical" />}
-            className={isPulsing ? "animate-fade-blur-in" : ""}
+            className={isPulsing ? 'animate-fade-blur-in' : ''}
           >
             <Typography
               level="h1"
               sx={{
-                color: "plum",
-                display: "inline-block",
-                verticalAlign: "middle",
-                alignItems: "center",
-                justifyContent: "center"
+                color: 'plum',
+                display: 'inline-block',
+                verticalAlign: 'middle',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
             >
               {siteConfig.name}
             </Typography>
-            <Stack direction="row" sx={{ alignItems: "center", justifyContent: "center" }}>
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>
               <Tooltip title="Version" variant="solid" placement="top" arrow>
-                <Box sx={{ display: "inline-block", verticalAlign: "middle" }}>
+                <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>
                   <AcaciaVersionTypography>{siteConfig.version}</AcaciaVersionTypography>
                 </Box>
               </Tooltip>
@@ -419,16 +420,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           </Stack>
           <IconButton
             onClick={() => setIsFeedbackModalOpen(true)}
-            className={isPulsing ? "animate-pulse-no-opacity" : ""}
+            className={isPulsing ? 'animate-pulse-no-opacity' : ''}
             sx={{
-              position: "fixed",
+              position: 'fixed',
               bottom: 20,
               right: 20,
               zIndex: 2000,
-              bgcolor: "primary.main",
-              color: "white",
-              "&:hover": {
-                bgcolor: "primary.dark"
+              bgcolor: 'primary.main',
+              color: 'white',
+              '&:hover': {
+                bgcolor: 'primary.dark'
               }
             }}
           >
@@ -437,7 +438,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         </Box>
       </Box>
       <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />
-      {/* <GithubFeedbackModal open={true} onClose={() => setIsFeedbackModalOpen(false)} /> */}
     </>
   );
 }
