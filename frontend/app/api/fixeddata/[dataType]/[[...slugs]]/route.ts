@@ -1,12 +1,12 @@
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import MapperFactory from '@/config/datamapper';
 import { handleError } from '@/utils/errorhandler';
-import { PoolConnection, format } from 'mysql2/promise';
+import { format, PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  AllTaxonomiesViewQueryConfig,
   generateInsertOperations,
   generateUpdateOperations,
-  AllTaxonomiesViewQueryConfig,
   StemTaxonomiesViewQueryConfig
 } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
@@ -90,6 +90,7 @@ export async function GET(
               AND c.PlotCensusNumber = ?
               AND q.MeasuredDBH IS NOT NULL
               AND q.MeasuredHOM IS NOT NULL
+            ORDER BY q.MeasurementDate ASC
             LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
@@ -138,6 +139,7 @@ export async function GET(
           JOIN ${schema}.census c ON sp.CensusID = c.CensusID
           WHERE c.PlotID = ?
             AND c.PlotCensusNumber = ?
+          ORDER BY pdt.MeasurementDate
           LIMIT ?, ?`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
@@ -156,6 +158,7 @@ export async function GET(
             JOIN ${schema}.census c ON sp.CensusID = c.CensusID
             WHERE c.PlotID = ?
               AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
+            ORDER BY pdt.MeasurementDate ASC
             LIMIT ?, ?`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;

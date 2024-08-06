@@ -1,4 +1,4 @@
-import { Pool, PoolConnection, PoolOptions, createPool } from 'mysql2/promise';
+import { createPool, Pool, PoolConnection, PoolOptions } from 'mysql2/promise';
 import chalk from 'chalk';
 
 export class PoolMonitor {

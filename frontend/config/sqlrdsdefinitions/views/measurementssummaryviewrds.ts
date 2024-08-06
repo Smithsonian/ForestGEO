@@ -1,7 +1,6 @@
 // measurementssummaryview custom data type
-import { IDataMapper, parseDate } from '../../datamapper';
-import { bitToBoolean, booleanToBit, ColumnStates } from '@/config/macros';
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import { ColumnStates } from '@/config/macros';
+import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { createInitialObject, ResultType } from '@/config/utils';
 
 export const validateMeasurementsRow: ValidationFunction = row => {

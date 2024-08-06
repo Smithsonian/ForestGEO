@@ -78,6 +78,7 @@ export function filterMSVColumns(rows: GridRowsProp, columns: GridColDef[]): Gri
 }
 
 export interface MeasurementSummaryGridProps {
+  gridType: string;
   gridColumns: GridColDef[];
   rows: GridRowsProp;
   setRows: Dispatch<SetStateAction<GridRowsProp>>;

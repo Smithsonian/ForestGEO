@@ -1,6 +1,5 @@
 // census custom data type
 import { createInitialObject, ResultType } from '@/config/utils';
-import { IDataMapper, parseDate } from '../../datamapper';
 
 export const initialCensusRDSRow = createInitialObject<CensusRDS>();
 

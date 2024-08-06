@@ -1,6 +1,5 @@
 // attributes custom data type
 import { createInitialObject, ResultType } from '@/config/utils';
-import { IDataMapper } from '../../datamapper';
 import { FileRow, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
 // attributes table column character limits

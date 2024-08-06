@@ -1,6 +1,5 @@
 // family custom data type
 import { ResultType } from '@/config/utils';
-import { IDataMapper } from '../../datamapper';
 
 export type FamilyRDS = {
   id?: number;
