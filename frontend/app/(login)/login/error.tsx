@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { Box, Typography, Button } from '@mui/joy';
+import { Box, Button, Typography } from '@mui/joy';
 
 const ErrorPage = ({ error, reset }: { error: Error; reset: () => void }) => {
   useEffect(() => {

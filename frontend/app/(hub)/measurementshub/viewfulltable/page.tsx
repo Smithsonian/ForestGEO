@@ -1,7 +1,7 @@
 'use client';
 
-import ViewFullTableViewDataGrid from '@/components/datagrids/applications/viewfulltableviewdatagrid';
+import ViewFullTableDataGrid from '@/components/datagrids/applications/viewfulltabledatagrid';
 
 export default function ViewFullTablePage() {
-  return <ViewFullTableViewDataGrid />;
+  return <ViewFullTableDataGrid />;
 }

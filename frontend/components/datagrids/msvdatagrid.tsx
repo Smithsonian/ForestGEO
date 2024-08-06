@@ -47,13 +47,13 @@ import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
 
 import {
-  MeasurementSummaryGridProps,
-  sortRowsByMeasurementDate,
-  PendingAction,
   CellItemContainer,
+  EditToolbarCustomProps,
   errorMapping,
   filterColumns,
-  EditToolbarCustomProps
+  MeasurementSummaryGridProps,
+  PendingAction,
+  sortRowsByMeasurementDate
 } from './datagridmacros';
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
@@ -127,6 +127,7 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
 export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummaryGridProps>) {
   const {
     addNewRowToGrid,
+    gridType,
     gridColumns,
     rows = [],
     setRows,
@@ -370,7 +371,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setLoading(true, 'Saving changes...');
     try {
       const updatedRow = await updateRow(
-        'measurementssummary',
+        gridType,
         currentSite?.schemaName,
         promiseArguments.newRow,
         promiseArguments.oldRow,
@@ -400,7 +401,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setLoading(true, 'Deleting...');
     const deletionID = rows.find(row => String(row.id) === String(id))?.id;
     if (!deletionID) return;
-    const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', 'measurementssummary', getGridID('measurementssummary'), deletionID);
+    const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), deletionID);
     const response = await fetch(deleteQuery, {
       method: 'DELETE',
       headers: {
@@ -492,7 +493,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       setRefresh(true);
       const paginatedQuery = createFetchQuery(
         currentSite?.schemaName ?? '',
-        'measurementssummary',
+        gridType,
         pageToFetch,
         paginationModel.pageSize,
         currentPlot?.plotID,
@@ -614,32 +615,28 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (handleSelectQuadrat) handleSelectQuadrat(null);
   };
 
-  const getEnhancedCellAction = (type: string, icon: any, onClick: any) => {
-    return (
-      <CellItemContainer>
-        <Tooltip title={locked ? 'Actions disabled while census closed!' : ''} arrow placement="top">
-          <span
-            onClick={e => {
-              if (locked) {
-                handleLockedClick();
-                const iconElement = e.currentTarget.querySelector('svg');
-                if (iconElement) {
-                  iconElement.classList.add('animate-shake');
-                  setTimeout(() => {
-                    iconElement.classList.remove('animate-shake');
-                  }, 500);
-                }
-              } else {
-                onClick();
-              }
-            }}
-          >
-            <GridActionsCellItem icon={icon} label={type} />
-          </span>
-        </Tooltip>
-      </CellItemContainer>
-    );
-  };
+  const getEnhancedCellAction = (type: string, icon: any, onClick: any) => (
+    <CellItemContainer>
+      <Tooltip
+        disableInteractive
+        title={
+          type === 'Save'
+            ? `Save your changes`
+            : type === 'Cancel'
+              ? `Cancel your changes`
+              : type === 'Edit'
+                ? `Edit this row`
+                : type === 'Delete'
+                  ? 'Delete this row (cannot be undone!)'
+                  : undefined
+        }
+        arrow
+        placement="top"
+      >
+        <GridActionsCellItem icon={icon} label={type} onClick={onClick} />
+      </Tooltip>
+    </CellItemContainer>
+  );
 
   function getGridActionsColumn(): GridColDef {
     return {
@@ -729,7 +726,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
     if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
     if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
-    const fullDataQuery = `/api/fetchall/${'measurementssummary'}` + partialQuery + `?schema=${currentSite?.schemaName}`;
+    const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
 
     try {
       const response = await fetch(fullDataQuery, {
@@ -751,11 +748,10 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   const handleExportErrors = async () => {
     const errorRows = await fetchErrorRows();
-    const formattedErrorRows = errorRows.map(row => {
+    return errorRows.map(row => {
       const errors = getRowErrorDescriptions(row.id);
       return { ...row, errors };
     });
-    return formattedErrorRows;
   };
 
   const modifiedColumns = gridColumns.map(column => {

@@ -1,7 +1,6 @@
 // quadrat custom data type
-import { IDataMapper } from '../../datamapper';
 import { ColumnStates } from '@/config/macros';
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { createInitialObject, ResultType } from '@/config/utils';
 
 export type QuadratRDS = {

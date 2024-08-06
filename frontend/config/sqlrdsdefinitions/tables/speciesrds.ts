@@ -1,7 +1,6 @@
 // species custom data type
 import { ResultType } from '@/config/utils';
-import { IDataMapper } from '../../datamapper';
-import { ValidationFunction, RowValidationErrors } from '@/config/macros/formdetails';
+import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
 export type SpeciesRDS = {
   id?: number;

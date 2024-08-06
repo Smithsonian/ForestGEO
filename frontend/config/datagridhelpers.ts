@@ -36,6 +36,7 @@ export type FetchQueryFunction = (
   censusID?: number,
   quadratID?: number
 ) => string;
+
 export type ProcessPostPatchQueryFunction = (
   // incorporated validation system into this too
   siteSchema: string,

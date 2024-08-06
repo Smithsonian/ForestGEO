@@ -1,5 +1,5 @@
 'use client';
-import { Box, Typography, Link as MuiLink } from '@mui/joy';
+import { Box, Link as MuiLink, Typography } from '@mui/joy';
 import Link from 'next/link';
 
 export default function NotFound() {

@@ -2,28 +2,16 @@
 
 import { Box, Card, CardContent, Chip, Divider, List, ListItem, ListItemContent, ListSubheader, Stack, Tooltip, Typography } from '@mui/joy';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
+import WarningIcon from '@mui/icons-material/Warning';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
+import { useSession } from 'next-auth/react';
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();
-  const _attributeNote =
-    'NOTE: If a code can be used for more than one status (e.g. The code “L” for a leaning tree, could\n' +
-    'apply to either a dead or alive stem), or if a code does not indicate any of the above status\n' +
-    'options, the status column should be left blank.';
-  const _quadratNote =
-    'NOTE: The x and y coordinates (“startx” and “starty”) refer to the distance in meters between\n' +
-    'the quadrat under question and lowest, left-most corner of the entire plot (or\n' +
-    'wherever your plot origin, or 0,0 coordinates are).';
-  const _censusNote1 =
-    'NOTE: Each of the multiple stems should be included in these files. You may indicate in the codes\n' +
-    'field which one is the main stem (if the tree has only one stem, you do not have to include the main\n' +
-    'stem code). The rest of the information should be repeated for each multiple stem. Make sure that\n' +
-    'the information (species code, date, etc.) is exactly the same for all multiple stems of the same tree. ';
-  const _censusNote2 =
-    'NOTE: The dataset for each census should only contain trees and stems that were tagged and\n' +
-    'measured from that census. The dataset for subsequent censuses should contain all live stems from\n' +
-    'the previous census. Dead or lost stems should have the appropriate codes to indicate their absence\n' +
-    'in subsequent censuses.';
+  const { data: session } = useSession();
+  const userName = session?.user?.name;
+  const userRole = session?.user?.userStatus;
+  const allowedSites = session?.user?.sites;
   return (
     <Box
       sx={{
@@ -34,6 +22,13 @@ export default function DashboardPage() {
         marginBottom: 5
       }}
     >
+      <Card variant="plain">
+        <CardContent>
+          <Typography level={'title-lg'} sx={{ alignSelf: 'center' }}>
+            Welcome, {userName}!
+          </Typography>
+        </CardContent>
+      </Card>
       <Stack direction={'row'} divider={<Divider orientation="vertical" sx={{ mx: 1 }} />}>
         <Card variant="soft" color="primary" invertedColors sx={{ width: '50%' }}>
           <CardContent>
@@ -69,35 +64,36 @@ export default function DashboardPage() {
                   <ListItem>
                     <ListItemContent>
                       <Typography level="body-md">
-                        Stem Codes - Submit attribute information for stems here. <strong>Does not require a census.</strong>
+                        <strong>Stem Codes</strong> - Submit attribute information for stems here. <strong>Does not require a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>
                   <ListItem>
                     <ListItemContent>
                       <Typography level="body-md">
-                        Personnel - Submit personnel working in your census here. <strong>Requires a census.</strong>
+                        <strong>Personnel</strong> - Submit personnel working in your census here. <strong>Requires a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>
                   <ListItem>
                     <ListItemContent>
                       <Typography level="body-md">
-                        Quadrats - Submit quadrat information for stems here. <strong>Requires a census.</strong>
+                        <strong>Quadrats</strong> - Submit quadrat information for stems here. <strong>Requires a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>
                   <ListItem>
                     <ListItemContent>
                       <Typography level="body-md">
-                        Species List - Submit species and taxonomy information for stems here. <strong>Does not require a census.</strong>
+                        <strong>Species List</strong> - Submit species and taxonomy information for stems here. <strong>Does not require a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>
                   <ListItem>
                     <ListItemContent>
                       <Typography level="body-md">
-                        Plot-Species List - See existing taxonomy information for stems in your plot and census here. <strong>Requires a census.</strong>
+                        <strong>Plot-Species List</strong> - See existing taxonomy information for stems in your plot and census here.{' '}
+                        <strong>Requires a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>
@@ -115,8 +111,32 @@ export default function DashboardPage() {
         </Card>
         <Card variant="soft" color="primary" invertedColors sx={{ width: '50%' }}>
           <CardContent>
-            <Typography level="title-lg">Completing a Census</Typography>
-            <Typography>Description of the card.</Typography>
+            <Typography level="title-lg" sx={{ marginBottom: 1 }}>
+              User-Specific Info
+            </Typography>
+            <Stack direction={'row'} divider={<Divider orientation={'vertical'} sx={{ mx: 1 }} />}>
+              <Stack direction={'column'} spacing={0.5}>
+                <Typography level={'body-md'} sx={{ alignSelf: 'flex-start' }}>
+                  Assigned Role: <strong>{userRole}</strong>
+                </Typography>
+                <Chip variant="soft" startDecorator={<WarningIcon />}>
+                  Is this incorrect?
+                </Chip>
+              </Stack>
+              <Stack direction={'column'}>
+                <Typography level={'body-md'} sx={{ alignSelf: 'flex-start' }}>
+                  You have access to the following sites:
+                </Typography>
+                <Stack direction={'row'} divider={<Divider orientation={'vertical'} sx={{ mx: 1 }} />}>
+                  {allowedSites?.map(site => (
+                    <Typography level={'body-md'} key={site.schemaName}>
+                      <strong>{site.siteName}</strong>
+                    </Typography>
+                  ))}
+                </Stack>
+              </Stack>
+            </Stack>
+            <Divider orientation={'horizontal'} sx={{ my: 1 }} />
           </CardContent>
         </Card>
       </Stack>

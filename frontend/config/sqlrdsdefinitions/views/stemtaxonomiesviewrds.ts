@@ -1,4 +1,3 @@
-import { IDataMapper } from '@/config/datamapper';
 import { ColumnStates } from '@/config/macros';
 import { createInitialObject, ResultType } from '@/config/utils';
 

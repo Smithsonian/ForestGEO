@@ -1,6 +1,6 @@
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { HTTPResponses } from '@/config/macros';
-import { PoolConnection, format } from 'mysql2/promise';
+import { format, PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 
 // dataType

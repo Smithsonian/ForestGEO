@@ -1,4 +1,4 @@
-import { openDB, IDBPDatabase, DBSchema } from 'idb';
+import { DBSchema, IDBPDatabase, openDB } from 'idb';
 
 interface MyDB extends DBSchema {
   MyStore: {
