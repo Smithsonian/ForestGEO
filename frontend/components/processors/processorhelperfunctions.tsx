@@ -166,8 +166,7 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
     console.log('getallschemas: ', sitesResults);
 
-    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>('sites');
-    return mapper.mapData(sitesResults);
+    return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
   } finally {
@@ -202,8 +201,7 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     const sitesParams = [userID];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
 
-    const mapper = MapperFactory.getMapper<SitesRDS, SitesResult>('sites');
-    return mapper.mapData(sitesResults);
+    return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
   } catch (error: any) {
     throw new Error(error);
   } finally {

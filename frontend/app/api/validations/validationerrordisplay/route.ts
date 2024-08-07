@@ -31,9 +31,9 @@ export async function GET(request: NextRequest) {
     const validationErrorsRows = await runQuery(conn, validationErrorsQuery);
 
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
-      CoreMeasurementID: row.CoreMeasurementID,
-      ValidationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
-      Descriptions: row.Descriptions.split(',')
+      coreMeasurementID: row.CoreMeasurementID,
+      validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
+      descriptions: row.Descriptions.split(',')
     }));
 
     // Query to fetch coremeasurements pending validation (no errors)
@@ -47,12 +47,10 @@ export async function GET(request: NextRequest) {
         cm.IsValidated = b'0' AND cme.CMVErrorID IS NULL;
     `;
     const pendingValidationRows = await runQuery(conn, pendingValidationQuery);
-    const mapper = MapperFactory.getMapper<any, any>('coremeasurements');
-    const mappedPending = mapper.mapData(pendingValidationRows);
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors,
-        pending: mappedPending
+        pending: MapperFactory.getMapper<any, any>('coremeasurements').mapData(pendingValidationRows)
       }),
       {
         status: HTTPResponses.OK,

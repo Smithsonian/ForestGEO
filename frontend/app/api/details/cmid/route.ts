@@ -11,32 +11,34 @@ export async function GET(request: NextRequest) {
   try {
     conn = await getConn();
     const query = `
-      SELECT 
-          cm.CoreMeasurementID,
-          p.PlotName,
-          q.QuadratName,
-          c.PlotCensusNumber,
-          c.StartDate,
-          c.EndDate,
-          per.FirstName,
-          per.LastName,
-          s.SpeciesName
-      FROM 
-          ${schema}.coremeasurements cm
-      INNER JOIN 
-          ${schema}.plots p ON cm.PlotID = p.PlotID
-      INNER JOIN 
-          ${schema}.quadrats q ON cm.QuadratID = q.QuadratID
-      INNER JOIN 
-          ${schema}.census c ON cm.CensusID = c.CensusID
-      INNER JOIN 
-          ${schema}.personnel per ON cm.PersonnelID = per.PersonnelID
-      INNER JOIN 
-          ${schema}.trees t ON cm.TreeID = t.TreeID
-      INNER JOIN 
-          ${schema}.species s ON t.SpeciesID = s.SpeciesID
-      WHERE 
-          cm.CoreMeasurementID = ?;`;
+        SELECT
+            cm.CoreMeasurementID,
+            p.PlotName,
+            q.QuadratName,
+            c.PlotCensusNumber,
+            c.StartDate,
+            c.EndDate,
+            per.FirstName,
+            per.LastName,
+            s.SpeciesName
+        FROM
+            ${schema}.coremeasurements cm
+                INNER JOIN
+            ${schema}.stems st ON cm.StemID = st.StemID
+                INNER JOIN
+            ${schema}.trees t ON st.TreeID = t.TreeID
+                INNER JOIN
+            ${schema}.species s ON t.SpeciesID = s.SpeciesID
+                INNER JOIN
+            ${schema}.quadrats q ON st.QuadratID = q.QuadratID
+                INNER JOIN
+            ${schema}.plots p ON q.PlotID = p.PlotID
+                INNER JOIN
+            ${schema}.census c ON cm.CensusID = c.CensusID
+                INNER JOIN
+            ${schema}.personnel per ON cm.PersonnelID = per.PersonnelID
+        WHERE
+            cm.CoreMeasurementID = ?;`;
     const results = await runQuery(conn, query, [cmID]);
     return new NextResponse(
       JSON.stringify(

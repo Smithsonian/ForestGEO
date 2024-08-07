@@ -197,9 +197,10 @@ class OrgCensusToCensusResultMapper {
 // Function to create and update OrgCensusRDS list from CensusRDS
 async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<OrgCensusRDS[]> {
   const orgCensusMapper = new OrgCensusToCensusResultMapper();
-  const censusMapper = MapperFactory.getMapper<CensusRDS, CensusResult>('census');
 
-  const censusResultList: CensusResult[] = censusMapper.demapData(censusRDSLoad.filter(data => data !== undefined));
+  const censusResultList: CensusResult[] = MapperFactory.getMapper<CensusRDS, CensusResult>('census').demapData(
+    censusRDSLoad.filter(data => data !== undefined)
+  );
   return orgCensusMapper.demapData(censusResultList);
 }
 

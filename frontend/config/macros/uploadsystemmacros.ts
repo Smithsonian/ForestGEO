@@ -178,7 +178,7 @@ export enum ReviewProgress {
 // for validation error display ONLY
 
 export interface CMError {
-  CoreMeasurementID: number;
-  ValidationErrorIDs: number[];
-  Descriptions: string[];
+  coreMeasurementID: number;
+  validationErrorIDs: number[];
+  descriptions: string[];
 }

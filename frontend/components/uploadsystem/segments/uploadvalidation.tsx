@@ -30,7 +30,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
 
   useEffect(() => {
     console.log('Loading Validations...');
-    fetch('/api/validations/validationlist', { method: 'GET' })
+    fetch('/api/validations/procedures/validationlist', { method: 'GET' })
       .then(response => response.json())
       .then(data => {
         console.log('Validation Messages:', data);
@@ -92,8 +92,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
     }
 
     try {
-      console.log('Validation URL:', `/api/validations/${api}?${queryParams}`);
-      const response = await fetch(`/api/validations/${api}?${queryParams}`);
+      console.log('Validation URL:', `/api/validations/procedures/${api}?${queryParams}`);
+      const response = await fetch(`/api/validations/procedures/${api}?${queryParams}`);
       console.log('Response Status:', response.status);
       if (!response.ok) {
         console.log(`Response not OK for ${api}:`, response.statusText);

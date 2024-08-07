@@ -244,7 +244,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const cellHasError = (colField: string, rowId: GridRowId) => {
     const error = validationErrors[Number(rowId)];
     if (!error) return false;
-    const errorFields = error.ValidationErrorIDs.flatMap(id => errorMapping[id.toString()] || []);
+    const errorFields = error.validationErrorIDs.flatMap(id => errorMapping[id.toString()] || []);
     return errorFields.includes(colField);
   };
   const rowHasError = (rowId: GridRowId) => {
@@ -259,9 +259,9 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
     const error = validationErrors[Number(rowId)];
     if (!error) return [];
-    return error.ValidationErrorIDs.map(id => {
-      const index = error.ValidationErrorIDs.indexOf(id);
-      return error.Descriptions[index]; // Assumes that descriptions are stored in the CMError object
+    return error.validationErrorIDs.map(id => {
+      const index = error.validationErrorIDs.indexOf(id);
+      return error.descriptions[index]; // Assumes that descriptions are stored in the CMError object
     });
   };
 
@@ -672,7 +672,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       // Only proceed with reduce if errors is an array
       const errorMap = Array.isArray(errors)
         ? errors.reduce<Record<number, CMError>>((acc, error) => {
-            acc[error?.CoreMeasurementID] = error;
+            acc[error?.coreMeasurementID] = error;
             return acc;
           }, {})
         : {};
@@ -687,10 +687,11 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     const error = validationErrors[Number(rowId)];
     if (!error) return '';
 
-    return error.ValidationErrorIDs.filter(id => errorMapping[id.toString()]?.includes(colField))
+    return error.validationErrorIDs
+      .filter(id => errorMapping[id.toString()]?.includes(colField))
       .map(id => {
-        const index = error.ValidationErrorIDs.indexOf(id);
-        return error.Descriptions[index];
+        const index = error.validationErrorIDs.indexOf(id);
+        return error.descriptions[index];
       })
       .join('; ');
   };
