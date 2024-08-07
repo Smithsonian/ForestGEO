@@ -9,6 +9,7 @@ import WidgetsIcon from '@mui/icons-material/Widgets';
 import SchemaIcon from '@mui/icons-material/Schema';
 import FilterIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
@@ -76,13 +77,13 @@ export const siteConfigNav: SiteConfigProps[] = [
         href: '/viewfulltable',
         tip: 'all historical data view',
         icon: HistoryIcon
+      },
+      {
+        label: 'Validations',
+        href: '/validations',
+        tip: 'data validations hub',
+        icon: FactCheckIcon
       }
-      // {
-      //   label: "Validation History",
-      //   href: "/validationhistory",
-      //   tip: '',
-      //   icon: HistoryEduIcon
-      // },
     ]
   },
 
@@ -149,3 +150,42 @@ export const siteConfigNav: SiteConfigProps[] = [
     ]
   }
 ];
+
+export function getEndpointHeaderName(endpoint: string) {
+  switch (endpoint) {
+    case '/dashboard':
+      return 'Dashboard';
+      break;
+    case '/measurementshub/summary':
+      return 'View Data';
+      break;
+    case '/measurementshub/validationhistory':
+      return 'Validation History';
+      break;
+    case '/measurementshub/viewfulltable':
+      return 'All Historical Data';
+    case '/measurementshub/validations':
+      return 'Validations Hub';
+    case '/fixeddatainput/attributes':
+      return 'Stem Codes';
+      break;
+    case '/fixeddatainput/personnel':
+      return 'Personnel';
+      break;
+    case '/fixeddatainput/quadrats':
+      return 'Quadrats';
+      break;
+    case '/fixeddatainput/subquadrats':
+      return 'Subquadrats';
+      break;
+    case '/fixeddatainput/stemtaxonomies':
+      return 'Plot-Species List';
+      break;
+    case '/fixeddatainput/quadratpersonnel':
+      return 'Quadrat-Assigned Personnel';
+      break;
+    case '/fixeddatainput/alltaxonomies':
+      return 'Species List';
+      break;
+  }
+}

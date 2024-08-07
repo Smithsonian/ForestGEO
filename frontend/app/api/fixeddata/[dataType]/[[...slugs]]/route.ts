@@ -186,24 +186,18 @@ export async function GET(
       const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemID']; // Define unique keys that should match
       const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join('|'));
       const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
-      // Map data using the appropriate mapper
-      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-      const deprecatedRows = mapper.mapData(filteredDeprecated);
-      const rows = mapper.mapData(paginatedResults);
       return new NextResponse(
         JSON.stringify({
-          output: rows,
-          deprecated: deprecatedRows,
+          output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
+          deprecated: MapperFactory.getMapper<any, any>(params.dataType).mapData(filteredDeprecated),
           totalCount: totalRows
         }),
         { status: HTTPResponses.OK }
       );
     } else {
-      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-      const rows = mapper.mapData(paginatedResults);
       return new NextResponse(
         JSON.stringify({
-          output: rows,
+          output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
           deprecated: undefined,
           totalCount: totalRows
         }),
@@ -230,8 +224,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     conn = await getConn();
     await conn.beginTransaction();
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
-    const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-    const newRowData = mapper.demapData([newRow])[0];
+    const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
 
     if (params.dataType.includes('view')) {
@@ -282,8 +275,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     conn = await getConn();
     await conn.beginTransaction();
     if (!['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
-      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-      const newRowData = mapper.demapData([newRow])[0];
+      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
       const updateQuery = format(
         `UPDATE ??
@@ -344,8 +336,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
 
     // Handle deletion for views
     if (['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
-      const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-      const deleteRowData = mapper.demapData([newRow])[0];
+      const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
       const viewConfig = viewToTableMappings[params.dataType];
       if (!viewConfig) throw new Error(`No table mapping found for view ${params.dataType}`);
 
@@ -358,8 +349,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
     }
     // Handle deletion for tables
-    const mapper = MapperFactory.getMapper<any, any>(params.dataType);
-    const deleteRowData = mapper.demapData([newRow])[0];
+    const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);

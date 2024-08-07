@@ -6,14 +6,6 @@ create table attributes
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
-create table batchprocessingflag
-(
-    flag_id       int auto_increment
-        primary key,
-    flag_status   enum ('STARTED', 'ENDED') not null,
-    needs_refresh tinyint(1) default 0      null
-);
-
 create table measurementssummary
 (
     CoreMeasurementID int                                                          not null

@@ -35,10 +35,10 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors
-      .filter(error => allRowToCMID.some(row => row.fileName === fileName && row.coreMeasurementID === error.CoreMeasurementID))
+      .filter(error => allRowToCMID.some(row => row.fileName === fileName && row.coreMeasurementID === error.coreMeasurementID))
       .flatMap(error => {
-        const relatedRow = allRowToCMID.find(row => row.coreMeasurementID === error.CoreMeasurementID);
-        return error.ValidationErrorIDs.map(validationErrorID => ({
+        const relatedRow = allRowToCMID.find(row => row.coreMeasurementID === error.coreMeasurementID);
+        return error.validationErrorIDs.map(validationErrorID => ({
           stemtag: relatedRow?.row.stemtag,
           tag: relatedRow?.row.tag,
           validationErrorID: validationErrorID

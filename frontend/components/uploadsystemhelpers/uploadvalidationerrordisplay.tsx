@@ -99,7 +99,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
   const getCellStyles = (cmError: CMError, key: string) => {
     if (!cmError) return {};
     let shouldHighlight = false;
-    cmError.ValidationErrorIDs.forEach(errorID => {
+    cmError.validationErrorIDs.forEach(errorID => {
       const errorFields = errorMapping[errorID.toString()] || [];
       if (errorFields.includes(key)) {
         shouldHighlight = true;
@@ -169,7 +169,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
           </TableHead>
           <TableBody>
             {currentFileRows.map((cmidRow, rowIndex) => {
-              const cmError = cmErrors.find(e => e.CoreMeasurementID === cmidRow.coreMeasurementID);
+              const cmError = cmErrors.find(e => e.coreMeasurementID === cmidRow.coreMeasurementID);
               const isErroneous = !!cmError;
 
               return (
@@ -177,7 +177,7 @@ const UploadValidationErrorDisplay: React.FC<UploadValidationErrorDisplayProps> 
                   <TableRow key={rowIndex}>{tableHeaders.map(item => renderTableCell(cmidRow, item.key, cmError))}</TableRow>
                   {isErroneous && cmError && (
                     <>
-                      {cmError.Descriptions.map(description => {
+                      {cmError.descriptions.map(description => {
                         return (
                           <TableRow
                             key={`error-${cmidRow.coreMeasurementID}`}

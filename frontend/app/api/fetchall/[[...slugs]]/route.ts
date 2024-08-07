@@ -56,10 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
     if (!results) {
       return new NextResponse(null, { status: 500 });
     }
-
-    const mapper: IDataMapper<any, any> = MapperFactory.getMapper<any, any>(dataType);
-    const rows = mapper.mapData(results);
-    return new NextResponse(JSON.stringify(rows), { status: HTTPResponses.OK });
+    return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error) {
     console.error('Error:', error);
     throw new Error('Call failed');

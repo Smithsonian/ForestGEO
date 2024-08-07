@@ -14,6 +14,7 @@ import { CensusRDS, CensusResult } from './sqlrdsdefinitions/tables/censusrds';
 import { PersonnelRDS, PersonnelResult } from './sqlrdsdefinitions/tables/personnelrds';
 import { QuadratRDS, QuadratsResult } from './sqlrdsdefinitions/tables/quadratrds';
 import { StemRDS, StemResult } from './sqlrdsdefinitions/tables/stemrds';
+import { UnifiedChangelogRDS, UnifiedChangelogResult } from '@/config/sqlrdsdefinitions/tables/unifiedchangelogrds';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -144,6 +145,8 @@ class MapperFactory {
         return new GenericMapper<SpeciesRDS, SpeciesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'unifiedchangelog':
+        return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       // views:
       case 'alltaxonomiesview':
         return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;

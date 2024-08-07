@@ -21,7 +21,7 @@ import {
   useSubquadratListDispatch
 } from '@/app/contexts/listselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/orgcensusrds';
-import { siteConfig } from '@/config/macros/siteconfigs';
+import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
@@ -42,45 +42,10 @@ function renderSwitch(endpoint: string) {
     minHeight: '50px'
   };
 
-  let output: string = '';
-
-  switch (endpoint) {
-    case '/dashboard':
-      output = 'Dashboard';
-      break;
-    case '/measurementshub/summary':
-      output = 'View Data';
-      break;
-    case '/measurementshub/validationhistory':
-      output = 'Validation History';
-      break;
-    case '/fixeddatainput/attributes':
-      output = 'Stem Codes';
-      break;
-    case '/fixeddatainput/personnel':
-      output = 'Personnel';
-      break;
-    case '/fixeddatainput/quadrats':
-      output = 'Quadrats';
-      break;
-    case '/fixeddatainput/subquadrats':
-      output = 'Subquadrats';
-      break;
-    case '/fixeddatainput/stemtaxonomies':
-      output = 'Plot-Species List';
-      break;
-    case '/fixeddatainput/quadratpersonnel':
-      output = 'Quadrat-Assigned Personnel';
-      break;
-    case '/fixeddatainput/alltaxonomies':
-      output = 'Species List';
-      break;
-  }
-
   return (
     <Box sx={commonStyle}>
       <h1 style={{ lineHeight: '1.1em' }} className={title({ color: 'cyan' })} key={endpoint}>
-        {output}
+        {getEndpointHeaderName(endpoint)}
       </h1>
     </Box>
   );

@@ -180,11 +180,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     if (startCountdown && countdown > 0) {
       timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
     } else if (countdown === 0) {
-      if (uploadForm === 'measurements') {
-        setReviewState(ReviewStates.VALIDATE);
-      } else {
-        setReviewState(ReviewStates.UPLOAD_AZURE);
-      }
+      setReviewState(ReviewStates.UPLOAD_AZURE); // redirecting to azure upload. Validations page has been separated into dedicated page to centralize function.
     }
 
     return () => clearTimeout(timer);
