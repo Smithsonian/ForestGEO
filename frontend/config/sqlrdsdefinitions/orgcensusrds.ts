@@ -39,6 +39,7 @@ function collapseCensusDataToGridSelections(orgCensusList: OrgCensus[]): GridSel
 
 class OrgCensusToCensusResultMapper {
   private censusMapper: IDataMapper<CensusRDS, CensusResult>;
+
   constructor() {
     this.censusMapper = MapperFactory.getMapper('census');
   }

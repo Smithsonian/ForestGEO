@@ -1,8 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { UploadValidationProps } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates, UploadValidationProps } from '@/config/macros/uploadsystemmacros';
 import { ValidationResponse } from '@/components/processors/processormacros';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';

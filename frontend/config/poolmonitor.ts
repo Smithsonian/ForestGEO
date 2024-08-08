@@ -94,6 +94,18 @@ export class PoolMonitor {
     }
   }
 
+  public reinitializePool() {
+    console.log(chalk.cyan('Reinitializing connection pool...'));
+    this.pool = createPool(this.config);
+    this.poolClosed = false;
+    this.acquiredConnectionIds.clear();
+    console.log(chalk.cyan('Connection pool reinitialized.'));
+  }
+
+  public isPoolClosed(): boolean {
+    return this.poolClosed;
+  }
+
   private resetInactivityTimer() {
     if (this.inactivityTimer) {
       clearTimeout(this.inactivityTimer);
@@ -106,17 +118,5 @@ export class PoolMonitor {
         console.log(chalk.red('Graceful shutdown complete.'));
       }
     }, 3600000); // 1 hour in milliseconds
-  }
-
-  public reinitializePool() {
-    console.log(chalk.cyan('Reinitializing connection pool...'));
-    this.pool = createPool(this.config);
-    this.poolClosed = false;
-    this.acquiredConnectionIds.clear();
-    console.log(chalk.cyan('Connection pool reinitialized.'));
-  }
-
-  public isPoolClosed(): boolean {
-    return this.poolClosed;
   }
 }

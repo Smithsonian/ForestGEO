@@ -340,7 +340,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             paddingLeft: 2
           }}
         >
-          {children}
+          {session?.user.name && session.user.email && session.user.userStatus && <>{children}</>}
         </Box>
         <Divider orientation={'horizontal'} />
         <Box

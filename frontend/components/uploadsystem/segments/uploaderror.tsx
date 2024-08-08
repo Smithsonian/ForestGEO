@@ -1,8 +1,7 @@
 import { Box } from '@mui/joy';
 import React from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { UploadErrorProps } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates, UploadErrorProps } from '@/config/macros/uploadsystemmacros';
 
 const UploadError = (props: Readonly<UploadErrorProps>) => {
   const { error, component, acceptedFiles, setAcceptedFiles, setReviewState, handleReturnToStart, resetError } = props;

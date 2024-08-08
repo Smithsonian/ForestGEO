@@ -187,6 +187,16 @@ create table quadratpersonnel
         foreign key (CensusID) references census (CensusID)
 );
 
+create table sitespecificvalidations
+(
+    ValidationProcedureID int auto_increment
+        primary key,
+    Name                  varchar(255)     not null,
+    Definition            text             not null,
+    Description           varchar(255)     null,
+    IsEnabled             bit default b'0' not null
+);
+
 create table species
 (
     SpeciesID           int auto_increment
@@ -402,8 +412,9 @@ create table validationchangelog
 
 create table viewfulltable
 (
-    CoreMeasurementID         int                                                                                                             not null
+    ViewFullTableID           int auto_increment
         primary key,
+    CoreMeasurementID         int                                                                                                             not null,
     MeasurementDate           date                                                                                                            null,
     MeasuredDBH               decimal(10, 6)                                                                                                  null,
     DBHUnits                  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'cm'    null,

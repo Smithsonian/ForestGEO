@@ -6,7 +6,6 @@ import {
   AccordionGroup,
   AccordionSummary,
   Box,
-  ButtonGroup,
   Card,
   CardContent,
   Chip,
@@ -46,7 +45,7 @@ export default function DashboardPage() {
 
   async function loadChangelogHistory() {
     try {
-      const response = await fetch(`/api/changelog/overview?schema=${currentSite?.schemaName}`, { method: 'GET' });
+      const response = await fetch(`/api/changelog/overview/unifiedchangelog?schema=${currentSite?.schemaName}`, { method: 'GET' });
       const results = await response.json();
       setChangelogHistory(results);
     } catch (error) {
@@ -55,13 +54,7 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    if (currentSite) {
-      if (changelogHistory.length === 0) {
-        loadChangelogHistory().catch(console.error);
-      }
-    } else {
-      setChangelogHistory([]); // reset or if changes occur
-    }
+    if (currentSite && currentPlot && currentCensus) loadChangelogHistory().catch(console.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   return (

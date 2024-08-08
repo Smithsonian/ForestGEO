@@ -1,8 +1,7 @@
 import mysql, { PoolConnection } from 'mysql2/promise';
 import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from '@/components/processors/processormacros';
-import { SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import { processCensus } from '@/components/processors/processcensus';
-import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import MapperFactory from '@/config/datamapper';
 
 export async function getPersonnelIDByName(connection: PoolConnection, schema: string, fullName: string): Promise<number | null> {

@@ -6,7 +6,7 @@ import { QuadratRDS } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import { PersonnelRDS } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { Stack } from '@mui/material';
-import { Button, Checkbox, IconButton, Modal, ModalDialog, Typography, Alert, DialogContent, DialogTitle, DialogActions, Select, Option, Grid } from '@mui/joy';
+import { Alert, Button, Checkbox, DialogActions, DialogContent, DialogTitle, Grid, IconButton, Modal, ModalDialog, Option, Select, Typography } from '@mui/joy';
 import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
 import { useOrgCensusListContext } from '@/app/contexts/listselectionprovider';
 import { OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';

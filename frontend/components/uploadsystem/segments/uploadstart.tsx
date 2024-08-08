@@ -1,7 +1,6 @@
 'use client';
 
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { UploadStartProps } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates, UploadStartProps } from '@/config/macros/uploadsystemmacros';
 import { Box, Button, Stack, Tooltip, Typography } from '@mui/joy';
 import AutocompleteFixedData from '@/components/forms/autocompletefixeddata';
 import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';

@@ -51,30 +51,27 @@ export async function GET(
       case 'stemtaxonomiesview':
       case 'quadratpersonnel':
         paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS * 
-          FROM ${schema}.${params.dataType} 
-          LIMIT ?, ?`;
+            SELECT SQL_CALC_FOUND_ROWS *
+            FROM ${schema}.${params.dataType} LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'personnel':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
-            JOIN ${schema}.census c ON q.CensusID = c.CensusID
+                     JOIN ${schema}.census c ON q.CensusID = c.CensusID
             WHERE c.PlotID = ?
-              AND c.PlotCensusNumber = ?
-            LIMIT ?, ?;`;
+              AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
-            JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
+                     JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
             WHERE q.PlotID = ?
               AND c.PlotID = ?
-              AND c.PlotCensusNumber = ?
-            LIMIT ?, ?;`;
+              AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'measurementssummary':
@@ -84,14 +81,13 @@ export async function GET(
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.${params.dataType} q
-            JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
+                     JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
             WHERE q.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
               AND q.MeasuredDBH IS NOT NULL
               AND q.MeasuredHOM IS NOT NULL
-            ORDER BY q.MeasurementDate ASC
-            LIMIT ?, ?;`;
+            ORDER BY q.MeasurementDate ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'subquadrats':
@@ -101,46 +97,42 @@ export async function GET(
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS s.*
             FROM ${schema}.subquadrats s
-            JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-            JOIN ${schema}.census c ON q.CensusID = c.CensusID
+                     JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+                     JOIN ${schema}.census c ON q.CensusID = c.CensusID
             WHERE q.QuadratID = ?
               AND q.PlotID = ?
               AND c.PlotID = ?
-              AND c.PlotCensusNumber = ?
-            LIMIT ?, ?;`;
+              AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'census':
         paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS * 
-          FROM ${schema}.census 
-          WHERE PlotID = ?
-          LIMIT ?, ?`;
+            SELECT SQL_CALC_FOUND_ROWS *
+            FROM ${schema}.census
+            WHERE PlotID = ? LIMIT ?, ?`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
       case 'coremeasurements':
         // Retrieve multiple past CensusID for the given PlotCensusNumber
         const censusQuery = `
-          SELECT CensusID
-          FROM ${schema}.census
-          WHERE PlotID = ?
-            AND PlotCensusNumber = ?
-          ORDER BY StartDate DESC
-          LIMIT 30
+            SELECT CensusID
+            FROM ${schema}.census
+            WHERE PlotID = ?
+              AND PlotCensusNumber = ?
+            ORDER BY StartDate DESC LIMIT 30
         `;
         const censusResults = await runQuery(conn, format(censusQuery, [plotID, plotCensusNumber]));
         if (censusResults.length < 2) {
           paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS pdt.*
-          FROM ${schema}.${params.dataType} pdt
-          JOIN ${schema}.stems s ON pdt.StemID = s.StemID
-          JOIN ${schema}.trees t ON s.TreeID = t.TreeID
-          JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
-          JOIN ${schema}.census c ON sp.CensusID = c.CensusID
-          WHERE c.PlotID = ?
-            AND c.PlotCensusNumber = ?
-          ORDER BY pdt.MeasurementDate
-          LIMIT ?, ?`;
+              SELECT SQL_CALC_FOUND_ROWS pdt.*
+              FROM ${schema}.${params.dataType} pdt
+                       JOIN ${schema}.stems s ON pdt.StemID = s.StemID
+                       JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+                       JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
+                       JOIN ${schema}.census c ON sp.CensusID = c.CensusID
+              WHERE c.PlotID = ?
+                AND c.PlotCensusNumber = ?
+              ORDER BY pdt.MeasurementDate LIMIT ?, ?`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         } else {
@@ -150,16 +142,15 @@ export async function GET(
           pastCensusIDs = censusIDs.slice(1);
           // Query to fetch paginated measurements from measurementssummaryview
           paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS pdt.*
-            FROM ${schema}.${params.dataType} pdt
-            JOIN ${schema}.stems s ON pdt.StemID = s.StemID
-            JOIN ${schema}.trees t ON s.TreeID = t.TreeID
-            JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
-            JOIN ${schema}.census c ON sp.CensusID = c.CensusID
-            WHERE c.PlotID = ?
-              AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
-            ORDER BY pdt.MeasurementDate ASC
-            LIMIT ?, ?`;
+              SELECT SQL_CALC_FOUND_ROWS pdt.*
+              FROM ${schema}.${params.dataType} pdt
+                       JOIN ${schema}.stems s ON pdt.StemID = s.StemID
+                       JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+                       JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
+                       JOIN ${schema}.census c ON sp.CensusID = c.CensusID
+              WHERE c.PlotID = ?
+                AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
+              ORDER BY pdt.MeasurementDate ASC LIMIT ?, ?`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;
         }
@@ -279,8 +270,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
       const updateQuery = format(
         `UPDATE ??
-                                  SET ?
-                                  WHERE ?? = ?`,
+         SET ?
+         WHERE ?? = ?`,
         [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]
       );
       await runQuery(conn, updateQuery);
@@ -343,7 +334,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       const { [viewConfig.primaryKey]: primaryKeyValue } = deleteRowData;
       if (!primaryKeyValue) throw new Error(`Primary key value missing for ${viewConfig.primaryKey} in view ${params.dataType}`);
 
-      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${viewConfig.table}`, viewConfig.primaryKey, primaryKeyValue]);
+      const deleteQuery = format(
+        `DELETE
+         FROM ? ?
+         WHERE ?? = ?`,
+        [`${schema}.${viewConfig.table}`, viewConfig.primaryKey, primaryKeyValue]
+      );
       await runQuery(conn, deleteQuery);
       await conn.commit();
       return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
@@ -351,7 +347,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
-    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+    const deleteQuery = format(
+      `DELETE
+       FROM ? ?
+       WHERE ?? = ?`,
+      [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]
+    );
     await runQuery(conn, deleteQuery);
     await conn.commit();
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });

@@ -155,37 +155,27 @@ export function getEndpointHeaderName(endpoint: string) {
   switch (endpoint) {
     case '/dashboard':
       return 'Dashboard';
-      break;
     case '/measurementshub/summary':
       return 'View Data';
-      break;
     case '/measurementshub/validationhistory':
       return 'Validation History';
-      break;
     case '/measurementshub/viewfulltable':
       return 'All Historical Data';
     case '/measurementshub/validations':
       return 'Validations Hub';
     case '/fixeddatainput/attributes':
       return 'Stem Codes';
-      break;
     case '/fixeddatainput/personnel':
       return 'Personnel';
-      break;
     case '/fixeddatainput/quadrats':
       return 'Quadrats';
-      break;
     case '/fixeddatainput/subquadrats':
       return 'Subquadrats';
-      break;
     case '/fixeddatainput/stemtaxonomies':
       return 'Plot-Species List';
-      break;
     case '/fixeddatainput/quadratpersonnel':
       return 'Quadrat-Assigned Personnel';
-      break;
     case '/fixeddatainput/alltaxonomies':
       return 'Species List';
-      break;
   }
 }

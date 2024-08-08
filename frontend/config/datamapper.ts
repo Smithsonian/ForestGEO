@@ -15,6 +15,8 @@ import { PersonnelRDS, PersonnelResult } from './sqlrdsdefinitions/tables/person
 import { QuadratRDS, QuadratsResult } from './sqlrdsdefinitions/tables/quadratrds';
 import { StemRDS, StemResult } from './sqlrdsdefinitions/tables/stemrds';
 import { UnifiedChangelogRDS, UnifiedChangelogResult } from '@/config/sqlrdsdefinitions/tables/unifiedchangelogrds';
+import { ValidationChangelogRDS, ValidationChangelogResult } from '@/config/sqlrdsdefinitions/tables/validationchangelogrds';
+import { ValidationProceduresResult } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -34,6 +36,7 @@ export function parseDate(date: any): Date | undefined {
 
 export interface IDataMapper<RDS, Result> {
   mapData(results: Result[], indexOffset?: number): RDS[];
+
   demapData(results: RDS[]): Result[];
 }
 
@@ -147,6 +150,10 @@ class MapperFactory {
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'validationchangelog':
+        return new GenericMapper<ValidationChangelogRDS, ValidationChangelogResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'validationprocedures':
+        return new GenericMapper<ValidationProceduresResult, ValidationProceduresResult>() as unknown as IDataMapper<RDS, Result>;
       // views:
       case 'alltaxonomiesview':
         return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;

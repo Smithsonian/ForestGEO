@@ -11,8 +11,7 @@ import ListItemContent from '@mui/joy/ListItemContent';
 import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { LoginLogout } from '@/components/loginlogout';
-import { siteConfigNav, validityMapping } from '@/config/macros/siteconfigs';
-import { SiteConfigProps } from '@/config/macros/siteconfigs';
+import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
 import { Site } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import { Plot } from '@/config/sqlrdsdefinitions/tables/plotrds';
 import {
@@ -24,7 +23,7 @@ import {
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
 import { usePathname, useRouter } from 'next/navigation';
-import { Button, SelectOption, Stack, Badge, Tooltip, IconButton } from '@mui/joy';
+import { Badge, Button, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
