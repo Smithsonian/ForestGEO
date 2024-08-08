@@ -1,7 +1,5 @@
 // core measurements custom data type
 import { ResultType } from '@/config/utils';
-import { IDataMapper, parseDate } from '../../datamapper';
-import { bitToBoolean, booleanToBit } from '@/config/macros';
 
 export type CoreMeasurementsRDS = {
   id?: number;

@@ -1,4 +1,5 @@
-set foreign_key_checks = 0;
+set
+foreign_key_checks = 0;
 truncate attributes;
 truncate census;
 truncate cmattributes;
@@ -36,4 +37,5 @@ DROP PROCEDURE IF EXISTS `ValidateFindTreeStemsInDifferentQuadrats`;
 DROP PROCEDURE IF EXISTS `ValidateHOMUpperAndLowerBounds`;
 DROP PROCEDURE IF EXISTS `ValidateScreenMeasuredDiameterMinMax`;
 DROP PROCEDURE IF EXISTS `ValidateScreenStemsWithMeasurementsButDeadAttributes`;
-set foreign_key_checks = 1;
+set
+foreign_key_checks = 1;

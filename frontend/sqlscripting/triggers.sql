@@ -1,4 +1,5 @@
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_attributes
     AFTER INSERT
@@ -35,9 +36,10 @@ BEGIN
     VALUES ('attributes', OLD.Code, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_plots
     AFTER INSERT
@@ -138,9 +140,10 @@ BEGIN
     VALUES ('plots', OLD.PlotID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_census
     AFTER INSERT
@@ -205,10 +208,11 @@ BEGIN
     VALUES ('census', OLD.CensusID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_quadrats
     AFTER INSERT
@@ -301,10 +305,11 @@ BEGIN
     VALUES ('quadrats', OLD.QuadratID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_reference
     AFTER INSERT
@@ -365,10 +370,11 @@ BEGIN
     VALUES ('reference', OLD.ReferenceID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_family
     AFTER INSERT
@@ -421,10 +427,11 @@ BEGIN
     VALUES ('family', OLD.FamilyID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_genus
     AFTER INSERT
@@ -485,10 +492,11 @@ BEGIN
     VALUES ('genus', OLD.GenusID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_roles
     AFTER INSERT
@@ -541,10 +549,11 @@ BEGIN
     VALUES ('roles', OLD.RoleID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_personnel
     AFTER INSERT
@@ -605,10 +614,11 @@ BEGIN
     VALUES ('personnel', OLD.PersonnelID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_quadratpersonnel
     AFTER INSERT
@@ -665,10 +675,11 @@ BEGIN
     VALUES ('quadratpersonnel', OLD.QuadratPersonnelID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_species
     AFTER INSERT
@@ -757,10 +768,11 @@ BEGIN
     VALUES ('species', OLD.SpeciesID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_specieslimits
     AFTER INSERT
@@ -825,10 +837,11 @@ BEGIN
     VALUES ('specieslimits', OLD.SpeciesLimitID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_subquadrats
     AFTER INSERT
@@ -909,10 +922,11 @@ BEGIN
     VALUES ('subquadrats', OLD.SubquadratID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_trees
     AFTER INSERT
@@ -965,10 +979,11 @@ BEGIN
     VALUES ('trees', OLD.TreeID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_stems
     AFTER INSERT
@@ -1049,10 +1064,11 @@ BEGIN
     VALUES ('stems', OLD.StemID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_coremeasurements
     AFTER INSERT
@@ -1137,10 +1153,11 @@ BEGIN
     VALUES ('coremeasurements', OLD.CoreMeasurementID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_cmattributes
     AFTER INSERT
@@ -1193,10 +1210,11 @@ BEGIN
     VALUES ('cmattributes', OLD.CMAID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_cmverrors
     AFTER INSERT
@@ -1249,10 +1267,11 @@ BEGIN
     VALUES ('cmverrors', OLD.CMVErrorID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_specimens
     AFTER INSERT
@@ -1333,10 +1352,11 @@ BEGIN
     VALUES ('specimens', OLD.SpecimenID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_insert_validationchangelog
     AFTER INSERT
@@ -1417,6 +1437,6 @@ BEGIN
     VALUES ('validationchangelog', OLD.ValidationRunID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER ;
+DELIMITER;
 
 

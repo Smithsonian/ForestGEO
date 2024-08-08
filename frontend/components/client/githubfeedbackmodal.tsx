@@ -29,7 +29,7 @@ import {
   Typography
 } from '@mui/joy';
 import { useState } from 'react';
-import { BugReport, Error as ErrorIcon, Info, Build, AccessibilityNew, GitHub, Event, Person } from '@mui/icons-material';
+import { AccessibilityNew, BugReport, Build, Error as ErrorIcon, Event, GitHub, Info, Person } from '@mui/icons-material';
 import { Octokit } from 'octokit';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { usePathname } from 'next/navigation';

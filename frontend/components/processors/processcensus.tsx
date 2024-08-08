@@ -6,7 +6,7 @@ import { QuadratRDS, QuadratsResult } from '@/config/sqlrdsdefinitions/tables/qu
 import { SpeciesRDS, SpeciesResult } from '@/config/sqlrdsdefinitions/tables/speciesrds';
 import { StemRDS, StemResult } from '@/config/sqlrdsdefinitions/tables/stemrds';
 import { SubquadratRDS, SubquadratResult } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
-import { createSelectQuery, createInsertOrUpdateQuery } from '@/config/utils';
+import { createInsertOrUpdateQuery, createSelectQuery } from '@/config/utils';
 import { TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/tables/treerds';
 
 import { getPersonnelIDByName } from './processorhelperfunctions';

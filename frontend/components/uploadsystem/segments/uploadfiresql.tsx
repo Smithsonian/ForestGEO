@@ -2,8 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { formatDate } from '@/config/macros';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { UploadFireProps } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow } from '@/config/macros/formdetails';
 import { Stack } from '@mui/joy';
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
@@ -180,7 +179,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     if (startCountdown && countdown > 0) {
       timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
     } else if (countdown === 0) {
-      setReviewState(ReviewStates.UPLOAD_AZURE); // redirecting to azure upload. Validations page has been separated into dedicated page to centralize function.
+      if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
+      else setReviewState(ReviewStates.UPLOAD_AZURE);
     }
 
     return () => clearTimeout(timer);

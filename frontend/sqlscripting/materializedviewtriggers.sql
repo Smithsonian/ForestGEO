@@ -405,9 +405,9 @@ CREATE TRIGGER trg_batchprocessingflag_before_insert
 BEGIN
     IF NEW.flag_status = 'STARTED' THEN
         -- Ensure there is only one STARTED flag and reset needs_refresh
-        DELETE FROM batchprocessingflag WHERE flag_status = 'STARTED';
-        SET NEW.needs_refresh = FALSE;
-    END IF;
+    DELETE FROM batchprocessingflag WHERE flag_status = 'STARTED';
+    SET NEW.needs_refresh = FALSE;
+END IF;
 END;
 
 CREATE TRIGGER trg_batchprocessingflag_after_update
@@ -418,10 +418,10 @@ BEGIN
     IF NEW.flag_status = 'ENDED' AND NEW.needs_refresh = TRUE THEN
         -- Call the refresh procedures
         CALL RefreshMeasurementsSummary();
-        CALL RefreshViewFullTable();
+    CALL RefreshViewFullTable();
 
-        -- Reset the needs_refresh flag
-        UPDATE batchprocessingflag SET needs_refresh = FALSE WHERE flag_id = NEW.flag_id;
-    END IF;
+    -- Reset the needs_refresh flag
+    UPDATE batchprocessingflag SET needs_refresh = FALSE WHERE flag_id = NEW.flag_id;
+END IF;
 END;
 

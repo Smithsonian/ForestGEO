@@ -1,4 +1,4 @@
-import { unitSelectionOptions, areaSelectionOptions } from '@/config/macros';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridRenderEditCellParams, useGridApiRef } from '@mui/x-data-grid';
@@ -775,3 +775,39 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
   }
   return column;
 });
+
+export const ValidationProceduresGridColumns: GridColDef[] = [
+  { field: 'id', headerName: 'ID', headerClassName: 'header' },
+  { field: 'validationID', headerName: '#', headerClassName: 'header' },
+  { field: 'procedureName', headerName: 'Procedure', headerClassName: 'header', type: 'string', editable: true, flex: 1 },
+  { field: 'description', headerName: 'Description', headerClassName: 'header', type: 'string', editable: true, flex: 1 },
+  {
+    field: 'createdAt',
+    headerName: 'Created At',
+    renderHeader: () => formatHeader('Created', 'At'),
+    type: 'date',
+    headerClassName: 'header',
+    headerAlign: 'center',
+    valueGetter: (params: any) => {
+      if (!params || !params.value) return null;
+      return new Date(params.value);
+    },
+    editable: true,
+    flex: 0.4
+  },
+  {
+    field: 'updatedAt',
+    headerName: 'Updated At',
+    renderHeader: () => formatHeader('Updated', 'At'),
+    type: 'date',
+    headerClassName: 'header',
+    headerAlign: 'center',
+    valueGetter: (params: any) => {
+      if (!params || !params.value) return null;
+      return new Date(params.value);
+    },
+    editable: true,
+    flex: 0.4
+  },
+  { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.4 }
+];

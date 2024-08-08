@@ -1,13 +1,13 @@
 'use client';
 
 import { Box, Paper, Typography } from '@mui/material';
-import React, { Dispatch, SetStateAction, useState, useEffect } from 'react';
+import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { FileWithPath } from 'react-dropzone';
 import '@/styles/validationtable.css';
 import moment from 'moment';
 import { GridCellParams, GridColDef, GridRowModel, GridRowsProp } from '@mui/x-data-grid';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import { FileErrors, FileRow, FileCollectionRowSet, RowValidationErrors, ValidationFunction, getTableHeaders } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileErrors, FileRow, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { validateAttributesRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/tables/quadratrds';

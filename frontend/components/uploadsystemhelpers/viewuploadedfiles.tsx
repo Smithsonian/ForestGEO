@@ -1,8 +1,7 @@
 'use client';
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { tableHeaderSettings } from '@/config/macros';
-import { fileColumns } from '@/config/macros/formdetails';
-import { UploadedFileData } from '@/config/macros/formdetails';
+import { fileColumns, UploadedFileData } from '@/config/macros/formdetails';
 import { Plot } from '@/config/sqlrdsdefinitions/tables/plotrds';
 import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { DeleteIcon, DownloadIcon, EditIcon } from '@/components/icons';

@@ -3,9 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Pagination, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
 import { formatDate } from '@/config/macros';
-import { CMError } from '@/config/macros/uploadsystemmacros';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { UploadValidationErrorDisplayProps } from '@/config/macros/uploadsystemmacros';
+import { CMError, ReviewStates, UploadValidationErrorDisplayProps } from '@/config/macros/uploadsystemmacros';
 import { FileRow } from '@/config/macros/formdetails';
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import { Button, CircularProgress } from '@mui/joy';

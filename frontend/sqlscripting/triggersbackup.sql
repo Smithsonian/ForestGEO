@@ -1,4 +1,5 @@
-# attributes triggers
+#
+attributes triggers
 
 DELIMITER //
 
@@ -27,9 +28,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_attributes
     AFTER UPDATE
@@ -65,9 +67,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_attributes
     AFTER DELETE
@@ -94,9 +97,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# plots triggers
+#
+plots triggers
 DELIMITER //
 
 CREATE TRIGGER after_insert_plots
@@ -137,9 +141,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_plots
     AFTER UPDATE
@@ -200,9 +205,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_plots
     AFTER DELETE
@@ -241,9 +247,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# census triggers
+#
+census triggers
 
 DELIMITER //
 
@@ -276,9 +283,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_census
     AFTER UPDATE
@@ -321,9 +329,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_census
     AFTER DELETE
@@ -353,9 +362,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# quadrats triggers
+#
+quadrats triggers
 
 DELIMITER //
 
@@ -395,9 +405,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_quadrats
     AFTER UPDATE
@@ -454,9 +465,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_quadrats
     AFTER DELETE
@@ -493,9 +505,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# reference triggers
+#
+reference triggers
 
 DELIMITER //
 
@@ -527,9 +540,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_reference
     AFTER UPDATE
@@ -570,9 +584,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_reference
     AFTER DELETE
@@ -600,9 +615,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# family triggers
+#
+family triggers
 
 DELIMITER //
 
@@ -632,9 +648,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_family
     AFTER UPDATE
@@ -671,9 +688,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_family
     AFTER DELETE
@@ -701,9 +719,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# genus triggers
+#
+genus triggers
 
 DELIMITER //
 
@@ -735,9 +754,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_genus
     AFTER UPDATE
@@ -778,9 +798,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_genus
     AFTER DELETE
@@ -809,9 +830,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# roles triggers
+#
+roles triggers
 
 DELIMITER //
 
@@ -841,9 +863,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_roles
     AFTER UPDATE
@@ -880,9 +903,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_roles
     AFTER DELETE
@@ -909,9 +933,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# personnel triggers
+#
+personnel triggers
 
 DELIMITER //
 
@@ -943,9 +968,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_personnel
     AFTER UPDATE
@@ -986,9 +1012,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_personnel
     AFTER DELETE
@@ -1017,9 +1044,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# quadratpersonnel triggers
+#
+quadratpersonnel triggers
 
 DELIMITER //
 
@@ -1050,9 +1078,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_quadratpersonnel
     AFTER UPDATE
@@ -1091,9 +1120,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_quadratpersonnel
     AFTER DELETE
@@ -1121,9 +1151,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# species triggers
+#
+species triggers
 
 DELIMITER //
 
@@ -1162,9 +1193,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_species
     AFTER UPDATE
@@ -1219,9 +1251,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_species
     AFTER DELETE
@@ -1257,9 +1290,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# specieslimits triggers
+#
+specieslimits triggers
 
 DELIMITER //
 
@@ -1292,9 +1326,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_specieslimits
     AFTER UPDATE
@@ -1337,9 +1372,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_specieslimits
     AFTER DELETE
@@ -1369,9 +1405,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# subquadrats triggers
+#
+subquadrats triggers
 
 DELIMITER //
 
@@ -1408,9 +1445,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_subquadrats
     AFTER UPDATE
@@ -1460,9 +1498,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_subquadrats
     AFTER DELETE
@@ -1496,9 +1535,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# trees triggers
+#
+trees triggers
 
 DELIMITER //
 
@@ -1528,9 +1568,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_trees
     AFTER UPDATE
@@ -1567,9 +1608,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_trees
     AFTER DELETE
@@ -1597,9 +1639,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# stems triggers
+#
+stems triggers
 
 DELIMITER //
 
@@ -1635,9 +1678,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_stems
     AFTER UPDATE
@@ -1688,9 +1732,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_stems
     AFTER DELETE
@@ -1725,9 +1770,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# coremeasurements triggers
+#
+coremeasurements triggers
 
 DELIMITER //
 
@@ -1764,9 +1810,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_coremeasurements
     AFTER UPDATE
@@ -1817,9 +1864,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_coremeasurements
     AFTER DELETE
@@ -1854,9 +1902,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# cmattributes triggers
+#
+cmattributes triggers
 
 DELIMITER //
 
@@ -1886,9 +1935,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_cmattributes
     AFTER UPDATE
@@ -1925,9 +1975,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_cmattributes
     AFTER DELETE
@@ -1955,9 +2006,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# cmverrors triggers
+#
+cmverrors triggers
 
 DELIMITER //
 
@@ -1988,9 +2040,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_cmverrors
     AFTER UPDATE
@@ -2027,9 +2080,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_cmverrors
     AFTER DELETE
@@ -2057,9 +2111,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# specimens triggers
+#
+specimens triggers
 
 DELIMITER //
 
@@ -2095,9 +2150,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_specimens
     AFTER UPDATE
@@ -2148,9 +2204,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_specimens
     AFTER DELETE
@@ -2185,9 +2242,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-# validationchangelog triggers
+#
+validationchangelog triggers
 
 DELIMITER //
 
@@ -2224,9 +2282,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_update_validationchangelog
     AFTER UPDATE
@@ -2277,9 +2336,10 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;
 
-DELIMITER //
+DELIMITER
+//
 
 CREATE TRIGGER after_delete_validationchangelog
     AFTER DELETE
@@ -2313,4 +2373,4 @@ BEGIN
            );
 END //
 
-DELIMITER ;
+DELIMITER;

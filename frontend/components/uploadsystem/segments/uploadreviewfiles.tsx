@@ -4,9 +4,8 @@ import { Button, Dialog, DialogActions, DialogContent, DialogContentText, Dialog
 import { Box, Checkbox, Modal, Typography } from '@mui/joy';
 import { DisplayParsedDataGridInline } from '@/components/uploadsystemhelpers/displayparseddatagrid';
 import Divider from '@mui/joy/Divider';
-import React, { useState, useEffect } from 'react';
-import { ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { UploadReviewFilesProps } from '@/config/macros/uploadsystemmacros';
+import React, { useEffect, useState } from 'react';
+import { ReviewStates, UploadReviewFilesProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
 import { DropzoneLogic } from '@/components/uploadsystemhelpers/dropzone';
 import { FileList } from '@/components/uploadsystemhelpers/filelist';

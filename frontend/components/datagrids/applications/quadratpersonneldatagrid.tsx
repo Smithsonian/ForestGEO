@@ -1,6 +1,6 @@
 // quadratpersonnel datagrid
 'use client';
-import { Box, Typography, Button } from '@mui/joy';
+import { Box, Button, Typography } from '@mui/joy';
 import { AlertProps } from '@mui/material';
 import { GridColDef, GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';

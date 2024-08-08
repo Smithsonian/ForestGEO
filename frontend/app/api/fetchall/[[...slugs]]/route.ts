@@ -1,5 +1,5 @@
 import { getConn, runQuery } from '@/components/processors/processormacros';
-import MapperFactory, { IDataMapper } from '@/config/datamapper';
+import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
@@ -7,31 +7,34 @@ import { NextRequest, NextResponse } from 'next/server';
 const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCensusNumber?: string, quadratID?: string): string => {
   if (fetchType === 'plots') {
     return `
-      SELECT 
-        p.*, 
-        COUNT(q.QuadratID) AS NumQuadrats
-      FROM 
-        ${schema}.plots p
-      LEFT JOIN 
-        ${schema}.quadrats q ON p.PlotID = q.PlotID
-      GROUP BY 
-        p.PlotID
-      ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ''}`;
-  }
+        SELECT p.*,
+               COUNT(q.QuadratID) AS NumQuadrats
+        FROM ${schema}.plots p
+                 LEFT JOIN
+             ${schema}.quadrats q ON p.PlotID = q.PlotID
+        GROUP BY p.PlotID
+            ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ''}`;
+  } else if (fetchType === 'validationprocedures') {
+    return `
+        SELECT *
+        FROM catalog.validationprocedures;
+    `;
+  } else {
+    let query = `SELECT *
+                 FROM ${schema}.${fetchType}`;
+    const conditions = [];
 
-  let query = `SELECT * FROM ${schema}.${fetchType}`;
-  const conditions = [];
+    if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) && fetchType !== 'personnel') conditions.push(`PlotID = ${plotID}`);
+    if (plotCensusNumber && plotCensusNumber !== 'undefined' && !isNaN(parseInt(plotCensusNumber))) {
+      conditions.push(`CensusID IN ( SELECT c.CensusID FROM ${schema}.census c WHERE c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber})`);
+    }
+    if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
 
-  if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) && fetchType !== 'personnel') conditions.push(`PlotID = ${plotID}`);
-  if (plotCensusNumber && plotCensusNumber !== 'undefined' && !isNaN(parseInt(plotCensusNumber))) {
-    conditions.push(`CensusID IN ( SELECT c.CensusID FROM ${schema}.census c WHERE c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber})`);
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    return query;
   }
-  if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
-
-  if (conditions.length > 0) {
-    query += ' WHERE ' + conditions.join(' AND ');
-  }
-  return query;
 };
 
 // ordering: PCQ
