@@ -24,11 +24,15 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
                  FROM ${schema}.${fetchType}`;
     const conditions = [];
 
-    if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) && fetchType !== 'personnel') conditions.push(`PlotID = ${plotID}`);
-    if (plotCensusNumber && plotCensusNumber !== 'undefined' && !isNaN(parseInt(plotCensusNumber))) {
-      conditions.push(`CensusID IN ( SELECT c.CensusID FROM ${schema}.census c WHERE c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber})`);
+    if (plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) && fetchType !== 'personnel') {
+      conditions.push(`PlotID = ${plotID}`);
     }
-    if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) conditions.push(`QuadratID = ${quadratID}`);
+    if (plotCensusNumber && plotCensusNumber !== 'undefined' && !isNaN(parseInt(plotCensusNumber))) {
+      conditions.push(`CensusID IN (SELECT c.CensusID FROM ${schema}.census c WHERE c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber})`);
+    }
+    if (quadratID && quadratID !== 'undefined' && !isNaN(parseInt(quadratID))) {
+      conditions.push(`QuadratID = ${quadratID}`);
+    }
 
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
