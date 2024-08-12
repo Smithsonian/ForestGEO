@@ -811,3 +811,10 @@ export const ValidationProceduresGridColumns: GridColDef[] = [
   },
   { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.4 }
 ];
+
+export const CMVErrorGridColumns: GridColDef[] = [
+  { field: 'id', headerName: 'ID', headerClassName: 'header' },
+  { field: 'cmvErrorID', headerName: 'CMVErrorID', headerClassName: 'header' },
+  { field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header' },
+  { field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header' }
+];

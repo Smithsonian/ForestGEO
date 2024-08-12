@@ -17,6 +17,7 @@ import { StemRDS, StemResult } from './sqlrdsdefinitions/tables/stemrds';
 import { UnifiedChangelogRDS, UnifiedChangelogResult } from '@/config/sqlrdsdefinitions/tables/unifiedchangelogrds';
 import { ValidationChangelogRDS, ValidationChangelogResult } from '@/config/sqlrdsdefinitions/tables/validationchangelogrds';
 import { ValidationProceduresResult } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
+import { CMAttributesRDS, CMAttributesResult, CMVErrorRDS, CMVErrorResult } from '@/config/sqlrdsdefinitions/tables/cmrds';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -128,24 +129,35 @@ class MapperFactory {
   static getMapper<RDS, Result>(type: string): IDataMapper<RDS, Result> {
     switch (type) {
       // tables
-      case 'coremeasurements':
-        return new GenericMapper<CoreMeasurementsRDS, CoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'sites':
-        return new SitesMapper() as any;
-      case 'plots':
-        return new GenericMapper<PlotRDS, PlotsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'alltaxonomiesview':
+        return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'attributes':
         return new GenericMapper<AttributesRDS, AttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'quadratpersonnel':
-        return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'census':
         return new GenericMapper<CensusRDS, CensusResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'coremeasurements':
+        return new GenericMapper<CoreMeasurementsRDS, CoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'cmverrors':
+        return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'cmattributes':
+        return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'measurementssummary':
+      case 'measurementssummaryview':
+        return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
       case 'personnel':
         return new GenericMapper<PersonnelRDS, PersonnelResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'plots':
+        return new GenericMapper<PlotRDS, PlotsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'quadratpersonnel':
+        return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':
         return new GenericMapper<QuadratRDS, QuadratsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'sites':
+        return new SitesMapper() as any;
       case 'species':
         return new GenericMapper<SpeciesRDS, SpeciesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'stemtaxonomiesview':
+        return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
@@ -154,16 +166,8 @@ class MapperFactory {
         return new GenericMapper<ValidationChangelogRDS, ValidationChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationprocedures':
         return new GenericMapper<ValidationProceduresResult, ValidationProceduresResult>() as unknown as IDataMapper<RDS, Result>;
-      // views:
-      case 'alltaxonomiesview':
-        return new GenericMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'stemtaxonomiesview':
-        return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'measurementssummaryview':
-      case 'measurementssummary':
-        return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'viewfulltableview':
       case 'viewfulltable':
+      case 'viewfulltableview':
         return new GenericMapper<ViewFullTableViewRDS, ViewFullTableViewResult>() as unknown as IDataMapper<RDS, Result>;
       default:
         throw new Error('Mapper not found for type: ' + type);
