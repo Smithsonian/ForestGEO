@@ -9,7 +9,7 @@ import { randomId } from '@mui/x-data-grid-generator';
 import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
-import MeasurementSummaryGrid from '@/components/datagrids/msvdatagrid';
+import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 
 export default function ViewFullTableDataGrid() {
   const [rows, setRows] = useState<GridRowsProp>([initialViewFullTableViewRDS] as GridRowsProp);
@@ -72,7 +72,7 @@ export default function ViewFullTableDataGrid() {
           </Box>
         </Box>
 
-        <MeasurementSummaryGrid
+        <MeasurementsCommons
           gridType="viewfulltable"
           gridColumns={ViewFullTableGridColumns}
           rows={rows}

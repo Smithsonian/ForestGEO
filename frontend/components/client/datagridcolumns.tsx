@@ -415,7 +415,7 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
   );
 };
 
-export const msvGridColumns: GridColDef[] = [
+export const measurementsSummaryViewGridColumns: GridColDef[] = [
   { field: 'id', headerName: 'ID', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
   { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
   { field: 'quadratName', headerName: 'Quadrat', headerAlign: 'left', headerClassName: 'header', flex: 0.8, align: 'left', editable: true },
@@ -574,25 +574,54 @@ export const ValidationErrorGridColumns: GridColDef[] = [
 ];
 
 export const CoreMeasurementsGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'coreMeasurementID', headerName: 'CMID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'stemID', headerName: 'StemID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'isValidated', headerName: 'IsValidated', headerClassName: 'header', flex: 1, align: 'left', editable: false },
+  { field: 'id', headerName: 'ID', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
+  { field: 'censusID', headerName: 'Census ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  { field: 'stemID', headerName: 'Stem ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   {
-    field: 'measurementDate',
-    headerName: 'MeasurementDate',
-    type: 'date',
+    field: 'measuredDBH',
+    headerName: 'DBH',
     headerClassName: 'header',
-    flex: 1,
-    valueGetter: (params: any) => {
-      if (!params || !params.value) return null;
-      return new Date(params.value);
-    },
-    editable: true
+    flex: 0.8,
+    align: 'right',
+    editable: true,
+    renderCell: renderDBHCell,
+    renderEditCell: renderEditDBHCell
   },
-  { field: 'measuredDBH', headerName: 'DBH', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'measuredHOM', headerName: 'HOM', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left' }
+  {
+    field: 'dbhUnits',
+    headerName: 'DBH Units',
+    headerClassName: 'header',
+    flex: 0.4,
+    maxWidth: 65,
+    renderHeader: () => formatHeader('DBH', 'Units'),
+    align: 'center',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  },
+  {
+    field: 'measuredHOM',
+    headerName: 'HOM',
+    headerClassName: 'header',
+    flex: 0.5,
+    align: 'right',
+    headerAlign: 'left',
+    editable: true,
+    renderCell: renderHOMCell,
+    renderEditCell: renderEditHOMCell
+  },
+  {
+    field: 'homUnits',
+    headerName: 'HOM Units',
+    headerClassName: 'header',
+    maxWidth: 65,
+    renderHeader: () => formatHeader('HOM', 'Units'),
+    align: 'center',
+    editable: true,
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  }
 ];
 
 export const SubquadratGridColumns: GridColDef[] = [
@@ -751,7 +780,7 @@ const combineColumns = (primary: GridColDef[], secondary: GridColDef[]): GridCol
   return combined;
 };
 
-const rawColumns: GridColDef[] = combineColumns(msvGridColumns, StemTaxonomiesViewGridColumns);
+const rawColumns: GridColDef[] = combineColumns(measurementsSummaryViewGridColumns, StemTaxonomiesViewGridColumns);
 
 export const ViewFullTableGridColumns = rawColumns.map(column => {
   if (column.field === 'speciesCode') {
@@ -810,11 +839,4 @@ export const ValidationProceduresGridColumns: GridColDef[] = [
     flex: 0.4
   },
   { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.4 }
-];
-
-export const CMVErrorGridColumns: GridColDef[] = [
-  { field: 'id', headerName: 'ID', headerClassName: 'header' },
-  { field: 'cmvErrorID', headerName: 'CMVErrorID', headerClassName: 'header' },
-  { field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header' },
-  { field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header' }
 ];

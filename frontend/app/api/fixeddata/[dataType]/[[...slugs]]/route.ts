@@ -24,11 +24,12 @@ export async function GET(
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam] = params.slugs;
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
     throw new Error('core slugs schema/page/pageSize not correctly received');
-  const page = parseInt(pageParam);
-  const pageSize = parseInt(pageSizeParam);
-
   if (!plotIDParam || plotIDParam === '0' || !plotCensusNumberParam || plotCensusNumberParam === '0')
     throw new Error('Core plot/census information not received');
+  // optional pending parameter to filter only pending rows:
+  const pending = request.nextUrl.searchParams.get('pending') === 'true';
+  const page = parseInt(pageParam);
+  const pageSize = parseInt(pageSizeParam);
   const plotID = parseInt(plotIDParam);
   const plotCensusNumber = parseInt(plotCensusNumberParam);
   const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
@@ -126,12 +127,10 @@ export async function GET(
           paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS pdt.*
               FROM ${schema}.${params.dataType} pdt
-                       JOIN ${schema}.stems s ON pdt.StemID = s.StemID
-                       JOIN ${schema}.trees t ON s.TreeID = t.TreeID
-                       JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
-                       JOIN ${schema}.census c ON sp.CensusID = c.CensusID
+                       JOIN ${schema}.census c ON pdt.CensusID = c.CensusID
               WHERE c.PlotID = ?
                 AND c.PlotCensusNumber = ?
+                ${pending ? ` AND pdt.IsValidated IS NULL` : ''}
               ORDER BY pdt.MeasurementDate LIMIT ?, ?`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
@@ -150,6 +149,7 @@ export async function GET(
                        JOIN ${schema}.census c ON sp.CensusID = c.CensusID
               WHERE c.PlotID = ?
                 AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
+                ${pending ? ` AND pdt.IsValidated IS NULL` : ''}
               ORDER BY pdt.MeasurementDate ASC LIMIT ?, ?`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;

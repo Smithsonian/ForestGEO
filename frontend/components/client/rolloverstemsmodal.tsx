@@ -43,7 +43,8 @@ const defaultCVS: CensusValidationStatus = {
   hasStemsData: false
 };
 
-export default function RolloverStemsModal({ open, onClose, onConfirm }: RolloverStemsModalProps) {
+export default function RolloverStemsModal(props: RolloverStemsModalProps) {
+  const { open, onClose, onConfirm } = props;
   const [rolloverStems, setRolloverStems] = useState(false);
   const [selectedStems, setSelectedStems] = useState<StemRDS[]>([]);
   const [previousStems, setPreviousStems] = useState<StemRDS[]>([]);

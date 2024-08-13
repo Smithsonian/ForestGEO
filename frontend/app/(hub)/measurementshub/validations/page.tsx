@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Card, CardContent, Typography } from '@mui/joy';
+import { Box, Card, CardContent, Stack, Typography } from '@mui/joy';
 import React, { useEffect, useState } from 'react';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
@@ -9,6 +9,7 @@ import { CMVErrorGridColumns, ValidationProceduresGridColumns } from '@/componen
 import { GridToolbar } from '@mui/x-data-grid';
 import Divider from '@mui/joy/Divider';
 import { CMVErrorRDS } from '@/config/sqlrdsdefinitions/tables/cmrds';
+import MeasurementsSummaryViewDataGrid from '@/components/datagrids/applications/measurementssummaryviewdatagrid';
 
 export default function ValidationsPage() {
   const currentSite = useSiteContext();
@@ -43,10 +44,18 @@ export default function ValidationsPage() {
             Review Validations
           </Typography>
           <StyledDataGrid
+            isCellEditable={() => false}
             slots={{ toolbar: GridToolbar }}
             loading={loading}
             disableColumnSelector
-            sx={{ width: '100%' }}
+            sx={{
+              width: '100%',
+              '& .MuiDataGrid-cell': {
+                whiteSpace: 'normal',
+                wordWrap: 'break-word',
+                lineHeight: '1.2'
+              }
+            }}
             columns={ValidationProceduresGridColumns}
             rows={validationProcedures}
             initialState={{
@@ -54,7 +63,8 @@ export default function ValidationsPage() {
                 columnVisibilityModel: {
                   id: false,
                   validationID: false,
-                  updatedAt: false
+                  updatedAt: false,
+                  createdAt: false
                 }
               }
             }}
@@ -62,28 +72,39 @@ export default function ValidationsPage() {
         </CardContent>
       </Card>
       <Divider orientation={'vertical'} sx={{ mx: 1 }} />
-      <Card variant="plain" sx={{ width: '50%' }}>
-        <CardContent>
-          <Typography level={'title-lg'} fontWeight={'bold'}>
-            Rows Failing Validation
-          </Typography>
-          <StyledDataGrid
-            slots={{ toolbar: GridToolbar }}
-            loading={loading}
-            disableColumnSelector
-            sx={{ width: '100%' }}
-            columns={CMVErrorGridColumns}
-            rows={currentErrors}
-            initialState={{
-              columns: {
-                columnVisibilityModel: {
-                  id: false
+      <Stack direction={'column'} sx={{ width: '50%' }}>
+        <Card variant={'plain'}>
+          <CardContent>
+            <Typography level={'title-lg'} fontWeight={'bold'}>
+              Rows Pending Validation
+            </Typography>
+            <MeasurementsSummaryViewDataGrid filterPending={true} />
+          </CardContent>
+        </Card>
+        <Card variant="plain">
+          <CardContent>
+            <Typography level={'title-lg'} fontWeight={'bold'}>
+              Rows Failing Validation
+            </Typography>
+            <StyledDataGrid
+              isCellEditable={() => false}
+              slots={{ toolbar: GridToolbar }}
+              loading={loading}
+              disableColumnSelector
+              sx={{ width: '100%' }}
+              columns={CMVErrorGridColumns}
+              rows={currentErrors}
+              initialState={{
+                columns: {
+                  columnVisibilityModel: {
+                    id: false
+                  }
                 }
-              }
-            }}
-          />
-        </CardContent>
-      </Card>
+              }}
+            />
+          </CardContent>
+        </Card>
+      </Stack>
     </Box>
   );
 }
