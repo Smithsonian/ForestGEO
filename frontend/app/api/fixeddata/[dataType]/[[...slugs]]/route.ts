@@ -45,12 +45,19 @@ export async function GET(
     const queryParams: any[] = [];
 
     switch (params.dataType) {
+      case 'validationprocedures':
+        paginatedQuery = `
+          SELECT SQL_CALC_FOUND_ROWS * 
+          FROM catalog.${params.dataType} LIMIT ?, ?;`; // validation procedures is special
+        queryParams.push(page * pageSize, pageSize);
+        break;
       case 'attributes':
       case 'species':
       case 'stems':
       case 'alltaxonomiesview':
       case 'stemtaxonomiesview':
       case 'quadratpersonnel':
+      case 'sitespecificvalidations':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
             FROM ${schema}.${params.dataType} LIMIT ?, ?`;
@@ -346,7 +353,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     }
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-    const { [demappedGridID]: gridIDKey, ...remainingProperties } = deleteRowData;
+    const { [demappedGridID]: gridIDKey } = deleteRowData;
     const deleteQuery = format(
       `DELETE
        FROM ? ?

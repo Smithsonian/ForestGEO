@@ -20,15 +20,16 @@ import {
   Stepper,
   Tooltip,
   Typography
-} from '@mui/joy';
-import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
-import WarningIcon from '@mui/icons-material/Warning';
-import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
-import { useSession } from 'next-auth/react';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/tables/unifiedchangelogrds';
-import { useEffect, useState } from 'react';
-import moment from 'moment';
+} from "@mui/joy";
+import HelpOutlineOutlinedIcon from "@mui/icons-material/HelpOutlineOutlined";
+import WarningIcon from "@mui/icons-material/Warning";
+import CheckIcon from "@mui/icons-material/Check";
+import { useLockAnimation } from "@/app/contexts/lockanimationcontext";
+import { useSession } from "next-auth/react";
+import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { UnifiedChangelogRDS } from "@/config/sqlrdsdefinitions/tables/unifiedchangelogrds";
+import { useEffect, useState } from "react";
+import moment from "moment";
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();
@@ -180,15 +181,21 @@ export default function DashboardPage() {
                   </Typography>
                 </Box>
               </Stack>
-              <Stack direction={'column'} sx={{ justifyContent: 'center', alignContent: 'center' }}>
-                <Typography level={'body-md'} sx={{ alignSelf: 'flex-start' }}>
+              <Stack direction={'column'} sx={{ justifyContent: 'center', alignContent: 'center', width: '100%', boxSizing: 'border-box' }}>
+                <Typography level={'body-md'} sx={{ alignSelf: 'flex-start', width: '100%' }}>
                   You have access to the following sites:
                 </Typography>
-                <Stack direction={'row'} divider={<Divider orientation={'vertical'} sx={{ mx: 1 }} />}>
+                <Stack
+                  direction={'column'}
+           "column"ivider={<Divider orientation={'horizontal'} sx={{ m"horizontal"}
+                  sx={{ flexWrap: 'wrap', width: '100%'"wrap"izing: 'b"100%"box' }}
+     "border-box"
                   {allowedSites?.map(site => (
-                    <Typography level={'body-md'} key={site.schemaName}>
-                      <strong>{site.siteName}</strong>
-                    </Typography>
+                    <Chip key={site.schemaName} variant="soft" startDecorator={<CheckIcon />} sx={{ flexBasis: 'auto' }}>
+                      <Typography level={'body-md'} key={site.schemaName} sx={{ marginBottom: 1, wordBreak: 'break-word', flexBasis: 'auto' }}>
+                        <strong>{site.siteName}</strong>
+                      </Typography>
+                    </Chip>
                   ))}
                 </Stack>
               </Stack>

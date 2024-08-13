@@ -2,13 +2,12 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { GridToolbarProps } from '@mui/x-data-grid';
-import { getCoreMeasurementsHCs } from './sqlrdsdefinitions/tables/coremeasurementsrds';
-import { getQuadratHCs } from './sqlrdsdefinitions/tables/quadratrds';
-import { getAllTaxonomiesViewHCs } from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
-import { getMeasurementsSummaryViewHCs } from './sqlrdsdefinitions/views/measurementssummaryviewrds';
-import { getStemTaxonomiesViewHCs } from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
-import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltableviewrds';
+import { getCoreMeasurementsHCs } from "./sqlrdsdefinitions/tables/coremeasurementsrds";
+import { getQuadratHCs } from "./sqlrdsdefinitions/tables/quadratrds";
+import { getAllTaxonomiesViewHCs } from "./sqlrdsdefinitions/views/alltaxonomiesviewrds";
+import { getMeasurementsSummaryViewHCs } from "./sqlrdsdefinitions/views/measurementssummaryviewrds";
+import { getStemTaxonomiesViewHCs } from "./sqlrdsdefinitions/views/stemtaxonomiesviewrds";
+import { getAllViewFullTableViewsHCs } from "./sqlrdsdefinitions/views/viewfulltableviewrds";
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -39,12 +38,6 @@ export type ProcessPostPatchQueryFunction = (
   gridID: string
 ) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
-
-export interface EditToolbarProps extends GridToolbarProps {
-  locked?: boolean;
-  handleAddNewRow: () => void;
-  handleRefresh: () => Promise<void>;
-}
 
 const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   default: {
@@ -134,6 +127,8 @@ export function getGridID(gridType: string): string {
     case 'alltaxonomiesview':
     case 'species':
       return 'speciesID';
+    case 'validationprocedures':
+      return 'validationID';
     default:
       return 'breakage';
   }
