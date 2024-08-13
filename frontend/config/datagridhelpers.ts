@@ -2,12 +2,12 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { getCoreMeasurementsHCs } from "./sqlrdsdefinitions/tables/coremeasurementsrds";
-import { getQuadratHCs } from "./sqlrdsdefinitions/tables/quadratrds";
-import { getAllTaxonomiesViewHCs } from "./sqlrdsdefinitions/views/alltaxonomiesviewrds";
-import { getMeasurementsSummaryViewHCs } from "./sqlrdsdefinitions/views/measurementssummaryviewrds";
-import { getStemTaxonomiesViewHCs } from "./sqlrdsdefinitions/views/stemtaxonomiesviewrds";
-import { getAllViewFullTableViewsHCs } from "./sqlrdsdefinitions/views/viewfulltableviewrds";
+import { getCoreMeasurementsHCs } from './sqlrdsdefinitions/tables/coremeasurementsrds';
+import { getQuadratHCs } from './sqlrdsdefinitions/tables/quadratrds';
+import { getAllTaxonomiesViewHCs } from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
+import { getMeasurementsSummaryViewHCs } from './sqlrdsdefinitions/views/measurementssummaryviewrds';
+import { getStemTaxonomiesViewHCs } from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
+import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltableviewrds';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
