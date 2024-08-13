@@ -2,15 +2,9 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { GridRowModel, GridToolbarProps } from '@mui/x-data-grid';
-import { coreMeasurementsFields } from './sqlrdsdefinitions/tables/coremeasurementsrds';
-import { attributesFields } from './sqlrdsdefinitions/tables/attributerds';
-import { censusFields } from './sqlrdsdefinitions/tables/censusrds';
-import { personnelFields } from './sqlrdsdefinitions/tables/personnelrds';
-import { getQuadratHCs, quadratsFields } from './sqlrdsdefinitions/tables/quadratrds';
-import { speciesFields } from './sqlrdsdefinitions/tables/speciesrds';
-import { subquadratsFields } from './sqlrdsdefinitions/tables/subquadratrds';
-import { allTaxonomiesFields, stemTaxonomiesViewFields } from '@/components/processors/processorhelperfunctions';
+import { GridToolbarProps } from '@mui/x-data-grid';
+import { getCoreMeasurementsHCs } from './sqlrdsdefinitions/tables/coremeasurementsrds';
+import { getQuadratHCs } from './sqlrdsdefinitions/tables/quadratrds';
 import { getAllTaxonomiesViewHCs } from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
 import { getMeasurementsSummaryViewHCs } from './sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { getStemTaxonomiesViewHCs } from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
@@ -34,7 +28,8 @@ export type FetchQueryFunction = (
   pageSize: number,
   plotID?: number,
   censusID?: number,
-  quadratID?: number
+  quadratID?: number,
+  pending?: boolean
 ) => string;
 
 export type ProcessPostPatchQueryFunction = (
@@ -64,6 +59,10 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getAllTaxonomiesViewHCs()
   },
+  measurementssummary: {
+    id: false,
+    ...getMeasurementsSummaryViewHCs()
+  },
   measurementssummaryview: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
@@ -71,6 +70,10 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   stemtaxonomiesview: {
     id: false,
     ...getStemTaxonomiesViewHCs()
+  },
+  coremeasurements: {
+    id: false,
+    ...getCoreMeasurementsHCs()
   },
   quadrats: {
     id: false,
@@ -85,8 +88,21 @@ export const getColumnVisibilityModel = (gridType: string): { [key: string]: boo
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
   return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;
 };
-export const createFetchQuery: FetchQueryFunction = (siteSchema: string, gridType, page, pageSize, plotID?, plotCensusNumber?, quadratID?: number) => {
-  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${plotCensusNumber}` + `${quadratID ? `/${quadratID}` : ``}`;
+export const createFetchQuery: FetchQueryFunction = (
+  siteSchema: string,
+  gridType,
+  page,
+  pageSize,
+  plotID?,
+  plotCensusNumber?,
+  quadratID?: number,
+  pending?: boolean
+) => {
+  return (
+    `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${plotCensusNumber}` +
+    `${quadratID ? `/${quadratID}` : ``}` +
+    `${pending ? `?pending=${pending}` : ``}`
+  );
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string) => {
@@ -120,41 +136,5 @@ export function getGridID(gridType: string): string {
       return 'speciesID';
     default:
       return 'breakage';
-  }
-}
-
-const comparePersonnelObjects = (obj1: any, obj2: any) => {
-  return Object.entries(obj1).some(([key, value]) => obj2[key] !== value);
-};
-
-export function computeMutation(gridType: string, newRow: GridRowModel, oldRow: GridRowModel) {
-  switch (gridType) {
-    case 'coremeasurements':
-      return coreMeasurementsFields.some(field => newRow[field] !== oldRow[field]);
-    case 'attributes':
-      return attributesFields.some(field => newRow[field] !== oldRow[field]);
-    case 'census':
-      return censusFields.some(field => newRow[field] !== oldRow[field]);
-    case 'personnel':
-      return personnelFields.some(field => newRow[field] !== oldRow[field]);
-    case 'quadrats':
-      return quadratsFields.some(field => {
-        if (field === 'personnel') {
-          // Special handling for 'personnel' field, which is an array
-          return comparePersonnelObjects(newRow[field], oldRow[field]);
-        }
-        return newRow[field] !== oldRow[field];
-      });
-    case 'subquadrats':
-      return subquadratsFields.some(field => newRow[field] !== oldRow[field]);
-    case 'species':
-      return speciesFields.some(field => newRow[field] !== oldRow[field]);
-    // views
-    case 'stemtaxonomiesview':
-      return stemTaxonomiesViewFields.some(field => newRow[field] !== oldRow[field]);
-    case 'alltaxonomiesview':
-      return allTaxonomiesFields.some(field => newRow[field] !== oldRow[field]);
-    default:
-      throw new Error('invalid grid type submitted');
   }
 }

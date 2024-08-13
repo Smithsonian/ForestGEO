@@ -1,5 +1,6 @@
 // core measurements custom data type
-import { ResultType } from '@/config/utils';
+import { createInitialObject, ResultType } from '@/config/utils';
+import { ColumnStates } from '@/config/macros';
 
 export type CoreMeasurementsRDS = {
   id?: number;
@@ -18,4 +19,12 @@ export type CoreMeasurementsRDS = {
 
 export type CoreMeasurementsResult = ResultType<CoreMeasurementsRDS>;
 
-export const coreMeasurementsFields = ['stemID', 'isValidated', 'measurementDate', 'measuredDBH', 'measuredHOM', 'description', 'userDefinedFields'];
+export const initialCoreMeasurementsRDSRow = createInitialObject<CoreMeasurementsRDS>();
+
+export function getCoreMeasurementsHCs(): ColumnStates {
+  return {
+    censusID: false,
+    description: false,
+    userDefinedFields: false
+  };
+}

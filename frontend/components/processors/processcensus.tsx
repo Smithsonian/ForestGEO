@@ -99,7 +99,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           let query = createInsertOrUpdateQuery<CoreMeasurementsRDS, CoreMeasurementsResult>(schema, 'coremeasurements', {
             CensusID: censusID,
             StemID: stemID,
-            IsValidated: 0,
+            IsValidated: null,
             MeasurementDate: moment(rowData.date).format('YYYY-MM-DD'),
             MeasuredDBH: rowData.dbh ?? null,
             DBHUnit: rowData.dbhunit ?? null,

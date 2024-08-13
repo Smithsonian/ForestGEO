@@ -34,7 +34,8 @@ const defaultCVS: CensusValidationStatus = {
   hasQuadratsData: false
 };
 
-export default function RolloverModal({ open, onClose, onConfirm }: RolloverModalProps) {
+export default function RolloverModal(props: RolloverModalProps) {
+  const { open, onClose, onConfirm } = props;
   const [rolloverPersonnel, setRolloverPersonnel] = useState(false);
   const [rolloverQuadrats, setRolloverQuadrats] = useState(false);
   const [selectedQuadrats, setSelectedQuadrats] = useState<QuadratRDS[]>([]);

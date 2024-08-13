@@ -1,4 +1,4 @@
-// measurementssummaryview datagrid
+// measurementcommons datagrid
 'use client';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -31,7 +31,7 @@ import FileDownloadTwoToneIcon from '@mui/icons-material/FileDownloadTwoTone';
 import Box from '@mui/joy/Box';
 import { Stack, Tooltip, Typography } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
+import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getColumnVisibilityModel, getGridID } from '@/config/datagridhelpers';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { redirect } from 'next/navigation';
@@ -41,7 +41,7 @@ import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
-import { CensusDateRange, OrgCensusRDS } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { CensusDateRange } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
@@ -51,7 +51,7 @@ import {
   EditToolbarCustomProps,
   errorMapping,
   filterColumns,
-  MeasurementSummaryGridProps,
+  MeasurementsCommonsProps,
   PendingAction,
   sortRowsByMeasurementDate
 } from './datagridmacros';
@@ -124,7 +124,7 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
  * Handles state and logic for editing, saving, deleting rows, pagination,
  * validation errors, printing, exporting, and more.
  */
-export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummaryGridProps>) {
+export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
   const {
     addNewRowToGrid,
     gridType,
@@ -145,7 +145,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     setIsNewRowAdded,
     shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
-    handleSelectQuadrat
+    handleSelectQuadrat,
+    filterPending
   } = props;
 
   // states from datagridcommons:
@@ -204,9 +205,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       }
     }
   };
-  const getDateRangesForCensus = (census: OrgCensusRDS | undefined) => {
-    return census?.dateRanges ?? [];
-  };
   const handleDateRangeChange = (censusID: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.checked) {
       setSelectedDateRanges(prev => [...prev, censusID]);
@@ -234,13 +232,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       ))}
     </FormGroup>
   );
-  const extractErrorRows = () => {
-    if (errorRowsForExport.length > 0) return;
-
-    fetchErrorRows().then(fetchedRows => {
-      setErrorRowsForExport(fetchedRows);
-    });
-  };
   const cellHasError = (colField: string, rowId: GridRowId) => {
     const error = validationErrors[Number(rowId)];
     if (!error) return false;
@@ -253,8 +244,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   };
   const fetchErrorRows = async () => {
     if (!rows || rows.length === 0) return [];
-    const errorRows = rows.filter(row => rowHasError(row.id));
-    return errorRows;
+    return rows.filter(row => rowHasError(row.id));
   };
   const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
     const error = validationErrors[Number(rowId)];
@@ -393,7 +383,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
     if (handleSelectQuadrat) handleSelectQuadrat(null);
     setLoading(false);
     await fetchPaginatedData(paginationModel.page);
-    1;
   };
 
   const performDeleteAction = async (id: GridRowId) => {
@@ -498,7 +487,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
         paginationModel.pageSize,
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber,
-        currentQuadrat?.quadratID
+        currentQuadrat?.quadratID,
+        filterPending
       );
       try {
         const response = await fetch(paginatedQuery, { method: 'GET' });
@@ -528,7 +518,8 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
       newLastPage,
       setRows,
       setRowCount,
-      setRefresh
+      setRefresh,
+      filterPending
     ]
   );
 
@@ -570,12 +561,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
-
-    const rowInEditMode = Object.entries(newRowModesModel).find(([id, mode]) => mode.mode === GridRowModes.Edit);
-    if (rowInEditMode) {
-      const [id] = rowInEditMode;
-      const row = rows.find(row => String(row.id) === String(id));
-    }
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -833,6 +818,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
   }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
+  console.log('filtered columns: ', filteredColumns);
 
   const visibleRows = useMemo(() => {
     let filteredRows = rows;
@@ -925,11 +911,6 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
               </Typography>
             </Stack>
           </Stack>
-          {/* <Stack direction={'column'} marginTop={2}>
-            <Typography level='title-lg'>Filtering &mdash;</Typography>
-            <Typography level="body-xs">Select or deselect filters to filter by date ranges within a census</Typography>
-          </Stack>
-          {renderDateRangeFilters(getDateRangesForCensus(currentCensus))} */}
           <StyledDataGrid
             sx={{ width: '100%' }}
             rows={visibleRows}
@@ -952,7 +933,9 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
-                handleEnterKeyNavigation(params, event);
+                handleEnterKeyNavigation(params, event).then(r => {
+                  console.log(r);
+                });
               }
             }}
             paginationModel={paginationModel}
@@ -962,21 +945,7 @@ export default function MeasurementSummaryGrid(props: Readonly<MeasurementSummar
             onSortModelChange={handleSortModelChange}
             initialState={{
               columns: {
-                columnVisibilityModel: {
-                  id: false,
-                  coreMeasurementID: false,
-                  plotID: false,
-                  plotName: false,
-                  censusID: false,
-                  quadratID: false,
-                  subquadratID: false,
-                  speciesID: false,
-                  treeID: false,
-                  stemID: false,
-                  personnelID: false
-                  // dbhUnits: false,
-                  // homUnits: false,
-                }
+                columnVisibilityModel: getColumnVisibilityModel(gridType)
               }
             }}
             slots={{

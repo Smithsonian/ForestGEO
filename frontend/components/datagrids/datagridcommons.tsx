@@ -407,7 +407,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         setShouldAddRowAfterFetch(false);
         await fetchPaginatedData(paginationModel.page);
       }
-
+      // call refreshmeasurementssummary or viewfulltable if needed: await fetch(`/api/refresh/${gridType}`);
       return newRow;
     } catch (error: any) {
       setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });

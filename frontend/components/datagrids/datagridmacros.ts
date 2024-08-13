@@ -77,7 +77,7 @@ export function filterMSVColumns(rows: GridRowsProp, columns: GridColDef[]): Gri
   return columns.filter(col => col.field === 'actions' || col.field === 'subquadrats' || col.field === 'isValidated' || !allValuesAreNull(rows, col.field));
 }
 
-export interface MeasurementSummaryGridProps {
+export interface MeasurementsCommonsProps {
   gridType: string;
   gridColumns: GridColDef[];
   rows: GridRowsProp;
@@ -98,6 +98,7 @@ export interface MeasurementSummaryGridProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
+  filterPending?: boolean;
 }
 
 export const errorMapping: { [key: string]: string[] } = {
