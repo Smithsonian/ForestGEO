@@ -1,6 +1,6 @@
 // catalog rds types
 
-import { ResultType } from '@/config/utils';
+import { createInitialObject, ResultType } from '@/config/utils';
 
 export type ValidationProceduresRDS = {
   id?: number;
@@ -13,3 +13,5 @@ export type ValidationProceduresRDS = {
 };
 
 export type ValidationProceduresResult = ResultType<ValidationProceduresRDS>;
+
+export const initialValidationProcedure = createInitialObject<ValidationProceduresRDS>();

@@ -14,8 +14,24 @@ const formatHeader = (word1: string, word2: string) => (
 );
 
 export const quadratGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'quadratID', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'quadratID',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   {
     field: 'quadratName',
     headerName: 'Quadrat Name',
@@ -27,8 +43,26 @@ export const quadratGridColumns: GridColDef[] = [
     type: 'string',
     editable: true
   },
-  { field: 'startX', headerName: 'X', headerClassName: 'header', flex: 0.5, align: 'right', headerAlign: 'right', type: 'number', editable: true },
-  { field: 'startY', headerName: 'Y', headerClassName: 'header', flex: 0.5, align: 'right', headerAlign: 'right', type: 'number', editable: true },
+  {
+    field: 'startX',
+    headerName: 'X',
+    headerClassName: 'header',
+    flex: 0.5,
+    align: 'right',
+    headerAlign: 'right',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'startY',
+    headerName: 'Y',
+    headerClassName: 'header',
+    flex: 0.5,
+    align: 'right',
+    headerAlign: 'right',
+    type: 'number',
+    editable: true
+  },
   {
     field: 'coordinateUnits',
     headerName: 'Unit',
@@ -41,7 +75,16 @@ export const quadratGridColumns: GridColDef[] = [
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
   },
-  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 0.75, align: 'right', headerAlign: 'right', type: 'number', editable: true },
+  {
+    field: 'area',
+    headerName: 'Area',
+    headerClassName: 'header',
+    flex: 0.75,
+    align: 'right',
+    headerAlign: 'right',
+    type: 'number',
+    editable: true
+  },
   {
     field: 'areaUnits',
     headerName: 'Unit',
@@ -101,8 +144,24 @@ export const quadratGridColumns: GridColDef[] = [
 ];
 
 export const AllTaxonomiesViewGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'speciesID', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'speciesID',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: false
+  },
   {
     field: 'speciesCode',
     headerName: 'Species Code',
@@ -113,10 +172,42 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
     type: 'string',
     editable: true
   },
-  { field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'genusID', headerName: 'Genus ID', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
+  {
+    field: 'familyID',
+    headerName: 'Family ID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'family',
+    headerName: 'Family',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusID',
+    headerName: 'Genus ID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'genus',
+    headerName: 'Genus',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
   {
     field: 'genusAuthority',
     headerName: 'Genus Auth',
@@ -127,8 +218,24 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
     type: 'string',
     editable: true
   },
-  { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'subspeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
+  {
+    field: 'speciesName',
+    headerName: 'Species',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesName',
+    headerName: 'Subspecies',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
   {
     field: 'speciesIDLevel',
     headerName: 'Species ID Level',
@@ -182,9 +289,25 @@ export const AllTaxonomiesViewGridColumns: GridColDef[] = [
 ];
 
 export const AttributeGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'code', headerName: 'Code', headerClassName: 'header', minWidth: 150, flex: 1, editable: true }, // all unique ID columns need to be tagged 'id'
-  { field: 'description', headerName: 'Description', headerClassName: 'header', minWidth: 250, flex: 1, align: 'left', editable: true },
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    minWidth: 250,
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
   {
     field: 'status',
     headerName: 'Status',
@@ -199,22 +322,60 @@ export const AttributeGridColumns: GridColDef[] = [
 ];
 
 export const PersonnelGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'personnelID', headerName: 'PersonnelID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'censusID', headerName: 'Census ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'personnelID',
+    headerName: 'PersonnelID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  },
+  {
+    field: 'censusID',
+    headerName: 'Census ID',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
   { field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   { field: 'role', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: true }
 ];
 
 export const StemTaxonomiesViewGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'stemID', headerName: '#', headerClassName: 'header', flex: 0.1, align: 'left' },
   { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'speciesCode', headerName: 'Species Code', renderHeader: () => formatHeader('Species', 'Code'), headerClassName: 'header', flex: 1, align: 'left' },
+  {
+    field: 'speciesCode',
+    headerName: 'Species Code',
+    renderHeader: () => formatHeader('Species', 'Code'),
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left'
+  },
   { field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'genusID', headerName: 'Genus ID', headerClassName: 'header', flex: 1, align: 'left' },
@@ -416,15 +577,86 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
 };
 
 export const measurementsSummaryViewGridColumns: GridColDef[] = [
-  { field: 'id', headerName: 'ID', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
-  { field: 'quadratName', headerName: 'Quadrat', headerAlign: 'left', headerClassName: 'header', flex: 0.8, align: 'left', editable: true },
-  { field: 'speciesID', headerName: 'Species ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'speciesCode', headerName: 'Species Code', headerAlign: 'left', headerClassName: 'header', flex: 1.2, align: 'left', editable: true },
-  { field: 'treeID', headerName: 'Tree ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'treeTag', headerName: 'Tree', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
-  { field: 'stemID', headerName: 'Stem ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemTag', headerName: 'Stem', headerAlign: 'left', headerClassName: 'header', flex: 0.7, align: 'left', editable: true },
+  {
+    field: 'id',
+    headerName: 'ID',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'coreMeasurementID',
+    headerName: '#',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 0.25,
+    align: 'left'
+  },
+  {
+    field: 'quadratName',
+    headerName: 'Quadrat',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 0.8,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'speciesID',
+    headerName: 'Species ID',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'speciesCode',
+    headerName: 'Species Code',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1.2,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'treeID',
+    headerName: 'Tree ID',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'treeTag',
+    headerName: 'Tree',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 0.7,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'stemID',
+    headerName: 'Stem ID',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'stemTag',
+    headerName: 'Stem',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 0.7,
+    align: 'left',
+    editable: true
+  },
   {
     field: 'stemLocalX',
     headerName: 'X',
@@ -528,14 +760,45 @@ export const measurementsSummaryViewGridColumns: GridColDef[] = [
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
   },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
   { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true }
 ];
 
 export const CensusGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'censusID', headerName: 'ID', type: 'number', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'plotCensusNumber', headerName: 'PlotCensusNumber', type: 'number', headerClassName: 'header', flex: 1, align: 'left', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'censusID',
+    headerName: 'ID',
+    type: 'number',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  },
+  {
+    field: 'plotCensusNumber',
+    headerName: 'PlotCensusNumber',
+    type: 'number',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  },
   {
     field: 'startDate',
     headerName: 'Starting',
@@ -564,20 +827,72 @@ export const CensusGridColumns: GridColDef[] = [
       } else return 'null';
     }
   },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, type: 'string', editable: true }
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    flex: 1,
+    type: 'string',
+    editable: true
+  }
 ];
 
 export const ValidationErrorGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'validationErrorDescription', headerName: 'ValidationErrorDescription', headerClassName: 'header', flex: 1, align: 'left' }
+  {
+    field: 'validationErrorDescription',
+    headerName: 'ValidationErrorDescription',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left'
+  }
 ];
 
 export const CoreMeasurementsGridColumns: GridColDef[] = [
-  { field: 'id', headerName: 'ID', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'coreMeasurementID', headerName: '#', headerAlign: 'left', headerClassName: 'header', flex: 0.25, align: 'left' },
-  { field: 'censusID', headerName: 'Census ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'stemID', headerName: 'Stem ID', headerAlign: 'left', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  {
+    field: 'id',
+    headerName: 'ID',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'coreMeasurementID',
+    headerName: '#',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 0.25,
+    align: 'left'
+  },
+  {
+    field: 'censusID',
+    headerName: 'Census ID',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
+  {
+    field: 'stemID',
+    headerName: 'Stem ID',
+    headerAlign: 'left',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  },
   {
     field: 'measuredDBH',
     headerName: 'DBH',
@@ -625,12 +940,44 @@ export const CoreMeasurementsGridColumns: GridColDef[] = [
 ];
 
 export const SubquadratGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'ordering', headerName: 'Order', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'subquadratName', headerName: 'Name', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
+  {
+    field: 'subquadratName',
+    headerName: 'Name',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
   { field: 'quadratID', headerName: 'Quadrat', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'dimensionX', headerName: 'X-Dimension', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'dimensionY', headerName: 'Y-Dimension', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
+  {
+    field: 'dimensionX',
+    headerName: 'X-Dimension',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'dimensionY',
+    headerName: 'Y-Dimension',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
   { field: 'qX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
   { field: 'qY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
   {
@@ -646,10 +993,42 @@ export const SubquadratGridColumns: GridColDef[] = [
 ];
 
 export const StemGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
-  { field: 'stemTag', headerName: 'Stem Tag', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'localX', headerName: 'Plot X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'localY', headerName: 'Plot Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'stemTag',
+    headerName: 'Stem Tag',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'localX',
+    headerName: 'Plot X',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'localY',
+    headerName: 'Plot Y',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
   {
     field: 'coordinateUnits',
     headerName: 'Unit',
@@ -660,12 +1039,36 @@ export const StemGridColumns: GridColDef[] = [
     valueOptions: unitSelectionOptions,
     editable: true
   },
-  { field: 'moved', headerName: 'Moved', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
-  { field: 'stemDescription', headerName: 'StemDescription', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true }
+  {
+    field: 'moved',
+    headerName: 'Moved',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'boolean',
+    editable: true
+  },
+  {
+    field: 'stemDescription',
+    headerName: 'StemDescription',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  }
 ];
 
 export const SpeciesInventoryGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'speciesInventoryID', headerName: 'SpeciesInventoryID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'censusID', headerName: 'CensusID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left' },
@@ -674,32 +1077,136 @@ export const SpeciesInventoryGridColumns: GridColDef[] = [
 ];
 
 export const SpeciesGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   // { field: 'id', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', maxWidth: 50},
-  { field: 'speciesCode', headerName: 'SpCode', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true, maxWidth: 125 },
+  {
+    field: 'speciesCode',
+    headerName: 'SpCode',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true,
+    maxWidth: 125
+  },
   // {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
   // { field: 'currentTaxonFlag', headerName: 'Current?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
   // { field: 'obsoleteTaxonFlag', headerName: 'Obsolete?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
-  { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'subSpeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'idLevel', headerName: 'IDLevel', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'speciesAuthority', headerName: 'SpeciesAuth', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'subspeciesAuthority', headerName: 'SubspeciesAuth', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'fieldFamily', headerName: 'FieldFamily', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'validCode', headerName: 'Valid Code', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true }
+  {
+    field: 'speciesName',
+    headerName: 'Species',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subSpeciesName',
+    headerName: 'Subspecies',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'idLevel',
+    headerName: 'IDLevel',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesAuthority',
+    headerName: 'SpeciesAuth',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesAuthority',
+    headerName: 'SubspeciesAuth',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'fieldFamily',
+    headerName: 'FieldFamily',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'validCode',
+    headerName: 'Valid Code',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  }
   // {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
 ];
 
 export const RolesGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'roleID', headerName: 'RoleID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'roleDescription', headerName: 'Description', headerClassName: 'header', flex: 1, align: 'left', editable: false }
+  {
+    field: 'roleDescription',
+    headerName: 'Description',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  }
 ];
 
 export const ReferenceGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'publicationTitle', headerName: 'PublicationTitle', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'fullReference', headerName: 'FullReference', headerClassName: 'header', flex: 1, align: 'left' },
@@ -718,46 +1225,195 @@ export const ReferenceGridColumns: GridColDef[] = [
 ];
 
 export const PlotGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'plotID', headerName: 'PlotID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'plotName', headerName: 'PlotName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'locationName', headerName: 'LocationName', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'countryName', headerName: 'CountryName', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'dimensionX', headerName: 'DimX', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'dimensionY', headerName: 'DimY', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'area', headerName: 'Area', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'globalX', headerName: 'GlobalX', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'globalY', headerName: 'GlobalY', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'globalZ', headerName: 'GlobalZ', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'unit', headerName: 'Units', headerClassName: 'header', flex: 1, align: 'left', type: 'singleSelect', valueOptions: unitSelectionOptions },
-  { field: 'plotShape', headerName: 'PlotShape', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true },
-  { field: 'plotDescription', headerName: 'PlotDescription', headerClassName: 'header', flex: 1, align: 'left', type: 'string', editable: true }
+  {
+    field: 'locationName',
+    headerName: 'LocationName',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'countryName',
+    headerName: 'CountryName',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'dimensionX',
+    headerName: 'DimX',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'dimensionY',
+    headerName: 'DimY',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'area',
+    headerName: 'Area',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'globalX',
+    headerName: 'GlobalX',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'globalY',
+    headerName: 'GlobalY',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'globalZ',
+    headerName: 'GlobalZ',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'unit',
+    headerName: 'Units',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  },
+  {
+    field: 'plotShape',
+    headerName: 'PlotShape',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'plotDescription',
+    headerName: 'PlotDescription',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'string',
+    editable: true
+  }
 ];
 
 export const GenusGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'genus', headerName: 'GenusName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'genusAuthority', headerName: 'Authority', headerClassName: 'header', flex: 1, align: 'left', editable: true }
+  {
+    field: 'referenceID',
+    headerName: 'ReferenceID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  },
+  {
+    field: 'genusAuthority',
+    headerName: 'Authority',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
+  }
 ];
 
 export const FamilyGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'familyID', headerName: 'FamilyID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
   { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left', editable: false }
+  {
+    field: 'referenceID',
+    headerName: 'ReferenceID',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: false
+  }
 ];
 export const CMVErrorGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'cmvErrorID', headerName: 'CMVErrorID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'validationErrorID', headerName: 'ValidationErrorID', headerClassName: 'header', flex: 1, align: 'left' }
 ];
 
 export const CMAttributeGridColumns: GridColDef[] = [
-  { field: 'id', headerName: '#', headerClassName: 'header', flex: 0.3, align: 'right', headerAlign: 'right', editable: false },
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
   { field: 'cmaID', headerName: 'CMAID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'coreMeasurementID', headerName: 'CoreMeasurementID', headerClassName: 'header', flex: 1, align: 'left' },
   { field: 'code', headerName: 'Code', headerClassName: 'header', flex: 1, align: 'left' }
@@ -808,8 +1464,29 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
 export const ValidationProceduresGridColumns: GridColDef[] = [
   { field: 'id', headerName: 'ID', headerClassName: 'header' },
   { field: 'validationID', headerName: '#', headerClassName: 'header' },
-  { field: 'procedureName', headerName: 'Procedure', headerClassName: 'header', type: 'string', editable: true, flex: 1 },
-  { field: 'description', headerName: 'Description', headerClassName: 'header', type: 'string', editable: true, flex: 1 },
+  {
+    field: 'procedureName',
+    headerName: 'Procedure',
+    headerClassName: 'header',
+    type: 'string',
+    editable: true,
+    flex: 1,
+    renderCell: (params: GridRenderEditCellParams) => {
+      const value = params.row.procedureName.replace(/(DBH|HOM)([A-Z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2');
+      return <Typography level={'body-lg'}>{value}</Typography>;
+    }
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    type: 'string',
+    editable: true,
+    flex: 1,
+    renderCell: (params: GridRenderEditCellParams) => {
+      return <Typography level={'body-md'}>{params.row.description}</Typography>;
+    }
+  },
   {
     field: 'createdAt',
     headerName: 'Created At',
@@ -838,5 +1515,5 @@ export const ValidationProceduresGridColumns: GridColDef[] = [
     editable: true,
     flex: 0.4
   },
-  { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.4 }
+  { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.2 }
 ];

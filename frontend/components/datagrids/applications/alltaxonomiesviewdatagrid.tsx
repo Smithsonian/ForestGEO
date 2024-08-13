@@ -8,7 +8,6 @@ import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { Box, Button, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
-import { useOrgCensusContext } from '@/app/contexts/userselectionprovider';
 import { AllTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
 import { initialAllTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds';
 
@@ -26,7 +25,6 @@ export default function AllTaxonomiesViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const { data: session } = useSession();
-  const currentCensus = useOrgCensusContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();

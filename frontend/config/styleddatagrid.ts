@@ -31,7 +31,10 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
     borderBottom: `1px solid ${theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'}`
   },
   '& .MuiDataGrid-cell': {
-    color: theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.65)'
+    color: theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.65)',
+    whiteSpace: 'normal',
+    wordWrap: 'break-word',
+    lineHeight: '1.2'
   },
   '& .MuiPaginationItem-root': {
     borderRadius: 0
