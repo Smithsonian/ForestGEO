@@ -3,14 +3,14 @@
 import React, { useState } from 'react';
 import { GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
-import { initialValidationProcedure } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
 import { randomId } from '@mui/x-data-grid-generator';
-import { ValidationProceduresGridColumns } from '@/components/client/datagridcolumns';
+import { SiteSpecificValidationsGridColumns } from '@/components/client/datagridcolumns';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { useSession } from 'next-auth/react';
+import { initialSiteSpecificValidation } from '@/config/sqlrdsdefinitions/tables/sitespecificvalidationsrds';
 
-export default function ValidationProceduresDataGrid() {
-  const [rows, setRows] = useState([initialValidationProcedure] as GridRowsProp);
+export default function SiteSpecificValidationsDataGrid() {
+  const [rows, setRows] = useState([initialSiteSpecificValidation] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
@@ -26,7 +26,7 @@ export default function ValidationProceduresDataGrid() {
   const addNewRowToGrid = () => {
     const id = randomId();
     const newRow = {
-      ...initialValidationProcedure,
+      ...initialSiteSpecificValidation,
       id,
       isNew: true
     };
@@ -41,8 +41,8 @@ export default function ValidationProceduresDataGrid() {
   return (
     <DataGridCommons
       locked={session?.user?.userStatus !== 'db admin' && session?.user?.userStatus !== 'global'} // only global and db admins allowed to interact with this grid
-      gridType="validationprocedures"
-      gridColumns={ValidationProceduresGridColumns}
+      gridType="sitespecificvalidations"
+      gridColumns={SiteSpecificValidationsGridColumns}
       rows={rows}
       setRows={setRows}
       rowCount={rowCount}

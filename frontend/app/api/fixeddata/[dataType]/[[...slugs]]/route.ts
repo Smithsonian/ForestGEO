@@ -26,8 +26,6 @@ export async function GET(
     throw new Error('core slugs schema/page/pageSize not correctly received');
   if (!plotIDParam || plotIDParam === '0' || !plotCensusNumberParam || plotCensusNumberParam === '0')
     throw new Error('Core plot/census information not received');
-  // optional pending parameter to filter only pending rows:
-  const pending = request.nextUrl.searchParams.get('pending') === 'true';
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
   const plotID = parseInt(plotIDParam);
@@ -36,7 +34,6 @@ export async function GET(
   let conn: PoolConnection | null = null;
   let updatedMeasurementsExist = false;
   let censusIDs;
-  let mostRecentCensusID: any;
   let pastCensusIDs: string | any[];
 
   try {
@@ -137,26 +134,20 @@ export async function GET(
                        JOIN ${schema}.census c ON pdt.CensusID = c.CensusID
               WHERE c.PlotID = ?
                 AND c.PlotCensusNumber = ?
-                ${pending ? ` AND pdt.IsValidated IS NULL` : ''}
               ORDER BY pdt.MeasurementDate LIMIT ?, ?`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         } else {
           updatedMeasurementsExist = true;
           censusIDs = censusResults.map((c: any) => c.CensusID);
-          mostRecentCensusID = censusIDs[0];
           pastCensusIDs = censusIDs.slice(1);
           // Query to fetch paginated measurements from measurementssummaryview
           paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS pdt.*
               FROM ${schema}.${params.dataType} pdt
-                       JOIN ${schema}.stems s ON pdt.StemID = s.StemID
-                       JOIN ${schema}.trees t ON s.TreeID = t.TreeID
-                       JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
                        JOIN ${schema}.census c ON sp.CensusID = c.CensusID
               WHERE c.PlotID = ?
                 AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')})
-                ${pending ? ` AND pdt.IsValidated IS NULL` : ''}
               ORDER BY pdt.MeasurementDate ASC LIMIT ?, ?`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;

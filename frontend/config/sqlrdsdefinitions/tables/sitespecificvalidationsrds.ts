@@ -1,4 +1,4 @@
-import { ResultType } from '@/config/utils';
+import { createInitialObject, ResultType } from '@/config/utils';
 
 export type SiteSpecificValidationsRDS = {
   id?: number;
@@ -10,3 +10,4 @@ export type SiteSpecificValidationsRDS = {
 };
 
 export type SiteSpecificValidationsResult = ResultType<SiteSpecificValidationsRDS>;
+export const initialSiteSpecificValidation = createInitialObject<SiteSpecificValidationsRDS>();

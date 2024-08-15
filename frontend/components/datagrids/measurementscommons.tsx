@@ -145,8 +145,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setIsNewRowAdded,
     shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
-    handleSelectQuadrat,
-    filterPending
+    handleSelectQuadrat
   } = props;
 
   // states from datagridcommons:
@@ -487,8 +486,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         paginationModel.pageSize,
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber,
-        currentQuadrat?.quadratID,
-        filterPending
+        currentQuadrat?.quadratID
       );
       try {
         const response = await fetch(paginatedQuery, { method: 'GET' });
@@ -518,8 +516,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       newLastPage,
       setRows,
       setRowCount,
-      setRefresh,
-      filterPending
+      setRefresh
     ]
   );
 

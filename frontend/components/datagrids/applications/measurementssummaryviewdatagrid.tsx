@@ -11,11 +11,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { measurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 
-interface MSVDataGridProps {
-  filterPending?: boolean;
-}
-
-export default function MeasurementsSummaryViewDataGrid({ filterPending }: MSVDataGridProps) {
+export default function MeasurementsSummaryViewDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -132,7 +128,6 @@ export default function MeasurementsSummaryViewDataGrid({ filterPending }: MSVDa
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
-        filterPending={filterPending}
       />
     </>
   );

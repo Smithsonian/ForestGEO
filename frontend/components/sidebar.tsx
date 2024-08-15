@@ -674,7 +674,7 @@ export default function Sidebar(props: SidebarProps) {
                     </Box>
                     ForestGEO
                   </Box>
-                  {session?.user.userStatus !== 'fieldcrew' && (
+                  {session?.user.userStatus !== 'field crew' && (
                     <Typography level="h1" color="danger" sx={{ marginLeft: 0.5 }}>
                       (Admin)
                     </Typography>

@@ -27,8 +27,7 @@ export type FetchQueryFunction = (
   pageSize: number,
   plotID?: number,
   censusID?: number,
-  quadratID?: number,
-  pending?: boolean
+  quadratID?: number
 ) => string;
 
 export type ProcessPostPatchQueryFunction = (
@@ -81,21 +80,8 @@ export const getColumnVisibilityModel = (gridType: string): { [key: string]: boo
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
   return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;
 };
-export const createFetchQuery: FetchQueryFunction = (
-  siteSchema: string,
-  gridType,
-  page,
-  pageSize,
-  plotID?,
-  plotCensusNumber?,
-  quadratID?: number,
-  pending?: boolean
-) => {
-  return (
-    `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${plotCensusNumber}` +
-    `${quadratID ? `/${quadratID}` : ``}` +
-    `${pending ? `?pending=${pending}` : ``}`
-  );
+export const createFetchQuery: FetchQueryFunction = (siteSchema: string, gridType, page, pageSize, plotID?, plotCensusNumber?, quadratID?: number) => {
+  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${plotCensusNumber}` + `${quadratID ? `/${quadratID}` : ``}`;
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string) => {

@@ -10,7 +10,6 @@ import { useSession } from 'next-auth/react';
 import { Box, Button, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import Link from 'next/link';
-import { useOrgCensusContext } from '@/app/contexts/userselectionprovider';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
 
 export default function PersonnelDataGrid() {
@@ -27,7 +26,6 @@ export default function PersonnelDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const { data: session } = useSession();
-  const currentCensus = useOrgCensusContext();
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -64,7 +62,7 @@ export default function PersonnelDataGrid() {
           }}
         >
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'fieldcrew' && (
+            {session?.user.userStatus !== 'field crew' && (
               <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>

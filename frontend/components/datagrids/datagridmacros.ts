@@ -33,6 +33,7 @@ export interface DataGridCommonProps {
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   initialRow?: GridRowModel;
+  locked?: boolean;
 }
 
 // Define types for the new states and props
@@ -98,7 +99,6 @@ export interface MeasurementsCommonsProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
-  filterPending?: boolean;
 }
 
 export const errorMapping: { [key: string]: string[] } = {
