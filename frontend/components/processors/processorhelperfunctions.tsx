@@ -79,6 +79,18 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
   }
 }
 
+/**
+ * Runs a validation procedure on the database to validate data for a given schema, procedure name, plot ID, and census ID.
+ * If the procedure name is 'ValidateScreenMeasuredDiameterMinMax' or 'ValidateHOMUpperAndLowerBounds', the function will also pass minimum and maximum values to the procedure.
+ *
+ * @param schema - The schema name where the validation procedure is located.
+ * @param procedureName - The name of the validation procedure to execute.
+ * @param plotID - The plot ID to use in the validation procedure.
+ * @param censusID - The census ID to use in the validation procedure.
+ * @param min - The minimum value to pass to the validation procedure (optional).
+ * @param max - The maximum value to pass to the validation procedure (optional).
+ * @returns A validation response object containing the total rows, failed rows, a message, and optionally the failed core measurement IDs.
+ */
 export async function runValidationProcedure(
   schema: string,
   procedureName: string,
@@ -91,13 +103,10 @@ export async function runValidationProcedure(
   let query, parameters;
 
   // Since min and max are already either numbers or null, you don't need to convert them here
-  const minDBH = min;
-  const maxDBH = max;
-
   if (procedureName === 'ValidateScreenMeasuredDiameterMinMax' || procedureName === 'ValidateHOMUpperAndLowerBounds') {
     // validation procedures have been updated to use new species limits tables
     query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
-    parameters = [censusID, plotID, minDBH, maxDBH];
+    parameters = [censusID, plotID, min, max];
   } else {
     query = `CALL ${schema}.${procedureName}(?, ?)`;
     parameters = [censusID, plotID];
@@ -123,14 +132,26 @@ export async function runValidationProcedure(
 
     await conn.commit();
     return validationResponse;
-  } catch (error) {
-    await conn.rollback();
-    throw error;
+  } catch (error: any) {
+    if (error.code === 'PROTOCOL_CONNECTION_LOST' || error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
+      // rollback should ONLY occur when the connection to MySQL is lost
+      await conn.rollback();
+      throw error;
+    }
   } finally {
     if (conn) conn.release();
   }
 }
 
+/**
+ * Verifies the email address of a user in the database.
+ *
+ * @param email - The email address to verify.
+ * @returns An object with two properties:
+ *   - `emailVerified`: a boolean indicating whether the email address exists in the database.
+ *   - `userStatus`: the status of the user associated with the email address.
+ * @throws An error if there is a problem connecting to the database or executing the query.
+ */
 export async function verifyEmail(email: string): Promise<{ emailVerified: boolean; userStatus: string }> {
   const connection: PoolConnection | null = await getConn();
   try {
@@ -153,6 +174,12 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
   }
 }
 
+/**
+ * Retrieves all available sites from the database.
+ *
+ * @returns {Promise<SitesRDS[]>} An array of `SitesRDS` objects representing the available sites.
+ * @throws {Error} If there is an error connecting to the database or executing the query.
+ */
 export async function getAllSchemas(): Promise<SitesRDS[]> {
   const connection: PoolConnection | null = await getConn();
   try {
@@ -173,6 +200,13 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
   }
 }
 
+/**
+ * Retrieves the list of sites that the user with the given email address is allowed to access.
+ *
+ * @param email - The email address of the user.
+ * @returns {Promise<SitesRDS[]>} An array of `SitesRDS` objects representing the sites the user is allowed to access.
+ * @throws {Error} If there is an error connecting to the database or executing the query, or if the user is not found.
+ */
 export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
   const connection: PoolConnection | null = await getConn();
   try {
@@ -243,6 +277,15 @@ interface UpdateQueryConfig {
   fieldList: FieldList;
 }
 
+/**
+ * Generates a set of SQL update queries based on the changes between a new row and an old row.
+ *
+ * @param schema - The database schema name.
+ * @param newRow - The updated row data.
+ * @param oldRow - The original row data.
+ * @param config - An object containing configuration for the update queries, including field slices and primary keys.
+ * @returns An array of SQL update queries.
+ */
 export function generateUpdateOperations(schema: string, newRow: any, oldRow: any, config: UpdateQueryConfig): string[] {
   const { fieldList, slices } = config;
   const changedFields = detectFieldChanges(newRow, oldRow, fieldList);

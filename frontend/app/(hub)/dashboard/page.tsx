@@ -185,7 +185,7 @@ export default function DashboardPage() {
                 <Typography level={'body-md'} sx={{ alignSelf: 'flex-start', width: '100%' }}>
                   You have access to the following sites:
                 </Typography>
-                <Stack>
+                <Stack spacing={0.5}>
                   {allowedSites?.map(site => (
                     <Chip key={site.schemaName} variant="soft" startDecorator={<CheckIcon />} sx={{ flexBasis: 'auto' }}>
                       <Typography level={'body-md'} key={site.schemaName} sx={{ marginBottom: 1, wordBreak: 'break-word', flexBasis: 'auto' }}>

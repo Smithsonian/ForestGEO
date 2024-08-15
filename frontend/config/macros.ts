@@ -122,3 +122,5 @@ export type GridSelections = {
   label: string;
   value: number;
 };
+
+export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field crew';

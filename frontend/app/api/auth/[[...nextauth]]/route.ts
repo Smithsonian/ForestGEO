@@ -2,6 +2,7 @@ import NextAuth, { AzureADProfile } from 'next-auth';
 import AzureADProvider from 'next-auth/providers/azure-ad';
 import { getAllowedSchemas, getAllSchemas, verifyEmail } from '@/components/processors/processorhelperfunctions';
 import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
+import { UserAuthRoles } from '@/config/macros';
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,
@@ -30,7 +31,7 @@ const handler = NextAuth({
         if (!emailVerified) {
           throw new Error('User email not found.');
         }
-        user.userStatus = userStatus; // Add userStatus property to the user object
+        user.userStatus = userStatus as UserAuthRoles; // Add userStatus property to the user object
         user.email = userEmail;
         // console.log('getting all sites: ');
         const allSites = await getAllSchemas();
@@ -55,9 +56,9 @@ const handler = NextAuth({
 
     async session({ session, token }) {
       if (typeof token.userStatus === 'string') {
-        session.user.userStatus = token.userStatus;
+        session.user.userStatus = token.userStatus as UserAuthRoles;
       } else {
-        session.user.userStatus = 'fieldcrew'; // default no admin permissions
+        session.user.userStatus = 'field crew' as UserAuthRoles; // default no admin permissions
       }
       if (token && token.allsites && Array.isArray(token.allsites)) {
         session.user.allsites = token.allsites as SitesRDS[];

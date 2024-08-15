@@ -10,11 +10,7 @@ import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { CoreMeasurementsGridColumns } from '@/components/client/datagridcolumns';
 import { initialCoreMeasurementsRDSRow } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 
-interface CoreMeasurementsDataGridProps {
-  filterPending?: boolean;
-}
-
-export default function CoreMeasurementsDataGrid({ filterPending }: CoreMeasurementsDataGridProps) {
+export default function CoreMeasurementsDataGrid() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -125,7 +121,6 @@ export default function CoreMeasurementsDataGrid({ filterPending }: CoreMeasurem
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
-        filterPending={filterPending}
       />
     </>
   );

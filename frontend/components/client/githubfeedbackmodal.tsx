@@ -90,7 +90,8 @@ const formatHeaders = (headers: any) => {
   ));
 };
 
-export default function GithubFeedbackModal({ open, onClose }: GithubFeedbackModalProps) {
+export default function GithubFeedbackModal(props: GithubFeedbackModalProps) {
+  const { open, onClose } = props;
   const [name, setName] = useState<string>('');
   const [issueType, setIssueType] = useState<IssueType | null>(null);
   const [description, setDescription] = useState('');

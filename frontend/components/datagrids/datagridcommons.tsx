@@ -2,7 +2,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
-  GridCellParams,
   GridColDef,
   GridEventListener,
   GridFilterModel,
@@ -94,13 +93,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     isNewRowAdded,
     setIsNewRowAdded,
     setShouldAddRowAfterFetch,
-    handleSelectQuadrat
+    handleSelectQuadrat,
+    locked = false
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [locked, setLocked] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
@@ -527,39 +526,13 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   }, [rowModesModel, locked]);
 
   const columns = useMemo(() => {
-    const commonColumns = gridColumns;
-    return [...commonColumns, getGridActionsColumn()];
+    return [...gridColumns, getGridActionsColumn()];
   }, [gridColumns, rowModesModel, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => {
     if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns);
     else return columns;
   }, [rows, columns]);
-
-  const handleEnterKeyNavigation = async (params: GridCellParams, event: React.KeyboardEvent) => {
-    event.defaultPrevented = true;
-    const columnIndex = filteredColumns.findIndex(col => col.field === params.field);
-    const isLastColumn = columnIndex === filteredColumns.length - 2;
-    const currentColumn = filteredColumns[columnIndex];
-
-    if (isSaveHighlighted) {
-      openConfirmationDialog('save', params.id);
-      setIsSaveHighlighted(false);
-    } else if (currentColumn.type === 'singleSelect') {
-      const cell = apiRef.current.getCellElement(params.id, params.field);
-      if (cell) {
-        const select = cell.querySelector('select');
-        if (select) {
-          select.focus();
-        }
-      }
-    } else if (isLastColumn) {
-      setIsSaveHighlighted(true);
-      apiRef.current.setCellFocus(params.id, 'actions');
-    } else {
-      apiRef.current.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
-    }
-  };
 
   const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
     if (locked) return;

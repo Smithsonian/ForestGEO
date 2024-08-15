@@ -1,8 +1,13 @@
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/tables/attributerds';
-import { Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
+import { Accordion, AccordionDetails, AccordionGroup, AccordionSummary, Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridRenderEditCellParams, useGridApiRef } from '@mui/x-data-grid';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import Avatar from '@mui/joy/Avatar';
+import { ExpandMore } from '@mui/icons-material';
+import { useSession } from 'next-auth/react';
+import CodeMirror from '@uiw/react-codemirror';
+import { sql } from '@codemirror/lang-sql';
 
 const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
@@ -1488,6 +1493,61 @@ export const ValidationProceduresGridColumns: GridColDef[] = [
     }
   },
   {
+    field: 'definition',
+    headerName: 'SQL Implementation',
+    headerClassName: 'header',
+    type: 'string',
+    editable: true,
+    flex: 1,
+    renderCell: (params: GridRenderEditCellParams) => {
+      const { data: session } = useSession();
+      let isEditing = false;
+      if (typeof params.id === 'string') {
+        isEditing = params.rowModesModel[parseInt(params.id)]?.mode === 'edit';
+      }
+      const isAdmin = session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global';
+
+      if (isEditing && isAdmin) {
+        return (
+          <CodeMirror
+            value={params.value}
+            height="auto"
+            extensions={[sql()]}
+            onChange={value => {
+              // Update the grid row with the new value from CodeMirror
+              params.api.updateRows([{ ...params.row, definition: value }]);
+            }}
+          />
+        );
+      }
+
+      return (
+        <AccordionGroup>
+          <Accordion sx={{ width: '100%' }}>
+            <AccordionSummary
+              sx={{
+                padding: 0,
+                '& .MuiAccordionSummary-content': {
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }
+              }}
+            >
+              <Avatar>
+                <ExpandMore />
+              </Avatar>
+              <Typography level={'body-md'}>{params.row.description}</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ padding: 0 }}>
+              <Typography level={'body-md'}>{params.row.definition}</Typography>
+            </AccordionDetails>
+          </Accordion>
+        </AccordionGroup>
+      );
+    }
+  },
+  {
     field: 'createdAt',
     headerName: 'Created At',
     renderHeader: () => formatHeader('Created', 'At'),
@@ -1514,6 +1574,69 @@ export const ValidationProceduresGridColumns: GridColDef[] = [
     },
     editable: true,
     flex: 0.4
+  },
+  { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.2 }
+];
+
+export const SiteSpecificValidationsGridColumns: GridColDef[] = [
+  { field: 'id', headerName: 'ID', headerClassName: 'header' },
+  { field: 'validationProcedureID', headerName: '#', headerClassName: 'header' },
+  {
+    field: 'name',
+    headerName: 'Procedure',
+    headerClassName: 'header',
+    type: 'string',
+    editable: true,
+    flex: 1,
+    renderCell: (params: GridRenderEditCellParams) => {
+      const value = params.row.procedureName.replace(/(DBH|HOM)([A-Z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2');
+      return <Typography level={'body-lg'}>{value}</Typography>;
+    }
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
+    headerClassName: 'header',
+    type: 'string',
+    editable: true,
+    flex: 1,
+    renderCell: (params: GridRenderEditCellParams) => {
+      return <Typography level={'body-md'}>{params.row.description}</Typography>;
+    }
+  },
+  {
+    field: 'definition',
+    headerName: 'SQL Implementation',
+    headerClassName: 'header',
+    type: 'string',
+    editable: true,
+    flex: 1,
+    renderCell: (params: GridRenderEditCellParams) => {
+      return (
+        <AccordionGroup>
+          <Accordion sx={{ width: '100%' }}>
+            <AccordionSummary
+              sx={{
+                padding: 0,
+                '& .MuiAccordionSummary-content': {
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }
+              }}
+            >
+              <Avatar>
+                <ExpandMore />
+              </Avatar>
+              <Typography level={'body-md'}>{params.row.description}</Typography>
+            </AccordionSummary>
+            <AccordionDetails sx={{ padding: 0 }}>
+              <Typography level={'body-md'}>{params.row.description}</Typography>
+            </AccordionDetails>
+          </Accordion>
+        </AccordionGroup>
+      );
+    }
   },
   { field: 'isEnabled', headerName: 'Active?', headerClassName: 'header', type: 'boolean', editable: true, flex: 0.2 }
 ];

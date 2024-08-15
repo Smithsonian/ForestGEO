@@ -57,7 +57,7 @@ export default function AllTaxonomiesViewDataGrid() {
           }}
         >
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'fieldcrew' && (
+            {session?.user.userStatus !== 'field crew' && (
               <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
                 Note: ADMINISTRATOR VIEW
               </Typography>
