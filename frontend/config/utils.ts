@@ -75,7 +75,7 @@ export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> }
   return new Proxy(
     {},
     {
-      get: (target, prop) => {
+      get: (_target, prop) => {
         if (typeof prop === 'string' && prop.toLowerCase().includes('id')) {
           return 0; // Set the id field to 0
         }
@@ -95,58 +95,17 @@ export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> }
   ) as { [K in keyof T]: InitialValue<T[K]> };
 }
 
-export type UniqueKeys<T, U> = {
-  [K in keyof (T & U)]: K extends keyof T ? (K extends keyof U ? never : K) : K;
-}[keyof (T & U)];
-export type Unique<T, U> = Pick<T & U, UniqueKeys<T, U>>;
-
-export type CommonKeys<T, U> = {
-  [K in keyof T & keyof U]: K;
-}[keyof T & keyof U];
-
-export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
-
-export function getColumnMappings<RDS, Result extends { [K in keyof RDS as TransformSpecialCases<CapitalizeFirstLetter<K & string>>]: any }>(): {
-  [key in keyof Result]: string;
-} {
-  const mappings: { [key in keyof Result]: string } = {} as { [key in keyof Result]: string };
-
-  for (const key in {} as RDS) {
-    if (key) {
-      const transformedKey = transformRDSKeyToResultKey(key);
-      mappings[transformedKey as keyof Result] = transformedKey;
-    }
-  }
-
-  return mappings;
-}
-
-function transformRDSKeyToResultKey(key: string): string {
-  return key
-    .replace(/(\b[a-z])/g, char => char.toUpperCase()) // Capitalize first letter
-    .replace(/Dbh/g, 'DBH') // Transform specific keys
-    .replace(/Hom/g, 'HOM')
-    .replace(/Id/g, 'ID')
-    .replace(/Cma/g, 'CMA');
-}
-
-export function createSelectQuery<RDS, Result>(schema: string, tableName: string, whereClause: Partial<Result>): string {
-  const columnMappings = getColumnMappings<RDS, Result>();
-  console.log('columnMappings:', columnMappings);
-
+export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>): string {
   const whereConditions = Object.keys(whereClause)
-    .map(key => `${columnMappings[key as keyof Result]} = ?`)
+    .map(key => `${key} = ?`)
     .join(' AND ');
 
   return `SELECT * FROM ${schema}.${tableName} WHERE ${whereConditions}`;
 }
 
 export function createInsertOrUpdateQuery<Result>(schema: string, tableName: string, data: Partial<Result>): string {
-  const columnMappings = getColumnMappings<Result>();
-  console.log('columnMappings:', columnMappings);
-
   const columns = Object.keys(data)
-    .map(key => columnMappings[key as keyof Result])
+    .map(key => key)
     .join(', ');
 
   const values = Object.keys(data)
@@ -154,7 +113,7 @@ export function createInsertOrUpdateQuery<Result>(schema: string, tableName: str
     .join(', ');
 
   const updates = Object.keys(data)
-    .map(key => `${columnMappings[key as keyof Result]} = VALUES(${columnMappings[key as keyof Result]})`)
+    .map(key => `${key} = VALUES(${key})`)
     .join(', ');
 
   return `INSERT INTO ${schema}.${tableName} (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${updates}`;
@@ -190,10 +149,12 @@ export async function handleUpsert<Result>(
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
+
   console.log('handleUpsert data:', data);
 
   const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
   console.log('handleUpsert query:', query);
+
   const result = await runQuery(connection, query, Object.values(data));
 
   let id = result.insertId;
@@ -219,3 +180,14 @@ export function createError(message: string, context: any) {
   console.error(message, context);
   return error;
 }
+
+export type UniqueKeys<T, U> = {
+  [K in keyof (T & U)]: K extends keyof T ? (K extends keyof U ? never : K) : K;
+}[keyof (T & U)];
+export type Unique<T, U> = Pick<T & U, UniqueKeys<T, U>>;
+
+export type CommonKeys<T, U> = {
+  [K in keyof T & keyof U]: K;
+}[keyof T & keyof U];
+
+export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
