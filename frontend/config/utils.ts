@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import { PoolConnection } from 'mysql2/promise';
+import { runQuery } from '@/components/processors/processormacros';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -39,7 +41,11 @@ export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}
         ? `${Prefix}HOM${Suffix}`
         : T extends `${infer Prefix}Id${infer Suffix}`
           ? `${Prefix}ID${Suffix}`
-          : T;
+          : T extends `${infer Prefix}cma${infer Suffix}`
+            ? `${Prefix}CMA${Suffix}`
+            : T extends `${infer Prefix}Cma${infer Suffix}`
+              ? `${Prefix}CMA${Suffix}`
+              : T;
 
 // Utility type to omit specific keys
 export type OmitKey<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;
@@ -61,8 +67,8 @@ export type InitialValue<T> = T extends string
           ? bigint
           : T extends symbol
             ? symbol
-            : T extends Function
-              ? Function
+            : T extends (...args: any[]) => any
+              ? (...args: any[]) => any
               : undefined;
 
 export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> } {
@@ -100,18 +106,34 @@ export type CommonKeys<T, U> = {
 
 export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
 
-export function getColumnMappings<RDS, Result extends ResultType<RDS>>(): { [key in keyof Result]: string } {
+export function getColumnMappings<RDS, Result extends { [K in keyof RDS as TransformSpecialCases<CapitalizeFirstLetter<K & string>>]: any }>(): {
+  [key in keyof Result]: string;
+} {
   const mappings: { [key in keyof Result]: string } = {} as { [key in keyof Result]: string };
 
-  for (const key in mappings) {
-    mappings[key] = key;
+  for (const key in {} as RDS) {
+    if (key) {
+      const transformedKey = transformRDSKeyToResultKey(key);
+      mappings[transformedKey as keyof Result] = transformedKey;
+    }
   }
 
   return mappings;
 }
 
-export function createSelectQuery<RDS, Result extends ResultType<RDS>>(schema: string, tableName: string, whereClause: Partial<Result>): string {
+function transformRDSKeyToResultKey(key: string): string {
+  return key
+    .replace(/(\b[a-z])/g, char => char.toUpperCase()) // Capitalize first letter
+    .replace(/Dbh/g, 'DBH') // Transform specific keys
+    .replace(/Hom/g, 'HOM')
+    .replace(/Id/g, 'ID')
+    .replace(/Cma/g, 'CMA');
+}
+
+export function createSelectQuery<RDS, Result>(schema: string, tableName: string, whereClause: Partial<Result>): string {
   const columnMappings = getColumnMappings<RDS, Result>();
+  console.log('columnMappings:', columnMappings);
+
   const whereConditions = Object.keys(whereClause)
     .map(key => `${columnMappings[key as keyof Result]} = ?`)
     .join(' AND ');
@@ -119,17 +141,81 @@ export function createSelectQuery<RDS, Result extends ResultType<RDS>>(schema: s
   return `SELECT * FROM ${schema}.${tableName} WHERE ${whereConditions}`;
 }
 
-export function createInsertOrUpdateQuery<RDS, Result extends ResultType<RDS>>(schema: string, tableName: string, data: Partial<Result>): string {
-  const columnMappings = getColumnMappings<RDS, Result>();
+export function createInsertOrUpdateQuery<Result>(schema: string, tableName: string, data: Partial<Result>): string {
+  const columnMappings = getColumnMappings<Result>();
+  console.log('columnMappings:', columnMappings);
+
   const columns = Object.keys(data)
     .map(key => columnMappings[key as keyof Result])
     .join(', ');
+
   const values = Object.keys(data)
     .map(() => '?')
     .join(', ');
+
   const updates = Object.keys(data)
     .map(key => `${columnMappings[key as keyof Result]} = VALUES(${columnMappings[key as keyof Result]})`)
     .join(', ');
 
   return `INSERT INTO ${schema}.${tableName} (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${updates}`;
+}
+
+export async function fetchPrimaryKey<Result>(
+  schema: string,
+  table: string,
+  whereClause: Partial<Result>,
+  connection: PoolConnection,
+  primaryKeyColumn: keyof Result
+): Promise<number> {
+  const query = createSelectQuery<Result>(schema, table, whereClause);
+  const rows: Result[] = await runQuery(connection, query, Object.values(whereClause));
+
+  if (rows.length === 0) {
+    throw new Error(`${Object.values(whereClause).join(' ')} not found in ${table}.`);
+  }
+
+  console.log(`${Object.values(whereClause).join(' ')} found in ${table}.`);
+
+  // Retrieve and return the primary key value from the result
+  return rows[0][primaryKeyColumn] as unknown as number;
+}
+
+export async function handleUpsert<Result>(
+  connection: PoolConnection,
+  schema: string,
+  tableName: string,
+  data: Partial<Result>,
+  key: keyof Result
+): Promise<number> {
+  if (!Object.keys(data).length) {
+    throw new Error(`No data provided for upsert operation on table ${tableName}`);
+  }
+  console.log('handleUpsert data:', data);
+
+  const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+  console.log('handleUpsert query:', query);
+  const result = await runQuery(connection, query, Object.values(data));
+
+  let id = result.insertId;
+
+  if (id === 0) {
+    const findExisting = createSelectQuery<Result>(schema, tableName, data);
+    console.log('handleUpsert findExisting query:', findExisting);
+    const searchResult = await runQuery(connection, findExisting, Object.values(data));
+
+    if (searchResult.length > 0) {
+      id = searchResult[0][key as keyof Result] as unknown as number;
+    } else {
+      throw new Error(`Unknown error. InsertId was 0, but manually searching for ${tableName} by ${String(key)} also failed.`);
+    }
+  }
+
+  return id;
+}
+
+export function createError(message: string, context: any) {
+  const error = new Error(message);
+  error.name = 'ProcessingError';
+  console.error(message, context);
+  return error;
 }

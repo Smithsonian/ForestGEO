@@ -87,7 +87,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
   const validatePreviousCensusData = async () => {
     if (!censusListContext || censusListContext.length === 0) {
-      return;
+      return defaultCVS;
     }
 
     const validationStatusPromises = censusListContext.map(async census => {
@@ -162,7 +162,7 @@ export default function RolloverModal(props: RolloverModalProps) {
     setSelectedQuadrats([]);
     setSelectedPersonnel([]);
     setError(null);
-    setLoading(true);
+    setLoading(false);
     setCustomizePersonnel(false);
     setCustomizeQuadrats(false);
     setSelectedQuadratsCensus(defaultCVS);
