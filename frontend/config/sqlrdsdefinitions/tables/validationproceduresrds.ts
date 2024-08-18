@@ -7,6 +7,7 @@ export type ValidationProceduresRDS = {
   validationID?: number;
   procedureName?: string;
   description?: string;
+  definition?: string;
   isEnabled?: boolean;
   createdAt?: Date;
   updatedAt?: Date;

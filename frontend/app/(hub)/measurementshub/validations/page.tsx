@@ -1,11 +1,35 @@
 'use client';
 
 import { Box, Card, CardContent, Typography } from '@mui/joy';
-import React from 'react';
-import ValidationProceduresDataGrid from '@/components/datagrids/applications/validationproceduresdatagrid';
-import SiteSpecificValidationsDataGrid from '@/components/datagrids/applications/sitespecificvalidationsdatagrid';
+import React, { useEffect } from 'react';
+import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import ValidationCard from '@/components/validationcard';
 
 export default function ValidationsPage() {
+  const currentSite = useSiteContext();
+  const [globalValidations, setGlobalValidations] = React.useState<ValidationProceduresRDS[]>([]);
+
+  const handleToggle = (enabled?: boolean) => {
+    console.log('Validation enabled:', enabled);
+  };
+
+  const handleSaveChanges = (newSqlCode?: string) => {
+    console.log('New SQL Code:', newSqlCode);
+  };
+
+  const handleDelete = () => {
+    console.log('Validation deleted');
+  };
+
+  useEffect(() => {
+    async function fetchValidations() {
+      const response = await fetch('/api/fetchall/validationprocedures?schema=' + currentSite?.schemaName);
+      setGlobalValidations(await response.json());
+    }
+
+    fetchValidations().catch(err => console.error(err));
+  }, []);
   return (
     <Box sx={{ width: '100%' }}>
       <Card variant={'plain'} sx={{ width: '100%' }}>
@@ -13,7 +37,9 @@ export default function ValidationsPage() {
           <Typography level={'title-lg'} fontWeight={'bold'}>
             Review Global Validations
           </Typography>
-          <ValidationProceduresDataGrid />
+          {globalValidations.length > 0 && (
+            <ValidationCard onDelete={handleDelete} onSaveChanges={handleSaveChanges} onToggle={handleToggle} {...globalValidations[0]} />
+          )}
         </CardContent>
       </Card>
       <Card variant={'plain'} sx={{ width: '100%' }}>
@@ -21,7 +47,6 @@ export default function ValidationsPage() {
           <Typography level={'title-lg'} fontWeight={'bold'}>
             Review Site-Specific Validations
           </Typography>
-          <SiteSpecificValidationsDataGrid />
         </CardContent>
       </Card>
     </Box>

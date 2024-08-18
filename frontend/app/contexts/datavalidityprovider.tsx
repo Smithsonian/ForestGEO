@@ -76,7 +76,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
     } else {
       console.log('No flags set for rechecking, or missing site/plot/census data');
     }
-  }, [validity, checkDataValidity, refreshNeeded]);
+  }, [validity, checkDataValidity, refreshNeeded, currentPlot, currentSite, currentCensus]);
 
   const debouncedRecheckValidityIfNeeded = useCallback(debounce(recheckValidityIfNeeded, 300), [recheckValidityIfNeeded]);
 

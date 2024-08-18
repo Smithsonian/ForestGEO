@@ -63,6 +63,14 @@ module.exports = {
         'fade-blur-out': {
           '0%': { filter: 'blur(5px)', opacity: '0.3' },
           '100%': { filter: 'blur(0)', opacity: '1' }
+        },
+        expand: {
+          '0%': { transform: 'scale(1)', opacity: 1 },
+          '100%': { transform: 'scale(1.2)', opacity: 1 }
+        },
+        shrink: {
+          '0%': { transform: 'scale(1.2)', opacity: 1 },
+          '100%': { transform: 'scale(1)', opacity: 1 }
         }
       },
       animation: {
@@ -73,7 +81,9 @@ module.exports = {
         bounce: 'bounce 0.5s',
         'fade-blur-in': 'fade-blur-in 0.15s ease forwards',
         'fade-blur-out': 'fade-blur-out 0.15s ease forwards',
-        'pulse-no-opacity': 'pulse-no-opacity 2s infinite'
+        'pulse-no-opacity': 'pulse-no-opacity 2s infinite',
+        expand: 'expand 0.3s ease-out forwards',
+        shrink: 'shrink 0.3s ease-in forwards'
       },
       textColor: {
         error: 'red',

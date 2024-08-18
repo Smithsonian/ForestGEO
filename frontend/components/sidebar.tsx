@@ -223,7 +223,7 @@ export default function Sidebar(props: SidebarProps) {
               censusListContext[0]?.plotCensusNumber ?? 0
             )
           : 0;
-      if (!highestPlotCensusNumber) throw new Error('highest plot census number calculation failed');
+      console.log('highest plot number: ', highestPlotCensusNumber);
 
       const mapper = new OrgCensusToCensusResultMapper();
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
@@ -344,7 +344,7 @@ export default function Sidebar(props: SidebarProps) {
             <Typography level="body-md" className="sidebar-item">{`Plot: ${selectedPlot?.plotName}`}</Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'}>
-                &mdash; Quadrats: {selectedPlot.numQuadrats}
+                &mdash; {selectedPlot.numQuadrats ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>

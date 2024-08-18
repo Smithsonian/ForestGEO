@@ -53,6 +53,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             body: JSON.stringify(fileData[fileName])
           }
         );
+        if (!response.ok) throw new Error('SQLLOAD ERROR: ' + response.statusText);
         setCompletedOperations(prevCompleted => prevCompleted + 1);
         const result = await response.json();
         if (result.idToRows) {

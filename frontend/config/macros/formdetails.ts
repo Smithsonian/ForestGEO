@@ -30,9 +30,10 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'quadrat' },
     { label: 'startx' },
     { label: 'starty' },
+    { label: 'coordinateunit' },
     { label: 'dimx' },
     { label: 'dimy' },
-    { label: 'unit' },
+    { label: 'dimensionunit' },
     { label: 'quadratshape' }
   ],
   subquadrats: [
@@ -40,9 +41,10 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'quadrat' },
     { label: 'dimx' },
     { label: 'dimy' },
+    { label: 'dimensionunit' },
     { label: 'xindex' },
     { label: 'yindex' },
-    { label: 'unit' },
+    { label: 'coordinateunit' },
     { label: 'orderindex' }
   ],
   measurements: [
@@ -53,6 +55,7 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'subquadrat' },
     { label: 'lx' },
     { label: 'ly' },
+    { label: 'coordinateunit' },
     { label: 'dbh' },
     { label: 'dbhunit' },
     { label: 'hom' },

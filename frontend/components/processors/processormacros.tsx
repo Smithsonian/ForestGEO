@@ -3,6 +3,7 @@ import { FileRow } from '@/config/macros/formdetails';
 import { processSpecies } from '@/components/processors/processspecies';
 import { processCensus } from '@/components/processors/processcensus';
 import { PoolMonitor } from '@/config/poolmonitor';
+import { processPersonnel } from '@/components/processors/processpersonnel';
 
 export async function getConn() {
   let conn: PoolConnection | null = null;
@@ -55,7 +56,8 @@ export const fileMappings: Record<string, FileMapping> = {
       firstname: 'FirstName',
       lastname: 'LastName',
       role: 'Role'
-    }
+    },
+    specialProcessing: processPersonnel
   },
   species: {
     tableName: '',

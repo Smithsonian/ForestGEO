@@ -1,9 +1,9 @@
-import { runQuery, SpecialProcessingProps } from '@/components/processors/processormacros';
+import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import { booleanToBit } from '@/config/macros';
-import { FamilyRDS, FamilyResult } from '@/config/sqlrdsdefinitions/tables/familyrds';
-import { GenusRDS, GenusResult } from '@/config/sqlrdsdefinitions/tables/genusrds';
-import { SpeciesRDS, SpeciesResult } from '@/config/sqlrdsdefinitions/tables/speciesrds';
-import { createInsertOrUpdateQuery } from '@/config/utils';
+import { FamilyResult } from '@/config/sqlrdsdefinitions/tables/familyrds';
+import { GenusResult } from '@/config/sqlrdsdefinitions/tables/genusrds';
+import { SpeciesResult } from '@/config/sqlrdsdefinitions/tables/speciesrds';
+import { createError, handleUpsert } from '@/config/utils';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};
@@ -25,17 +25,13 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
     // Handle Family insertion/updation
     let familyID: number | undefined;
     if (rowData.family) {
-      const query = createInsertOrUpdateQuery<FamilyRDS, FamilyResult>(schema, 'family', { Family: rowData.family });
-      const result = await runQuery(connection, query, [rowData.family]);
-      familyID = result.insertId;
+      familyID = await handleUpsert<FamilyResult>(connection, schema, 'family', { Family: rowData.family }, 'FamilyID');
     }
 
     // Handle Genus insertion/updation
     let genusID: number | undefined;
     if (rowData.genus) {
-      const query = createInsertOrUpdateQuery<GenusRDS, GenusResult>(schema, 'genus', { Genus: rowData.genus, FamilyID: familyID });
-      const result = await runQuery(connection, query, [rowData.genus, familyID]);
-      genusID = result.insertId;
+      genusID = await handleUpsert<GenusResult>(connection, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID');
     }
 
     // Handle Species insertion/updation
@@ -53,26 +49,15 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);
-      const query = createInsertOrUpdateQuery<SpeciesRDS, SpeciesResult>(schema, 'species', cleanedSpeciesData);
-      const result = await runQuery(connection, query, [
-        cleanedSpeciesData.speciesCode,
-        cleanedSpeciesData.speciesName,
-        cleanedSpeciesData.subspeciesName,
-        cleanedSpeciesData.idLevel,
-        cleanedSpeciesData.speciesAuthority,
-        cleanedSpeciesData.subspeciesAuthority,
-        cleanedSpeciesData.genusID,
-        cleanedSpeciesData.currentTaxonFlag
-      ]);
-      speciesID = result.insertId;
+      speciesID = await handleUpsert<SpeciesResult>(connection, schema, 'species', cleanedSpeciesData, 'SpeciesID');
     }
 
     await connection.commit();
     console.log('Upsert successful');
-    return speciesID !== undefined ? speciesID : undefined;
+    return speciesID;
   } catch (error: any) {
     await connection.rollback();
     console.error('Upsert failed:', error.message);
-    throw error;
+    throw createError('Upsert failed', { error });
   }
 }
