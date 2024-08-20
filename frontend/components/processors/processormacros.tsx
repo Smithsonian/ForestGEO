@@ -82,9 +82,10 @@ export const fileMappings: Record<string, FileMapping> = {
       censusID: 'CensusID',
       startx: 'StartX',
       starty: 'StartY',
+      coordinateunit: 'CoordinateUnits',
       dimx: 'DimensionX',
       dimy: 'DimensionY',
-      unit: 'Unit',
+      dimensionunit: 'DimensionUnits',
       quadratshape: 'QuadratShape'
     }
   },

@@ -1,13 +1,12 @@
 'use client';
 
 import { Box, Paper, Typography } from '@mui/material';
-import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
-import { FileWithPath } from 'react-dropzone';
+import React, { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
 import '@/styles/validationtable.css';
 import moment from 'moment';
 import { GridCellParams, GridColDef, GridRowModel, GridRowsProp } from '@mui/x-data-grid';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import { FileCollectionRowSet, FileErrors, FileRow, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileErrors, FileRow, FormType, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { validateAttributesRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/tables/quadratrds';
@@ -15,24 +14,7 @@ import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/tables/specie
 import { validateSubquadratsRow } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
 import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { usePlotContext } from '@/app/contexts/userselectionprovider';
-
-export interface ValidationTableProps {
-  uploadedData: FileWithPath[];
-  errorMessage: { [fileName: string]: { [currentRow: string]: string } };
-  headers: { label: string }[];
-  formType: string;
-}
-
-export interface DisplayErrorTableProps {
-  fileName: string;
-  fileData: { fileName: string; data: DataStructure[] };
-  errorMessage: FileErrors;
-  formType: string;
-}
-
-export interface DataStructure {
-  [key: string]: string;
-}
+import { Divider } from '@mui/joy';
 
 const validationFunctions: Record<string, ValidationFunction> = {
   attributes: validateAttributesRow,
@@ -59,7 +41,7 @@ export interface DisplayParsedDataProps {
   errorRows: FileCollectionRowSet;
   setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   fileName: string;
-  formType: string;
+  formType: FormType;
 }
 
 export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (props: Readonly<DisplayParsedDataProps>) => {
@@ -72,76 +54,93 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
   const [validRows, setValidRows] = useState<GridRowsProp>([]);
   const [invalidRows, setInvalidRows] = useState<GridRowsProp>([]);
 
-  const columns: GridColDef[] = tableHeaders.map(header => ({
-    field: header.label,
-    headerName: header.label,
-    flex: 1,
-    getCellClassName: (params: GridCellParams) => {
-      const rowIndex = params.id.toString().split('-')[1];
-      const errorKey = `row-${rowIndex}`;
-      const cellError = errors[fileName]?.[errorKey]?.[header.label];
-      return cellError ? 'error-cell' : '';
-    },
-    renderCell: (params: GridCellParams) => {
-      if (header.label === 'date') {
-        const formattedDate = params.value ? moment(params.value).format('YYYY-MM-DD') : '';
-        return <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedDate}</Typography>;
-      }
+  const columns: GridColDef[] = useMemo(
+    () =>
+      tableHeaders.map(header => ({
+        field: header.label,
+        headerName: header.label,
+        flex: 1,
+        getCellClassName: (params: GridCellParams) => {
+          const rowIndex = params.id.toString().split('-')[1];
+          const errorKey = `row-${rowIndex}`;
+          const cellError = errors[fileName]?.[errorKey]?.[header.label];
+          return cellError ? 'error-cell' : '';
+        },
+        renderCell: (params: GridCellParams) => {
+          if (header.label === 'date') {
+            const formattedDate = params.value ? moment(params.value).format('YYYY-MM-DD') : '';
+            return <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedDate}</Typography>;
+          }
 
-      const rowIndex = params.id.toString().split('-')[1];
-      const errorKey = `row-${rowIndex}`;
-      const cellError = errors[fileName]?.[errorKey]?.[header.label];
+          const rowIndex = params.id.toString().split('-')[1];
+          const errorKey = `row-${rowIndex}`;
+          const cellError = errors[fileName]?.[errorKey]?.[header.label];
 
-      // Extract the display value
-      const displayValue = params.value;
-      const isAutoFillCorrection =
-        cellError && (cellError === 'Genus was auto-filled based on species field.' || cellError === 'Species field was split into genus and species.');
+          // Extract the display value
+          const displayValue = params.value;
+          const isAutoFillCorrection =
+            cellError &&
+            (cellError === 'Genus was auto-filled based on species field.' ||
+              cellError === 'Species field was split into genus and species.' ||
+              cellError === 'Coordinate units were auto-filled based on table defaults.' ||
+              cellError === 'Dimension units were auto-filled based on table defaults.' ||
+              cellError === 'Area units were auto-filled based on table defaults.' ||
+              cellError === 'Area was auto-calculated based on dimension submission. A square shape for the quadrat was assumed.');
 
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flex: 1,
-            flexDirection: 'column',
-            marginY: 1.5
-          }}
-        >
-          {cellError ? (
-            <>
-              {isAutoFillCorrection ? (
-                <Typography className="auto-fill-correction">{displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}</Typography>
-              ) : (
+          return (
+            <Box
+              sx={{
+                display: 'flex',
+                flex: 1,
+                flexDirection: 'column',
+                marginY: 1.5
+              }}
+            >
+              {cellError ? (
                 <>
-                  <Typography className="error-cell">{displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}</Typography>
-                  <Typography className="null-cell">NULL</Typography>
+                  {isAutoFillCorrection ? (
+                    <>
+                      <Typography className="auto-fill-correction">
+                        {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
+                      </Typography>
+                      <Divider orientation="horizontal" sx={{ marginY: 0.5 }} />
+                      <Typography variant={'caption'} className="auto-fill-correction">
+                        {cellError}
+                      </Typography>
+                    </>
+                  ) : (
+                    <>
+                      <Typography className="error-cell">{displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}</Typography>
+                      <Typography className="null-cell">NULL</Typography>
+                    </>
+                  )}
                 </>
+              ) : (
+                <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+                  {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
+                </Typography>
               )}
-            </>
-          ) : (
-            <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
-              {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
-            </Typography>
-          )}
-        </Box>
-      );
-    },
-    editable: false
-  }));
+            </Box>
+          );
+        },
+        editable: false
+      })),
+    [tableHeaders, errors, fileName]
+  );
 
   useEffect(() => {
     const tempValidRows: GridRowModel[] = [];
     const tempInvalidRows: GridRowModel[] = [];
     const tempErrors: FileErrors = {};
 
-    Object.entries(singleFileData).forEach(([rowKey, rowData], index) => {
+    Object.entries(singleFileData).forEach(([_rowKey, rowData], index) => {
       if (typeof rowData === 'object' && rowData !== null) {
         const row = { id: `${fileName}-${index}`, ...rowData } as FileRow;
         let rowErrors = validateRowByFormType(formType, row);
 
         // Check species/genus condition independently
         if (formType === 'species') {
-          const speciesField = row['species'];
-          const genusField = row['genus'];
+          const [speciesField, genusField] = [row['species'], row['genus']];
           if (speciesField && !genusField) {
             const speciesWords = speciesField.trim().split(/\s+/);
             if (speciesWords.length === 2) {
@@ -152,6 +151,27 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
               rowErrors['genus'] = 'Genus was auto-filled based on species field.';
               rowErrors['species'] = 'Species field was split into genus and species.';
             }
+          }
+        } else if (formType === 'quadrats') {
+          rowErrors = rowErrors || {};
+          const [coordinateUnits, dimensionUnits, areaUnits] = [row['coordinateunit'], row['dimensionunit'], row['areaunit']];
+          if (!coordinateUnits) {
+            row['coordinateunit'] = 'm';
+            rowErrors['coordinateunit'] = 'Coordinate units were auto-filled based on table defaults.';
+          }
+          if (!dimensionUnits) {
+            row['dimensionunit'] = 'm';
+            rowErrors['dimensionunit'] = 'Dimension units were auto-filled based on table defaults.';
+          }
+          if (!areaUnits) {
+            row['areaunit'] = 'm2';
+            rowErrors['areaunit'] = 'Area units were auto-filled based on table defaults.';
+          }
+
+          const [area, dimx, dimy] = [row['area'], row['dimx'], row['dimy']];
+          if (!area && dimx && dimy) {
+            row['area'] = String(Number(dimx) * Number(dimy));
+            rowErrors['area'] = 'Area was auto-calculated based on dimension submission. A square shape for the quadrat was assumed.';
           }
         }
 

@@ -168,7 +168,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Grid item xs={4} />
               <Grid item xs={12}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', mr: 10 }}>
-                  {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && currentFileHeaders.length > 0 ? (
+                  {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && currentFileHeaders.length > 0 && uploadForm !== undefined ? (
                     <>
                       <Typography level={'title-md'} color={'primary'} sx={{ marginBottom: 1 }}>
                         Form: {uploadForm}

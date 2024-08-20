@@ -12,6 +12,7 @@ import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import Link from 'next/link';
 import { quadratGridColumns } from '@/components/client/datagridcolumns';
+import { FormType } from '@/config/macros/formdetails';
 
 export default function QuadratsDataGrid() {
   const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);
@@ -27,7 +28,6 @@ export default function QuadratsDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const { data: session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [uploadFormType, setUploadFormType] = useState<'quadrats'>('quadrats');
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -83,7 +83,6 @@ export default function QuadratsDataGrid() {
           <Button
             onClick={() => {
               setIsUploadModalOpen(true);
-              setUploadFormType('quadrats');
             }}
             color={'primary'}
           >
@@ -103,7 +102,7 @@ export default function QuadratsDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={uploadFormType}
+        formType={FormType.quadrats}
       />
       <DataGridCommons
         gridType="quadrats"

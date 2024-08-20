@@ -1,14 +1,14 @@
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import React, { Dispatch, SetStateAction } from 'react';
 import { FileWithPath } from 'react-dropzone';
-import { FileCollectionRowSet } from './formdetails';
+import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
 
 export interface UploadStartProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   personnelRecording: string;
   // state setters
-  setUploadForm: Dispatch<SetStateAction<string>>;
+  setUploadForm: Dispatch<SetStateAction<FormType | undefined>>;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
@@ -16,7 +16,7 @@ export interface UploadStartProps {
 
 export interface UploadParseFilesProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   acceptedFiles: FileWithPath[];
   personnelRecording: string;
   dataViewActive: number;
@@ -35,7 +35,7 @@ export interface UploadReviewFilesProps {
   dbhUnit: string;
   homUnit: string;
   coordUnit: string;
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   acceptedFiles: FileWithPath[];
   expectedHeaders: string[];
   parsedData: FileCollectionRowSet;
@@ -67,7 +67,7 @@ export interface UploadFireProps {
   // contexts
   schema: string;
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   personnelRecording: string;
   dbhUnit: string;
   homUnit: string;
@@ -88,7 +88,7 @@ export interface UploadFireAzureProps {
   // contexts
   user: string;
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   acceptedFiles: FileWithPath[];
   cmErrors: CMError[];
   allRowToCMID: DetailedCMIDRow[];
@@ -108,7 +108,7 @@ export interface UploadValidationProps {
 
 export interface UploadValidationErrorDisplayProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   allRowToCMID: DetailedCMIDRow[]; // Updated to use DetailedCMIDRow[]
   cmErrors: CMError[];
   // state setters
@@ -125,7 +125,7 @@ export interface UploadUpdateValidationsProps {
 
 export interface UploadCompleteProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   // state setters
   handleCloseUploadModal: () => void;
 }

@@ -11,12 +11,12 @@ export type QuadratRDS = {
   quadratName?: string;
   startX?: number;
   startY?: number;
-  coordinateUnits?: string;
+  coordinateunit?: string;
   dimensionX?: number;
   dimensionY?: number;
-  dimensionUnits?: string;
+  dimensionunit?: string;
   area?: number;
-  areaUnits?: string;
+  areaunit?: string;
   quadratShape?: string;
 };
 
@@ -24,36 +24,23 @@ export type QuadratsResult = ResultType<QuadratRDS>;
 
 export const initialQuadratRDSRow = createInitialObject<QuadratRDS>();
 
-export interface QuadratRaw {
-  quadratID: number;
-  plotID: number;
-  quadratName: string;
-}
-
 export type Quadrat = QuadratRDS | undefined;
 
 export const validateQuadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
 
-  if (row['unit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['unit'])) {
-    errors['unit'] = 'Invalid unit value.';
+  if (!row['coordinateunit'] || (row['coordinateunit'] !== null && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['coordinateunit']))) {
+    errors['coordinateunit'] = 'Invalid unit value.';
+  }
+  if (!row['dimensionunit'] || (row['dimensionunit'] !== null && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['dimensionunit']))) {
+    errors['dimensionunit'] = 'Invalid unit value.';
+  }
+  if (!row['areaunit'] || (row['areaunit'] !== null && !['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'].includes(row['areaunit']))) {
+    errors['areaunit'] = 'Invalid unit value.';
   }
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
-
-export const quadratsFields = [
-  'quadratName',
-  'startX',
-  'startY',
-  'coordinateUnits',
-  'dimensionX',
-  'dimensionY',
-  'dimensionUnits',
-  'area',
-  'areaUnits',
-  'quadratShape'
-];
 
 export function getQuadratHCs(): ColumnStates {
   return {

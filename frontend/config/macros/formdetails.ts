@@ -12,11 +12,21 @@ const arcgisHeaders: HeaderObject[] = arcgisHeaderArr.map(header => ({
   label: header
 }));
 
+export enum FormType {
+  attributes = 'attributes',
+  personnel = 'personnel',
+  species = 'species',
+  quadrats = 'quadrats',
+  subquadrats = 'subquadrats',
+  measurements = 'measurements',
+  arcgis_xlsx = 'arcgis_xlsx'
+}
+
 // this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
-export const TableHeadersByFormType: Record<string, { label: string }[]> = {
-  attributes: [{ label: 'code' }, { label: 'description' }, { label: 'status' }],
-  personnel: [{ label: 'firstname' }, { label: 'lastname' }, { label: 'role' }],
-  species: [
+export const TableHeadersByFormType: Record<FormType, { label: string }[]> = {
+  [FormType.attributes]: [{ label: 'code' }, { label: 'description' }, { label: 'status' }],
+  [FormType.personnel]: [{ label: 'firstname' }, { label: 'lastname' }, { label: 'role' }],
+  [FormType.species]: [
     { label: 'spcode' },
     { label: 'family' },
     { label: 'genus' },
@@ -26,7 +36,7 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'authority' },
     { label: 'subspeciesauthority' }
   ],
-  quadrats: [
+  [FormType.quadrats]: [
     { label: 'quadrat' },
     { label: 'startx' },
     { label: 'starty' },
@@ -34,9 +44,11 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'dimx' },
     { label: 'dimy' },
     { label: 'dimensionunit' },
+    { label: 'area' },
+    { label: 'areaunit' },
     { label: 'quadratshape' }
   ],
-  subquadrats: [
+  [FormType.subquadrats]: [
     { label: 'subquadrat' },
     { label: 'quadrat' },
     { label: 'dimx' },
@@ -47,7 +59,7 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'coordinateunit' },
     { label: 'orderindex' }
   ],
-  measurements: [
+  [FormType.measurements]: [
     { label: 'tag' },
     { label: 'stemtag' },
     { label: 'spcode' },
@@ -63,35 +75,35 @@ export const TableHeadersByFormType: Record<string, { label: string }[]> = {
     { label: 'date' },
     { label: 'codes' }
   ],
-  arcgis_xlsx: arcgisHeaders
+  [FormType.arcgis_xlsx]: arcgisHeaders
 };
 
-export function getTableHeaders(formType: string, _usesSubquadrats: boolean): { label: string }[] {
-  // if (formType === "measurements") {
-  //   return TableHeadersByFormType["measurements"].map(header => {
-  //     if (header.label === "subquadrat") {
-  //       return {label: usesSubquadrats ? "subquadrat" : "quadrat"};
-  //     }
-  //     return header;
-  //   });
-  // }
-
+export function getTableHeaders(formType: FormType, _usesSubquadrats: boolean): { label: string }[] {
   return TableHeadersByFormType[formType];
 }
 
-export const RequiredTableHeadersByFormType: Record<string, { label: string }[]> = {
-  attributes: [],
-  personnel: [],
-  species: [],
-  quadrats: [],
-  subquadrats: [],
-  measurements: [],
-  arcgis_xlsx: []
+export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[]> = {
+  [FormType.attributes]: [],
+  [FormType.personnel]: [],
+  [FormType.species]: [],
+  [FormType.quadrats]: [],
+  [FormType.subquadrats]: [],
+  [FormType.measurements]: [],
+  [FormType.arcgis_xlsx]: []
 };
-export const DBInputForms: string[] = ['attributes', 'personnel', 'species', 'quadrats', 'subquadrats', 'measurements'];
+
+export const DBInputForms: FormType[] = [
+  FormType.attributes,
+  FormType.personnel,
+  FormType.species,
+  FormType.quadrats,
+  FormType.subquadrats,
+  FormType.measurements
+];
+
 export const FormGroups: Record<string, string[]> = {
   'Database Forms': DBInputForms,
-  'ArcGIS Forms': ['arcgis_xlsx']
+  'ArcGIS Forms': [FormType.arcgis_xlsx]
 };
 
 /**
@@ -137,34 +149,6 @@ export interface UploadedFileData {
   fileErrors?: any;
   date?: Date;
 }
-
-// custom forms (unique)
-export type MeasurementForm = {
-  tag?: string;
-  stemtag?: string;
-  spcode?: string;
-  subquadrat?: string;
-  lx?: string;
-  ly?: string;
-  unit?: string;
-  dbh?: string;
-  dbhunit?: string;
-  hom?: string;
-  homunit?: string;
-  date?: string;
-  codes?: string;
-};
-
-export type SpeciesForm = {
-  spcode?: string;
-  family?: string;
-  genus?: string;
-  species?: string;
-  subspecies?: string;
-  idlevel?: string;
-  authority?: string;
-  subspeciesauthority?: string;
-};
 
 // CONSTANT MACROS
 

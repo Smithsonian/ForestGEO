@@ -11,6 +11,7 @@ import { Box, Button, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import Link from 'next/link';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
+import { FormType } from '@/config/macros/formdetails';
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);
@@ -96,7 +97,7 @@ export default function PersonnelDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={'personnel'}
+        formType={FormType.personnel}
       />
       <DataGridCommons
         gridType="personnel"

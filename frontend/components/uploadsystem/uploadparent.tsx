@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { CMError, ReviewProgress, ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow, FileRowSet, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
@@ -36,7 +36,7 @@ export interface DetailedCMIDRow extends CMIDRow {
 
 interface UploadParentProps {
   onReset: () => void; // closes the modal
-  overrideUploadForm?: string;
+  overrideUploadForm?: FormType;
 }
 
 export default function UploadParent(props: UploadParentProps) {
@@ -45,7 +45,7 @@ export default function UploadParent(props: UploadParentProps) {
    * this will be the new parent upload function that will then pass data to child components being called within
    */
   // select schema table that file should be uploaded to --> state
-  const [uploadForm, setUploadForm] = useState('');
+  const [uploadForm, setUploadForm] = useState<FormType | undefined>(overrideUploadForm);
   const [personnelRecording, setPersonnelRecording] = useState('');
   const [coordUnit, setCoordUnit] = useState('');
   const [dbhUnit, setDBHUnit] = useState('');
@@ -81,10 +81,6 @@ export default function UploadParent(props: UploadParentProps) {
   if (!currentSite) throw new Error('site must be selected!');
   const { data: session } = useSession();
 
-  useEffect(() => {
-    if (overrideUploadForm) setUploadForm(overrideUploadForm);
-  }, [overrideUploadForm]);
-
   const handleCancelUpload = (): void => {
     handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
   };
@@ -108,6 +104,7 @@ export default function UploadParent(props: UploadParentProps) {
     isValid: boolean;
     missingHeaders: string[];
   } {
+    if (!uploadForm) throw new Error('No upload form set!');
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
     const requiredExpectedHeadersLower = requiredHeaders.map(header => header.label.toLowerCase());
     const actualHeadersLower = actualHeaders.map(header => header.toLowerCase());
@@ -126,7 +123,7 @@ export default function UploadParent(props: UploadParentProps) {
     setParsedData({});
     setErrors({});
     setErrorRows({});
-    setUploadForm('');
+    setUploadForm(undefined);
     setPersonnelRecording('');
     setReviewState(ReviewStates.START);
   }
@@ -196,7 +193,7 @@ export default function UploadParent(props: UploadParentProps) {
         skipEmptyLines: true,
         transformHeader: h => h.trim(),
         transform: (value, field) => {
-          if (uploadForm === 'measurements' && field === 'date') {
+          if (uploadForm === FormType.measurements && field === 'date') {
             const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
 
             if (match) {
@@ -222,6 +219,7 @@ export default function UploadParent(props: UploadParentProps) {
           return value;
         },
         complete: async (results: ParseResult<FileRow>) => {
+          if (!uploadForm) throw new Error('Upload form set failure');
           const expectedHeaders = getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false);
           const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
 
@@ -307,7 +305,7 @@ export default function UploadParent(props: UploadParentProps) {
   }, [progressTracker, reviewState]);
 
   const renderStateContent = () => {
-    if (uploadForm === '' && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
+    if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
     switch (reviewState) {
       case ReviewStates.START:
         return (

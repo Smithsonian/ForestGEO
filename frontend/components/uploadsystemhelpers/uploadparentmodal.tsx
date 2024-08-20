@@ -4,11 +4,12 @@ import { IconButton, Modal, ModalDialog } from '@mui/joy';
 import CloseIcon from '@mui/icons-material/Close';
 
 import UploadParent from '../uploadsystem/uploadparent';
+import { FormType } from '@/config/macros/formdetails';
 
 interface UPMProps {
   isUploadModalOpen: boolean;
   handleCloseUploadModal: () => void;
-  formType: string;
+  formType: FormType;
 }
 
 export default function UploadParentModal(props: UPMProps) {
