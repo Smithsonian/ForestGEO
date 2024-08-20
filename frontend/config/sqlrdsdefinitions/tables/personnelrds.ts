@@ -1,15 +1,16 @@
 // personnel custom data type
 import { createInitialObject, ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import { ColumnStates } from '@/config/macros';
 
-export interface PersonnelRDS {
+export type PersonnelRDS = {
   id?: number;
   personnelID?: number;
   censusID?: number;
   firstName?: string;
   lastName?: string;
   roleID?: number;
-}
+};
 
 export type PersonnelResult = ResultType<PersonnelRDS>;
 
@@ -36,4 +37,9 @@ export const validatePersonnelRow: ValidationFunction = row => {
   return Object.keys(errors).length > 0 ? errors : null;
 };
 
-export const personnelFields = ['firstName', 'lastName'];
+export function getPersonnelHCs(): ColumnStates {
+  return {
+    censusID: false,
+    roleID: false
+  };
+}

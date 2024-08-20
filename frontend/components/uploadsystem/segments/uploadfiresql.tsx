@@ -124,7 +124,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   useEffect(() => {
     switch (uploadForm) {
       case 'attributes':
-      case 'roles':
       case 'personnel':
       case 'species':
       case 'quadrats':

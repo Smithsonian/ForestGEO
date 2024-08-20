@@ -1,5 +1,5 @@
 // species custom data type
-import { ResultType } from '@/config/utils';
+import { createInitialObject, ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
 export type SpeciesRDS = {
@@ -19,6 +19,8 @@ export type SpeciesRDS = {
 };
 
 export type SpeciesResult = ResultType<SpeciesRDS>;
+
+export const initialSpeciesRDSRow = createInitialObject<SpeciesRDS>();
 
 const SPECIES_SPECIESCODE_LIMIT = 25;
 const SPECIES_SPECIESNAME_LIMIT = 64;
@@ -58,18 +60,3 @@ export const validateSpeciesFormRow: ValidationFunction = row => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
-
-export const speciesFields = [
-  'currentTaxonFlag',
-  'obsoleteTaxonFlag',
-  'speciesName',
-  'subspeciesName',
-  'speciesCode',
-  'idLevel',
-  'speciesAuthority',
-  'subspeciesAuthority',
-  'fieldFamily',
-  'description',
-  'validCode',
-  'referenceID'
-];

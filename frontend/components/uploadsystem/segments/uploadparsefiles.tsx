@@ -73,7 +73,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
           <Stack direction={'column'} sx={{ display: 'flex', flexDirection: 'column', mb: 10 }}>
             <Typography sx={{ mb: 2 }}>
               You have selected {uploadForm}. Please ensure that your file has the following headers before continuing: <br />
-              {uploadForm !== '' &&
+              {uploadForm !== undefined &&
                 getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false)
                   .map(obj => obj.label)
                   .join(', ')}

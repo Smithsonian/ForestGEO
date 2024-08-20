@@ -11,6 +11,7 @@ import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { useOrgCensusContext } from '@/app/contexts/userselectionprovider';
 import { AttributeGridColumns } from '@/components/client/datagridcolumns';
+import { FormType } from '@/config/macros/formdetails';
 
 export default function AttributesDataGrid() {
   const [rows, setRows] = useState([initialAttributesRDSRow] as GridRowsProp);
@@ -74,7 +75,7 @@ export default function AttributesDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={'attributes'}
+        formType={FormType.attributes}
       />
 
       <DataGridCommons

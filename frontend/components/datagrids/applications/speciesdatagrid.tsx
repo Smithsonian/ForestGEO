@@ -9,6 +9,7 @@ import { useSession } from 'next-auth/react';
 import { Box, Button, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { SpeciesGridColumns } from '@/components/client/datagridcolumns';
+import { FormType } from '@/config/macros/formdetails';
 
 export default function SpeciesDataGrid() {
   /**
@@ -123,7 +124,7 @@ export default function SpeciesDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={'species'}
+        formType={FormType.species}
       />
 
       <DataGridCommons

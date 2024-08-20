@@ -70,7 +70,7 @@ export const quadratGridColumns: GridColDef[] = [
   },
   {
     field: 'coordinateUnits',
-    headerName: 'Unit',
+    headerName: 'Coordinate Units',
     headerClassName: 'header',
     flex: 1,
     renderHeader: () => formatHeader('Coordinate', 'Units'),
@@ -92,7 +92,7 @@ export const quadratGridColumns: GridColDef[] = [
   },
   {
     field: 'areaUnits',
-    headerName: 'Unit',
+    headerName: 'Area Unit',
     headerClassName: 'header',
     flex: 1,
     renderHeader: () => formatHeader('Area', 'Unit'),
@@ -125,7 +125,7 @@ export const quadratGridColumns: GridColDef[] = [
   },
   {
     field: 'dimensionUnits',
-    headerName: 'Unit',
+    headerName: 'Dimension Unit',
     headerClassName: 'header',
     flex: 1,
     renderHeader: () => formatHeader('Dimension', 'Unit'),

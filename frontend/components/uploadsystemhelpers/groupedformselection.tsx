@@ -8,7 +8,7 @@ import ListDivider from '@mui/joy/ListDivider';
 import ListItem from '@mui/joy/ListItem';
 import Typography from '@mui/joy/Typography';
 import Check from '@mui/icons-material/Check';
-import { FormGroups, TableHeadersByFormType } from '@/config/macros/formdetails';
+import { FormGroups, FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 
 interface SelectFormTypeProps {
   externalState: string;
@@ -24,7 +24,7 @@ const SelectFormType: React.FC<SelectFormTypeProps> = ({ externalState, updateEx
   const handleChange = (event: React.SyntheticEvent | null, newValue: string | null) => {
     if (newValue) {
       updateExternalState(newValue!);
-      updateExternalHeaders(TableHeadersByFormType[newValue!].map(item => item.label));
+      updateExternalHeaders(TableHeadersByFormType[newValue as FormType].map(item => item.label));
     }
   };
 

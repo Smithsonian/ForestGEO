@@ -11,6 +11,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import { initialStemTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views/stemtaxonomiesviewrds';
 import { useOrgCensusContext } from '@/app/contexts/userselectionprovider';
 import { StemTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
+import { FormType } from '@/config/macros/formdetails';
 
 export default function StemTaxonomiesViewDataGrid() {
   const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);
@@ -79,7 +80,7 @@ export default function StemTaxonomiesViewDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={'species'}
+        formType={FormType.species}
       />
 
       <DataGridCommons

@@ -90,7 +90,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     setIsQuadratConfirmed(true);
   };
 
-  const allSelectionsMade = uploadForm !== '' && (uploadForm !== 'measurements' || (personnelRecording !== '' && isQuadratConfirmed));
+  const allSelectionsMade = uploadForm !== undefined && (uploadForm !== 'measurements' || (personnelRecording !== '' && isQuadratConfirmed));
 
   const showBackButton = personnelRecording !== '' || isQuadratConfirmed;
 
@@ -139,7 +139,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
           </Tooltip>
         )}
         {/* Form Type Selection */}
-        {uploadForm !== '' && uploadForm !== 'measurements' && !finish && (
+        {uploadForm !== undefined && uploadForm !== 'measurements' && !finish && (
           <>
             <Typography sx={{ mb: 2 }}>You have selected:</Typography>
             <Typography>Form: {uploadForm}</Typography>
@@ -198,12 +198,16 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
             <Typography>Personnel: {personnelRecording}</Typography>
           </>
         )}
-        {['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes(uploadForm) && personnelRecording !== '' && currentQuadrat && !finish && (
-          <>
-            <Typography sx={{ mb: 2, mt: 2 }}>You have selected:</Typography>
-            <Typography>Form: {uploadForm}</Typography>
-          </>
-        )}
+        {uploadForm !== undefined &&
+          ['attributes', 'personnel', 'species', 'quadrats', 'subquadrats'].includes(uploadForm) &&
+          personnelRecording !== '' &&
+          currentQuadrat &&
+          !finish && (
+            <>
+              <Typography sx={{ mb: 2, mt: 2 }}>You have selected:</Typography>
+              <Typography>Form: {uploadForm}</Typography>
+            </>
+          )}
         <FinalizeSelectionsButton onFinish={() => setFinish(true)} show={allSelectionsMade && !finish} />
       </Stack>
     </Box>

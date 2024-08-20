@@ -10,6 +10,7 @@ import { Box, Button, Snackbar, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { measurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { FormType } from '@/config/macros/formdetails';
 
 export default function MeasurementsSummaryViewDataGrid() {
   const currentPlot = usePlotContext();
@@ -106,7 +107,7 @@ export default function MeasurementsSummaryViewDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={'measurements'}
+        formType={FormType.measurements}
       />
       <MeasurementsCommons
         gridType={'measurementssummary'}
