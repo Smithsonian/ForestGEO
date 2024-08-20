@@ -40,6 +40,6 @@ export const validatePersonnelRow: ValidationFunction = row => {
 export function getPersonnelHCs(): ColumnStates {
   return {
     censusID: false,
-    roleID: false
+    personnelID: false
   };
 }

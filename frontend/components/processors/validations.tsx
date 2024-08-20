@@ -1,5 +1,27 @@
 import { getConn, runQuery } from './processormacros';
 
+// Define the enum for DBH units
+enum DBHUnits {
+  km = 'km',
+  hm = 'hm',
+  dam = 'dam',
+  m = 'm',
+  dm = 'dm',
+  cm = 'cm',
+  mm = 'mm'
+}
+
+// Map the units to their conversion factors
+const unitConversionFactors: Record<DBHUnits, number> = {
+  km: 1000000,
+  hm: 100000,
+  dam: 10000,
+  m: 1000,
+  dm: 100,
+  cm: 10,
+  mm: 1
+};
+
 export async function validateDBHGrowthExceedsMax(p_CensusID: number | null, p_PlotID: number | null) {
   const conn = await getConn();
   let insertCount = 0;
@@ -7,32 +29,44 @@ export async function validateDBHGrowthExceedsMax(p_CensusID: number | null, p_P
   let veID: number;
 
   try {
-    // Fetch the ValidationErrorID for this stored procedure
     const validationProcedureQuery = `
             SELECT ValidationID
             FROM catalog.validationprocedures
             WHERE ProcedureName = 'ValidateDBHGrowthExceedsMax';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
     const cursorQuery = `
-            SELECT cm2.CoreMeasurementID, cm1.MeasuredDBH AS vPrevDBH, cm2.MeasuredDBH AS vCurrDBH
+            SELECT 
+                cm2.CoreMeasurementID, 
+                cm1.MeasuredDBH AS vPrevDBH, 
+                cm2.MeasuredDBH AS vCurrDBH, 
+                cm1.DBHUnit AS vPrevDBHUnit, 
+                cm2.DBHUnit AS vCurrDBHUnit
             FROM coremeasurements cm1
-            JOIN coremeasurements cm2 ON cm1.StemID = cm2.StemID AND YEAR(cm2.MeasurementDate) = YEAR(cm1.MeasurementDate) + 1
-            LEFT JOIN stems st2 ON cm2.StemID = st2.StemID
-            LEFT JOIN quadrats q ON st2.QuadratID = q.QuadratID
-            LEFT JOIN cmattributes cma ON cm1.CoreMeasurementID = cma.CoreMeasurementID
-            LEFT JOIN attributes a ON cma.Code = a.Code
-            WHERE (a.Status NOT IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted') OR a.Status IS NULL)
-              AND cm1.MeasuredDBH IS NOT NULL
-              AND cm2.MeasuredDBH IS NOT NULL
-              AND (cm2.MeasuredDBH - cm1.MeasuredDBH > 65)
-              AND cm1.IsValidated IS TRUE
-              AND cm2.IsValidated IS FALSE
-              AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-              AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
+            JOIN coremeasurements cm2 
+                ON cm1.StemID = cm2.StemID 
+                AND YEAR(cm2.MeasurementDate) = YEAR(cm1.MeasurementDate) + 1
+            LEFT JOIN stems st2 
+                ON cm2.StemID = st2.StemID
+            LEFT JOIN quadrats q 
+                ON st2.QuadratID = q.QuadratID
+            LEFT JOIN cmattributes cma 
+                ON cm1.CoreMeasurementID = cma.CoreMeasurementID
+            LEFT JOIN attributes a 
+                ON cma.Code = a.Code
+            WHERE 
+                (a.Status NOT IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted') OR a.Status IS NULL)
+                AND cm1.MeasuredDBH IS NOT NULL
+                AND cm2.MeasuredDBH IS NOT NULL
+                AND cm1.IsValidated IS TRUE
+                AND cm2.IsValidated IS FALSE
+                AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
+                AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
         `;
 
     const cursorParams = [];
@@ -41,40 +75,65 @@ export async function validateDBHGrowthExceedsMax(p_CensusID: number | null, p_P
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
 
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
+
     for (const row of cursorResults) {
-      const { CoreMeasurementID, vPrevDBH, vCurrDBH } = row;
+      const { CoreMeasurementID, vPrevDBH, vCurrDBH, vPrevDBHUnit, vCurrDBHUnit } = row;
+
       expectedCount++;
 
-      // Check if validation error already exists
-      const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
-      const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
+      // Type assertions for the DBH unit
+      const prevDBHUnit = vPrevDBHUnit as DBHUnits;
+      const currDBHUnit = vCurrDBHUnit as DBHUnits;
 
-      if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
+      // Convert DBH values to millimeters
+      const prevDBHInMM = vPrevDBH * (unitConversionFactors[prevDBHUnit] || 1);
+      const currDBHInMM = vCurrDBH * (unitConversionFactors[currDBHUnit] || 1);
+
+      // Check if growth exceeds 65mm
+      if (currDBHInMM - prevDBHInMM > 65) {
+        const errorCheckQuery = `
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
                 `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
-        insertCount++;
+        if (errorCheckResult.length === 0) {
+          insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+          insertErrorParams.push(CoreMeasurementID, veID);
+
+          insertCount++;
+        }
+
+        logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Growth exceeds max threshold.',
+                              'Annual DBH Growth', ?, 'Growth <= 65', 'Checked for excessive DBH growth over a year');
+                `);
+        logValidationParams.push(
+          'ValidateDBHGrowthExceedsMax',
+          CoreMeasurementID,
+          `Previous DBH: ${vPrevDBH} ${vPrevDBHUnit}, Current DBH: ${vCurrDBH} ${vCurrDBHUnit}`
+        );
       }
-
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Growth exceeds max threshold.',
-                        'Annual DBH Growth', ?, 'Growth <= 65', 'Checked for excessive DBH growth over a year');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateDBHGrowthExceedsMax', CoreMeasurementID, `Previous DBH: ${vPrevDBH}, Current DBH: ${vCurrDBH}`]);
     }
 
-    // Return the summary
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
+    }
+
     return {
       TotalRows: expectedCount,
       FailedRows: insertCount,
@@ -82,10 +141,9 @@ export async function validateDBHGrowthExceedsMax(p_CensusID: number | null, p_P
     };
   } catch (error: any) {
     console.error('Error during DBH Growth validation:', error.message);
-    throw error;
+    throw new Error('DBH Growth validation failed. Please check the logs for more details.');
   } finally {
-    // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -103,25 +161,39 @@ export async function validateDBHShrinkageExceedsMax(p_CensusID: number | null, 
             WHERE ProcedureName = 'ValidateDBHShrinkageExceedsMax';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to fetch all relevant measurement pairs
     const cursorQuery = `
-            SELECT cm2.CoreMeasurementID, cm1.MeasuredDBH AS vPrevDBH, cm2.MeasuredDBH AS vCurrDBH
+            SELECT 
+                cm2.CoreMeasurementID, 
+                cm1.MeasuredDBH AS vPrevDBH, 
+                cm2.MeasuredDBH AS vCurrDBH, 
+                cm1.DBHUnit AS vPrevDBHUnit, 
+                cm2.DBHUnit AS vCurrDBHUnit
             FROM coremeasurements cm1
-            JOIN coremeasurements cm2 ON cm1.StemID = cm2.StemID AND YEAR(cm2.MeasurementDate) = YEAR(cm1.MeasurementDate) + 1
-            LEFT JOIN stems st ON cm2.StemID = st.StemID
-            LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
-            LEFT JOIN cmattributes cma ON cm1.CoreMeasurementID = cma.CoreMeasurementID
-            LEFT JOIN attributes a ON cma.Code = a.Code
-            WHERE (a.Status NOT IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted') OR a.Status IS NULL)
-              AND cm1.MeasuredDBH IS NOT NULL
-              AND cm2.MeasuredDBH IS NOT NULL
-              AND cm1.IsValidated IS TRUE
-              AND cm2.IsValidated IS FALSE
-              AND (cm2.MeasuredDBH < cm1.MeasuredDBH * 0.95) -- Validation condition
-              AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-              AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
+            JOIN coremeasurements cm2 
+                ON cm1.StemID = cm2.StemID 
+                AND YEAR(cm2.MeasurementDate) = YEAR(cm1.MeasurementDate) + 1
+            LEFT JOIN stems st 
+                ON cm2.StemID = st.StemID
+            LEFT JOIN quadrats q 
+                ON st.QuadratID = q.QuadratID
+            LEFT JOIN cmattributes cma 
+                ON cm1.CoreMeasurementID = cma.CoreMeasurementID
+            LEFT JOIN attributes a 
+                ON cma.Code = a.Code
+            WHERE 
+                (a.Status NOT IN ('dead', 'stem dead', 'broken below', 'missing', 'omitted') OR a.Status IS NULL)
+                AND cm1.MeasuredDBH IS NOT NULL
+                AND cm2.MeasuredDBH IS NOT NULL
+                AND cm1.IsValidated IS TRUE
+                AND cm2.IsValidated IS FALSE
+                AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
+                AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
         `;
 
     const cursorParams = [];
@@ -130,37 +202,66 @@ export async function validateDBHShrinkageExceedsMax(p_CensusID: number | null, 
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
 
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
+
     for (const row of cursorResults) {
-      const { CoreMeasurementID, vPrevDBH, vCurrDBH } = row;
+      const { CoreMeasurementID, vPrevDBH, vCurrDBH, vPrevDBHUnit, vCurrDBHUnit } = row;
       expectedCount++;
 
-      // Check if validation error already exists
-      const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
-      const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
+      // Type assertions for the DBH unit
+      const prevDBHUnit = vPrevDBHUnit as DBHUnits;
+      const currDBHUnit = vCurrDBHUnit as DBHUnits;
 
-      if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
+      // Convert DBH values to millimeters
+      const prevDBHInMM = vPrevDBH * (unitConversionFactors[prevDBHUnit] || 1);
+      const currDBHInMM = vCurrDBH * (unitConversionFactors[currDBHUnit] || 1);
+
+      // Check if shrinkage exceeds 5%
+      if (currDBHInMM < prevDBHInMM * 0.95) {
+        // Check if validation error already exists
+        const errorCheckQuery = `
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
                 `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
-        insertCount++;
+        if (errorCheckResult.length === 0) {
+          // Queue insertion of validation error
+          insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+          insertErrorParams.push(CoreMeasurementID, veID);
+
+          insertCount++;
+        }
+
+        // Queue insertion into validationchangelog
+        logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Shrinkage exceeds maximum allowed threshold.',
+                              'Annual DBH Shrinkage', ?, 'Shrinkage < 5% of previous DBH', 'Checked for excessive DBH shrinkage over a year');
+                `);
+        logValidationParams.push(
+          'ValidateDBHShrinkageExceedsMax',
+          CoreMeasurementID,
+          `Previous DBH: ${vPrevDBH} ${vPrevDBHUnit}, Current DBH: ${vCurrDBH} ${vCurrDBHUnit}`
+        );
       }
+    }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Shrinkage exceeds maximum allowed threshold.',
-                        'Annual DBH Shrinkage', ?, 'Shrinkage < 5% of previous DBH', 'Checked for excessive DBH shrinkage over a year');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateDBHShrinkageExceedsMax', CoreMeasurementID, `Previous DBH: ${vPrevDBH}, Current DBH: ${vCurrDBH}`]);
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -171,10 +272,10 @@ export async function validateDBHShrinkageExceedsMax(p_CensusID: number | null, 
     };
   } catch (error: any) {
     console.error('Error during DBH Shrinkage validation:', error.message);
-    throw error;
+    throw new Error('DBH Shrinkage validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -192,9 +293,12 @@ export async function validateFindAllInvalidSpeciesCodes(p_CensusID: number | nu
             WHERE ProcedureName = 'ValidateFindAllInvalidSpeciesCodes';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to fetch all relevant measurements with invalid species codes
     const cursorQuery = `
             SELECT cm.CoreMeasurementID
             FROM stems s
@@ -215,39 +319,53 @@ export async function validateFindAllInvalidSpeciesCodes(p_CensusID: number | nu
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
 
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
+
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
       expectedCount++;
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Invalid species code detected.',
-                        'Species Code Validation', 'Species ID: NULL',
-                        'Non-null and valid Species ID',
-                        'Checking for the existence of valid species codes for each measurement.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindAllInvalidSpeciesCodes', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Invalid species code detected.',
+                              'Species Code Validation', 'Species ID: NULL',
+                              'Non-null and valid Species ID',
+                              'Checking for the existence of valid species codes for each measurement.');
+                `);
+      logValidationParams.push('ValidateFindAllInvalidSpeciesCodes', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -258,10 +376,10 @@ export async function validateFindAllInvalidSpeciesCodes(p_CensusID: number | nu
     };
   } catch (error: any) {
     console.error('Error during Species Code validation:', error.message);
-    throw error;
+    throw new Error('Species Code validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -279,9 +397,12 @@ export async function validateFindDuplicateStemTreeTagCombinationsPerCensus(p_Ce
             WHERE ProcedureName = 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to fetch all relevant measurements with duplicate stem-tree tag combinations
     const cursorQuery = `
             SELECT cm.CoreMeasurementID
             FROM coremeasurements cm
@@ -295,11 +416,16 @@ export async function validateFindDuplicateStemTreeTagCombinationsPerCensus(p_Ce
             HAVING COUNT(cm.CoreMeasurementID) > 1;
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -307,33 +433,42 @@ export async function validateFindDuplicateStemTreeTagCombinationsPerCensus(p_Ce
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Duplicate stem and tree tag combination detected.',
-                        'Duplicate Stem-Tree Tag Combinations per Census', 'N/A',
-                        'Unique Stem-Tree Tag Combinations',
-                        'Checking for duplicate stem and tree tag combinations in each census.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindDuplicateStemTreeTagCombinationsPerCensus', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Duplicate stem and tree tag combination detected.',
+                              'Duplicate Stem-Tree Tag Combinations per Census', 'N/A',
+                              'Unique Stem-Tree Tag Combinations',
+                              'Checking for duplicate stem and tree tag combinations in each census.');
+                `);
+      logValidationParams.push('ValidateFindDuplicateStemTreeTagCombinationsPerCensus', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -344,10 +479,10 @@ export async function validateFindDuplicateStemTreeTagCombinationsPerCensus(p_Ce
     };
   } catch (error: any) {
     console.error('Error during Duplicate Stem-Tree Tag validation:', error.message);
-    throw error;
+    throw new Error('Duplicate Stem-Tree Tag validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -365,9 +500,12 @@ export async function validateFindDuplicatedQuadratsByName(p_CensusID: number | 
             WHERE ProcedureName = 'ValidateFindDuplicatedQuadratsByName';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to fetch all relevant measurements with duplicated quadrat names
     const cursorQuery = `
             SELECT cm.CoreMeasurementID
             FROM quadrats q
@@ -385,11 +523,16 @@ export async function validateFindDuplicatedQuadratsByName(p_CensusID: number | 
             GROUP BY cm.CoreMeasurementID;
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -397,32 +540,41 @@ export async function validateFindDuplicatedQuadratsByName(p_CensusID: number | 
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Duplicated quadrat name detected.',
-                        'Quadrat Name Duplication', 'N/A',
-                        'Unique Quadrat Names per Plot', 'Checking for duplicated quadrat names within the same plot.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindDuplicatedQuadratsByName', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Duplicated quadrat name detected.',
+                              'Quadrat Name Duplication', 'N/A',
+                              'Unique Quadrat Names per Plot', 'Checking for duplicated quadrat names within the same plot.');
+                `);
+      logValidationParams.push('ValidateFindDuplicatedQuadratsByName', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -433,10 +585,10 @@ export async function validateFindDuplicatedQuadratsByName(p_CensusID: number | 
     };
   } catch (error: any) {
     console.error('Error during Quadrat Name Duplication validation:', error.message);
-    throw error;
+    throw new Error('Quadrat Name Duplication validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -454,9 +606,12 @@ export async function validateFindMeasurementsOutsideCensusDateBoundsGroupByQuad
             WHERE ProcedureName = 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to fetch all relevant measurements outside census date bounds
     const cursorQuery = `
             SELECT MIN(cm.CoreMeasurementID) AS CoreMeasurementID
             FROM coremeasurements cm
@@ -471,11 +626,16 @@ export async function validateFindMeasurementsOutsideCensusDateBoundsGroupByQuad
             GROUP BY q.QuadratID, c.CensusID, c.StartDate, c.EndDate;
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -483,33 +643,42 @@ export async function validateFindMeasurementsOutsideCensusDateBoundsGroupByQuad
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Measurement outside census date bounds.',
-                        'Measurement Date vs Census Date Bounds', 'Measurement Date',
-                        'Within Census Start and End Dates',
-                        'Checking if measurement dates fall within the start and end dates of their respective censuses.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Measurement outside census date bounds.',
+                              'Measurement Date vs Census Date Bounds', 'Measurement Date',
+                              'Within Census Start and End Dates',
+                              'Checking if measurement dates fall within the start and end dates of their respective censuses.');
+                `);
+      logValidationParams.push('ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -520,10 +689,10 @@ export async function validateFindMeasurementsOutsideCensusDateBoundsGroupByQuad
     };
   } catch (error: any) {
     console.error('Error during Measurement Date validation:', error.message);
-    throw error;
+    throw new Error('Measurement Date validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -541,9 +710,12 @@ export async function validateFindStemsInTreeWithDifferentSpecies(p_CensusID: nu
             WHERE ProcedureName = 'ValidateFindStemsInTreeWithDifferentSpecies';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to find stems in the same tree with different species
     const cursorQuery = `
             SELECT cm.CoreMeasurementID
             FROM coremeasurements cm
@@ -557,11 +729,16 @@ export async function validateFindStemsInTreeWithDifferentSpecies(p_CensusID: nu
             HAVING COUNT(DISTINCT t.SpeciesID) > 1;
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -569,32 +746,41 @@ export async function validateFindStemsInTreeWithDifferentSpecies(p_CensusID: nu
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Stems in the same tree have different species.',
-                        'Species consistency across tree stems', 'One species per tree',
-                        'One species per tree', 'Checking if stems belonging to the same tree have different species IDs.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindStemsInTreeWithDifferentSpecies', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Stems in the same tree have different species.',
+                              'Species consistency across tree stems', 'One species per tree',
+                              'One species per tree', 'Checking if stems belonging to the same tree have different species IDs.');
+                `);
+      logValidationParams.push('ValidateFindStemsInTreeWithDifferentSpecies', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -605,10 +791,10 @@ export async function validateFindStemsInTreeWithDifferentSpecies(p_CensusID: nu
     };
   } catch (error: any) {
     console.error('Error during Species Consistency validation:', error.message);
-    throw error;
+    throw new Error('Species Consistency validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -626,9 +812,12 @@ export async function validateFindStemsOutsidePlots(p_CensusID: number | null, p
             WHERE ProcedureName = 'ValidateFindStemsOutsidePlots';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to find stems outside plot dimensions
     const cursorQuery = `
             SELECT cm.CoreMeasurementID
             FROM stems s
@@ -646,11 +835,16 @@ export async function validateFindStemsOutsidePlots(p_CensusID: number | null, p
             GROUP BY cm.CoreMeasurementID;
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -658,32 +852,41 @@ export async function validateFindStemsOutsidePlots(p_CensusID: number | null, p
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Stem is outside plot dimensions.',
-                        'Stem Placement within Plot Boundaries', 'Stem Plot Coordinates',
-                        'Within Plot Dimensions', 'Validating whether stems are located within the specified plot dimensions.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindStemsOutsidePlots', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Stem is outside plot dimensions.',
+                              'Stem Placement within Plot Boundaries', 'Stem Plot Coordinates',
+                              'Within Plot Dimensions', 'Validating whether stems are located within the specified plot dimensions.');
+                `);
+      logValidationParams.push('ValidateFindStemsOutsidePlots', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -694,10 +897,10 @@ export async function validateFindStemsOutsidePlots(p_CensusID: number | null, p
     };
   } catch (error: any) {
     console.error('Error during Stem Placement validation:', error.message);
-    throw error;
+    throw new Error('Stem Placement validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -715,9 +918,12 @@ export async function validateFindTreeStemsInDifferentQuadrats(p_CensusID: numbe
             WHERE ProcedureName = 'ValidateFindTreeStemsInDifferentQuadrats';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to find tree stems located in different quadrats
     const cursorQuery = `
             SELECT cm1.CoreMeasurementID
             FROM stems s1
@@ -732,11 +938,16 @@ export async function validateFindTreeStemsInDifferentQuadrats(p_CensusID: numbe
             GROUP BY cm1.CoreMeasurementID;
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -744,33 +955,42 @@ export async function validateFindTreeStemsInDifferentQuadrats(p_CensusID: numbe
 
       // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        // Log the validation error
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      // Insert into validationchangelog
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Stems in the same tree are in different quadrats.',
-                        'Stem Quadrat Consistency within Trees', 'Quadrat IDs of Stems',
-                        'Consistent Quadrat IDs for all Stems in a Tree',
-                        'Validating that all stems within the same tree are located in the same quadrat.');
-            `;
-      await runQuery(conn, logValidationQuery, ['ValidateFindTreeStemsInDifferentQuadrats', CoreMeasurementID]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Stems in the same tree are in different quadrats.',
+                              'Stem Quadrat Consistency within Trees', 'Quadrat IDs of Stems',
+                              'Consistent Quadrat IDs for all Stems in a Tree',
+                              'Validating that all stems within the same tree are located in the same quadrat.');
+                `);
+      logValidationParams.push('ValidateFindTreeStemsInDifferentQuadrats', CoreMeasurementID);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -781,12 +1001,34 @@ export async function validateFindTreeStemsInDifferentQuadrats(p_CensusID: numbe
     };
   } catch (error: any) {
     console.error('Error during Stem Quadrat Consistency validation:', error.message);
-    throw error;
+    throw new Error('Stem Quadrat Consistency validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
+
+// Enum for HOM units
+enum HOMUnits {
+  km = 'km',
+  hm = 'hm',
+  dam = 'dam',
+  m = 'm',
+  dm = 'dm',
+  cm = 'cm',
+  mm = 'mm'
+}
+
+// Map the units to their conversion factors to meters
+const unitConversionFactorsHOM: Record<HOMUnits, number> = {
+  km: 1000,
+  hm: 100,
+  dam: 10,
+  m: 1,
+  dm: 0.1,
+  cm: 0.01,
+  mm: 0.001
+};
 
 export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, p_PlotID: number | null, minHOM: number | null, maxHOM: number | null) {
   const conn = await getConn();
@@ -802,11 +1044,14 @@ export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, 
             WHERE ProcedureName = 'ValidateHOMUpperAndLowerBounds';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to find measurements outside the HOM bounds
     const cursorQuery = `
-            SELECT cm.CoreMeasurementID
+            SELECT cm.CoreMeasurementID, cm.MeasuredHOM, cm.HOMUnit
             FROM coremeasurements cm
             LEFT JOIN stems st ON cm.StemID = st.StemID
             LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
@@ -819,7 +1064,7 @@ export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, 
             AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (minHOM !== null) cursorParams.push(minHOM);
     if (maxHOM !== null) cursorParams.push(maxHOM);
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
@@ -827,55 +1072,67 @@ export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, 
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
 
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
+
     for (const row of cursorResults) {
-      const { CoreMeasurementID } = row;
+      const { CoreMeasurementID, MeasuredHOM, HOMUnit } = row;
       expectedCount++;
 
-      const measuredValueQuery = `
-                SELECT MeasuredHOM
-                FROM coremeasurements
-                WHERE CoreMeasurementID = ?;
-            `;
-      const measuredValueResult = await runQuery(conn, measuredValueQuery, [CoreMeasurementID]);
-      const measuredHOM = measuredValueResult[0]?.MeasuredHOM;
+      // Convert HOM to meters
+      const homUnit = HOMUnit as HOMUnits;
+      const measuredHOMInMeters = MeasuredHOM * (unitConversionFactorsHOM[homUnit] || 1);
 
       const validationCriteria = 'HOM Measurement Range Validation';
-      const measuredValue = `Measured HOM: ${measuredHOM}`;
-      const expectedValueRange = `Expected HOM Range: ${minHOM} - ${maxHOM}`;
-      const additionalDetails = 'Checks if the measured HOM falls within the specified minimum and maximum range.';
+      const measuredValue = `Measured HOM: ${measuredHOMInMeters} meters`;
+      const expectedValueRange = `Expected HOM Range: ${minHOM} - ${maxHOM} meters`;
+      const additionalDetails = 'Checks if the measured HOM falls within the specified minimum and maximum range in meters.';
 
-      // Log the failed validation
+      // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', ?, ?, ?, ?, ?);
-            `;
-      await runQuery(conn, logValidationQuery, [
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', ?, ?, ?, ?, ?);
+                `);
+      logValidationParams.push(
         'ValidateHOMUpperAndLowerBounds',
         CoreMeasurementID,
-        `HOM outside bounds: ${minHOM} - ${maxHOM}`,
+        `HOM outside bounds: ${minHOM} - ${maxHOM} meters`,
         validationCriteria,
         measuredValue,
         expectedValueRange,
         additionalDetails
-      ]);
+      );
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -886,10 +1143,10 @@ export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, 
     };
   } catch (error: any) {
     console.error('Error during HOM Bounds validation:', error.message);
-    throw error;
+    throw new Error('HOM Bounds validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -907,11 +1164,14 @@ export async function validateScreenMeasuredDiameterMinMax(p_CensusID: number | 
             WHERE ProcedureName = 'ValidateScreenMeasuredDiameterMinMax';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to find measurements outside the DBH bounds
     const cursorQuery = `
-            SELECT cm.CoreMeasurementID
+            SELECT cm.CoreMeasurementID, cm.MeasuredDBH, cm.DBHUnit
             FROM coremeasurements cm
             LEFT JOIN stems st ON cm.StemID = st.StemID
             LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
@@ -924,62 +1184,74 @@ export async function validateScreenMeasuredDiameterMinMax(p_CensusID: number | 
             AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (maxDBH !== null) cursorParams.push(maxDBH);
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
 
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
+
     for (const row of cursorResults) {
-      const { CoreMeasurementID } = row;
+      const { CoreMeasurementID, MeasuredDBH, DBHUnit } = row;
       expectedCount++;
 
-      const measuredValueQuery = `
-                SELECT MeasuredDBH
-                FROM coremeasurements
-                WHERE CoreMeasurementID = ?;
-            `;
-      const measuredValueResult = await runQuery(conn, measuredValueQuery, [CoreMeasurementID]);
-      const measuredDBH = measuredValueResult[0]?.MeasuredDBH;
+      // Convert DBH to millimeters
+      const dbhUnit = DBHUnit as DBHUnits;
+      const measuredDBHInMM = MeasuredDBH * (unitConversionFactors[dbhUnit] || 1);
 
       const validationCriteria = 'DBH Measurement Range Validation';
-      const measuredValue = `Measured DBH: ${measuredDBH}`;
-      const expectedValueRange = `Expected DBH Range: ${minDBH} - ${maxDBH}`;
-      const additionalDetails = 'Checks if the measured DBH falls within the specified minimum and maximum range.';
+      const measuredValue = `Measured DBH: ${measuredDBHInMM} mm`;
+      const expectedValueRange = `Expected DBH Range: ${minDBH} - ${maxDBH} mm`;
+      const additionalDetails = 'Checks if the measured DBH falls within the specified minimum and maximum range in millimeters.';
 
-      // Log the failed validation
+      // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', ?, ?, ?, ?, ?);
-            `;
-      await runQuery(conn, logValidationQuery, [
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', ?, ?, ?, ?, ?);
+                `);
+      logValidationParams.push(
         'ValidateScreenMeasuredDiameterMinMax',
         CoreMeasurementID,
-        `DBH outside bounds: ${minDBH} - ${maxDBH}`,
+        `DBH outside bounds: ${minDBH} - ${maxDBH} mm`,
         validationCriteria,
         measuredValue,
         expectedValueRange,
         additionalDetails
-      ]);
+      );
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -990,10 +1262,10 @@ export async function validateScreenMeasuredDiameterMinMax(p_CensusID: number | 
     };
   } catch (error: any) {
     console.error('Error during DBH Bounds validation:', error.message);
-    throw error;
+    throw new Error('DBH Bounds validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }
 
@@ -1011,9 +1283,12 @@ export async function validateScreenStemsWithMeasurementsButDeadAttributes(p_Cen
             WHERE ProcedureName = 'ValidateScreenStemsWithMeasurementsButDeadAttributes';
         `;
     const validationResult = await runQuery(conn, validationProcedureQuery);
+    if (validationResult.length === 0) {
+      throw new Error('Validation procedure not found.');
+    }
     veID = validationResult[0]?.ValidationID;
 
-    // Cursor-like operation: SELECT and then iterate over results
+    // Query to find stems with measurements but dead attributes
     const cursorQuery = `
             SELECT cm.CoreMeasurementID
             FROM coremeasurements cm
@@ -1031,11 +1306,16 @@ export async function validateScreenStemsWithMeasurementsButDeadAttributes(p_Cen
             AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
         `;
 
-    const cursorParams = [];
+    const cursorParams: any[] = [];
     if (p_CensusID !== null) cursorParams.push(p_CensusID);
     if (p_PlotID !== null) cursorParams.push(p_PlotID);
 
     const cursorResults = await runQuery(conn, cursorQuery, cursorParams);
+
+    const insertErrorQueries: string[] = [];
+    const insertErrorParams: any[] = [];
+    const logValidationQueries: string[] = [];
+    const logValidationParams: any[] = [];
 
     for (const row of cursorResults) {
       const { CoreMeasurementID } = row;
@@ -1044,36 +1324,42 @@ export async function validateScreenStemsWithMeasurementsButDeadAttributes(p_Cen
       const validationCriteria = 'Stem Measurements with Dead Attributes Validation';
       const additionalDetails = 'Verifies that stems marked as dead do not have active measurements.';
 
-      // Log the failed validation
+      // Check if validation error already exists
       const errorCheckQuery = `
-                SELECT 1
-                FROM cmverrors
-                WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
-            `;
+                    SELECT 1
+                    FROM cmverrors
+                    WHERE CoreMeasurementID = ? AND ValidationErrorID = ?;
+                `;
       const errorCheckResult = await runQuery(conn, errorCheckQuery, [CoreMeasurementID, veID]);
 
       if (errorCheckResult.length === 0) {
-        const insertErrorQuery = `
-                    INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
-                    VALUES (?, ?);
-                `;
-        await runQuery(conn, insertErrorQuery, [CoreMeasurementID, veID]);
+        // Queue insertion of validation error
+        insertErrorQueries.push(`
+                        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+                        VALUES (?, ?);
+                    `);
+        insertErrorParams.push(CoreMeasurementID, veID);
 
         insertCount++;
       }
 
-      const logValidationQuery = `
-                INSERT INTO validationchangelog (ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
-                                                 ValidationCriteria, AdditionalDetails)
-                VALUES (?, NOW(), ?, 'Failed', 'Stem with measurements but dead attributes detected.',
-                        ?, ?);
-            `;
-      await runQuery(conn, logValidationQuery, [
-        'ValidateScreenStemsWithMeasurementsButDeadAttributes',
-        CoreMeasurementID,
-        validationCriteria,
-        additionalDetails
-      ]);
+      // Queue insertion into validationchangelog
+      logValidationQueries.push(`
+                    INSERT INTO validationchangelog (
+                        ProcedureName, RunDateTime, TargetRowID, ValidationOutcome, ErrorMessage,
+                        ValidationCriteria, AdditionalDetails
+                    ) VALUES (?, NOW(), ?, 'Failed', 'Stem with measurements but dead attributes detected.',
+                              ?, ?);
+                `);
+      logValidationParams.push('ValidateScreenStemsWithMeasurementsButDeadAttributes', CoreMeasurementID, validationCriteria, additionalDetails);
+    }
+
+    // Execute all queued insertions in one go
+    if (insertErrorQueries.length > 0) {
+      await runQuery(conn, insertErrorQueries.join(' '), insertErrorParams);
+    }
+    if (logValidationQueries.length > 0) {
+      await runQuery(conn, logValidationQueries.join(' '), logValidationParams);
     }
 
     // Return the summary
@@ -1084,9 +1370,9 @@ export async function validateScreenStemsWithMeasurementsButDeadAttributes(p_Cen
     };
   } catch (error: any) {
     console.error('Error during Stem with Dead Attributes validation:', error.message);
-    throw error;
+    throw new Error('Stem with Dead Attributes validation failed. Please check the logs for more details.');
   } finally {
     // Always release the connection back to the pool
-    conn.release();
+    if (conn) conn.release();
   }
 }

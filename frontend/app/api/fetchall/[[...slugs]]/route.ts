@@ -48,13 +48,13 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
     throw new Error('Schema selection was not provided to API endpoint');
   }
 
-  const [dataType, plotID, censusID, quadratID] = params.slugs ?? [];
+  const [dataType, plotID, plotCensusNumber, quadratID] = params.slugs ?? [];
   if (!dataType) {
     throw new Error('fetchType was not correctly provided');
   }
 
-  console.log('fetchall --> slugs provided: fetchType: ', dataType, 'plotID: ', plotID, 'censusID: ', censusID, 'quadratID: ', quadratID);
-  const query = buildQuery(schema, dataType, plotID, censusID, quadratID);
+  console.log('fetchall --> slugs provided: fetchType: ', dataType, 'plotID: ', plotID, 'plotcensusnumber: ', plotCensusNumber, 'quadratID: ', quadratID);
+  const query = buildQuery(schema, dataType, plotID, plotCensusNumber, quadratID);
   let conn: PoolConnection | null = null;
 
   try {

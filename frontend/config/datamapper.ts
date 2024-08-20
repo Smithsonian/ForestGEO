@@ -20,7 +20,7 @@ import { ValidationProceduresRDS, ValidationProceduresResult } from '@/config/sq
 import { CMAttributesRDS, CMAttributesResult, CMVErrorRDS, CMVErrorResult } from '@/config/sqlrdsdefinitions/tables/cmrds';
 import { SiteSpecificValidationsRDS, SiteSpecificValidationsResult } from '@/config/sqlrdsdefinitions/tables/sitespecificvalidationsrds';
 import { Common, ResultType, Unique } from '@/config/utils';
-import { RoleRDS } from '@/config/sqlrdsdefinitions/tables/rolesrds';
+import { RoleRDS, RoleResult } from '@/config/sqlrdsdefinitions/tables/rolesrds';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -154,6 +154,8 @@ class MapperFactory {
           Unique<PersonnelRDS, RoleRDS> & Unique<RoleRDS, PersonnelRDS> & Common<PersonnelRDS, RoleRDS>,
           ResultType<Unique<PersonnelRDS, RoleRDS> & Unique<RoleRDS, PersonnelRDS> & Common<PersonnelRDS, RoleRDS>>
         >() as unknown as IDataMapper<RDS, Result>;
+      case 'roles':
+        return new GenericMapper<RoleRDS, RoleResult>() as unknown as IDataMapper<RDS, Result>;
       case 'plots':
         return new GenericMapper<PlotRDS, PlotsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadratpersonnel':
