@@ -51,6 +51,7 @@ export default function RolloverModal(props: RolloverModalProps) {
   const [selectedPersonnelCensus, setSelectedPersonnelCensus] = useState<CensusValidationStatus>(defaultCVS);
   const [confirmNoQuadratsRollover, setConfirmNoQuadratsRollover] = useState(false);
   const [confirmNoPersonnelRollover, setConfirmNoPersonnelRollover] = useState(false);
+  const [relatedData, setRelatedData] = useState<any[]>([]);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -77,6 +78,8 @@ export default function RolloverModal(props: RolloverModalProps) {
       const personnelResponse = await fetch(`/api/fetchall/personnel/${currentPlot?.plotID}/${plotCensusNumber}?schema=${currentSite?.schemaName}`);
       const personnelData = await personnelResponse.json();
       setPreviousPersonnel(personnelData);
+      const rolesResponse = await fetch(`/api/fetchall/roles/undefined/${plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`, { method: 'GET' });
+      setRelatedData(await rolesResponse.json());
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch previous data', error);
@@ -359,7 +362,7 @@ export default function RolloverModal(props: RolloverModalProps) {
                       {customizePersonnel && (
                         <DataGrid
                           rows={previousPersonnel}
-                          columns={PersonnelGridColumns}
+                          columns={PersonnelGridColumns(relatedData)}
                           pageSizeOptions={[5, 10, 25, 100]}
                           checkboxSelection
                           onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedPersonnel)}

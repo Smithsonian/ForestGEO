@@ -2,7 +2,7 @@
 'use client';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { initialPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
@@ -12,6 +12,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import Link from 'next/link';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
+import { useOrgCensusContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);
@@ -26,7 +27,25 @@ export default function PersonnelDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [relatedData, setRelatedData] = useState<any[]>([]);
   const { data: session } = useSession();
+  const currentSite = useSiteContext();
+  const currentCensus = useOrgCensusContext();
+  useEffect(() => {
+    if (rows[0] !== initialPersonnelRDSRow && rows.length > 0) {
+      async function fetchRelatedData() {
+        const personnelFetchResponse = await fetch(
+          `/api/fetchall/personnel/undefined/${currentCensus?.plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`,
+          {
+            method: 'GET'
+          }
+        );
+        setRelatedData(await personnelFetchResponse.json());
+      }
+
+      fetchRelatedData().catch(console.error);
+    }
+  }, [rows]);
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -101,7 +120,7 @@ export default function PersonnelDataGrid() {
       />
       <DataGridCommons
         gridType="personnel"
-        gridColumns={PersonnelGridColumns}
+        gridColumns={PersonnelGridColumns(relatedData)}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

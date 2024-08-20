@@ -8,6 +8,7 @@ import { getAllTaxonomiesViewHCs } from './sqlrdsdefinitions/views/alltaxonomies
 import { getMeasurementsSummaryViewHCs } from './sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { getStemTaxonomiesViewHCs } from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
 import { getAllViewFullTableViewsHCs } from './sqlrdsdefinitions/views/viewfulltableviewrds';
+import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -70,6 +71,10 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   quadrats: {
     id: false,
     ...getQuadratHCs()
+  },
+  personnel: {
+    id: false,
+    ...getPersonnelHCs()
   }
 };
 

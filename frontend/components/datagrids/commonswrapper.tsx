@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { GridColDef, GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
 import { randomId } from '@mui/x-data-grid-generator';
@@ -7,12 +7,13 @@ import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { Box, Button, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 interface CommonsWrapperProps {
   initialRow: any;
   gridType: string;
   gridFieldToFocus: string;
-  gridColumns: GridColDef[];
+  gridColumns: GridColDef[] | ((relatedData?: any) => GridColDef[]);
   uploadFormType?: FormType;
 }
 
@@ -26,6 +27,25 @@ export default function CommonsWrapper({ initialRow, gridType, gridFieldToFocus,
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [relatedData, setRelatedData] = useState<any[]>([]);
+  const currentPlot = usePlotContext();
+  const currentSite = useSiteContext();
+  const currentCensus = useOrgCensusContext();
+
+  useEffect(() => {
+    if (rows[0] !== initialRow) {
+      async function fetchRelatedData() {
+        if (gridType === 'personnel') {
+          const roleResponse = await fetch(`/api/fetchall/roles/undefined/undefined/undefined?schema=${currentSite?.schemaName}`, {
+            method: 'GET'
+          });
+          setRelatedData(await roleResponse.json());
+        }
+      }
+
+      fetchRelatedData().catch(console.error);
+    }
+  }, [rows, initialRow, gridType]);
 
   const addNewRowToGrid = useCallback(() => {
     const id = randomId();
@@ -37,6 +57,9 @@ export default function CommonsWrapper({ initialRow, gridType, gridFieldToFocus,
       [id]: { mode: GridRowModes.Edit, fieldToFocus: gridFieldToFocus }
     }));
   }, [initialRow, gridFieldToFocus]);
+
+  // Determine the actual columns based on whether gridColumns is a function or an array
+  const actualColumns = typeof gridColumns === 'function' ? gridColumns(relatedData) : gridColumns;
 
   return (
     <>
@@ -76,7 +99,7 @@ export default function CommonsWrapper({ initialRow, gridType, gridFieldToFocus,
 
       <DataGridCommons
         gridType={gridType}
-        gridColumns={gridColumns}
+        gridColumns={actualColumns} // Use the determined columns
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}
