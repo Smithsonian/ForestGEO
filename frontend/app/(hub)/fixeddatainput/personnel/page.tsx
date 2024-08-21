@@ -1,6 +1,5 @@
-import PersonnelWrappedDataGrid from '@/components/datagrids/wrapped/personnelwrappedgrid';
+import PersonnelDataGrid from '@/components/datagrids/applications/personneldatagrid';
 
 export default function PersonnelPage() {
-  // return <PersonnelDataGrid />;
-  return <PersonnelWrappedDataGrid />;
+  return <PersonnelDataGrid />;
 }

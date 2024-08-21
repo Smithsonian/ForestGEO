@@ -1,18 +1,19 @@
 // personnel datagrid
 'use client';
-import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
+import { GridColDef, GridRenderCellParams, GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
 import React, { useEffect, useState } from 'react';
 import { initialPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { useSession } from 'next-auth/react';
-import { Box, Button, Stack, Typography } from '@mui/joy';
+import { Box, Button, Chip, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import Link from 'next/link';
-import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
-import { useOrgCensusContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
+import { RoleRDS } from '@/config/sqlrdsdefinitions/tables/rolesrds';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);
@@ -27,25 +28,51 @@ export default function PersonnelDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [relatedData, setRelatedData] = useState<any[]>([]);
+  const [roles, setRoles] = useState<RoleRDS[]>([]);
   const { data: session } = useSession();
   const currentSite = useSiteContext();
-  const currentCensus = useOrgCensusContext();
-  useEffect(() => {
-    if (rows[0] !== initialPersonnelRDSRow && rows.length > 0) {
-      async function fetchRelatedData() {
-        const personnelFetchResponse = await fetch(
-          `/api/fetchall/personnel/undefined/${currentCensus?.plotCensusNumber}/undefined?schema=${currentSite?.schemaName}`,
-          {
-            method: 'GET'
-          }
-        );
-        setRelatedData(await personnelFetchResponse.json());
-      }
 
-      fetchRelatedData().catch(console.error);
+  useEffect(() => {
+    async function fetchRoles() {
+      const response = await fetch(`/api/fetchall/roles?schema=${currentSite?.schemaName}`);
+      setRoles(await response.json());
     }
-  }, [rows]);
+
+    fetchRoles().catch(console.error);
+  }, []);
+
+  const roleIDColumn: GridColDef = {
+    field: 'roleID',
+    headerName: 'Role',
+    headerClassName: 'header',
+    headerAlign: 'left',
+    type: 'singleSelect',
+    flex: 1,
+    align: 'center',
+    editable: true,
+    valueOptions: roles.map(role => ({
+      value: role.roleID,
+      label: `${role.roleName}`
+    })),
+    renderCell: (params: GridRenderCellParams) => (
+      <Box
+        sx={{
+          display: 'flex',
+          flex: 1,
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          width: '100%',
+          height: '100%'
+        }}
+      >
+        <Chip variant={'soft'} color={'primary'}>
+          <Typography level="body-sm">{roles.find(role => role.roleID === params.value)?.roleName}</Typography>
+        </Chip>
+      </Box>
+    )
+  };
+
   // Function to fetch paginated data
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -120,7 +147,7 @@ export default function PersonnelDataGrid() {
       />
       <DataGridCommons
         gridType="personnel"
-        gridColumns={PersonnelGridColumns(relatedData)}
+        gridColumns={[...PersonnelGridColumns, roleIDColumn]}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}
@@ -138,6 +165,10 @@ export default function PersonnelDataGrid() {
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
+        selectionOptions={roles.map(role => ({
+          value: role.roleID ?? 0,
+          label: `${role.roleName}`
+        }))}
       />
     </>
   );

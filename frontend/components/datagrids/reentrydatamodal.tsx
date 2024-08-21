@@ -28,20 +28,20 @@ interface ReEnterDataModalProps {
   handleClose: () => void;
   handleSave: (selectedRow: GridRowModel) => void;
   columns: GridColDef[];
+  selectionOptions?: { value: string | number; label: string }[];
 }
 
-const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, handleClose, handleSave, columns }) => {
+const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, handleClose, handleSave, columns, selectionOptions }) => {
   const [localData, setLocalData] = useState<GridRowModel>({ ...reEnterData });
   const [selectedRow, setSelectedRow] = useState<GridRowModel | null>(null);
   const [isConfirmStep, setIsConfirmStep] = useState(false);
-  const [isRowSelected, setIsRowSelected] = useState(false); // New state for row selection
+  const [isRowSelected, setIsRowSelected] = useState(false);
 
-  // Function to calculate the width dynamically based on column definitions
   const calculateDialogWidth = () => {
-    const baseWidth = 300; // Base width for non-flex columns
+    const baseWidth = 300;
     const totalFlex = columns.reduce((acc, column) => acc + (column.flex || 0), 0);
     const totalMinWidth = columns.reduce((acc, column) => acc + (column.minWidth || 0), 0);
-    const flexWidth = totalFlex ? totalFlex * 100 : 0; // Approximate flex width, you can adjust the multiplier as needed
+    const flexWidth = totalFlex ? totalFlex * 100 : 0;
 
     return Math.max(baseWidth + flexWidth, totalMinWidth);
   };
@@ -62,7 +62,6 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
             initialData[field] !== false ||
             initialData[field] !== 0)
         ) {
-          // empty/default value here means that this is a new entry, should be preserved
           initialData[field] = '';
         }
       });
@@ -83,22 +82,27 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
 
   const handleRowSelect = (row: GridRowModel) => {
     setSelectedRow(row);
-    setIsRowSelected(true); // Set the row selection state
+    setIsRowSelected(true);
   };
 
   const handleFinalConfirm = () => {
     if (selectedRow) {
-      handleSave(selectedRow);
+      const { label, ...remaining } = selectedRow;
+      handleSave(remaining);
     }
+  };
+
+  const getOptionLabel = (field: string, value: any) => {
+    if (selectionOptions) {
+      const option = selectionOptions.find(opt => opt.value === value);
+      return option ? option.label : value;
+    }
+    return value;
   };
 
   return (
     <Modal open onClose={handleClose}>
-      <ModalDialog
-        variant="outlined"
-        role="alertdialog"
-        sx={{ width: 'auto', maxWidth: '90vw', overflow: 'auto' }} // Set dialog width dynamically
-      >
+      <ModalDialog variant="outlined" role="alertdialog" sx={{ width: 'auto', maxWidth: '90vw', overflow: 'auto' }}>
         <DialogTitle>Confirm Changes</DialogTitle>
         <DialogContent>
           {!isConfirmStep ? (
@@ -110,7 +114,8 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                   return null;
                 }
                 if (type === 'singleSelect') {
-                  const valueOptions = field !== 'status' ? unitSelectionOptions : AttributeStatusOptions;
+                  const valueOptions = selectionOptions ? selectionOptions : field !== 'status' ? unitSelectionOptions : AttributeStatusOptions;
+
                   return (
                     <FormControl key={field}>
                       <FormLabel>{column.headerName}</FormLabel>
@@ -121,11 +126,18 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                           handleInputChange(field, newValue);
                         }}
                       >
-                        {valueOptions.map(option => (
-                          <Option key={option} value={option}>
-                            {option}
-                          </Option>
-                        ))}
+                        {(valueOptions === unitSelectionOptions || valueOptions === AttributeStatusOptions) &&
+                          valueOptions.map(option => (
+                            <Option key={option} value={option}>
+                              {option}
+                            </Option>
+                          ))}
+                        {valueOptions === selectionOptions &&
+                          valueOptions.map(option => (
+                            <Option key={option.value} value={option.value}>
+                              {option.label}
+                            </Option>
+                          ))}
                       </Select>
                     </FormControl>
                   );
@@ -192,8 +204,8 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                     },
                     ...columns.map(col => ({
                       ...col,
-                      flex: col.flex || 1, // Ensure flex is set for dynamic resizing
-                      minWidth: col.minWidth || 150, // Provide a default minWidth if not set
+                      flex: col.flex || 1,
+                      minWidth: col.minWidth || 150,
                       renderCell: (params: GridRenderCellParams) => (
                         <Box
                           sx={{
@@ -202,7 +214,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                             width: '100%'
                           }}
                         >
-                          {params.value}
+                          {selectionOptions && col.type === 'singleSelect' ? getOptionLabel(col.field, params.value) : params.value}
                         </Box>
                       )
                     }))
@@ -217,17 +229,16 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                       cursor: 'pointer'
                     },
                     '& .MuiDataGrid-row:hover': {
-                      backgroundColor: 'rgba(0, 0, 0, 0.44)', // light gray background for better readability
-                      color: 'inherit' // keep the text color unchanged
+                      backgroundColor: 'rgba(0, 0, 0, 0.44)',
+                      color: 'inherit'
                     },
                     '& .MuiDataGrid-row.selected': {
-                      backgroundColor: 'rgba(0, 0, 255, 0.22)', // blue background for selected row
-                      color: 'inherit' // keep the text color unchanged
+                      backgroundColor: 'rgba(0, 0, 255, 0.22)',
+                      color: 'inherit'
                     },
                     '& .MuiDataGrid-cell': {
-                      padding: '8px' // add padding for better readability
+                      padding: '8px'
                     },
-                    // Hide the footer that contains pagination controls and rows per page selector
                     '& .MuiDataGrid-footerContainer': {
                       display: 'none'
                     }

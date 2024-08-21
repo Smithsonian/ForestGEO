@@ -66,7 +66,7 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
       const result: any = {};
       for (const key in item) {
         if (Object.prototype.hasOwnProperty.call(item, key)) {
-          if (key === 'id') continue; // Ensure id is removed
+          if (key === 'id') continue;
           const capitalizedKey = this.capitalizeAndTransformKey(key);
           result[capitalizedKey] = this.transformValue(item[key]);
         }
@@ -94,7 +94,9 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
       .replace(/DBHUnits/gi, 'dbhUnits')
       .replace(/HOMUnits/gi, 'homUnits')
       .replace(/measureddbh/gi, 'measuredDBH')
-      .replace(/measuredhom/gi, 'measuredHOM');
+      .replace(/measuredhom/gi, 'measuredHOM')
+      .replace(/cam/gi, 'CAM')
+      .replace(/Cam/gi, 'CAM');
   }
 
   private transformValue(value: any): any {
@@ -114,7 +116,7 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
       return indexOffset;
     } else if (typeof value === 'number' && value === 0) {
       return undefined;
-    } else if (typeof value === 'boolean' && value === false) {
+    } else if (typeof value === 'boolean' && !value) {
       return undefined;
     } else if (typeof value === 'string' && value === '') {
       return undefined;

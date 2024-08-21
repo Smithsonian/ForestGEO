@@ -6,13 +6,13 @@ export const initialAllTaxonomiesViewRDSRow = createInitialObject<AllTaxonomiesV
 
 export type AllTaxonomiesViewRDS = {
   id?: number;
-  speciesID?: number;
-  speciesCode?: string;
   familyID?: number;
   family?: string;
   genusID?: number;
   genus?: string;
   genusAuthority?: string;
+  speciesID?: number;
+  speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
   speciesIDLevel?: string;

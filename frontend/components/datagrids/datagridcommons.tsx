@@ -94,7 +94,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setIsNewRowAdded,
     setShouldAddRowAfterFetch,
     handleSelectQuadrat,
-    locked = false
+    locked = false,
+    selectionOptions
   } = props;
 
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
@@ -110,7 +111,6 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     newRow: GridRowModel;
     oldRow: GridRowModel;
   } | null>(null);
-  const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({
     items: []
   });
@@ -639,6 +639,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
             handleClose={handleCancelAction}
             handleSave={handleConfirmAction}
             columns={gridColumns}
+            selectionOptions={selectionOptions}
           />
         )}
         {isDeleteDialogOpen && (

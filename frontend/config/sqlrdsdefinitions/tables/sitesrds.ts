@@ -1,5 +1,6 @@
 // sites custom data type
-import { IDataMapper } from '../../datamapper';
+
+import { IDataMapper } from '@/config/datamapper';
 
 export type SitesRDS = {
   siteID?: number;

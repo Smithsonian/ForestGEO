@@ -362,7 +362,7 @@ export default function RolloverModal(props: RolloverModalProps) {
                       {customizePersonnel && (
                         <DataGrid
                           rows={previousPersonnel}
-                          columns={PersonnelGridColumns(relatedData)}
+                          columns={PersonnelGridColumns}
                           pageSizeOptions={[5, 10, 25, 100]}
                           checkboxSelection
                           onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedPersonnel)}

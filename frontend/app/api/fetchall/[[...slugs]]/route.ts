@@ -1,8 +1,8 @@
+import { PoolConnection } from 'mysql2/promise';
+import { NextRequest, NextResponse } from 'next/server';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import { PoolConnection } from 'mysql2/promise';
-import { NextRequest, NextResponse } from 'next/server';
 
 const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCensusNumber?: string, quadratID?: string): string => {
   if (fetchType === 'plots') {

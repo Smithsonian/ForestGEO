@@ -4,36 +4,6 @@ import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrd
 import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 
-export async function getPersonnelIDByName(connection: PoolConnection, schema: string, fullName: string): Promise<number | null> {
-  // Split the full name into first and last names
-  const [firstName, lastName] = fullName.split(' ');
-  if (!firstName || !lastName) {
-    throw new Error('Full name must include both first and last names.');
-  }
-
-  try {
-    // Prepare the query
-    const query = `
-      SELECT PersonnelID
-      FROM ${schema}.personnel
-      WHERE FirstName = ?
-        AND LastName = ?
-    `;
-
-    // Execute the query
-    const rows = await runQuery(connection, query, [firstName.trim(), lastName.trim()]);
-
-    if (rows.length > 0) {
-      console.log('getpersonnelidbyname: ', rows);
-      return rows[0].PersonnelID as number;
-    }
-    return null; // No matching personnel found
-  } catch (error: any) {
-    console.error('Error retrieving PersonnelID:', error.message);
-    throw error;
-  }
-}
-
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | undefined> {
   const { formType, schema, ...subProps } = props;
   const { connection, rowData } = subProps;
@@ -358,24 +328,19 @@ export const allTaxonomiesFields = [
   'currentTaxonFlag',
   'obsoleteTaxonFlag',
   'fieldFamily',
-  'speciesDescription',
-  'publicationTitle',
-  'fullReference',
-  'dateOfPublication',
-  'citation'
+  'speciesDescription'
 ];
 
-export const stemTaxonomiesViewFields = [
-  'treeTag',
+const stemTaxonomiesViewFields = [
   'stemTag',
+  'treeTag',
+  'speciesCode',
   'family',
   'genus',
-  'genusAuthority',
-  'speciesCode',
   'speciesName',
   'subspeciesName',
-  'currentTaxonFlag',
-  'obsoleteTaxonFlag',
+  'validCode',
+  'genusAuthority',
   'speciesAuthority',
   'subspeciesAuthority',
   'speciesIDLevel',
