@@ -86,7 +86,6 @@ export async function GET(
             p.CensusID,
             p.FirstName,
             p.LastName,
-            r.RoleID,
             r.RoleName,
             r.RoleDescription
         FROM 

@@ -1,7 +1,7 @@
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { Accordion, AccordionDetails, AccordionGroup, AccordionSummary, Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
-import { GridColDef, GridRenderEditCellParams, useGridApiContext, useGridApiRef } from '@mui/x-data-grid';
+import { GridColDef, GridRenderEditCellParams, useGridApiRef } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
 import Avatar from '@mui/joy/Avatar';
 import { ExpandMore } from '@mui/icons-material';
@@ -326,7 +326,7 @@ export const AttributeGridColumns: GridColDef[] = [
   }
 ];
 
-export const PersonnelGridColumns = (roles: any[]): GridColDef[] => [
+export const PersonnelGridColumns: GridColDef[] = [
   {
     field: 'id',
     headerName: '#',
@@ -353,48 +353,21 @@ export const PersonnelGridColumns = (roles: any[]): GridColDef[] => [
     align: 'left',
     editable: true
   },
-  { field: 'firstName', headerName: 'FirstName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
-  { field: 'lastName', headerName: 'LastName', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   {
-    field: 'roleID',
-    headerName: 'Role',
+    field: 'firstName',
+    headerName: 'First Name',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
-    editable: true,
-    valueGetter: (value: any) => {
-      const role = roles.find(role => role.roleID === value);
-      return role ? `${value} - ${role.roleName}` : value;
-    },
-    renderEditCell: (params: GridRenderEditCellParams) => {
-      const apiRef = useGridApiContext();
-      const { id, row } = params;
-      const [value, setValue] = useState(row.roleID);
-
-      const handleRoleChange = (_event: React.SyntheticEvent | null, newValue: string | null) => {
-        if (newValue !== null) {
-          const roleID = Number(newValue.split(' ')[0]);
-          setValue(roleID);
-          apiRef.current.setEditCellValue({ id, field: 'roleID', value: roleID });
-        }
-      };
-
-      useEffect(() => {
-        setValue(row.roleID);
-      }, [row.roleID]);
-
-      return (
-        <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-          <Select value={`${value}`} onChange={handleRoleChange} placeholder={'Role'} required>
-            {roles.map(role => (
-              <Option key={role.roleID} value={`${role.roleID} - ${role.roleName}`}>
-                {`${role.roleID} - ${role.roleName}`}
-              </Option>
-            ))}
-          </Select>
-        </Box>
-      );
-    }
+    editable: true
+  },
+  {
+    field: 'lastName',
+    headerName: 'Last Name',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    editable: true
   }
 ];
 

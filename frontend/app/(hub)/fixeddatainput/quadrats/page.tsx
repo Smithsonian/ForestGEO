@@ -1,6 +1,5 @@
-import QuadratsWrappedDataGrid from '@/components/datagrids/wrapped/quadratswrappedgrid';
+import QuadratsDataGrid from '@/components/datagrids/applications/quadratsdatagrid';
 
 export default function QuadratsPage() {
-  // return <QuadratsDataGrid />;
-  return <QuadratsWrappedDataGrid />;
+  return <QuadratsDataGrid />;
 }

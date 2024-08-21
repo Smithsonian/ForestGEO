@@ -3,9 +3,9 @@
         SYSTEM "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd">
 
 <instance-profile id="fad"
-                 name="ForestGEO Application Documentation"
-                 start-page="starter-topic.md">
+                  name="ForestGEO Application Documentation"
+                  start-page="Getting-Started.md">
 
+    <toc-element topic="Getting-Started.md"/>
     <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>
-    <toc-element topic="starter-topic.md"/>
 </instance-profile>

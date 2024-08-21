@@ -1,6 +1,5 @@
-import AttributesWrappedDataGrid from '@/components/datagrids/wrapped/attributeswrappedgrid';
+import AttributesDataGrid from '@/components/datagrids/applications/attributesdatagrid';
 
 export default function AttributesPage() {
-  // return <AttributesDataGrid />;
-  return <AttributesWrappedDataGrid />;
+  return <AttributesDataGrid />;
 }

@@ -34,6 +34,7 @@ export interface DataGridCommonProps {
   handleSelectQuadrat?: (quadratID: number | null) => void;
   initialRow?: GridRowModel;
   locked?: boolean;
+  selectionOptions?: { value: string | number; label: string }[];
 }
 
 // Define types for the new states and props
