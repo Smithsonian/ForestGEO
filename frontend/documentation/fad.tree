@@ -9,6 +9,9 @@
     <toc-element topic="Getting-Started.md">
         <toc-element topic="Understanding-the-Dashboard.md"/>
         <toc-element topic="Working-with-the-Sidebar.md"/>
+        <toc-element topic="The-Census-Hub.md"/>
+        <toc-element topic="Stem-Plot-Details.md"/>
+        <toc-element topic="Adding-New-Information.md"/>
+        <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>
     </toc-element>
-    <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>
 </instance-profile>
