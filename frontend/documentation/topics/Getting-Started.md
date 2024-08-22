@@ -5,7 +5,8 @@
 Before you're ready to start using ForestGEO, you'll need to make sure that you have the following:
 
 1. A registered account on the SI tenant.
-2. A registered account on the ForestGEO server.
+2. A registered account on the ForestGEO server, and:
+    1. **at least one site registered to your account in-server.**
 
 > Missing one of these? Please contact an administrator to request access!
 
@@ -29,5 +30,9 @@ Once you've gotten both of these set up, you can access the ForestGEO website by
 
 
 Once you decide which website to use, you can use the *Login* icon in the **bottom right corner** of the sidebar to log
-in!
+in! Follow the Microsoft prompts to complete the login process.
 
+> Remember, if you don't have any sites assigned to your account, you won't be able to complete the login process!
+> {style="warning"}
+
+Once you've logged in, you'll be redirected to the **Dashboard** page.

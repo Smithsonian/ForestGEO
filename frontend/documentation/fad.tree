@@ -6,6 +6,9 @@
                   name="ForestGEO Application Documentation"
                   start-page="Getting-Started.md">
 
-    <toc-element topic="Getting-Started.md"/>
+    <toc-element topic="Getting-Started.md">
+        <toc-element topic="Understanding-the-Dashboard.md"/>
+        <toc-element topic="Working-with-the-Sidebar.md"/>
+    </toc-element>
     <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>
 </instance-profile>
