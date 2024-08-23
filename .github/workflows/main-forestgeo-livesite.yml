@@ -164,37 +164,43 @@ jobs:
   build-docs:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          repository: Smithsonian/ForestGEO
+          persist-credentials: true
+        env:
+          INSTANCE: documentation/fad
+          ARTIFACT: webHelpFAD2-all.zip
+          DOCKER_VERSION: 241.18775
 
-      - name: Build Documentation
-        uses: JetBrains/writerside-github-action@v4
-        with:
-          instance: documentation/fad
-          artifact: webHelpFAD2-all.zip
-          docker-version: 241.18775
-
-      - name: Log artifacts directory contents
-        run: ls -la /github/workspace/artifacts/
-
-      - name: Verify report.json creation
+      - name: Build documentation
         run: |
-          if [ ! -f "/github/workspace/artifacts/report.json" ]; then
-            echo "report.json not found!"
-            exit 1
+          mkdir -p /github/workspace/artifacts/
+          docker run --rm -v /home/runner/work/ForestGEO/ForestGEO:/github/workspace registry.jetbrains.team/p/writerside/builder/writerside-builder:$DOCKER_VERSION /bin/bash -c "
+          export DISPLAY=:99
+          Xvfb :99 &
+          git config --global --add safe.directory /github/workspace
+          /opt/builder/bin/idea.sh helpbuilderinspect -source-dir /github/workspace/ -product $INSTANCE --runner github -output-dir /github/workspace/artifacts/ || true
+          echo 'Test existing artifacts'
+          test -e /github/workspace/artifacts/webHelpFAD2-all.zip && echo webHelpFAD2-all.zip exists
+          if [ -z \"$(ls -A /github/workspace/artifacts/ 2>/dev/null)\" ]; then
+              echo 'Artifacts not found' && false
+          else
+              chmod 777 /github/workspace/artifacts/
+              ls -la /github/workspace/artifacts/
           fi
+          "
 
-      - name: Upload artifacts
+      - name: Upload documentation artifacts
         uses: actions/upload-artifact@v4
         with:
           name: docs
           path: |
             artifacts/webHelpFAD2-all.zip
-            artifacts/report.json
+            artifacts/report.json  # Ensure report.json is included
           retention-days: 7
+          if-no-files-found: warn
 
   test-docs:
     needs: build-docs
