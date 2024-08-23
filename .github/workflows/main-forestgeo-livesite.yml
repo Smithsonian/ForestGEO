@@ -187,7 +187,7 @@ jobs:
           retention-days: 7
 
   deploy-docs:
-    needs: [build-docs, test-docs]
+    needs: [build-docs]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
