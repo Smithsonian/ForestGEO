@@ -181,7 +181,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docs
-          path: artifacts/${{ env.ARTIFACT }}
+          path: |
+            artifacts/${{ env.ARTIFACT }}
+            artifacts/report.json  # Ensure report.json is included
           retention-days: 7
 
   test-docs:
@@ -193,6 +195,13 @@ jobs:
         with:
           name: docs
           path: artifacts
+
+      - name: Verify report.json exists
+        run: |
+          if [ ! -f "artifacts/report.json" ]; then
+            echo "report.json not found!"
+            exit 1
+          fi
 
       - name: Test documentation
         uses: JetBrains/writerside-checker-action@v1
