@@ -161,9 +161,12 @@ jobs:
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: ./frontend/build/standalone
 
-  build-docs:
+  build-docs-deploy-docs:
     runs-on: ubuntu-latest
-    needs: build-app
+    needs: deploy-app
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -185,14 +188,6 @@ jobs:
             artifacts/${{ env.ARTIFACT }}
             artifacts/report.json  # Ensure report.json is included
           retention-days: 7
-
-  deploy-docs:
-    needs: build-docs
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Download documentation artifact
         uses: actions/download-artifact@v4
         with:
