@@ -163,40 +163,56 @@ jobs:
 
   build-docs:
     runs-on: ubuntu-latest
-    needs: build-app
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          repository: Smithsonian/ForestGEO
 
-      - name: Build docs using Writerside Docker builder
+      - name: Build Documentation
         uses: JetBrains/writerside-github-action@v4
         with:
-          instance: ${{ env.INSTANCE }}
-          artifact: ${{ env.ARTIFACT }}
-          docker-version: ${{ env.DOCKER_VERSION }}
+          instance: documentation/fad
+          artifact: webHelpFAD2-all.zip
+          docker-version: 241.18775
 
-      - name: Upload documentation artifact
+      - name: Log artifacts directory contents
+        run: ls -la /github/workspace/artifacts/
+
+      - name: Verify report.json creation
+        run: |
+          if [ ! -f "/github/workspace/artifacts/report.json" ]; then
+            echo "report.json not found!"
+            exit 1
+          fi
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: docs
           path: |
-            artifacts/${{ env.ARTIFACT }}
-            artifacts/report.json  # Ensure report.json is included
+            artifacts/webHelpFAD2-all.zip
+            artifacts/report.json
           retention-days: 7
 
   test-docs:
     needs: build-docs
     runs-on: ubuntu-latest
     steps:
-      - name: Download documentation artifact
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: docs
           path: artifacts
+          merge-multiple: false
+          repository: Smithsonian/ForestGEO
+          run-id: ${{ github.run_id }}
 
-      - name: Verify report.json exists
+      - name: Log downloaded artifacts
+        run: ls -la artifacts/
+
+      - name: Check for report.json
         run: |
           if [ ! -f "artifacts/report.json" ]; then
             echo "report.json not found!"
