@@ -176,8 +176,8 @@ jobs:
 
       - name: Build documentation
         run: |
-          mkdir -p /github/workspace/artifacts/
-          docker run --rm -v /home/runner/work/ForestGEO/ForestGEO:/github/workspace registry.jetbrains.team/p/writerside/builder/writerside-builder:$DOCKER_VERSION /bin/bash -c "
+          mkdir -p $GITHUB_WORKSPACE/artifacts/
+          docker run --rm -v $GITHUB_WORKSPACE:/github/workspace registry.jetbrains.team/p/writerside/builder/writerside-builder:$DOCKER_VERSION /bin/bash -c "
           export DISPLAY=:99
           Xvfb :99 &
           git config --global --add safe.directory /github/workspace
@@ -197,8 +197,8 @@ jobs:
         with:
           name: docs
           path: |
-            artifacts/webHelpFAD2-all.zip
-            artifacts/report.json  # Ensure report.json is included
+            $GITHUB_WORKSPACE/artifacts/webHelpFAD2-all.zip
+            $GITHUB_WORKSPACE/artifacts/report.json  # Ensure report.json is included
           retention-days: 7
           if-no-files-found: warn
 
