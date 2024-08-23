@@ -10,9 +10,13 @@ on:
       - 'forestgeo-app-*'
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  pages: write
+
 env:
-  INSTANCE: 'documentation/forestgeo-docs'
-  ARTIFACT: 'webHelpFORESTGEO-DOCS2-all.zip'
+  INSTANCE: 'frontend/documentation/fad'
+  ARTIFACT: 'webHelpFAD2-all.zip'
   DOCKER_VERSION: '241.18775'
 
 jobs:
@@ -152,18 +156,54 @@ jobs:
         uses: JetBrains/writerside-github-action@v4
         with:
           instance: ${{ env.INSTANCE }}
-          artifact: 'webHelpHI2-all.zip'
-          docker-version: '241.18775'
+          artifact: ${{ env.ARTIFACT }}
+          docker-version: ${{ env.DOCKER_VERSION }}
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
         with:
           name: docs
-          path: artifacts/webHelpHI2-all.zip
+          path: artifacts/${{ env.ARTIFACT }}
           retention-days: 7
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+  test-docs:
+    needs: build-docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download documentation artifact
+        uses: actions/download-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./frontend/documentation
+          name: docs
+          path: artifacts
+
+      - name: Test documentation
+        uses: JetBrains/writerside-checker-action@v1
+        with:
+          instance: ${{ env.INSTANCE }}
+
+  deploy-docs:
+    needs: [build-docs, test-docs]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download documentation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docs
+
+      - name: Unzip artifact
+        run: unzip -O UTF-8 -qq '${{ env.ARTIFACT }}' -d dir
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Package and upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dir
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
