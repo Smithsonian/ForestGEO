@@ -186,29 +186,29 @@ jobs:
             artifacts/report.json  # Ensure report.json is included
           retention-days: 7
 
-    deploy-docs:
-      needs: build-docs
-      runs-on: ubuntu-latest
-      environment:
-        name: github-pages
-        url: ${{ steps.deployment.outputs.page_url }}
-      steps:
-        - name: Download documentation artifact
-          uses: actions/download-artifact@v4
-          with:
-            name: docs
+  deploy-docs:
+    needs: build-docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download documentation artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docs
 
-        - name: Unzip documentation artifact
-          run: unzip -O UTF-8 -qq 'artifacts/${{ env.ARTIFACT }}' -d dir
+      - name: Unzip documentation artifact
+        run: unzip -O UTF-8 -qq 'artifacts/${{ env.ARTIFACT }}' -d dir
 
-        - name: Setup Pages
-          uses: actions/configure-pages@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
 
-        - name: Package and upload Pages artifact
-          uses: actions/upload-pages-artifact@v3
-          with:
-            path: dir
+      - name: Package and upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dir
 
-        - name: Deploy to GitHub Pages
-          id: deployment
-          uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
