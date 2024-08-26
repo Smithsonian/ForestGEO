@@ -55,6 +55,7 @@ export async function GET(
       case 'stemtaxonomiesview':
       case 'quadratpersonnel':
       case 'sitespecificvalidations':
+      case 'roles':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
             FROM ${schema}.${params.dataType} LIMIT ?, ?`;

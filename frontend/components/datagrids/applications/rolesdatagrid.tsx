@@ -1,19 +1,17 @@
-// attributes datagrid
+// roles datagrid
 'use client';
 import { GridRowModes, GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
 import React, { useState } from 'react';
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
-import { initialAttributesRDSRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
-import { Box, Button, Typography } from '@mui/joy';
+import { Box, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
-import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
-import { AttributeGridColumns } from '@/components/client/datagridcolumns';
-import { FormType } from '@/config/macros/formdetails';
+import { RolesGridColumns } from '@/components/client/datagridcolumns';
+import { initialRoleRDSRow } from '@/config/sqlrdsdefinitions/tables/rolesrds';
 
-export default function AttributesDataGrid() {
-  const [rows, setRows] = useState([initialAttributesRDSRow] as GridRowsProp);
+export default function RolesDataGrid() {
+  const [rows, setRows] = useState([initialRoleRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
@@ -24,18 +22,27 @@ export default function AttributesDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const { data: session } = useSession();
 
   const addNewRowToGrid = () => {
+    if (isNewRowAdded) return; // Prevent double add
+
     const id = randomId();
-    const newRow = { ...initialAttributesRDSRow, id, isNew: true };
-    setRows(oldRows => [...(oldRows ?? []), newRow]);
+    console.log('Generated ID:', id);
+
+    const newRow = { ...initialRoleRDSRow, id, isNew: true };
+    setRows(oldRows => {
+      console.log('Before adding new row:', oldRows);
+      const updatedRows = [...(oldRows ?? []), newRow];
+      console.log('After adding new row:', updatedRows);
+      return updatedRows;
+    });
+
     setRowModesModel(oldModel => ({
       ...oldModel,
-      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'code' }
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'roleName' }
     }));
-    console.log('attributes addnewrowtogrid triggered');
+    setIsNewRowAdded(true);
   };
 
   return (
@@ -59,26 +66,12 @@ export default function AttributesDataGrid() {
               </Typography>
             )}
           </Box>
-
-          {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-            Upload
-          </Button>
         </Box>
       </Box>
 
-      <UploadParentModal
-        isUploadModalOpen={isUploadModalOpen}
-        handleCloseUploadModal={() => {
-          setIsUploadModalOpen(false);
-          setRefresh(true);
-        }}
-        formType={FormType.attributes}
-      />
-
       <DataGridCommons
-        gridType="attributes"
-        gridColumns={AttributeGridColumns}
+        gridType="roles"
+        gridColumns={RolesGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

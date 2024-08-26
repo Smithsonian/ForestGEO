@@ -114,6 +114,8 @@ export function getGridID(gridType: string): string {
       return 'quadratID';
     case 'quadratpersonnel':
       return 'quadratPersonnelID';
+    case 'roles':
+      return 'roleID';
     case 'subquadrats':
       return 'subquadratID';
     case 'alltaxonomiesview':

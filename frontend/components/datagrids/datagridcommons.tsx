@@ -310,9 +310,8 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   };
 
   const handleAddNewRow = async () => {
-    if (locked) {
-      return;
-    }
+    if (locked) return;
+    if (isNewRowAdded) return; // Debounce double adds
     const newRowCount = rowCount + 1;
     const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
     const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
