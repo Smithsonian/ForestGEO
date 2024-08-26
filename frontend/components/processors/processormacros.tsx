@@ -5,21 +5,6 @@ import { processCensus } from '@/components/processors/processcensus';
 import { PoolMonitor } from '@/config/poolmonitor';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 
-export async function getConn() {
-  let conn: PoolConnection | null = null;
-  try {
-    const i = 0;
-    conn = await getSqlConnection(i);
-  } catch (error: any) {
-    console.error('Error processing files:', error.message);
-    throw new Error(error.message);
-  }
-  if (!conn) {
-    throw new Error('conn empty');
-  }
-  return conn;
-}
-
 export interface SpecialProcessingProps {
   connection: PoolConnection;
   rowData: FileRow;
@@ -151,6 +136,21 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
   }
+}
+
+export async function getConn() {
+  let conn: PoolConnection | null = null;
+  try {
+    const i = 0;
+    conn = await getSqlConnection(i);
+  } catch (error: any) {
+    console.error('Error processing files:', error.message);
+    throw new Error(error.message);
+  }
+  if (!conn) {
+    throw new Error('conn empty');
+  }
+  return conn;
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
