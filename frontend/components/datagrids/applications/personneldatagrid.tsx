@@ -7,13 +7,15 @@ import { initialPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/person
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { useSession } from 'next-auth/react';
-import { Box, Button, Chip, Stack, Typography } from '@mui/joy';
+import { Box, Button, Chip, IconButton, Modal, ModalDialog, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import Link from 'next/link';
 import { FormType } from '@/config/macros/formdetails';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { RoleRDS } from '@/config/sqlrdsdefinitions/tables/rolesrds';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import CloseIcon from '@mui/icons-material/Close';
+import RolesDataGrid from '@/components/datagrids/applications/rolesdatagrid';
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);
@@ -28,6 +30,7 @@ export default function PersonnelDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
   const [roles, setRoles] = useState<RoleRDS[]>([]);
   const { data: session } = useSession();
   const currentSite = useSiteContext();
@@ -123,7 +126,7 @@ export default function PersonnelDataGrid() {
           </Box>
 
           {/* Upload Button */}
-          <Stack direction="column">
+          <Stack direction="column" spacing={2}>
             <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
               Upload
             </Button>
@@ -133,6 +136,9 @@ export default function PersonnelDataGrid() {
                 View Quadrat Personnel
               </Button>
             </Link>
+            <Button onClick={() => setIsRolesModalOpen(true)} variant={'soft'} color={'primary'}>
+              Edit Roles
+            </Button>
           </Stack>
         </Box>
       </Box>
@@ -145,6 +151,21 @@ export default function PersonnelDataGrid() {
         }}
         formType={FormType.personnel}
       />
+      <Modal
+        open={isRolesModalOpen}
+        onClose={() => {}}
+        aria-labelledby="upload-dialog-title"
+        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <ModalDialog size="lg" sx={{ maxWidth: '100vh', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog">
+          <IconButton aria-label="close" onClick={() => setIsRolesModalOpen(false)} sx={{ position: 'absolute', top: 8, right: 8 }}>
+            <CloseIcon />
+          </IconButton>
+          <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%' }}>
+            <RolesDataGrid />
+          </Box>
+        </ModalDialog>
+      </Modal>
       <DataGridCommons
         gridType="personnel"
         gridColumns={[...PersonnelGridColumns, roleIDColumn]}

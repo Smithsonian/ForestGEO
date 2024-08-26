@@ -19,7 +19,16 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
     console.log('normalizedRole: ', normalizedRole);
 
     // Handle Role insertion/updation
-    const roleID = await handleUpsert<RoleResult>(connection, schema, 'roles', { RoleName: normalizedRole }, 'RoleID');
+    const roleID = await handleUpsert<RoleResult>(
+      connection,
+      schema,
+      'roles',
+      {
+        RoleName: normalizedRole,
+        RoleDescription: rowData.roledescription
+      },
+      'RoleID'
+    );
 
     // Handle Personnel insertion/updation
     const personnelData = {

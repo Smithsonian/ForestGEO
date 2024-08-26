@@ -25,7 +25,7 @@ export enum FormType {
 // this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
 export const TableHeadersByFormType: Record<FormType, { label: string }[]> = {
   [FormType.attributes]: [{ label: 'code' }, { label: 'description' }, { label: 'status' }],
-  [FormType.personnel]: [{ label: 'firstname' }, { label: 'lastname' }, { label: 'role' }],
+  [FormType.personnel]: [{ label: 'firstname' }, { label: 'lastname' }, { label: 'role' }, { label: 'roledescription' }],
   [FormType.species]: [
     { label: 'spcode' },
     { label: 'family' },

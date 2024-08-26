@@ -1203,15 +1203,24 @@ export const RolesGridColumns: GridColDef[] = [
     headerAlign: 'right',
     editable: false
   },
-  { field: 'roleID', headerName: 'RoleID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
-  { field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: false },
+  {
+    field: 'roleID',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.2,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  // { field: 'roleID', headerName: 'RoleID', headerClassName: 'header', flex: 1, align: 'left', editable: false },
+  { field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: true },
   {
     field: 'roleDescription',
     headerName: 'Description',
     headerClassName: 'header',
     flex: 1,
     align: 'left',
-    editable: false
+    editable: true
   }
 ];
 
