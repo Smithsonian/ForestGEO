@@ -17,7 +17,7 @@ export async function GET(): Promise<NextResponse<ValidationMessages>> {
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    const query = `SELECT ProcedureName, Description, Definition FROM catalog.validationprocedures WHERE IsEnabled = 1;`;
+    const query = `SELECT ProcedureName, Description, Definition FROM catalog.validationprocedures WHERE IsEnabled IS TRUE;`;
     const results: ValidationProcedure[] = await runQuery(conn, query);
 
     const validationMessages: ValidationMessages = results.reduce((acc, { ProcedureName, Description, Definition }) => {

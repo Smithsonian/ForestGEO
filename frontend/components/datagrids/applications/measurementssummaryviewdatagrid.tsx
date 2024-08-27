@@ -97,7 +97,7 @@ export default function MeasurementsSummaryViewDataGrid() {
             </Box>
           </Stack>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button>Upload</Button>
+            <Button onClick={() => setIsUploadModalOpen(true)}>Upload</Button>
           </Box>
         </Box>
       </Box>

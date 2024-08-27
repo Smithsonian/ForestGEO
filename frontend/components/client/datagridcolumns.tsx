@@ -57,6 +57,9 @@ export const quadratGridColumns: GridColDef[] = [
     align: 'right',
     headerAlign: 'right',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -67,6 +70,9 @@ export const quadratGridColumns: GridColDef[] = [
     align: 'right',
     headerAlign: 'right',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -89,6 +95,9 @@ export const quadratGridColumns: GridColDef[] = [
     align: 'right',
     headerAlign: 'right',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -111,6 +120,9 @@ export const quadratGridColumns: GridColDef[] = [
     renderHeader: () => formatHeader('Dimension', 'X'),
     align: 'right',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -122,6 +134,9 @@ export const quadratGridColumns: GridColDef[] = [
     align: 'right',
     headerAlign: 'right',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -995,10 +1010,35 @@ export const SubquadratGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
-  { field: 'qX', headerName: 'X', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
-  { field: 'qY', headerName: 'Y', headerClassName: 'header', flex: 1, align: 'left', type: 'number', editable: true },
+  {
+    field: 'qX',
+    headerName: 'X',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
+    editable: true
+  },
+  {
+    field: 'qY',
+    headerName: 'Y',
+    headerClassName: 'header',
+    flex: 1,
+    align: 'left',
+    type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
+    editable: true
+  },
   {
     field: 'unit',
     headerName: 'Units',
@@ -1037,6 +1077,9 @@ export const StemGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1046,6 +1089,9 @@ export const StemGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1289,6 +1335,9 @@ export const PlotGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1298,6 +1347,9 @@ export const PlotGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1307,6 +1359,9 @@ export const PlotGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1316,6 +1371,9 @@ export const PlotGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1325,6 +1383,9 @@ export const PlotGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {
@@ -1334,6 +1395,9 @@ export const PlotGridColumns: GridColDef[] = [
     flex: 1,
     align: 'left',
     type: 'number',
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     editable: true
   },
   {

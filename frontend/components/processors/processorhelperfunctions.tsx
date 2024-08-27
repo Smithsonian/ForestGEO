@@ -427,12 +427,14 @@ export async function runValidation(
           trees t ON t.SpeciesID = sp.SpeciesID
         JOIN 
           stems st ON st.TreeID = t.TreeID
+        JOIN
+          quadrats q ON st.QuadratID = q.QuadratID
         JOIN 
           coremeasurements cm ON cm.StemID = st.StemID
         WHERE 
           cm.IsValidated IS FALSE
           AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
-          AND (@p_PlotID IS NULL OR st.QuadratID = @p_PlotID)
+          AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
         LIMIT 1;
       `;
       const speciesLimits = await runQuery(conn, speciesLimitsQuery);
@@ -489,17 +491,47 @@ export async function runValidation(
   }
 }
 
-export async function updateValidatedRows(schema: string) {
+export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
   const conn = await getConn();
+  const setVariables = `SET @p_CensusID = ?, @p_PlotID = ?;`;
+  const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
+  const insertTemp = `
+    INSERT INTO UpdatedRows (CoreMeasurementID)
+    SELECT cm.CoreMeasurementID
+    FROM ${schema}.coremeasurements cm
+    LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
+    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+    WHERE cm.IsValidated IS NULL
+    AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
+    AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);`;
   const query = `
     UPDATE ${schema}.coremeasurements cm
     LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
-    SET cm.IsValidated = TRUE
-    WHERE cm.IsValidated = FALSE
-      AND cme.CMVErrorID IS NULL;`;
+    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+    SET cm.IsValidated = CASE 
+        WHEN cme.CMVErrorID IS NULL THEN TRUE
+        WHEN cme.CMVErrorID IS NOT NULL THEN FALSE
+        ELSE cm.IsValidated  
+    END
+    WHERE cm.IsValidated IS NULL
+    AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);`;
+  const getUpdatedRows = `
+    SELECT cm.*
+    FROM ${schema}.coremeasurements cm
+    JOIN UpdatedRows ur ON cm.CoreMeasurementID = ur.CoreMeasurementID;`;
+  const dropTemp = `DROP TEMPORARY TABLE UpdatedRows;`;
   try {
+    await conn.beginTransaction();
+    await runQuery(conn, setVariables, [params.p_CensusID || null, params.p_PlotID || null]);
+    await runQuery(conn, tempTable);
+    await runQuery(conn, insertTemp);
     await runQuery(conn, query);
+    const results = await runQuery(conn, getUpdatedRows);
+    await runQuery(conn, dropTemp);
+    await conn.commit();
+    return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
+    await conn.rollback();
     console.error(`Error during updateValidatedRows:`, error.message);
     throw new Error(`updateValidatedRows failed. Please check the logs for more details.`);
   } finally {

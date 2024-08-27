@@ -6,8 +6,8 @@ import { QuadratsResult } from '@/config/sqlrdsdefinitions/zones';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
-  const { connection, rowData, schema, plotID, censusID, fullName } = props;
-  if (!plotID || !censusID || !fullName) throw new Error('Process Census: Missing plotID, censusID, quadratID or full name');
+  const { connection, rowData, schema, plotID, censusID } = props;
+  if (!plotID || !censusID) throw new Error('Process Census: Missing plotID, censusID, quadratID or full name');
 
   const { tag, stemtag, spcode, quadrat, lx, ly, coordinateunit, dbh, dbhunit, hom, homunit, date, codes } = rowData;
 
@@ -57,7 +57,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             {
               CensusID: censusID,
               StemID: stemID,
-              IsValidated: false,
+              IsValidated: null,
               MeasurementDate: moment(date).format('YYYY-MM-DD'),
               MeasuredDBH: dbh,
               DBHUnit: dbhunit,

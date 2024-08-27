@@ -1,7 +1,6 @@
 'use client';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
-import { formatDate } from '@/config/macros';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow } from '@/config/macros/formdetails';
 import { Stack } from '@mui/joy';
@@ -68,15 +67,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   const detailArray = details[index];
                   if (Array.isArray(detailArray) && detailArray.length > 0) {
                     const detail = detailArray[0];
-                    if (
-                      'plotName' in detail &&
-                      'quadratName' in detail &&
-                      'plotCensusNumber' in detail &&
-                      'censusStart' in detail &&
-                      'censusEnd' in detail &&
-                      'personnelName' in detail &&
-                      'speciesName' in detail
-                    ) {
+                    if ('plotName' in detail && 'quadratName' in detail && 'plotCensusNumber' in detail && 'speciesName' in detail) {
                       return {
                         coreMeasurementID,
                         fileName,
@@ -84,9 +75,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         plotName: detail.plotName,
                         quadratName: detail.quadratName,
                         plotCensusNumber: detail.plotCensusNumber,
-                        censusStart: formatDate(detail.censusStart),
-                        censusEnd: formatDate(detail.censusEnd),
-                        personnelName: detail.personnelName,
                         speciesName: detail.speciesName
                       };
                     } else {
@@ -179,9 +167,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     if (startCountdown && countdown > 0) {
       timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
     } else if (countdown === 0) {
-      // if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
-      // else setReviewState(ReviewStates.UPLOAD_AZURE);
-      setReviewState(ReviewStates.UPLOAD_AZURE);
+      if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
+      else setReviewState(ReviewStates.UPLOAD_AZURE);
+      // setReviewState(ReviewStates.UPLOAD_AZURE);
     }
 
     return () => clearTimeout(timer);

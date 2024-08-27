@@ -18,8 +18,6 @@ export async function GET(request: NextRequest) {
             c.PlotCensusNumber,
             c.StartDate,
             c.EndDate,
-            per.FirstName,
-            per.LastName,
             s.SpeciesName
         FROM
             ${schema}.coremeasurements cm
@@ -35,8 +33,6 @@ export async function GET(request: NextRequest) {
             ${schema}.plots p ON q.PlotID = p.PlotID
                 INNER JOIN
             ${schema}.census c ON cm.CensusID = c.CensusID
-                INNER JOIN
-            ${schema}.personnel per ON cm.PersonnelID = per.PersonnelID
         WHERE
             cm.CoreMeasurementID = ?;`;
     const results = await runQuery(conn, query, [cmID]);
@@ -47,9 +43,6 @@ export async function GET(request: NextRequest) {
           plotName: row.PlotName,
           quadratName: row.QuadratName,
           plotCensusNumber: row.PlotCensusNumber,
-          censusStart: row.StartDate,
-          censusEnd: row.EndDate,
-          personnelName: row.FirstName + ' ' + row.LastName,
           speciesName: row.SpeciesName
         }))
       ),
