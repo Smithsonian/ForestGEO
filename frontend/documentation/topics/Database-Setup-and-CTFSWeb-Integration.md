@@ -1,6 +1,6 @@
 # CTFSWeb Data Migration
 
-Moving data from CTFSWeb's database schema to the ForestGEO App's schema is a layered, multi-step process. This guide 
+Moving data from CTFSWeb's database schema to the ForestGEO App's schema is a layered, multi-step process. This guide
 will outline the basic process developed to achieve this using a series of examples, SQL files, and Bash scripts. Please
 ensure your development environment is compatible with Unix systems before you proceed.
 
@@ -9,13 +9,13 @@ ensure your development environment is compatible with Unix systems before you p
 ## Before You Begin
 
 Before getting started, please ensure you have the following starting components:
+
 - A SQL flat file of an existing site
   - This should be a very large (think 100s of MBs) SQL file that contains a direct SQL dump of a full site's census history.
-  
 - An empty data source to migrate the old schema into.
 - An empty data source to migrate the data into.
 - Time!
-  - A word to the wise, this takes a ridiculous amount of time, so make sure you have a couple hours to spare. I'd 
+  - A word to the wise, this takes a ridiculous amount of time, so make sure you have a couple hours to spare. I'd
   - recommend making sure your machine is plugged in and has a steady internet connection.
 
 ---
@@ -23,14 +23,18 @@ Before getting started, please ensure you have the following starting components
 For the purposes of this guide, we're going to name the old schema `ctfsweb` and the new schema `forestgeo`.
 
 ### Why do you need to create a data source for the old data?
-Migration from schema to schema is easier to work with than working from a flat file. Having the old data source directly 
-viewable will let you confirm whether the migration has worked by reviewing foreign key connections directly. 
-Additionally, the flat file will often contain other nonessential statements that can potentially disrupt the 
+
+Migration from schema to schema is easier to work with than working from a flat file. Having the old data source directly
+viewable will let you confirm whether the migration has worked by reviewing foreign key connections directly.
+Additionally, the flat file will often contain other nonessential statements that can potentially disrupt the
 execution of the flat file.
 
 ### Preparing Data Sources
+
 Begin by ensuring that your data sources are correctly formatted (have all required tables).<br />
+
 1. For our `ctfsweb` example schema, you can use this SQL script
+
 ```SQL
 -- reset_ctfsweb_tables.sql
 DROP TABLE IF EXISTS `Census`;
@@ -765,9 +769,11 @@ CREATE TABLE IF NOT EXISTS `stagePersonnel` (
   PRIMARY KEY (`PersonnelRoleID`)
 ) ENGINE=InnoDB AUTO_INCREMENT=19 DEFAULT CHARSET=latin1;
 ```
+
 {collapsible="true" collapsed-title="ctfsweb generation"}
 
 2. For our `forestgeo` example schema, you can use this SQL script:
+
 ```SQL
 set foreign_key_checks = 0;
 drop table if exists attributes;
@@ -1119,14 +1125,18 @@ create table cmverrors
 
 set foreign_key_checks = 1;
 ```
+
 {collapsible="true" collapsed-title="forestgeo generation"}
 
-Make sure you run these while pointing to the correct databases! While we're using example values, you should use 
-appropriately named schemas for both of these cases (i.e., `ctfsweb_scbi` and `forestgeo_scbi`, or `ctfsweb_bci` and 
+Make sure you run these while pointing to the correct databases! While we're using example values, you should use
+appropriately named schemas for both of these cases (i.e., `ctfsweb_scbi` and `forestgeo_scbi`, or `ctfsweb_bci` and
 `forestgeo_bci`).
+
 ### Importing Flat File to `ctfsweb` Schema
+
 Next, we need to move all of the data from the site flat file we have on hand. <br />
 Start by creating and running the following Bash script:
+
 ```Bash
 #!/bin/bash
 
@@ -1148,19 +1158,23 @@ for table in "${tables[@]}"; do
     " "$source_file" > "$output_dir/${table}_insert.sql"
 done
 ```
+
 {collapsible="true" collapsed-title="break down flat file"}
-> Make sure you place this script in the same directory as your flat file, and change the `source_file` name to your 
+
+> Make sure you place this script in the same directory as your flat file, and change the `source_file` name to your
 > flat file's name!
-{style="warning"}
+> {style="warning"}
 
-After you run this script, you should see a new directory called `insert_statements` in your directory, which should 
+After you run this script, you should see a new directory called `insert_statements` in your directory, which should
 contain a collection of insertion SQL scripts. <br />
-> Verify that those scripts are correctly populated by referencing the flat file before continuing.
-{style="note"}
 
-Now that you have the `insert_statements` directory, run the following Bash script to load them all into a single 
-runnable SQL file that's been cleaned to only contain the core insertion statements and also toggles 
+> Verify that those scripts are correctly populated by referencing the flat file before continuing.
+> {style="note"}
+
+Now that you have the `insert_statements` directory, run the following Bash script to load them all into a single
+runnable SQL file that's been cleaned to only contain the core insertion statements and also toggles
 foreign_key_checks before and after execution to ensure a clean insertion:
+
 ```Bash
 #!/bin/bash
 
@@ -1176,21 +1190,24 @@ for file in "$output_dir"/*.sql; do
 done
 echo "SET FOREIGN_KEY_CHECKS = 1;" >> "$combined_file"
 ```
+
 {collapsible="true" collapsed-title="insertion statement assembly"}
+
 > Make sure your `output_dir` reference correctly points to the `insert_statements` directory and isn't inside it.<br />
-{style="warning"}
+> {style="warning"}
 
-Once this completes, you should end up with a single script called `all_inserts.sql` that contains all of the 
-insertion statements originally incorporated into your flat file. Now that you have this, access your MySQL server 
-and navigate to the schema you are using to hold the CTFSWeb-formatted data. 
+Once this completes, you should end up with a single script called `all_inserts.sql` that contains all of the
+insertion statements originally incorporated into your flat file. Now that you have this, access your MySQL server
+and navigate to the schema you are using to hold the CTFSWeb-formatted data.
 
-Run the `all_inserts.sql` script, and verify that the tables are correctly populated by checking the flat file and 
-then the tables. 
+Run the `all_inserts.sql` script, and verify that the tables are correctly populated by checking the flat file and
+then the tables.
 
 ### Migrating `ctfsweb` to `forestgeo`
 
-You're almost done! The only part left is to actually migrate the data in the `ctfsweb` schema to the `forestgeo` 
+You're almost done! The only part left is to actually migrate the data in the `ctfsweb` schema to the `forestgeo`
 schema. Use this script:
+
 ```SQL
 SET foreign_key_checks = 0;
 
@@ -1527,19 +1544,24 @@ DROP TABLE IF EXISTS temp_stem_mapping;
 
 SET foreign_key_checks = 1;
 ```
+
 {collapsible="true" collapsed-title="migration script"}
-> Make sure you change the name of the targeted and targeting schema in this script to your schema names! They are 
-> currently set to `ctfsweb_scbi` and `forestgeo_scbi`, respectively, and must be changed, otherwise the script will 
+
+> Make sure you change the name of the targeted and targeting schema in this script to your schema names! They are
+> currently set to `ctfsweb_scbi` and `forestgeo_scbi`, respectively, and must be changed, otherwise the script will
 > fail.
-{style="warning"}
+> {style="warning"}
 
 ### As the Migration Continues
-This will take a good amount of time (average for me was between 1-3 hours). As the script runs, you may find it 
-beneficial to have some way to monitor the progress of the script's execution, so the following script may come in 
-hand. 
+
+This will take a good amount of time (average for me was between 1-3 hours). As the script runs, you may find it
+beneficial to have some way to monitor the progress of the script's execution, so the following script may come in
+hand.
+
 > Make sure you run it in a new command-line/terminal instance!
 
 > Make sure you replace the DB_NAME variable with your schema's name!
+
 ```Bash
 #!/bin/bash
 
@@ -1569,7 +1591,7 @@ cleanup() {
     process_ids=$(mysql --defaults-file=~/.my.cnf  -D $DB_NAME -se "SHOW PROCESSLIST;" | awk '/SELECT COUNT/ {print $1}')
     for pid in $process_ids; do
         mysql --defaults-file=~/.my.cnf -D $DB_NAME -se "KILL $pid;"
-        echo "-----------------------------"    
+        echo "-----------------------------"
         echo "Killed process ID $pid"
         echo "-----------------------------"
     done
@@ -1584,7 +1606,7 @@ while true; do
     timeout $QUERY_TIMEOUT mysql --defaults-file=~/.my.cnf -D $DB_NAME -se "SELECT COUNT(*) FROM $TABLE;" > /tmp/${TABLE}_count &
     QUERY_PID=$!
     wait $QUERY_PID
-    
+
     if [ $? -eq 124 ]; then
       echo "$TABLE: query timed out"
     else
@@ -1606,12 +1628,14 @@ done
 
 
 ```
+
 {collapsible="true" collapsed-title="migration monitoring script"}
 
-Additionally, the following script may prove useful (it did for me) to remove accumulating `SELECT COUNT(*)` queries 
-in your processlist (I saw them starting to pile up as the script continued. The script as it is should 
-automatically remove them, so this is just a backup in case it becomes necessary). Like the migration script, run 
+Additionally, the following script may prove useful (it did for me) to remove accumulating `SELECT COUNT(*)` queries
+in your processlist (I saw them starting to pile up as the script continued. The script as it is should
+automatically remove them, so this is just a backup in case it becomes necessary). Like the migration script, run
 this from another terminal instance:
+
 ```Bash
 #!/bin/bash
 
@@ -1627,23 +1651,28 @@ for pid in $process_ids; do
   echo "Killed process ID $pid"
 done
 ```
+
 {collapsible="true" collapsed-title="backup monitoring cleanup script"}
 
 #### Prerequisites:
-1. Make sure you create the file `~/.my.cnf` in the `~` directory and add your connection credentials to it (example 
+
+1. Make sure you create the file `~/.my.cnf` in the `~` directory and add your connection credentials to it (example
    here):
+
 ```Bash
 [client]
 user=<username>
 password=<password>
 host=forestgeo-mysqldataserver.mysql.database.azure.com
 ```
-> Make sure you replace the <> portions with your actual credentials! I've left the host endpoint as it is because 
+
+> Make sure you replace the <> portions with your actual credentials! I've left the host endpoint as it is because
 > that shouldn't change unless absolutely necessary, but make sure you check that as well.
 
 ### After Migration Completes
-Make sure you check all of the now-populated tables to ensure that the system has not messed up populating them.
-> One of the issues I ran into was even though the flat file only specified one plot, the plots table after the 
-> migration contained several hundred duplicates of that single plot.
-{style="note"}
 
+Make sure you check all of the now-populated tables to ensure that the system has not messed up populating them.
+
+> One of the issues I ran into was even though the flat file only specified one plot, the plots table after the
+> migration contained several hundred duplicates of that single plot.
+> {style="note"}

@@ -1,8 +1,10 @@
 import mysql, { PoolConnection } from 'mysql2/promise';
 import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from '@/components/processors/processormacros';
-import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/tables/sitesrds';
 import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
+import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+
+// need to try integrating this into validation system:
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | undefined> {
   const { formType, schema, ...subProps } = props;
@@ -373,3 +375,134 @@ export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
     }
   }
 };
+
+// Generalized runValidation function
+export async function runValidation(
+  validationProcedureID: number,
+  validationProcedureName: string,
+  schema: string,
+  cursorQuery: string,
+  params: {
+    p_CensusID?: number | null;
+    p_PlotID?: number | null;
+    minDBH?: number | null;
+    maxDBH?: number | null;
+    minHOM?: number | null;
+    maxHOM?: number | null;
+  } = {}
+) {
+  const conn = await getConn();
+
+  try {
+    // Set MySQL session variables if provided
+    const variableQuery = `
+      SET @p_CensusID = ?, @p_PlotID = ?, @minDBH = ?, @maxDBH = ?, @minHOM = ?, @maxHOM = ?;
+    `;
+    const variableParams = [
+      params.p_CensusID || null,
+      params.p_PlotID || null,
+      params.minDBH || null,
+      params.maxDBH || null,
+      params.minHOM || null,
+      params.maxHOM || null
+    ];
+    await runQuery(conn, variableQuery, variableParams);
+
+    await runQuery(conn, `USE ${schema};`);
+
+    // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
+    if (params.minDBH === null || params.maxDBH === null || params.minHOM === null || params.maxHOM === null) {
+      const speciesLimitsQuery = `
+        SELECT 
+          sl.LimitType,
+          COALESCE(@minDBH, IF(sl.LimitType = 'DBH', sl.LowerBound, NULL)) AS minDBH,
+          COALESCE(@maxDBH, IF(sl.LimitType = 'DBH', sl.UpperBound, NULL)) AS maxDBH,
+          COALESCE(@minHOM, IF(sl.LimitType = 'HOM', sl.LowerBound, NULL)) AS minHOM,
+          COALESCE(@maxHOM, IF(sl.LimitType = 'HOM', sl.UpperBound, NULL)) AS maxHOM
+        FROM 
+          specieslimits sl
+        JOIN 
+          species sp ON sp.SpeciesCode = sl.SpeciesCode
+        JOIN 
+          trees t ON t.SpeciesID = sp.SpeciesID
+        JOIN 
+          stems st ON st.TreeID = t.TreeID
+        JOIN 
+          coremeasurements cm ON cm.StemID = st.StemID
+        WHERE 
+          cm.IsValidated IS FALSE
+          AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
+          AND (@p_PlotID IS NULL OR st.QuadratID = @p_PlotID)
+        LIMIT 1;
+      `;
+      const speciesLimits = await runQuery(conn, speciesLimitsQuery);
+
+      if (speciesLimits.length > 0) {
+        // Update the session variables with species-specific limits if they were null
+        const updatedVariableQuery = `
+          SET 
+            @minDBH = COALESCE(@minDBH, ?), 
+            @maxDBH = COALESCE(@maxDBH, ?), 
+            @minHOM = COALESCE(@minHOM, ?), 
+            @maxHOM = COALESCE(@maxHOM, ?);
+        `;
+        const updatedVariableParams = [
+          speciesLimits[0].minDBH || null,
+          speciesLimits[0].maxDBH || null,
+          speciesLimits[0].minHOM || null,
+          speciesLimits[0].maxHOM || null
+        ];
+        await runQuery(conn, updatedVariableQuery, updatedVariableParams);
+      }
+    }
+
+    // Execute the cursor query to get the rows that need validation
+    const cursorResults = await runQuery(conn, cursorQuery);
+
+    if (cursorResults.length > 0) {
+      const insertErrorQuery = `
+        INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
+        SELECT ?, ?
+        FROM DUAL
+        WHERE NOT EXISTS (
+          SELECT 1 
+          FROM cmverrors 
+          WHERE CoreMeasurementID = ? AND ValidationErrorID = ?
+        );
+      `;
+
+      // Insert errors for all rows that matched the validation condition
+      for (const row of cursorResults) {
+        await runQuery(conn, insertErrorQuery, [row.CoreMeasurementID, validationProcedureID, row.CoreMeasurementID, validationProcedureID]);
+      }
+    }
+
+    return {
+      TotalRows: cursorResults.length,
+      Message: `Validation completed successfully. Total rows processed: ${cursorResults.length}`
+    };
+  } catch (error: any) {
+    console.error(`Error during ${validationProcedureName} validation:`, error.message);
+    throw new Error(`${validationProcedureName} validation failed. Please check the logs for more details.`);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+export async function updateValidatedRows(schema: string) {
+  const conn = await getConn();
+  const query = `
+    UPDATE ${schema}.coremeasurements cm
+    LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
+    SET cm.IsValidated = TRUE
+    WHERE cm.IsValidated = FALSE
+      AND cme.CMVErrorID IS NULL;`;
+  try {
+    await runQuery(conn, query);
+  } catch (error: any) {
+    console.error(`Error during updateValidatedRows:`, error.message);
+    throw new Error(`updateValidatedRows failed. Please check the logs for more details.`);
+  } finally {
+    if (conn) conn.release();
+  }
+}

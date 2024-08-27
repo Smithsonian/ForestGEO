@@ -8,10 +8,10 @@ import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { Box, Button, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
-import { initialStemTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views/stemtaxonomiesviewrds';
 import { useOrgCensusContext } from '@/app/contexts/userselectionprovider';
 import { StemTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
+import { initialStemTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views';
 
 export default function StemTaxonomiesViewDataGrid() {
   const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);

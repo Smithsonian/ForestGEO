@@ -14,30 +14,31 @@ respective table. There are several different ways you can interact with the vie
 At the top of each data view, you should see a toolbar with a variety of options:
 
 1. Filters
-	1. Allows you to filter the view by placing constraints on the columns in the view.
-	2. These filters will ONLY apply to the page you're currently viewing!
+   1. Allows you to filter the view by placing constraints on the columns in the view.
+   2. These filters will ONLY apply to the page you're currently viewing!
 2. Density
-	1. Allows you to change the height of the headers
+   1. Allows you to change the height of the headers
 3. Export
-	1. Allows you to export the current page you're viewing
+   1. Allows you to export the current page you're viewing
 4. Add Row
-	1. Allows you to add new rows. Please see below for more guidance on how exactly that works!
+   1. Allows you to add new rows. Please see below for more guidance on how exactly that works!
 5. Refresh
-	1. Reloads data from the table.
+   1. Reloads data from the table.
 6. Export Full Data
-	1. Exports all data in the table to JSON
+   1. Exports all data in the table to JSON
 
 > Row Actions:
+>
 > > (Note: this is dependent on whether the view is locked for editing)
 > > {style='note'}
 >
 > > At the end of each row, you should see two buttons&mdash;a Pencil button and a Trash button.
-> This
-> will allow you to EDIT or DELETE a row from the view respectively.
+> > This
+> > will allow you to EDIT or DELETE a row from the view respectively.
 >
 > > If you click on the Pencil icon, the row will change to Edit mode. The icons will then
-> change to a Save button or a X-mark (Cancel) button. After you're done making your changes,
-> make sure to click on the Save button to trigger the save process!
+> > change to a Save button or a X-mark (Cancel) button. After you're done making your changes,
+> > make sure to click on the Save button to trigger the save process!
 
 ### Adding New Rows
 
@@ -84,7 +85,7 @@ data en masse by directly uploading a file (or form) of data.
 There are five types of forms currently accepted, along with the headers that they accept:
 
 | Form           | Headers                                                                                          |
-|----------------|--------------------------------------------------------------------------------------------------|
+| -------------- | ------------------------------------------------------------------------------------------------ |
 | `attributes`   | code, description, status                                                                        |
 | `personnel`    | firstname, lastname, role                                                                        |
 | `species`      | spcode, family, genus, species, subspecies, idlevel, authority, subspeciesauthority              |
@@ -99,7 +100,7 @@ The first stage is a two-parter: the first half of the screen (left side) is a l
 box where you can drag and drop your file in or click to select a file. On the right side,
 you'll see:
 
-- A description of *what* you're trying to upload, and a list of headers the file should have
+- A description of _what_ you're trying to upload, and a list of headers the file should have
   to be fully, properly uploaded.
 
 > The headers (and respective columns) aren't required, but any data you've added in a column

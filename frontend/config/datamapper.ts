@@ -1,26 +1,40 @@
 import moment from 'moment';
 import { booleanToBit } from './macros';
-import { MeasurementsSummaryRDS, MeasurementsSummaryResult } from './sqlrdsdefinitions/views/measurementssummaryviewrds';
-import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from './sqlrdsdefinitions/views/alltaxonomiesviewrds';
-import { SitesMapper } from './sqlrdsdefinitions/tables/sitesrds';
-import { SpeciesRDS, SpeciesResult } from './sqlrdsdefinitions/tables/speciesrds';
-import { StemTaxonomiesViewRDS, StemTaxonomiesViewResult } from './sqlrdsdefinitions/views/stemtaxonomiesviewrds';
-import { ViewFullTableViewRDS, ViewFullTableViewResult } from './sqlrdsdefinitions/views/viewfulltableviewrds';
-import { CoreMeasurementsRDS, CoreMeasurementsResult } from './sqlrdsdefinitions/tables/coremeasurementsrds';
-import { PlotRDS, PlotsResult } from './sqlrdsdefinitions/tables/plotrds';
-import { AttributesRDS, AttributesResult } from './sqlrdsdefinitions/tables/attributerds';
-import { QuadratPersonnelRDS, QuadratPersonnelResult } from './sqlrdsdefinitions/tables/quadratpersonnelrds';
-import { CensusRDS, CensusResult } from './sqlrdsdefinitions/tables/censusrds';
-import { PersonnelRDS, PersonnelResult } from './sqlrdsdefinitions/tables/personnelrds';
-import { QuadratRDS, QuadratsResult } from './sqlrdsdefinitions/tables/quadratrds';
-import { StemRDS, StemResult } from './sqlrdsdefinitions/tables/stemrds';
-import { UnifiedChangelogRDS, UnifiedChangelogResult } from '@/config/sqlrdsdefinitions/tables/unifiedchangelogrds';
-import { ValidationChangelogRDS, ValidationChangelogResult } from '@/config/sqlrdsdefinitions/tables/validationchangelogrds';
-import { ValidationProceduresRDS, ValidationProceduresResult } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
-import { CMAttributesRDS, CMAttributesResult, CMVErrorRDS, CMVErrorResult } from '@/config/sqlrdsdefinitions/tables/cmrds';
-import { SiteSpecificValidationsRDS, SiteSpecificValidationsResult } from '@/config/sqlrdsdefinitions/tables/sitespecificvalidationsrds';
 import { Common, ResultType, Unique } from '@/config/utils';
-import { RoleRDS, RoleResult } from '@/config/sqlrdsdefinitions/tables/rolesrds';
+import { SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
+import {
+  AllTaxonomiesViewRDS,
+  AllTaxonomiesViewResult,
+  MeasurementsSummaryRDS,
+  MeasurementsSummaryResult,
+  StemTaxonomiesViewRDS,
+  StemTaxonomiesViewResult,
+  ViewFullTableViewRDS,
+  ViewFullTableViewResult
+} from '@/config/sqlrdsdefinitions/views';
+import {
+  SiteSpecificValidationsRDS,
+  SiteSpecificValidationsResult,
+  ValidationChangelogRDS,
+  ValidationChangelogResult,
+  ValidationProceduresRDS,
+  ValidationProceduresResult
+} from '@/config/sqlrdsdefinitions/validations';
+import { CensusRDS, CensusResult } from '@/config/sqlrdsdefinitions/timekeeping';
+import { PersonnelRDS, PersonnelResult, QuadratPersonnelRDS, QuadratPersonnelResult, RoleRDS, RoleResult } from '@/config/sqlrdsdefinitions/personnel';
+import {
+  AttributesRDS,
+  AttributesResult,
+  CMAttributesRDS,
+  CMAttributesResult,
+  CMVErrorRDS,
+  CMVErrorResult,
+  CoreMeasurementsRDS,
+  CoreMeasurementsResult,
+  UnifiedChangelogRDS,
+  UnifiedChangelogResult
+} from '@/config/sqlrdsdefinitions/core';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;

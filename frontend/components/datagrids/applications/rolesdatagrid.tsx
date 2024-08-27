@@ -8,7 +8,8 @@ import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { Box, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import { RolesGridColumns } from '@/components/client/datagridcolumns';
-import { initialRoleRDSRow } from '@/config/sqlrdsdefinitions/tables/rolesrds';
+
+import { initialRoleRDSRow } from '@/config/sqlrdsdefinitions/personnel';
 
 export default function RolesDataGrid() {
   const [rows, setRows] = useState([initialRoleRDSRow] as GridRowsProp);

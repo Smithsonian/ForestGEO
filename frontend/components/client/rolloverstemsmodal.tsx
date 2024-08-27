@@ -1,7 +1,6 @@
 'use client';
 
 import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import {
   Alert,
   Box,
@@ -21,9 +20,10 @@ import {
 import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
-import { StemRDS } from '@/config/sqlrdsdefinitions/tables/stemrds';
 
 import { StemGridColumns } from './datagridcolumns';
+import { StemRDS } from '@/config/sqlrdsdefinitions/taxonomies';
+import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 
 interface RolloverStemsModalProps {
   open: boolean;

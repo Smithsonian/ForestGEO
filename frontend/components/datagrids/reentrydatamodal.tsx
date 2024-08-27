@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { DataGrid, GridColDef, GridRenderCellParams, GridRowModel } from '@mui/x-data-grid';
 import moment from 'moment';
 import { unitSelectionOptions } from '@/config/macros';
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import {
   Box,
   Button,
@@ -21,6 +20,8 @@ import {
   Typography
 } from '@mui/joy';
 import { DatePicker } from '@mui/x-date-pickers';
+
+import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
 interface ReEnterDataModalProps {
   row: GridRowModel;

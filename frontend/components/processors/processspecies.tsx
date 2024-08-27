@@ -1,8 +1,6 @@
 import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import { booleanToBit } from '@/config/macros';
-import { FamilyResult } from '@/config/sqlrdsdefinitions/tables/familyrds';
-import { GenusResult } from '@/config/sqlrdsdefinitions/tables/genusrds';
-import { SpeciesResult } from '@/config/sqlrdsdefinitions/tables/speciesrds';
+import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 
 function cleanInputData(data: any) {

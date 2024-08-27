@@ -1,11 +1,8 @@
 // useUpdateContextsFromIDB.ts
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSubquadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { getData, setData } from '@/config/db';
-import { QuadratRDS } from './sqlrdsdefinitions/tables/quadratrds';
-import { PlotRDS } from './sqlrdsdefinitions/tables/plotrds';
-import { SubquadratRDS } from './sqlrdsdefinitions/tables/subquadratrds';
-import { createAndUpdateCensusList } from './sqlrdsdefinitions/orgcensusrds';
-import { CensusRDS } from './sqlrdsdefinitions/tables/censusrds';
+import { PlotRDS, QuadratRDS, SubquadratRDS } from '@/config/sqlrdsdefinitions/zones';
+import { CensusRDS, createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 
 async function fetchData(endpoint: string): Promise<any> {
   const response = await fetch(endpoint);

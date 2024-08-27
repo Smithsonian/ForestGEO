@@ -1,38 +1,5 @@
 import { getConn, runQuery } from './processormacros';
 
-// centralized function:
-// Define the enum for DBH and HOM units
-enum Units {
-  km = 'km',
-  hm = 'hm',
-  dam = 'dam',
-  m = 'm',
-  dm = 'dm',
-  cm = 'cm',
-  mm = 'mm'
-}
-
-// Map the units to their conversion factors for DBH (in mm) and HOM (in meters)
-const unitConversionFactors: Record<Units, number> = {
-  km: 1000000,
-  hm: 100000,
-  dam: 10000,
-  m: 1000,
-  dm: 100,
-  cm: 10,
-  mm: 1
-};
-
-const unitConversionFactorsHOM: Record<Units, number> = {
-  km: 1000,
-  hm: 100,
-  dam: 10,
-  m: 1,
-  dm: 0.1,
-  cm: 0.01,
-  mm: 0.001
-};
-
 // Centralized validation function
 export async function runValidation(
   validationProcedureName: string,
@@ -115,6 +82,39 @@ export async function runValidation(
   }
 }
 
+// centralized function:
+// Define the enum for DBH and HOM units
+enum Units {
+  km = 'km',
+  hm = 'hm',
+  dam = 'dam',
+  m = 'm',
+  dm = 'dm',
+  cm = 'cm',
+  mm = 'mm'
+}
+
+// Map the units to their conversion factors for DBH (in mm) and HOM (in meters)
+const unitConversionFactors: Record<Units, number> = {
+  km: 1000000,
+  hm: 100000,
+  dam: 10000,
+  m: 1000,
+  dm: 100,
+  cm: 10,
+  mm: 1
+};
+
+const unitConversionFactorsHOM: Record<Units, number> = {
+  km: 1000,
+  hm: 100,
+  dam: 10,
+  m: 1,
+  dm: 0.1,
+  cm: 0.01,
+  mm: 0.001
+};
+
 // Define the enum for DBH units
 enum DBHUnits {
   km = 'km',
@@ -166,8 +166,8 @@ export async function validateDBHGrowthExceedsMax(p_CensusID: number | null, p_P
       AND cm2.MeasuredDBH IS NOT NULL
       AND cm1.IsValidated IS TRUE
       AND cm2.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
       AND (cm2.MeasuredDBH * (CASE cm2.DBHUnit 
                                 WHEN 'km' THEN 1000000 
                                 WHEN 'hm' THEN 100000 
@@ -244,8 +244,8 @@ export async function validateDBHShrinkageExceedsMax(p_CensusID: number | null, 
       AND cm2.MeasuredDBH IS NOT NULL
       AND cm1.IsValidated IS TRUE
       AND cm2.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       AND (cm2.MeasuredDBH * (CASE cm2.DBHUnit 
                                 WHEN 'km' THEN 1000000 
                                 WHEN 'hm' THEN 100000 
@@ -292,8 +292,8 @@ export async function validateFindAllInvalidSpeciesCodes(p_CensusID: number | nu
     LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
     WHERE sp.SpeciesID IS NULL
       AND cm.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY cm.CoreMeasurementID;
   `;
 
@@ -320,8 +320,8 @@ export async function validateFindDuplicateStemTreeTagCombinationsPerCensus(p_Ce
     INNER JOIN stems s ON cm.StemID = s.StemID
     INNER JOIN trees t ON s.TreeID = t.TreeID
     INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
-    WHERE (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+    WHERE (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       AND cm.IsValidated = FALSE
     GROUP BY q.CensusID, s.StemTag, t.TreeTag
     HAVING COUNT(cm.CoreMeasurementID) > 1;
@@ -356,8 +356,8 @@ export async function validateFindDuplicatedQuadratsByName(p_CensusID: number | 
           GROUP BY PlotID, QuadratName
           HAVING COUNT(*) > 1
       )
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY cm.CoreMeasurementID;
   `;
 
@@ -387,8 +387,8 @@ export async function validateFindMeasurementsOutsideCensusDateBoundsGroupByQuad
     WHERE (cm.MeasurementDate < c.StartDate OR cm.MeasurementDate > c.EndDate)
       AND cm.MeasurementDate IS NOT NULL
       AND cm.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `c.PlotID = ?` : `1=1`})
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY q.QuadratID, c.CensusID, c.StartDate, c.EndDate;
   `;
 
@@ -416,8 +416,8 @@ export async function validateFindStemsInTreeWithDifferentSpecies(p_CensusID: nu
     JOIN trees t ON s.TreeID = t.TreeID
     JOIN quadrats q ON s.QuadratID = q.QuadratID
     WHERE cm.IsValidated = FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY t.TreeID, cm.CoreMeasurementID
     HAVING COUNT(DISTINCT t.SpeciesID) > 1;
   `;
@@ -467,8 +467,8 @@ export async function validateFindStemsOutsidePlots(p_CensusID: number | null, p
         AND p.DimensionX > 0
         AND p.DimensionY > 0
         AND cm.IsValidated IS FALSE
-        AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-        AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`})
+        AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+        AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       GROUP BY cm.CoreMeasurementID;
     `;
 
@@ -554,8 +554,8 @@ export async function validateFindTreeStemsInDifferentQuadrats(p_CensusID: numbe
       JOIN coremeasurements cm1 ON s1.StemID = cm1.StemID
       WHERE q1.QuadratID != q2.QuadratID
         AND cm1.IsValidated IS FALSE
-        AND (${p_CensusID !== null ? `q1.CensusID = ?` : `1=1`})
-        AND (${p_PlotID !== null ? `q1.PlotID = ?` : `1=1`})
+        AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       GROUP BY cm1.CoreMeasurementID;
     `;
 
@@ -649,12 +649,12 @@ export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, 
       LEFT JOIN stems st ON cm.StemID = st.StemID
       LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
       WHERE (
-        (${minHOM !== null ? `cm.MeasuredHOM < ?` : `1=0`}) OR
-        (${maxHOM !== null ? `cm.MeasuredHOM > ?` : `1=0`})
+        (@minHOM IS NULL OR cm.MeasuredHOM = @minHOM) OR
+        (@maxHOM IS NULL OR cm.MeasuredHOM = @maxHOM)
       )
       AND cm.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
     `;
 
     const cursorParams: any[] = [];
@@ -752,12 +752,12 @@ export async function validateScreenMeasuredDiameterMinMax(p_CensusID: number | 
       LEFT JOIN stems st ON cm.StemID = st.StemID
       LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
       WHERE (
-        (${minDBH !== null ? `cm.MeasuredDBH < ?` : `1=0`}) OR
-        (${maxDBH !== null ? `cm.MeasuredDBH > ?` : `1=0`})
+        (@minDBH IS NULL OR cm.MeasuredDBH = @minDBH) OR
+        (@maxDBH IS NULL OR cm.MeasuredDBH = @maxDBH)
       )
       AND cm.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
     `;
 
     const cursorParams: any[] = [];
@@ -863,8 +863,8 @@ export async function validateScreenStemsWithMeasurementsButDeadAttributes(p_Cen
       )
       AND a.Status IN ('dead', 'stem dead', 'missing', 'broken below', 'omitted')
       AND cm.IsValidated IS FALSE
-      AND (${p_CensusID !== null ? `q.CensusID = ?` : `1=1`})
-      AND (${p_PlotID !== null ? `q.PlotID = ?` : `1=1`});
+      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
     `;
 
     const cursorParams: any[] = [];

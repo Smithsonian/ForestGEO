@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { Box, Button, Card, Modal, Stack, Switch, Textarea, Typography } from '@mui/joy';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
+
+import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 
 type ValidationCardProps = ValidationProceduresRDS & {
   onToggle: (enabled?: boolean) => void;

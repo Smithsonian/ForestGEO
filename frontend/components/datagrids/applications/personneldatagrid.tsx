@@ -3,7 +3,6 @@
 import { GridColDef, GridRenderCellParams, GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
 import React, { useEffect, useState } from 'react';
-import { initialPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
 import { useSession } from 'next-auth/react';
@@ -12,10 +11,10 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import Link from 'next/link';
 import { FormType } from '@/config/macros/formdetails';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
-import { RoleRDS } from '@/config/sqlrdsdefinitions/tables/rolesrds';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import CloseIcon from '@mui/icons-material/Close';
 import RolesDataGrid from '@/components/datagrids/applications/rolesdatagrid';
+import { initialPersonnelRDSRow, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 
 export default function PersonnelDataGrid() {
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);

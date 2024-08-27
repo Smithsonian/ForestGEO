@@ -20,7 +20,6 @@ import {
   useSubquadratListContext,
   useSubquadratListDispatch
 } from '@/app/contexts/listselectionprovider';
-import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
@@ -28,6 +27,7 @@ import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 
 import { useDataValidityContext } from '../contexts/datavalidityprovider';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
+import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });

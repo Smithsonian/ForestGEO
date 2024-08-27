@@ -7,14 +7,14 @@ import moment from 'moment';
 import { GridCellParams, GridColDef, GridRowModel, GridRowsProp } from '@mui/x-data-grid';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import { FileCollectionRowSet, FileErrors, FileRow, FormType, getTableHeaders, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { validateAttributesRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
-import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/tables/personnelrds';
-import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/tables/quadratrds';
-import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/tables/speciesrds';
-import { validateSubquadratsRow } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
-import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { usePlotContext } from '@/app/contexts/userselectionprovider';
-import { Divider } from '@mui/joy';
+import { Checkbox, Divider } from '@mui/joy';
+import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/taxonomies';
+import { validateQuadratsRow, validateSubquadratsRow } from '@/config/sqlrdsdefinitions/zones';
+import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views';
+import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/personnel';
+
+import { validateAttributesRow } from '@/config/sqlrdsdefinitions/core';
 
 const validationFunctions: Record<string, ValidationFunction> = {
   attributes: validateAttributesRow,
@@ -46,13 +46,17 @@ export interface DisplayParsedDataProps {
 
 export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (props: Readonly<DisplayParsedDataProps>) => {
   const { parsedData, setParsedData, errors, setErrors, errorRows, setErrorRows, fileName, formType } = props;
-  const singleFileData = parsedData[fileName] || {};
+  const [tempParsedData, setTempParsedData] = useState<FileCollectionRowSet>(parsedData);
+  const [autoCorrectedParsedData, setAutoCorrectedParsedData] = useState<FileCollectionRowSet>(parsedData);
+  const singleFileData = tempParsedData[fileName] || {};
 
   const currentPlot = usePlotContext();
 
   const tableHeaders = getTableHeaders(formType, currentPlot?.usesSubquadrats ?? false) || [];
   const [validRows, setValidRows] = useState<GridRowsProp>([]);
+  const [correctedValidRows, setCorrectedValidRows] = useState<GridRowsProp>([]);
   const [invalidRows, setInvalidRows] = useState<GridRowsProp>([]);
+  const [saveCorrections, setSaveCorrections] = useState<boolean>(false);
 
   const columns: GridColDef[] = useMemo(
     () =>
@@ -130,8 +134,10 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
 
   useEffect(() => {
     const tempValidRows: GridRowModel[] = [];
+    const tempCorrectedValidRows: GridRowModel[] = [];
     const tempInvalidRows: GridRowModel[] = [];
     const tempErrors: FileErrors = {};
+    const correctedDataCopy = { ...tempParsedData };
 
     Object.entries(singleFileData).forEach(([_rowKey, rowData], index) => {
       if (typeof rowData === 'object' && rowData !== null) {
@@ -182,10 +188,16 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         } else {
           tempValidRows.push(row);
         }
+        tempCorrectedValidRows.push(row); // either way, send in row
+        correctedDataCopy[fileName] = {
+          ...correctedDataCopy[fileName],
+          [`row-${index}`]: row
+        };
       }
     });
 
     setValidRows(tempValidRows as GridRowsProp);
+    setCorrectedValidRows(tempCorrectedValidRows as GridRowsProp);
     setInvalidRows(tempInvalidRows as GridRowsProp);
 
     // Set errors in the state
@@ -193,6 +205,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
       ...prevErrors,
       [fileName]: tempErrors
     }));
+    setAutoCorrectedParsedData(correctedDataCopy);
   }, [singleFileData, fileName, formType, setErrors]);
 
   const processRowUpdate = React.useCallback(
@@ -222,62 +235,88 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         });
       }
 
-      setParsedData(prevData => ({
+      setTempParsedData(prevData => ({
         ...prevData,
         [fileName]: { ...prevData[fileName], [updatedRow.id]: updatedRow }
       }));
 
       return updatedRow;
     },
-    [setErrorRows, setParsedData, fileName, formType, validateRowByFormType]
+    [setErrorRows, setTempParsedData, fileName, formType, validateRowByFormType]
   );
 
   return (
     <Paper style={{ height: '100%', width: '100%' }}>
-      {validRows.length > 0 && (
-        <StyledDataGrid
-          sx={{ display: 'flex', flex: 1, width: '100%' }}
-          rows={validRows}
-          columns={columns}
-          processRowUpdate={processRowUpdate}
-          pageSizeOptions={[5]}
-          initialState={{
-            pagination: {
-              paginationModel: {
-                pageSize: 5
-              }
-            }
-          }}
-          autoHeight
-          getRowHeight={() => 'auto'}
-        />
-      )}
-      {invalidRows.length > 0 && (
-        <Box sx={{ mt: 2 }}>
-          <Typography color="gold">
-            The following rows have been autocorrected to fit the schema. Please review the corrected rows and make sure they are correct.
-            <br />
-            <span style={{ color: 'red' }}>Red-highlighted text indicates invalid values that were detected and will be replaced with NULL.</span>
-            <br />
-            <span style={{ color: 'lightblue' }}>Light blue text indicates values that were auto-filled or auto-corrected based on other fields.</span>
-          </Typography>
-          <StyledDataGrid
-            sx={{ display: 'flex', flex: 1, width: '100%' }}
-            rows={invalidRows}
-            columns={columns}
-            pageSizeOptions={[5]}
-            initialState={{
-              pagination: {
-                paginationModel: {
-                  pageSize: 5
+      {!saveCorrections ? (
+        <>
+          {validRows.length > 0 && (
+            <StyledDataGrid
+              sx={{ display: 'flex', flex: 1, width: '100%' }}
+              rows={validRows}
+              columns={columns}
+              processRowUpdate={processRowUpdate}
+              pageSizeOptions={[5]}
+              initialState={{
+                pagination: {
+                  paginationModel: {
+                    pageSize: 5
+                  }
                 }
-              }
-            }}
-            autoHeight
-            getRowHeight={() => 'auto'}
-          />
-        </Box>
+              }}
+              autoHeight
+              getRowHeight={() => 'auto'}
+            />
+          )}
+          {invalidRows.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <Typography color="gold">
+                The following rows have been autocorrected to fit the schema. Please review the corrected rows and make sure they are correct.
+                <br />
+                <span style={{ color: 'red' }}>Red-highlighted text indicates invalid values that were detected and will be replaced with NULL.</span>
+                <br />
+                <span style={{ color: 'lightblue' }}>Light blue text indicates values that were auto-filled or auto-corrected based on other fields.</span>
+              </Typography>
+              <StyledDataGrid
+                sx={{ display: 'flex', flex: 1, width: '100%' }}
+                rows={invalidRows}
+                columns={columns}
+                pageSizeOptions={[5]}
+                initialState={{
+                  pagination: {
+                    paginationModel: {
+                      pageSize: 5
+                    }
+                  }
+                }}
+                autoHeight
+                getRowHeight={() => 'auto'}
+              />
+            </Box>
+          )}
+        </>
+      ) : (
+        <>
+          {validRows.length > 0 && (
+            <StyledDataGrid
+              sx={{ display: 'flex', flex: 1, width: '100%' }}
+              rows={correctedValidRows}
+              columns={columns}
+              processRowUpdate={processRowUpdate}
+              pageSizeOptions={[5]}
+              initialState={{
+                pagination: {
+                  paginationModel: {
+                    pageSize: 5
+                  }
+                }
+              }}
+              autoHeight
+              getRowHeight={() => 'auto'}
+            />
+          )}
+        </>
       )}
+      <Checkbox color={'primary'} variant={'soft'} onChange={event => setSaveCorrections(event.target.checked)} />
     </Paper>
   );
 };

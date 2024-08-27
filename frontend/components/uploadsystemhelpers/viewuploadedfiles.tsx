@@ -2,14 +2,14 @@
 import React, { Dispatch, SetStateAction, useCallback, useEffect, useState } from 'react';
 import { tableHeaderSettings } from '@/config/macros';
 import { fileColumns, UploadedFileData } from '@/config/macros/formdetails';
-import { Plot } from '@/config/sqlrdsdefinitions/tables/plotrds';
 import { Button, Card, CardContent, CardHeader, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { DeleteIcon, DownloadIcon, EditIcon } from '@/components/icons';
 import Divider from '@mui/joy/Divider';
 import CircularProgress from '@mui/joy/CircularProgress';
 import Box from '@mui/joy/Box';
 import Typography from '@mui/joy/Typography';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 // @todo: look into using an ID other than plot name.
 // @todo: react router URL params to pass in the ID for Browse.
 // https://reactrouter.com/en/main/start/tutorial#url-params-in-loaders

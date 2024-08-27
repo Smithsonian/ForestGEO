@@ -2,7 +2,6 @@
 
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import React, { useState } from 'react';
-import { initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views/measurementssummaryviewrds';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { Alert, AlertProps } from '@mui/material';
 import { randomId } from '@mui/x-data-grid-generator';
@@ -11,6 +10,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { measurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
+import { initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views';
 
 export default function MeasurementsSummaryViewDataGrid() {
   const currentPlot = usePlotContext();

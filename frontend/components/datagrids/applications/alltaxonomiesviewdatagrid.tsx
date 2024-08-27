@@ -9,8 +9,8 @@ import { Box, Button, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { AllTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
-import { initialAllTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views/alltaxonomiesviewrds';
 import { FormType } from '@/config/macros/formdetails';
+import { initialAllTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views';
 
 export default function AllTaxonomiesViewDataGrid() {
   const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);

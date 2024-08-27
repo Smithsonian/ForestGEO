@@ -5,12 +5,13 @@ import { AlertProps } from '@mui/material';
 import React, { useState } from 'react';
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
-import { initialAttributesRDSRow } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { Box, Button, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { AttributeGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
+
+import { initialAttributesRDSRow } from '@/config/sqlrdsdefinitions/core';
 
 export default function AttributesDataGrid() {
   const [rows, setRows] = useState([initialAttributesRDSRow] as GridRowsProp);

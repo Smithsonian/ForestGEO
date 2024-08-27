@@ -25,5 +25,4 @@ be able to review all past historical data for your site and plot here.
 
 You can see a display of data validation checks that will be applied to the data you upload here!
 If you have the appropriate permissions, you'll be able to add, edit, delete, or toggle
-validations on/off. 
-
+validations on/off.

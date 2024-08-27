@@ -1,5 +1,4 @@
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/tables/attributerds';
 import { Accordion, AccordionDetails, AccordionGroup, AccordionSummary, Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
 import { GridColDef, GridRenderEditCellParams, useGridApiRef } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
@@ -8,6 +7,8 @@ import { ExpandMore } from '@mui/icons-material';
 import { useSession } from 'next-auth/react';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
+
+import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
 const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>

@@ -1,7 +1,20 @@
-import MapperFactory, { IDataMapper } from '../datamapper';
-import { GridSelections } from '../macros';
-import { CensusRDS, CensusResult } from './tables/censusrds';
+import { createInitialObject, ResultType } from '@/config/utils';
+import MapperFactory, { IDataMapper } from '@/config/datamapper';
+import { GridSelections } from '@/config/macros';
 
+export const initialCensusRDSRow = createInitialObject<CensusRDS>();
+export type CensusRaw = {
+  id?: number;
+  censusID?: number;
+  plotID?: number;
+  plotCensusNumber?: number;
+  startDate?: Date;
+  endDate?: Date;
+  description?: string;
+};
+export type CensusRDS = CensusRaw | undefined;
+export type CensusResult = ResultType<CensusRDS>;
+export const censusFields = ['plotID', 'plotCensusNumber', 'startDate', 'endDate', 'description']; // Function to create and update OrgCensusRDS list from CensusRDS
 interface CensusDateRange {
   censusID: number;
   startDate: Date | undefined;
@@ -195,7 +208,6 @@ class OrgCensusToCensusResultMapper {
   }
 }
 
-// Function to create and update OrgCensusRDS list from CensusRDS
 async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<OrgCensusRDS[]> {
   const orgCensusMapper = new OrgCensusToCensusResultMapper();
 
@@ -205,5 +217,8 @@ async function createAndUpdateCensusList(censusRDSLoad: CensusRDS[]): Promise<Or
   return orgCensusMapper.demapData(censusResultList);
 }
 
-export { OrgCensusToCensusResultMapper, createAndUpdateCensusList, collapseCensusDataToGridSelections };
-export type { CensusDateRange, OrgCensusRDS };
+export { createAndUpdateCensusList };
+export { OrgCensusToCensusResultMapper };
+export { collapseCensusDataToGridSelections };
+export type { OrgCensusRDS };
+export type { CensusDateRange };

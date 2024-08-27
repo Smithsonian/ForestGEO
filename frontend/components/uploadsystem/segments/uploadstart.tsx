@@ -7,11 +7,11 @@ import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import Select, { SelectOption } from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import { Quadrat } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import { useQuadratListContext, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useQuadratDispatch, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 import FinalizeSelectionsButton from '../../client/finalizeselectionsbutton';
+import { Quadrat } from '@/config/sqlrdsdefinitions/zones';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const { uploadForm, personnelRecording, setPersonnelRecording, setReviewState } = props;

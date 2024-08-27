@@ -1,7 +1,7 @@
 import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import { createError, handleUpsert } from '@/config/utils';
-import { RoleResult } from '@/config/sqlrdsdefinitions/tables/rolesrds';
-import { PersonnelResult } from '@/config/sqlrdsdefinitions/tables/personnelrds';
+
+import { PersonnelResult, RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
   const { connection, rowData, schema, censusID } = props;

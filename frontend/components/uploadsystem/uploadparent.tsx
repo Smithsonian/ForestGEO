@@ -435,52 +435,6 @@ export default function UploadParent(props: UploadParentProps) {
           </Typography>
           <Box sx={{ mt: 5, mr: 5, width: '95%' }}>
             <Box sx={{ display: 'flex', width: '100%', flex: 1 }}>{renderStateContent()}</Box>
-            {/* <Tabs sx={{display: 'flex', flex: 1}} variant={"outlined"} aria-label={"File Hub Options"}
-                  size={"lg"}
-                  className={""}>
-              <TabList sticky={"top"} variant="soft"
-                       sx={{
-                         [`& .${tabClasses.root}`]: {
-                           '&[aria-selected="true"]': {
-                             bgcolor: 'background.surface',
-                             borderColor: 'divider',
-                             '&::before': {
-                               content: '""',
-                               display: 'block',
-                               position: 'absolute',
-                               height: 2,
-                               bottom: -2,
-                               left: 0,
-                               right: 0,
-                               bgcolor: 'background.surface',
-                             },
-                           },
-                         },
-                       }}>
-                <Tab indicatorPlacement="top">
-                  <ListItemDecorator>
-                    <ViewListIcon/>
-                  </ListItemDecorator>
-                  Browse Uploaded Files
-                </Tab>
-                <Tab indicatorPlacement="top">
-                  <ListItemDecorator>
-                    <UploadFileIcon/>
-                  </ListItemDecorator>
-                  Upload New Files
-                </Tab>
-              </TabList>
-              <TabPanel value={0}>
-                <ViewUploadedFiles currentPlot={currentPlot} currentCensus={currentCensus}
-                                   refreshFileList={refreshFileList}
-                                   setRefreshFileList={setRefreshFileList}/>
-              </TabPanel>
-              <TabPanel value={1}>
-                <Box sx={{display: 'flex', width: '100%', flex: 1}}>
-                  {renderStateContent()}
-                </Box>
-              </TabPanel>
-            </Tabs> */}
           </Box>
         </Box>
       )}

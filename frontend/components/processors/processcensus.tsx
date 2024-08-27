@@ -1,12 +1,9 @@
 import { runQuery, SpecialProcessingProps } from '@/components/processors/processormacros';
 import moment from 'moment';
-import { CMAttributesResult } from '@/config/sqlrdsdefinitions/tables/cmrds';
-import { CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
-import { QuadratsResult } from '@/config/sqlrdsdefinitions/tables/quadratrds';
-import { SpeciesResult } from '@/config/sqlrdsdefinitions/tables/speciesrds';
-import { StemResult } from '@/config/sqlrdsdefinitions/tables/stemrds';
-import { TreeResult } from '@/config/sqlrdsdefinitions/tables/treerds';
 import { createError, fetchPrimaryKey, handleUpsert } from '@/config/utils';
+import { SpeciesResult, StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { QuadratsResult } from '@/config/sqlrdsdefinitions/zones';
+import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
   const { connection, rowData, schema, plotID, censusID, fullName } = props;

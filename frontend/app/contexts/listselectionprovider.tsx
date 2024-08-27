@@ -2,11 +2,8 @@
 'use client';
 import React, { createContext, Dispatch, useContext, useReducer } from 'react';
 import { createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction } from '@/config/macros/contextreducers';
-import { QuadratRDS } from '@/config/sqlrdsdefinitions/tables/quadratrds';
-import { PlotRDS } from '@/config/sqlrdsdefinitions/tables/plotrds';
-import { SubquadratRDS } from '@/config/sqlrdsdefinitions/tables/subquadratrds';
-import { SitesRDS } from '@/config/sqlrdsdefinitions/tables/sitesrds';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/orgcensusrds';
+import { PlotRDS, QuadratRDS, SitesRDS, SubquadratRDS } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 // contexts
 export const PlotListContext = createContext<PlotRDS[] | undefined>([]);

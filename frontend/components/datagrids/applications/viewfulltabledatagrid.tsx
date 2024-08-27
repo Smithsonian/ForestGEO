@@ -1,7 +1,6 @@
 // viewfulltable view datagrid
 'use client';
 
-import { initialViewFullTableViewRDS } from '@/config/sqlrdsdefinitions/views/viewfulltableviewrds';
 import { Box, Typography } from '@mui/joy';
 import { AlertProps } from '@mui/material';
 import { GridRowsProp } from '@mui/x-data-grid';
@@ -10,6 +9,7 @@ import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
+import { initialViewFullTableViewRDS } from '@/config/sqlrdsdefinitions/views';
 
 export default function ViewFullTableDataGrid() {
   const [rows, setRows] = useState<GridRowsProp>([initialViewFullTableViewRDS] as GridRowsProp);
