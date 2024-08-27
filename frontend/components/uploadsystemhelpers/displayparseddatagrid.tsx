@@ -46,8 +46,8 @@ export interface DisplayParsedDataProps {
 
 export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (props: Readonly<DisplayParsedDataProps>) => {
   const { parsedData, setParsedData, errors, setErrors, errorRows, setErrorRows, fileName, formType } = props;
-  const [tempParsedData, setTempParsedData] = useState<FileCollectionRowSet>(parsedData);
-  const [autoCorrectedParsedData, setAutoCorrectedParsedData] = useState<FileCollectionRowSet>(parsedData);
+  const [autoCorrectedParsedData, setAutoCorrectedParsedData] = useState<FileCollectionRowSet>(() => ({ ...parsedData }));
+  const [tempParsedData, setTempParsedData] = useState<FileCollectionRowSet>(() => ({ ...parsedData }));
   const singleFileData = tempParsedData[fileName] || {};
 
   const currentPlot = usePlotContext();
@@ -65,6 +65,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         headerName: header.label,
         flex: 1,
         getCellClassName: (params: GridCellParams) => {
+          if (saveCorrections) return '';
           const rowIndex = params.id.toString().split('-')[1];
           const errorKey = `row-${rowIndex}`;
           const cellError = errors[fileName]?.[errorKey]?.[header.label];
@@ -82,14 +83,19 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
 
           // Extract the display value
           const displayValue = params.value;
+          if (saveCorrections) {
+            return (
+              <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+                {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
+              </Typography>
+            );
+          }
           const isAutoFillCorrection =
             cellError &&
-            (cellError === 'Genus was auto-filled based on species field.' ||
-              cellError === 'Species field was split into genus and species.' ||
-              cellError === 'Coordinate units were auto-filled based on table defaults.' ||
-              cellError === 'Dimension units were auto-filled based on table defaults.' ||
-              cellError === 'Area units were auto-filled based on table defaults.' ||
-              cellError === 'Area was auto-calculated based on dimension submission. A square shape for the quadrat was assumed.');
+            (cellError.includes('were auto-filled based on table defaults') ||
+              cellError.includes('was auto-calculated based on dimension submission') ||
+              cellError === 'Genus was auto-filled based on species field.' ||
+              cellError === 'Species field was split into genus and species.');
 
           return (
             <Box
@@ -179,6 +185,21 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
             row['area'] = String(Number(dimx) * Number(dimy));
             rowErrors['area'] = 'Area was auto-calculated based on dimension submission. A square shape for the quadrat was assumed.';
           }
+        } else if (formType === 'measurements') {
+          rowErrors = rowErrors || {};
+          const [coordinateUnits, dbhUnits, homUnits] = [row['coordinateunit'], row['dbhunit'], row['homunit']];
+          if (!coordinateUnits) {
+            row['coordinateunit'] = 'm';
+            rowErrors['coordinateunit'] = 'Coordinate units were auto-filled based on table defaults.';
+          }
+          if (!dbhUnits) {
+            row['dbhunit'] = 'mm';
+            rowErrors['dbhunit'] = 'DBH units were auto-filled based on table defaults.';
+          }
+          if (!homUnits) {
+            row['homunit'] = 'm';
+            rowErrors['homunit'] = 'HOM units were auto-filled based on table defaults.';
+          }
         }
 
         if (rowErrors) {
@@ -207,6 +228,11 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
     }));
     setAutoCorrectedParsedData(correctedDataCopy);
   }, [singleFileData, fileName, formType, setErrors]);
+
+  useEffect(() => {
+    if (saveCorrections) setParsedData(autoCorrectedParsedData);
+    else setParsedData(tempParsedData);
+  }, [saveCorrections]);
 
   const processRowUpdate = React.useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel): Promise<GridRowModel> => {
@@ -296,7 +322,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         </>
       ) : (
         <>
-          {validRows.length > 0 && (
+          {correctedValidRows.length > 0 && (
             <StyledDataGrid
               sx={{ display: 'flex', flex: 1, width: '100%' }}
               rows={correctedValidRows}
@@ -316,7 +342,13 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
           )}
         </>
       )}
-      <Checkbox color={'primary'} variant={'soft'} onChange={event => setSaveCorrections(event.target.checked)} />
+      <Checkbox
+        sx={{ mt: 1 }}
+        color={'primary'}
+        variant={'soft'}
+        onChange={event => setSaveCorrections(event.target.checked)}
+        label={!saveCorrections ? 'Save Autocorrected Values to Data' : 'Autocorrected Data Saved!'}
+      />
     </Paper>
   );
 };

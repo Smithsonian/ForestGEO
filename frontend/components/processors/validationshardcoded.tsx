@@ -165,7 +165,7 @@ export async function validateDBHGrowthExceedsMax(p_CensusID: number | null, p_P
       AND cm1.MeasuredDBH IS NOT NULL
       AND cm2.MeasuredDBH IS NOT NULL
       AND cm1.IsValidated IS TRUE
-      AND cm2.IsValidated IS FALSE
+      AND cm2.IsValidated IS NULL
       AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
       AND (cm2.MeasuredDBH * (CASE cm2.DBHUnit 
@@ -243,7 +243,7 @@ export async function validateDBHShrinkageExceedsMax(p_CensusID: number | null, 
       AND cm1.MeasuredDBH IS NOT NULL
       AND cm2.MeasuredDBH IS NOT NULL
       AND cm1.IsValidated IS TRUE
-      AND cm2.IsValidated IS FALSE
+      AND cm2.IsValidated IS NULL
       AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       AND (cm2.MeasuredDBH * (CASE cm2.DBHUnit 
@@ -291,7 +291,7 @@ export async function validateFindAllInvalidSpeciesCodes(p_CensusID: number | nu
     JOIN coremeasurements cm ON s.StemID = cm.StemID
     LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
     WHERE sp.SpeciesID IS NULL
-      AND cm.IsValidated IS FALSE
+      AND cm.IsValidated IS NULL
       AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY cm.CoreMeasurementID;
@@ -322,7 +322,7 @@ export async function validateFindDuplicateStemTreeTagCombinationsPerCensus(p_Ce
     INNER JOIN quadrats q ON s.QuadratID = q.QuadratID
     WHERE (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
-      AND cm.IsValidated = FALSE
+      AND cm.IsValidated = NULL
     GROUP BY q.CensusID, s.StemTag, t.TreeTag
     HAVING COUNT(cm.CoreMeasurementID) > 1;
   `;
@@ -349,7 +349,7 @@ export async function validateFindDuplicatedQuadratsByName(p_CensusID: number | 
     FROM quadrats q
     LEFT JOIN stems st ON q.QuadratID = st.QuadratID
     JOIN coremeasurements cm ON st.StemID = cm.StemID
-    WHERE cm.IsValidated IS FALSE
+    WHERE cm.IsValidated IS NULL
       AND (q.PlotID, q.QuadratName) IN (
           SELECT PlotID, QuadratName
           FROM quadrats
@@ -386,7 +386,7 @@ export async function validateFindMeasurementsOutsideCensusDateBoundsGroupByQuad
     JOIN census c ON q.CensusID = c.CensusID
     WHERE (cm.MeasurementDate < c.StartDate OR cm.MeasurementDate > c.EndDate)
       AND cm.MeasurementDate IS NOT NULL
-      AND cm.IsValidated IS FALSE
+      AND cm.IsValidated IS NULL
       AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY q.QuadratID, c.CensusID, c.StartDate, c.EndDate;
@@ -415,7 +415,7 @@ export async function validateFindStemsInTreeWithDifferentSpecies(p_CensusID: nu
     JOIN stems s ON cm.StemID = s.StemID
     JOIN trees t ON s.TreeID = t.TreeID
     JOIN quadrats q ON s.QuadratID = q.QuadratID
-    WHERE cm.IsValidated = FALSE
+    WHERE cm.IsValidated = NULL
       AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
     GROUP BY t.TreeID, cm.CoreMeasurementID
@@ -466,7 +466,7 @@ export async function validateFindStemsOutsidePlots(p_CensusID: number | null, p
         AND s.LocalY IS NOT NULL
         AND p.DimensionX > 0
         AND p.DimensionY > 0
-        AND cm.IsValidated IS FALSE
+        AND cm.IsValidated IS NULL
         AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
         AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       GROUP BY cm.CoreMeasurementID;
@@ -553,7 +553,7 @@ export async function validateFindTreeStemsInDifferentQuadrats(p_CensusID: numbe
       JOIN quadrats q2 ON s2.QuadratID = q2.QuadratID
       JOIN coremeasurements cm1 ON s1.StemID = cm1.StemID
       WHERE q1.QuadratID != q2.QuadratID
-        AND cm1.IsValidated IS FALSE
+        AND cm1.IsValidated IS NULL
         AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
       AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
       GROUP BY cm1.CoreMeasurementID;
@@ -644,17 +644,17 @@ export async function validateHOMUpperAndLowerBounds(p_CensusID: number | null, 
 
     // Query to find measurements outside the HOM bounds
     const cursorQuery = `
-      SELECT cm.CoreMeasurementID, cm.MeasuredHOM, cm.HOMUnit
+      SELECT cm.CoreMeasurementID, cm.MeasuredDBH, cm.DBHUnit
       FROM coremeasurements cm
-      LEFT JOIN stems st ON cm.StemID = st.StemID
-      LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
+      LEFT JOIN census c ON cm.CensusID = c.CensusID
       WHERE (
-        (@minHOM IS NULL OR cm.MeasuredHOM = @minHOM) OR
-        (@maxHOM IS NULL OR cm.MeasuredHOM = @maxHOM)
-      )
-      AND cm.IsValidated IS FALSE
-      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
-      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
+            (@minHOM IS NOT NULL AND cm.MeasuredHOM < @minHOM) 
+            OR 
+            (@maxHOM IS NOT NULL AND cm.MeasuredHOM > @maxHOM)
+            )
+      AND cm.IsValidated IS NULL
+      AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);
     `;
 
     const cursorParams: any[] = [];
@@ -749,15 +749,15 @@ export async function validateScreenMeasuredDiameterMinMax(p_CensusID: number | 
     const cursorQuery = `
       SELECT cm.CoreMeasurementID, cm.MeasuredDBH, cm.DBHUnit
       FROM coremeasurements cm
-      LEFT JOIN stems st ON cm.StemID = st.StemID
-      LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
+      LEFT JOIN census c ON cm.CensusID = c.CensusID
       WHERE (
-        (@minDBH IS NULL OR cm.MeasuredDBH = @minDBH) OR
-        (@maxDBH IS NULL OR cm.MeasuredDBH = @maxDBH)
-      )
-      AND cm.IsValidated IS FALSE
-      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
-      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
+            (@minDBH IS NOT NULL AND cm.MeasuredDBH < @minDBH) 
+            OR 
+            (@maxDBH IS NOT NULL AND cm.MeasuredDBH > @maxDBH)
+            )
+      AND cm.IsValidated IS NULL
+      AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);
     `;
 
     const cursorParams: any[] = [];
@@ -853,18 +853,17 @@ export async function validateScreenStemsWithMeasurementsButDeadAttributes(p_Cen
     const cursorQuery = `
       SELECT cm.CoreMeasurementID
       FROM coremeasurements cm
+      JOIN census c ON cm.CensusID = c.CensusID
       JOIN cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
       JOIN attributes a ON cma.Code = a.Code
-      JOIN stems st ON cm.StemID = st.StemID
-      JOIN quadrats q ON st.QuadratID = q.QuadratID
       WHERE (
         (cm.MeasuredDBH IS NOT NULL AND cm.MeasuredDBH > 0) OR
         (cm.MeasuredHOM IS NOT NULL AND cm.MeasuredHOM > 0)
       )
       AND a.Status IN ('dead', 'stem dead', 'missing', 'broken below', 'omitted')
-      AND cm.IsValidated IS FALSE
-      AND (@p_CensusID IS NULL OR q.CensusID = @p_CensusID)
-      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID);
+      AND cm.IsValidated IS NULL
+      AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
+      AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);
     `;
 
     const cursorParams: any[] = [];

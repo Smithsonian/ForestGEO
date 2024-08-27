@@ -28,9 +28,6 @@ export interface DetailedCMIDRow extends CMIDRow {
   plotName?: string;
   plotCensusNumber?: number;
   quadratName?: string;
-  censusStart?: any;
-  censusEnd?: any;
-  personnelName?: string;
   speciesName?: string;
 }
 
