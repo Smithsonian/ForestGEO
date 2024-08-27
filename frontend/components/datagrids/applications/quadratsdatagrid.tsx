@@ -3,7 +3,6 @@
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { AlertProps } from '@mui/material';
 import React, { useState } from 'react';
-import { initialQuadratRDSRow } from '@/config/sqlrdsdefinitions/tables/quadratrds';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import { randomId } from '@mui/x-data-grid-generator';
 import DataGridCommons from '@/components/datagrids/datagridcommons';
@@ -13,6 +12,7 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import Link from 'next/link';
 import { quadratGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
+import { initialQuadratRDSRow } from '@/config/sqlrdsdefinitions/zones';
 
 export default function QuadratsDataGrid() {
   const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);

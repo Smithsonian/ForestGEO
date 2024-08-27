@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { PoolConnection } from 'mysql2/promise';
 import { CMError } from '@/config/macros/uploadsystemmacros';
-import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 
 export async function GET(request: NextRequest) {
@@ -35,22 +34,9 @@ export async function GET(request: NextRequest) {
       validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
       descriptions: row.Descriptions.split(',')
     }));
-
-    // Query to fetch coremeasurements pending validation (no errors)
-    const pendingValidationQuery = `
-      SELECT cm.*
-      FROM 
-        ${schema}.coremeasurements AS cm
-      LEFT JOIN 
-        ${schema}.cmverrors AS cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
-      WHERE 
-        cm.IsValidated = b'0' AND cme.CMVErrorID IS NULL;
-    `;
-    const pendingValidationRows = await runQuery(conn, pendingValidationQuery);
     return new NextResponse(
       JSON.stringify({
-        failed: parsedValidationErrors,
-        pending: MapperFactory.getMapper<any, any>('coremeasurements').mapData(pendingValidationRows)
+        failed: parsedValidationErrors
       }),
       {
         status: HTTPResponses.OK,

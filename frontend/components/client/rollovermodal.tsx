@@ -2,17 +2,17 @@
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
-import { QuadratRDS } from '@/config/sqlrdsdefinitions/tables/quadratrds';
-import { PersonnelRDS } from '@/config/sqlrdsdefinitions/tables/personnelrds';
 import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { Stack } from '@mui/material';
 import { Alert, Button, Checkbox, DialogActions, DialogContent, DialogTitle, Grid, IconButton, Modal, ModalDialog, Option, Select, Typography } from '@mui/joy';
 import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
 import { useOrgCensusListContext } from '@/app/contexts/listselectionprovider';
-import { OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { Box } from '@mui/system';
 
 import { PersonnelGridColumns, quadratGridColumns } from './datagridcolumns';
+import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
+import { PersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 
 interface RolloverModalProps {
   open: boolean;

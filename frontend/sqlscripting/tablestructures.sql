@@ -194,6 +194,7 @@ create table sitespecificvalidations
     Name                  varchar(255)     not null,
     Definition            text             not null,
     Description           varchar(255)     null,
+    Criteria              varchar(255)     null,
     IsEnabled             bit default b'0' not null
 );
 

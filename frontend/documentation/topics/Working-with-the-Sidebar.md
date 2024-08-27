@@ -4,7 +4,7 @@
 
 ### Selecting a Site
 
-In the sidebar, you'll see a single selection menu that says *Select a Site*. This is the first step needed to reach the
+In the sidebar, you'll see a single selection menu that says _Select a Site_. This is the first step needed to reach the
 data management part of the application.
 
 > Selecting a site will determine which schema in the data server you are connected to, so having a site assigned to

@@ -12,8 +12,6 @@ import Typography from '@mui/joy/Typography';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { LoginLogout } from '@/components/loginlogout';
 import { siteConfigNav, SiteConfigProps, validityMapping } from '@/config/macros/siteconfigs';
-import { Site } from '@/config/sqlrdsdefinitions/tables/sitesrds';
-import { Plot } from '@/config/sqlrdsdefinitions/tables/plotrds';
 import {
   useOrgCensusContext,
   useOrgCensusDispatch,
@@ -36,11 +34,12 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 import RolloverModal from './client/rollovermodal';
 import RolloverStemsModal from './client/rolloverstemsmodal';
+import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;

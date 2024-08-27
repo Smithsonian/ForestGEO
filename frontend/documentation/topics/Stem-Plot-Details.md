@@ -34,4 +34,4 @@ Family, Genus, etc.
 ## Plot-Species List
 
 A filtered view of the species list, narrowing search by focusing on stems recorded in the
-current plot and census. 
+current plot and census.

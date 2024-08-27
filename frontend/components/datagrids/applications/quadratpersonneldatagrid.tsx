@@ -9,10 +9,10 @@ import React, { useEffect, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { GridSelections } from '@/config/macros';
-import { initialQuadratPersonnelRDSRow } from '@/config/sqlrdsdefinitions/tables/quadratpersonnelrds';
 import { useRouter } from 'next/navigation';
 
 import DataGridCommons from '../datagridcommons';
+import { initialQuadratPersonnelRDSRow } from '@/config/sqlrdsdefinitions/personnel';
 
 export default function QuadratPersonnelDataGrid() {
   const [rows, setRows] = useState([initialQuadratPersonnelRDSRow] as GridRowsProp);

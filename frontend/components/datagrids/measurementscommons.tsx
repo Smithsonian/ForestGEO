@@ -19,7 +19,7 @@ import {
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, Button, Checkbox, FormControlLabel, FormGroup, Snackbar } from '@mui/material';
+import { Alert, Button, Checkbox, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -31,30 +31,32 @@ import FileDownloadTwoToneIcon from '@mui/icons-material/FileDownloadTwoTone';
 import Box from '@mui/joy/Box';
 import { Stack, Tooltip, Typography } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import { createDeleteQuery, createFetchQuery, createPostPatchQuery, getColumnVisibilityModel, getGridID } from '@/config/datagridhelpers';
+import {
+  CellItemContainer,
+  createDeleteQuery,
+  createFetchQuery,
+  createPostPatchQuery,
+  EditToolbarCustomProps,
+  errorMapping,
+  filterColumns,
+  getColumnVisibilityModel,
+  getGridID,
+  MeasurementsCommonsProps,
+  PendingAction,
+  sortRowsByMeasurementDate
+} from '@/config/datagridhelpers';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { redirect } from 'next/navigation';
-import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/tables/coremeasurementsrds';
 import moment from 'moment';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
-import { CensusDateRange } from '@/config/sqlrdsdefinitions/orgcensusrds';
 import { HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
 
-import {
-  CellItemContainer,
-  EditToolbarCustomProps,
-  errorMapping,
-  filterColumns,
-  MeasurementsCommonsProps,
-  PendingAction,
-  sortRowsByMeasurementDate
-} from './datagridmacros';
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
 
@@ -204,33 +206,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       }
     }
   };
-  const handleDateRangeChange = (censusID: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.checked) {
-      setSelectedDateRanges(prev => [...prev, censusID]);
-    } else {
-      setSelectedDateRanges(prev => prev.filter(id => id !== censusID));
-    }
-  };
-  const renderDateRangeFilters = (dateRanges: CensusDateRange[]) => (
-    <FormGroup sx={{ ml: 1.5 }}>
-      {dateRanges.map(range => (
-        <FormControlLabel
-          key={range.censusID}
-          control={<Checkbox checked={selectedDateRanges.includes(range.censusID)} onChange={handleDateRangeChange(range.censusID)} />}
-          label={
-            <Stack direction={'column'} alignItems="flex-start" sx={{ my: 2 }}>
-              <Typography level="body-sm" sx={{ mb: -0.5 }}>
-                ID: {range.censusID}
-              </Typography>
-              <Typography level="body-md">
-                {moment(range.startDate).format('ddd, MMM D, YYYY')} - {moment(range.endDate).format('ddd, MMM D, YYYY')}
-              </Typography>
-            </Stack>
-          }
-        />
-      ))}
-    </FormGroup>
-  );
   const cellHasError = (colField: string, rowId: GridRowId) => {
     const error = validationErrors[Number(rowId)];
     if (!error) return false;
@@ -257,16 +232,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const errorRowCount = useMemo(() => {
     return rows.filter(row => rowHasError(row.id)).length;
   }, [rows, gridColumns]);
-
-  // custom useEffect loops for msvdatagrid --> setting date range filters
-  // useEffect(() => {
-  //   if (currentCensus) {
-  //     const allDateRangeIDs = currentCensus.dateRanges.map(range => range.censusID);
-  //     setSelectedDateRanges(allDateRangeIDs);
-  //   }
-  // }, [currentCensus]);
-
-  // main system begins here:
 
   const updateRow = async (
     gridType: string,
@@ -642,16 +607,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     };
   }
 
-  const fetchValidationErrors = async () => {
+  const fetchValidationErrors = useCallback(async () => {
     try {
       const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`);
       const data = await response.json();
 
-      // Provide default values if data.failed or data.pending is undefined
       const errors: CMError[] = data?.failed ?? [];
-      const pending: CoreMeasurementsRDS[] = data?.pending ?? [];
-
-      // Only proceed with reduce if errors is an array
       const errorMap = Array.isArray(errors)
         ? errors.reduce<Record<number, CMError>>((acc, error) => {
             acc[error?.coreMeasurementID] = error;
@@ -659,11 +620,21 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           }, {})
         : {};
 
-      setValidationErrors(errorMap);
+      // Only update state if there is a difference
+      if (JSON.stringify(validationErrors) !== JSON.stringify(errorMap)) {
+        setValidationErrors(errorMap);
+      }
     } catch (error) {
       console.error('Error fetching validation errors:', error);
     }
-  };
+  }, [currentSite?.schemaName, validationErrors]);
+
+  // Use useEffect to trigger fetchValidationErrors only when rows change
+  useEffect(() => {
+    if (rows.length > 0) {
+      fetchValidationErrors().then(r => console.log(r));
+    }
+  }, [rows, fetchValidationErrors]);
 
   const getCellErrorMessages = (colField: string, rowId: GridRowId) => {
     const error = validationErrors[Number(rowId)];

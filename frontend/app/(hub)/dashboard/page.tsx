@@ -27,9 +27,9 @@ import CheckIcon from '@mui/icons-material/Check';
 import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/tables/unifiedchangelogrds';
 import { useEffect, useState } from 'react';
 import moment from 'moment';
+import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();

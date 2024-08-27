@@ -1,4 +1,3 @@
-// species custom data type
 import { createInitialObject, ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
@@ -17,11 +16,8 @@ export type SpeciesRDS = {
   validCode?: string;
   referenceID?: number;
 };
-
 export type SpeciesResult = ResultType<SpeciesRDS>;
-
 export const initialSpeciesRDSRow = createInitialObject<SpeciesRDS>();
-
 const SPECIES_SPECIESCODE_LIMIT = 25;
 const SPECIES_SPECIESNAME_LIMIT = 64;
 const SPECIES_SUBSPECIESNAME_LIMIT = 255;
@@ -60,3 +56,71 @@ export const validateSpeciesFormRow: ValidationFunction = row => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
+export type FamilyRDS = {
+  id?: number;
+  familyID?: number;
+  family?: string;
+  referenceID?: number;
+};
+export type FamilyResult = ResultType<FamilyRDS>;
+export type GenusRDS = {
+  id?: number;
+  genusID?: number;
+  familyID?: number;
+  genus?: string;
+  referenceID?: number;
+  genusAuthority?: string;
+};
+export type GenusResult = ResultType<GenusRDS>;
+export type ReferenceRDS = {
+  id?: number;
+  referenceID?: number;
+  publicationTitle?: string;
+  fullReference?: string;
+  dateOfPublication?: Date;
+};
+export type ReferenceResult = ResultType<ReferenceRDS>;
+export type StemRDS = {
+  id?: number;
+  stemID?: number;
+  treeID?: number;
+  quadratID?: number;
+  stemNumber?: number;
+  stemTag?: string;
+  localX?: number;
+  localY?: number;
+  coordinateUnits?: string;
+  moved?: boolean;
+  stemDescription?: string;
+};
+export type StemResult = ResultType<StemRDS>;
+export type TreeRDS = {
+  id?: number;
+  treeID?: number;
+  treeTag?: string;
+  speciesID?: number;
+};
+export type TreeResult = ResultType<TreeRDS>;
+export type SpecimensRDS = {
+  id?: number;
+  specimenID?: number;
+  stemID?: number;
+  personnelID?: number;
+  specimenNumber?: number;
+  speciesID?: number;
+  herbarium?: string;
+  voucher?: number;
+  collectionDate?: Date;
+  determinedBy?: string;
+  description?: string;
+};
+export type SpecimensResult = ResultType<SpecimensRDS>;
+export type SpeciesInventoryRDS = {
+  id: number;
+  speciesInventoryID: number;
+  censusID: number | null;
+  plotID: number | null;
+  speciesID: number | null;
+  subSpeciesID: number | null;
+};
+export type SpeciesInventoryResult = ResultType<SpeciesInventoryRDS>;

@@ -2,9 +2,9 @@
 
 import { Box, Card, CardContent, Typography } from '@mui/joy';
 import React, { useEffect } from 'react';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/tables/validationproceduresrds';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import ValidationCard from '@/components/validationcard';
+import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 
 export default function ValidationsPage() {
   const currentSite = useSiteContext();

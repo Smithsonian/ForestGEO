@@ -1,29 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runValidationProcedure } from '@/components/processors/processorhelperfunctions';
+import { runValidation } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 
-export async function GET(request: NextRequest, { params }: { params: { validationType: string } }) {
-  const schema = request.nextUrl.searchParams.get('schema');
-  const plotIDParam = request.nextUrl.searchParams.get('plotID');
-  const censusIDParam = request.nextUrl.searchParams.get('censusID');
-  const minValueParam = request.nextUrl.searchParams.get('minValue');
-  const maxValueParam = request.nextUrl.searchParams.get('maxValue');
-  const validationType = params.validationType;
-
-  if (!schema) throw new Error('No schema variable provided!');
-  if (!validationType) throw new Error('validationType object not provided!');
-
-  const plotID = plotIDParam ? parseInt(plotIDParam) : null;
-  const censusID = censusIDParam ? parseInt(censusIDParam) : null;
-  const minValue = minValueParam !== 'undefined' && minValueParam !== null ? parseFloat(minValueParam) : null;
-  const maxValue = maxValueParam !== 'undefined' && maxValueParam !== null ? parseFloat(maxValueParam) : null;
-
+export async function POST(request: NextRequest, { params }: { params: { validationProcedureName: string } }) {
   try {
-    const validationResponse = await runValidationProcedure(schema, validationType, plotID, censusID, minValue, maxValue);
+    const { schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH, minHOM, maxHOM } = await request.json();
+
+    if (!schema) throw new Error('Schema is required');
+    if (!validationProcedureID || !params.validationProcedureName) throw new Error('Validation procedure details are required');
+    if (!cursorQuery) throw new Error('Cursor query is required');
+
+    // Execute the validation procedure using the provided inputs
+    const validationResponse = await runValidation(validationProcedureID, params.validationProcedureName, schema, cursorQuery, {
+      p_CensusID,
+      p_PlotID,
+      minDBH,
+      maxDBH,
+      minHOM,
+      maxHOM
+    });
+
     return new NextResponse(JSON.stringify(validationResponse), {
-      status: HTTPResponses.OK
+      status: HTTPResponses.OK,
+      headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
+    console.error('Error during validation:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
