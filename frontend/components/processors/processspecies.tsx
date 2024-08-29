@@ -1,5 +1,4 @@
 import { SpecialProcessingProps } from '@/components/processors/processormacros';
-import { booleanToBit } from '@/config/macros';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 
@@ -36,14 +35,13 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
     let speciesID: number | undefined;
     if (rowData.spcode) {
       const speciesData = {
-        speciesCode: rowData.spcode,
-        speciesName: rowData.species,
-        subspeciesName: rowData.subspecies,
-        idLevel: rowData.IDLevel,
-        speciesAuthority: rowData.authority,
-        subspeciesAuthority: rowData.subauthority,
-        genusID: genusID,
-        currentTaxonFlag: booleanToBit(true)
+        SpeciesCode: rowData.spcode,
+        SpeciesName: rowData.species,
+        SubspeciesName: rowData.subspecies,
+        IDLevel: rowData.IDLevel,
+        SpeciesAuthority: rowData.authority,
+        SubspeciesAuthority: rowData.subauthority,
+        GenusID: genusID
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);

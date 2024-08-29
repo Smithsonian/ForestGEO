@@ -8,7 +8,7 @@ import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectio
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 
 type ValidationMessages = {
-  [key: string]: { description: string; definition: string };
+  [key: string]: { id: number; description: string; definition: string };
 };
 
 const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, schema }) => {
@@ -28,13 +28,15 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
   const plotID = currentPlot?.plotID;
 
   useEffect(() => {
-    console.log('Loading validation procedures...');
-    fetch('/api/validations/validationlist', { method: 'GET' })
+    console.log('Loading core validation procedures...');
+    fetch(`/api/validations/validationlist?schema=${schema}`, { method: 'GET' })
       .then(response => response.json())
       .then(data => {
-        setValidationMessages(data);
-        const initialProgress = Object.keys(data).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
+        setValidationMessages(data.coreValidations);
+        const initialProgress = Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
         setValidationProgress(initialProgress);
+
+        // for now, site-specific validations are being ignored. Handling will be added later.
       })
       .catch(error => {
         console.error('Error fetching validation messages:', error);
@@ -70,7 +72,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
     }
 
     const validationProcedureName = Object.keys(validationMessages)[index];
-    const validationProcedureID = index + 1; // Assuming a 1-based index as an ID for simplicity; adjust as needed.
+    const validationProcedureID = validationMessages[validationProcedureName].id; // Retrieve the ID from the validationMessages object
     const cursorQuery = validationMessages[validationProcedureName].definition;
 
     try {
@@ -83,6 +85,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
       await performNextValidation(index + 1, foundError || hasError);
     } catch (error) {
       console.error(`Error in performNextValidation for ${validationProcedureName}:`, error);
+      return;
     }
   };
 
@@ -101,7 +104,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
           cursorQuery,
           p_CensusID: currentCensus?.dateRanges[0].censusID,
           p_PlotID: plotID,
-          minDBH: null, // Adjust these values as needed
+          minDBH: null,
           maxDBH: null,
           minHOM: null,
           maxHOM: null
@@ -119,17 +122,19 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
       console.error(`Error performing validation for ${validationProcedureName}:`, error);
       setApiErrors(prev => [...prev, `Failed to execute ${validationProcedureName}: ${error.message}`]);
       setValidationProgress(prevProgress => ({ ...prevProgress, [validationProcedureName]: -1 }));
-      return {
-        response: { failedRows: 0, message: error.message, totalRows: 0 },
-        hasError: false
-      };
+      throw new Error(`Error performing validation for ${validationProcedureName}:`, error);
+      // return {
+      //   response: { failedRows: 0, message: error.message, totalRows: 0 },
+      //   hasError: false
+      // };
     }
   };
 
   const renderProgressBars = () => {
     return Object.keys(validationMessages).map(validationProcedureName => (
       <Box key={validationProcedureName} sx={{ mb: 2 }}>
-        <Typography variant="subtitle1">{validationMessages[validationProcedureName]?.description || validationProcedureName}</Typography>
+        <Typography variant="subtitle1">{validationProcedureName}</Typography>
+        <Typography variant={'subtitle1'}>{validationMessages[validationProcedureName]?.description}</Typography>
         <LinearProgress variant="determinate" value={validationProgress[validationProcedureName]} />
       </Box>
     ));

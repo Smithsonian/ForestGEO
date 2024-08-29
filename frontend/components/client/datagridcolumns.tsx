@@ -625,7 +625,7 @@ export const measurementsSummaryViewGridColumns: GridColDef[] = [
     headerName: '#',
     headerAlign: 'left',
     headerClassName: 'header',
-    flex: 0.25,
+    flex: 0.4,
     align: 'left'
   },
   {

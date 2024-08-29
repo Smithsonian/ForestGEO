@@ -1,5 +1,5 @@
 import moment from 'moment';
-import { booleanToBit } from './macros';
+import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
 import { SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
@@ -136,6 +136,8 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
       return undefined;
     } else if (key.toLowerCase().includes('date') && value !== null) {
       return parseDate(value);
+    } else if (Buffer.isBuffer(value)) {
+      return bitToBoolean(value);
     } else if (value !== undefined && value !== null) {
       return value;
     } else {

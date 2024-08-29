@@ -37,7 +37,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const [validity, setValidityState] = useState<UnifiedValidityFlags>(initialValidityState);
   const [refreshNeeded, setRefreshNeeded] = useState<boolean>(false);
 
-  const { setLoading } = useLoading();
+  const { setSecondaryLoading } = useLoading();
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -50,7 +50,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
   const checkDataValidity = useCallback(
     async (type?: keyof UnifiedValidityFlags) => {
       if (!currentSite || !currentPlot || !currentCensus) return;
-      setLoading(true, 'Pre-validation in progress...');
+      setSecondaryLoading(type as string, true);
       const url = `/api/cmprevalidation/${type}/${currentSite.schemaName}/${currentPlot.plotID}/${currentCensus.plotCensusNumber}`;
       let response;
       try {
@@ -60,7 +60,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
         response = { ok: false };
       }
       setValidity(type as keyof UnifiedValidityFlags, response.ok);
-      setLoading(false);
+      setSecondaryLoading(type as string, false);
     },
     [currentSite, currentPlot, currentCensus, setValidity, validity]
   );

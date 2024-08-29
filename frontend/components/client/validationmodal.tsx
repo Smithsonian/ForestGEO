@@ -51,7 +51,9 @@ const ValidationModal: React.FC = () => {
     if (index >= Object.keys(validationMessages).length) {
       try {
         setIsUpdatingRows(true); // Indicate that the update is starting
-        await updateValidatedRows(schema!); // Call the updateValidatedRows function here
+        await updateValidatedRows(schema!, { p_CensusID: currentCensus?.dateRanges[0]?.censusID, p_PlotID: currentPlot?.plotID }); // Call the updateValidatedRows
+        // function
+        // here
         setIsUpdatingRows(false); // Indicate that the update is complete
         setIsValidationComplete(true);
         setErrorsFound(foundError);

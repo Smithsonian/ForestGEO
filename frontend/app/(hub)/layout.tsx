@@ -8,7 +8,7 @@ import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { getAllSchemas } from '@/components/processors/processorhelperfunctions';
-import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import {
   useOrgCensusListContext,
   useOrgCensusListDispatch,
@@ -16,9 +16,7 @@ import {
   usePlotListDispatch,
   useQuadratListContext,
   useQuadratListDispatch,
-  useSiteListDispatch,
-  useSubquadratListContext,
-  useSubquadratListDispatch
+  useSiteListDispatch
 } from '@/app/contexts/listselectionprovider';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
@@ -53,37 +51,36 @@ function renderSwitch(endpoint: string) {
 
 export default function HubLayout({ children }: { children: React.ReactNode }) {
   const { setLoading } = useLoading();
+  const { triggerRefresh } = useDataValidityContext();
 
   const censusListDispatch = useOrgCensusListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const siteListDispatch = useSiteListDispatch();
-  const subquadratListDispatch = useSubquadratListDispatch();
   const plotListDispatch = usePlotListDispatch();
 
   const censusListContext = useOrgCensusListContext();
   const quadratListContext = useQuadratListContext();
-  const subquadratListContext = useSubquadratListContext();
   const plotListContext = usePlotListContext();
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const currentQuadrat = useQuadratContext();
   const { data: session } = useSession();
   const { validity } = useDataValidityContext();
   const previousSiteRef = useRef<string | undefined>(undefined);
+  const previousPlotRef = useRef<number | undefined>(undefined);
+  const previousCensusRef = useRef<number | undefined>(undefined);
 
   const [siteListLoaded, setSiteListLoaded] = useState(false);
   const [plotListLoaded, setPlotListLoaded] = useState(false);
   const [censusListLoaded, setCensusListLoaded] = useState(false);
   const [quadratListLoaded, setQuadratListLoaded] = useState(false);
-  const [subquadratListLoaded, setSubquadratListLoaded] = useState(false);
   const [manualReset, setManualReset] = useState(false);
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const pathname = usePathname();
-  const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && (quadratListLoaded || subquadratListLoaded);
+  const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
   const loadCensusData = useCallback(async () => {
     if (!currentPlot)
@@ -96,13 +93,10 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(true, 'Loading raw census data');
     const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
     const censusRDSLoad = await response.json();
-    setLoading(false);
 
-    setLoading(true, 'Converting raw census data...');
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
-    if (censusListDispatch) {
-      await censusListDispatch({ censusList });
-    }
+    console.log('censusList: ', censusList);
+    if (censusListDispatch) await censusListDispatch({ censusList });
     setLoading(false);
     setCensusListLoaded(true);
     return { success: true };
@@ -120,12 +114,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
     const plotsData = await plotsResponse.json();
     if (!plotsData) return { success: false, message: 'Failed to load plots data' };
-    setLoading(false);
 
-    setLoading(true, 'Dispatching plot list information...');
-    if (plotListDispatch) {
-      await plotListDispatch({ plotList: plotsData });
-    } else return { success: false, message: 'Failed to dispatch plots data' };
+    if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
+    else return { success: false, message: 'Failed to dispatch plots data' };
     setLoading(false);
     setPlotListLoaded(true);
     return { success: true };
@@ -145,41 +136,13 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     );
     const quadratsData = await quadratsResponse.json();
     if (!quadratsData) return { success: false, message: 'Failed to load quadrats data' };
-    setLoading(false);
 
-    setLoading(true, 'Dispatching quadrat list information...');
-    if (quadratListDispatch) {
-      await quadratListDispatch({ quadratList: quadratsData });
-    } else return { success: false, message: 'Failed to dispatch quadrats data' };
+    if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
+    else return { success: false, message: 'Failed to dispatch quadrats data' };
     setLoading(false);
     setQuadratListLoaded(true);
     return { success: true };
   }, [quadratListContext, quadratListDispatch, currentPlot, currentCensus, currentSite, setLoading, validity]);
-
-  const loadSubquadratsData = useCallback(async () => {
-    if (!currentPlot || !currentCensus || !currentQuadrat)
-      return {
-        success: false,
-        message: 'Plot, Census, and Quadrat must be selected to load subquadrat data'
-      };
-    if (subquadratListContext !== undefined && subquadratListContext.length > 0) return { success: true };
-
-    setLoading(true, 'Loading subquadrat list information...');
-    const subquadratResponse = await fetch(
-      `/api/fetchall/subquadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}/${currentQuadrat.quadratID}?schema=${currentSite?.schemaName || ''}`
-    );
-    const subquadratData = await subquadratResponse.json();
-    if (!subquadratData) return { success: false, message: 'Failed to load subquadrats data' };
-    setLoading(false);
-
-    setLoading(true, 'Dispatching subquadrat list information...');
-    if (subquadratListDispatch) {
-      await subquadratListDispatch({ subquadratList: subquadratData });
-    } else return { success: false, message: 'Failed to dispatch subquadrat list' };
-    setLoading(false);
-    setSubquadratListLoaded(true);
-    return { success: true };
-  }, [subquadratListContext, subquadratListDispatch, currentPlot, currentCensus, currentQuadrat, currentSite, setLoading, validity]);
 
   const fetchSiteList = useCallback(async () => {
     setLoading(true, 'Loading Sites...');
@@ -199,6 +162,23 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, [session, siteListLoaded, siteListDispatch, setLoading, validity]);
 
+  // Detect first update from undefined to defined for currentSite and currentPlot
+  useEffect(() => {
+    const hasSiteJustBeenDefined = previousSiteRef.current === undefined && currentSite !== undefined;
+    const hasPlotJustBeenDefined = previousPlotRef.current === undefined && currentPlot !== undefined;
+
+    if (hasSiteJustBeenDefined || hasPlotJustBeenDefined) {
+      previousSiteRef.current = currentSite?.siteName;
+      previousPlotRef.current = currentPlot?.plotID;
+
+      if (currentSite && currentPlot) {
+        console.log('Triggering API call as currentSite and currentPlot have been defined for the first time.');
+        setLoading(true, 'Updating census date information...');
+        fetch(`/api/dates?schema=${currentSite.schemaName}`, { method: 'GET' }).then(() => setLoading(false));
+      }
+    }
+  }, [currentSite, currentPlot]);
+
   useEffect(() => {
     if (session && !siteListLoaded) {
       fetchSiteList()
@@ -217,19 +197,30 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (!quadratListLoaded && quadratListDispatch) {
       quadratListDispatch({ quadratList: undefined }).catch(console.error);
     }
-    if (!subquadratListLoaded && subquadratListDispatch) {
-      subquadratListDispatch({ subquadratList: undefined }).catch(console.error);
-    }
-  }, [plotListLoaded, censusListLoaded, quadratListLoaded, subquadratListLoaded]);
+  }, [plotListLoaded, censusListLoaded, quadratListLoaded]);
 
   useEffect(() => {
     const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
-    if (siteListLoaded && currentSite && hasSiteChanged) {
-      setPlotListLoaded(false);
-      setCensusListLoaded(false);
-      setQuadratListLoaded(false);
-      setSubquadratListLoaded(false);
-      previousSiteRef.current = currentSite.siteName;
+    const hasPlotChanged = previousPlotRef.current !== currentPlot?.plotID;
+    const hasCensusChanged = previousCensusRef.current !== currentCensus?.dateRanges[0]?.censusID;
+    if (hasSiteChanged && !hasPlotChanged && !hasCensusChanged) {
+      if (siteListLoaded && currentSite) {
+        setPlotListLoaded(false);
+        setCensusListLoaded(false);
+        setQuadratListLoaded(false);
+        previousSiteRef.current = currentSite.siteName;
+      }
+    } else if (!hasSiteChanged && hasPlotChanged && !hasCensusChanged) {
+      if (plotListLoaded && currentPlot) {
+        setCensusListLoaded(false);
+        setQuadratListLoaded(false);
+        previousPlotRef.current = currentPlot.plotID;
+      }
+    } else if (!hasSiteChanged && !hasPlotChanged && hasCensusChanged) {
+      if (censusListLoaded && currentCensus) {
+        setQuadratListLoaded(false);
+        previousCensusRef.current = currentCensus.dateRanges[0].censusID;
+      }
     }
     if (siteListLoaded && currentSite && !plotListLoaded) {
       loadPlotsData().catch(console.error);
@@ -240,20 +231,17 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && !quadratListLoaded) {
       loadQuadratsData().catch(console.error);
     }
-    // if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && quadratListLoaded && !subquadratListLoaded) {
-    //   loadSubquadratsData().catch(console.error);
-    // }
   }, [
-    siteListLoaded,
     currentSite,
+    currentPlot,
+    currentCensus,
+    siteListLoaded,
     plotListLoaded,
     censusListLoaded,
     quadratListLoaded,
-    subquadratListLoaded,
     loadCensusData,
     loadPlotsData,
-    loadQuadratsData,
-    loadSubquadratsData
+    loadQuadratsData
   ]);
 
   useEffect(() => {
@@ -262,7 +250,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       setPlotListLoaded(false);
       setCensusListLoaded(false);
       setQuadratListLoaded(false);
-      setSubquadratListLoaded(false);
       setSiteListLoaded(false);
       setManualReset(false);
       setLoading(false);
@@ -271,7 +258,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // if contexts are reset due to website refresh, system needs to redirect user back to dashboard
-    if (currentSite === undefined && currentPlot === undefined && currentQuadrat === undefined && pathname !== '/dashboard') redirect('/dashboard');
+    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard') redirect('/dashboard');
   }, [pathname]);
 
   useEffect(() => {

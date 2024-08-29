@@ -64,7 +64,6 @@ export const TableHeadersByFormType: Record<FormType, { label: string }[]> = {
     { label: 'stemtag' },
     { label: 'spcode' },
     { label: 'quadrat' },
-    { label: 'subquadrat' },
     { label: 'lx' },
     { label: 'ly' },
     { label: 'coordinateunit' },
