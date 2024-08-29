@@ -110,6 +110,7 @@ export default function MeasurementsSummaryViewDataGrid() {
         formType={FormType.measurements}
       />
       <MeasurementsCommons
+        locked={true}
         gridType={'measurementssummary'}
         gridColumns={measurementsSummaryViewGridColumns}
         rows={rows}

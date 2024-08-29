@@ -36,7 +36,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     if (censusListDispatch) {
-      censusListDispatch({ censusList });
+      await censusListDispatch({ censusList });
     }
     setProgress(prev => ({ ...prev, census: 100 }));
     setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));

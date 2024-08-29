@@ -108,8 +108,6 @@ export async function GET(
             WHERE q.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
-              AND q.MeasuredDBH IS NOT NULL
-              AND q.MeasuredHOM IS NOT NULL
             ORDER BY q.MeasurementDate ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;

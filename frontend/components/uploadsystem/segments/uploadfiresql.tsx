@@ -34,7 +34,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [results, setResults] = useState<string[]>([]);
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
-  const [currentlyRunning, setCurrentlyRunning] = useState('');
+  const [currentlyRunning, setCurrentlyRunning] = useState<string>('');
   const hasUploaded = useRef(false);
   const [countdown, setCountdown] = useState(5);
   const [startCountdown, setStartCountdown] = useState(false);
@@ -42,8 +42,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
-        setCurrentlyRunning(`File ${fileName} uploading to SQL...`);
-        console.log('rows: ', fileData[fileName]);
+        setCurrentlyRunning(`Uploading file "${fileName}" to SQL...`);
         const response = await fetch(
           `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${personnelRecording}`,
           {
@@ -53,9 +52,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         );
         if (!response.ok) throw new Error('SQLLOAD ERROR: ' + response.statusText);
+
         setCompletedOperations(prevCompleted => prevCompleted + 1);
+
         const result = await response.json();
+
         if (result.idToRows) {
+          setCurrentlyRunning(`Fetching CMID details for file "${fileName}"...`);
           if (uploadForm === 'measurements') {
             Promise.all(
               result.idToRows.map(({ coreMeasurementID }: IDToRow) =>
@@ -100,37 +103,48 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
           }
         }
+
+        // Additional API calls for measurements
+        if (uploadForm === 'measurements') {
+          setCurrentlyRunning(`Refreshing measurement summary view for "${fileName}"...`);
+          const refreshSummaryResponse = await fetch(`/api/refreshviews/measurementssummary/${schema}`, { method: 'POST' });
+          if (!refreshSummaryResponse.ok) throw new Error('REFRESH ERROR: ' + refreshSummaryResponse.statusText);
+
+          setCompletedOperations(prevCompleted => prevCompleted + 1);
+
+          setCurrentlyRunning(`Refreshing full table view for "${fileName}"...`);
+          const refreshViewResponse = await fetch(`/api/refreshviews/viewfulltable/${schema}`, { method: 'POST' });
+          if (!refreshViewResponse.ok) throw new Error('REFRESH ERROR: ' + refreshViewResponse.statusText);
+
+          setCompletedOperations(prevCompleted => prevCompleted + 1);
+        }
+
         return response.ok ? 'SQL load successful' : 'SQL load failed';
       } catch (error) {
         setUploadError(error);
         setReviewState(ReviewStates.ERRORS);
       }
     },
-    [uploadForm, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID, personnelRecording, setAllRowToCMID, setUploadError, setReviewState]
+    [
+      uploadForm,
+      currentPlot?.plotID,
+      currentCensus?.dateRanges[0].censusID,
+      personnelRecording,
+      setAllRowToCMID,
+      setUploadError,
+      setReviewState,
+      schema,
+      currentQuadrat?.quadratID
+    ]
   );
 
   useEffect(() => {
-    switch (uploadForm) {
-      case 'attributes':
-      case 'personnel':
-      case 'species':
-      case 'quadrats':
-      case 'subquadrats':
-        setUploadCompleteMessage('Upload complete! Moving to Azure upload stage...');
-        break;
-      case 'measurements':
-        setUploadCompleteMessage('Upload complete!\nYour upload included measurements, which must be validated before proceeding...');
-        break;
-      default:
-        setUploadCompleteMessage('');
-        break;
-    }
-
     const calculateTotalOperations = () => {
-      let totalOps = 0;
+      let totalOps = acceptedFiles.length;
 
-      for (const _file of acceptedFiles) {
-        totalOps += 1;
+      // Include additional steps if form type is measurements
+      if (uploadForm === 'measurements') {
+        totalOps += 2; // Two additional operations for refreshing views
       }
 
       setTotalOperations(totalOps);
@@ -141,11 +155,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       calculateTotalOperations();
 
-      console.log(`uploadfire acceptedfiles length: ${acceptedFiles.length}`);
-      console.log('parsedData: ', parsedData);
-
       for (const file of acceptedFiles) {
-        console.log(`file: ${file.name}`);
         const sqlResult = await uploadToSql(parsedData, file.name);
         uploadResults.push(`File: ${file.name}, SQL: ${sqlResult}`);
       }
@@ -169,7 +179,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     } else if (countdown === 0) {
       if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
       else setReviewState(ReviewStates.UPLOAD_AZURE);
-      // setReviewState(ReviewStates.UPLOAD_AZURE);
     }
 
     return () => clearTimeout(timer);
@@ -196,6 +205,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           <Stack direction={'column'}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
             <LinearProgressWithLabel variant={'determinate'} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
+            <Typography variant="body2" sx={{ mt: 2 }}>{`Completed: ${completedOperations} of ${totalOperations} operations`}</Typography>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              {currentlyRunning}
+            </Typography>
           </Stack>
         </Box>
       ) : (

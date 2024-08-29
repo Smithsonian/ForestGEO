@@ -33,7 +33,7 @@ export type FetchQueryFunction = (
   page: number,
   pageSize: number,
   plotID?: number,
-  censusID?: number,
+  plotCensusNumber?: number,
   quadratID?: number
 ) => string;
 
@@ -231,6 +231,7 @@ export interface MeasurementsCommonsProps {
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
+  locked?: boolean;
 }
 
 export const errorMapping: { [key: string]: string[] } = {

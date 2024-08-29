@@ -147,7 +147,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setIsNewRowAdded,
     shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
-    handleSelectQuadrat
+    handleSelectQuadrat,
+    locked = false
   } = props;
 
   // states from datagridcommons:
@@ -158,7 +159,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     actionId: null
   });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [locked, setLocked] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
     reject: (reason?: any) => void;
@@ -178,7 +178,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
   const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
-  const [selectedDateRanges, setSelectedDateRanges] = useState<number[]>([]);
 
   // context pulls and definitions
   const currentSite = useSiteContext();
@@ -187,7 +186,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const currentQuadrat = useQuadratContext();
   const { setLoading } = useLoading();
   const { triggerPulse } = useLockAnimation();
-  const handleLockedClick = () => triggerPulse();
 
   // use the session
   useSession();
@@ -457,7 +455,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         const response = await fetch(paginatedQuery, { method: 'GET' });
         if (!response.ok) throw new Error(response.statusText || 'Error fetching data');
         const data = await response.json();
-
+        console.log('data: ', data);
         setRows(data.output);
         setRowCount(data.totalCount);
 
@@ -786,7 +784,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }, [modifiedColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
-  console.log('filtered columns: ', filteredColumns);
 
   const visibleRows = useMemo(() => {
     let filteredRows = rows;

@@ -1,35 +1,67 @@
 'use client';
 
 import { Box, Card, CardContent, Typography } from '@mui/joy';
-import React, { useEffect } from 'react';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import React, { useEffect, useState } from 'react';
 import ValidationCard from '@/components/validationcard';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 
 export default function ValidationsPage() {
-  const currentSite = useSiteContext();
   const [globalValidations, setGlobalValidations] = React.useState<ValidationProceduresRDS[]>([]);
+  const [loading, setLoading] = useState<boolean>(true); // Use a loading state instead of refresh
 
-  const handleToggle = (enabled?: boolean) => {
-    console.log('Validation enabled:', enabled);
+  const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
+    try {
+      // Make the API call to toggle the validation
+      const response = await fetch(`/api/validations/crud`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedValidation) // Pass the entire updated validation object
+      });
+      if (response.ok) {
+        // Update the globalValidations state directly
+        setGlobalValidations(prev => prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)));
+      } else {
+        console.error('Failed to toggle validation');
+      }
+    } catch (error) {
+      console.error('Error toggling validation:', error);
+    }
   };
 
-  const handleSaveChanges = (newSqlCode?: string) => {
-    console.log('New SQL Code:', newSqlCode);
-  };
-
-  const handleDelete = () => {
-    console.log('Validation deleted');
+  const handleDelete = async (validationID?: number) => {
+    try {
+      // Make the API call to delete the validation
+      const response = await fetch(`/api/validations/delete/${validationID}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        // Remove the deleted validation from the globalValidations state
+        setGlobalValidations(prev => prev.filter(validation => validation.validationID !== validationID));
+      } else {
+        console.error('Failed to delete validation');
+      }
+    } catch (error) {
+      console.error('Error deleting validation:', error);
+    }
   };
 
   useEffect(() => {
     async function fetchValidations() {
-      const response = await fetch('/api/fetchall/validationprocedures?schema=' + currentSite?.schemaName);
-      setGlobalValidations(await response.json());
+      try {
+        const response = await fetch('/api/validations/crud', { method: 'GET' });
+        const data = await response.json();
+        console.log('data: ', data);
+        setGlobalValidations(data);
+      } catch (err) {
+        console.error('Error fetching validations:', err);
+      } finally {
+        setLoading(false); // Loading is complete
+      }
     }
 
-    fetchValidations().catch(err => console.error(err));
+    fetchValidations().catch(console.error); // Initial load
   }, []);
+
   return (
     <Box sx={{ width: '100%' }}>
       <Card variant={'plain'} sx={{ width: '100%' }}>
@@ -37,9 +69,9 @@ export default function ValidationsPage() {
           <Typography level={'title-lg'} fontWeight={'bold'}>
             Review Global Validations
           </Typography>
-          {globalValidations.length > 0 && (
-            <ValidationCard onDelete={handleDelete} onSaveChanges={handleSaveChanges} onToggle={handleToggle} {...globalValidations[0]} />
-          )}
+          {globalValidations.map(validation => (
+            <ValidationCard onDelete={handleDelete} onSaveChanges={handleSaveChanges} validation={validation} key={validation.validationID} />
+          ))}
         </CardContent>
       </Card>
       <Card variant={'plain'} sx={{ width: '100%' }}>

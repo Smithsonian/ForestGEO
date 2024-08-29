@@ -35,18 +35,6 @@ export async function POST(request: NextRequest) {
   formType = formType.trim();
   // full name
   const fullName = request.nextUrl.searchParams.get('user') ?? undefined;
-  // if (!fullName) throw new Error('no full name provided!');
-  // fullName = fullName.trim();
-  // unit of measurement --> use has been incorporated into form
-  // let dbhUnit = request.nextUrl.searchParams.get('dbhUnit');
-  // if (!dbhUnit) throw new Error('no DBH unitOfMeasurement provided!');
-  // dbhUnit = dbhUnit.trim();
-  // let homUnit = request.nextUrl.searchParams.get('homUnit');
-  // if (!homUnit) throw new Error('no HOM unitOfMeasurement provided!');
-  // dbhUnit = dbhUnit.trim();
-  // let coordUnit = request.nextUrl.searchParams.get('coordUnit');
-  // if (!coordUnit) throw new Error('no Coordinate unitOfMeasurement provided!');
-  // dbhUnit = dbhUnit.trim();
 
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
