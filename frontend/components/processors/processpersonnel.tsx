@@ -25,7 +25,7 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
       'roles',
       {
         RoleName: normalizedRole,
-        RoleDescription: rowData.roledescription
+        RoleDescription: rowData.roledescription ?? null
       },
       'RoleID'
     );
