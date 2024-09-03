@@ -1,5 +1,6 @@
 import { createInitialObject, ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
+import { ColumnStates } from '@/config/macros';
 
 export type SpeciesRDS = {
   id?: number;
@@ -16,8 +17,28 @@ export type SpeciesRDS = {
   validCode?: string;
   referenceID?: number;
 };
+
 export type SpeciesResult = ResultType<SpeciesRDS>;
 export const initialSpeciesRDSRow = createInitialObject<SpeciesRDS>();
+export type SpeciesLimitsRDS = {
+  id?: number;
+  speciesLimitID?: number;
+  speciesID?: number;
+  limitType?: string;
+  upperBound?: number;
+  lowerBound?: number;
+  unit?: string;
+};
+export type SpeciesLimitsResult = ResultType<SpeciesLimitsRDS>;
+export const initialSpeciesLimitsRDSRow = createInitialObject<SpeciesLimitsRDS>();
+
+export function getSpeciesLimitsHCs(): ColumnStates {
+  return {
+    speciesLimitsID: false,
+    speciesID: false
+  };
+}
+
 const SPECIES_SPECIESCODE_LIMIT = 25;
 const SPECIES_SPECIESNAME_LIMIT = 64;
 const SPECIES_SUBSPECIESNAME_LIMIT = 255;

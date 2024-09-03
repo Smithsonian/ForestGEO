@@ -79,7 +79,9 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
     subquadratID: false,
     treeID: false,
     stemID: false,
-    personnelID: false
+    personnelID: false,
+    dbhUnits: false,
+    homUnits: false
   };
 }
 

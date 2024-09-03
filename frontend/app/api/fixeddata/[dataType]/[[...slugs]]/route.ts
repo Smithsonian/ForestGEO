@@ -11,7 +11,7 @@ import {
 } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 
-// slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID
+// slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
   request: NextRequest,
   {
@@ -21,16 +21,15 @@ export async function GET(
   }
 ): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number }>> {
   if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
-  const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam] = params.slugs;
+  const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam, speciesIDParam] = params.slugs;
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
     throw new Error('core slugs schema/page/pageSize not correctly received');
-  if (!plotIDParam || plotIDParam === '0' || !plotCensusNumberParam || plotCensusNumberParam === '0')
-    throw new Error('Core plot/census information not received');
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
-  const plotID = parseInt(plotIDParam);
-  const plotCensusNumber = parseInt(plotCensusNumberParam);
+  const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
+  const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
   const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
+  const speciesID = speciesIDParam ? parseInt(speciesIDParam) : undefined;
   let conn: PoolConnection | null = null;
   let updatedMeasurementsExist = false;
   let censusIDs;
@@ -48,6 +47,10 @@ export async function GET(
           FROM catalog.${params.dataType} LIMIT ?, ?;`; // validation procedures is special
         queryParams.push(page * pageSize, pageSize);
         break;
+      case 'specieslimits':
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} pdt WHERE pdt.SpeciesID = ? LIMIT ?, ?`;
+        queryParams.push(speciesID, page * pageSize, pageSize);
+        break;
       case 'attributes':
       case 'species':
       case 'stems':
@@ -56,9 +59,7 @@ export async function GET(
       case 'quadratpersonnel':
       case 'sitespecificvalidations':
       case 'roles':
-        paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS *
-            FROM ${schema}.${params.dataType} LIMIT ?, ?`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'personnel':

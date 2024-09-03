@@ -14,9 +14,9 @@ import {
   ListItem,
   ListItemContent,
   ListSubheader,
+  Skeleton,
   Stack,
   Step,
-  StepIndicator,
   Stepper,
   Tooltip,
   Typography
@@ -28,8 +28,9 @@ import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import { useSession } from 'next-auth/react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useEffect, useState } from 'react';
-import moment from 'moment';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
+import moment from 'moment';
+import Avatar from '@mui/joy/Avatar';
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();
@@ -42,20 +43,42 @@ export default function DashboardPage() {
   const userRole = session?.user?.userStatus;
   const allowedSites = session?.user?.sites;
 
-  const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>([]);
+  const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
+  const [isLoading, setIsLoading] = useState(false);
 
   async function loadChangelogHistory() {
     try {
-      const response = await fetch(`/api/changelog/overview/unifiedchangelog?schema=${currentSite?.schemaName}`, { method: 'GET' });
-      const results = await response.json();
-      setChangelogHistory(results);
+      setIsLoading(true);
+
+      // Check if the required data is available, otherwise return a padded array
+      if (!currentSite || !currentPlot || !currentCensus) {
+        setChangelogHistory(Array(5).fill({}));
+        return;
+      }
+
+      const response = await fetch(
+        `/api/changelog/overview/unifiedchangelog/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`,
+        { method: 'GET' }
+      );
+      const results: UnifiedChangelogRDS[] = await response.json();
+
+      // Pad the array if it has less than 5 items
+      const paddedResults = [...results];
+      while (paddedResults.length < 5) {
+        paddedResults.push({}); // Push empty objects to pad the array
+      }
+
+      setChangelogHistory(paddedResults);
     } catch (error) {
       console.error('Failed to load changelog history', error);
+      setChangelogHistory(Array(5).fill({})); // Fallback to an empty padded array in case of an error
+    } finally {
+      setIsLoading(false);
     }
   }
 
   useEffect(() => {
-    if (currentSite && currentPlot && currentCensus) loadChangelogHistory().catch(console.error);
+    loadChangelogHistory().catch(console.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   return (
@@ -197,94 +220,92 @@ export default function DashboardPage() {
               </Stack>
             </Stack>
             <Divider orientation={'horizontal'} sx={{ my: 1 }} />
-            {currentSite && currentPlot && currentCensus && (
-              <Box>
-                <Typography level={'title-lg'} fontWeight={'bold'} sx={{ marginBottom: 1 }}>
-                  Recent Changes
-                </Typography>
-                <Stepper orientation="vertical">
-                  {changelogHistory.length > 0 &&
-                    changelogHistory.map(changelog => (
-                      <Step
-                        key={changelog.id}
-                        indicator={
-                          <StepIndicator variant={'soft'} color={'primary'}>
-                            {changelog.id}
-                          </StepIndicator>
-                        }
-                      >
-                        <AccordionGroup>
-                          <Accordion>
-                            <AccordionSummary>
-                              <Typography level={'title-md'} fontWeight={'bold'}>
-                                {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).toLocaleString()}
+            <Box>
+              <Typography level={'title-lg'} fontWeight={'bold'} sx={{ marginBottom: 1 }}>
+                Recent Changes
+              </Typography>
+              <Stepper orientation="vertical">
+                {changelogHistory.map((changelog, index) => (
+                  <Step
+                    key={changelog.id || `placeholder-${index}`}
+                    indicator={
+                      <Skeleton loading={changelog.id === undefined} variant={'circular'} animation={'wave'}>
+                        <Avatar size={'lg'}>{changelog.id}</Avatar>
+                      </Skeleton>
+                    }
+                  >
+                    <AccordionGroup>
+                      <Accordion disabled={isLoading || changelog.id === undefined}>
+                        <AccordionSummary>
+                          <Box sx={{ display: 'flex', flex: 1, width: '100%', alignItems: 'center', flexDirection: 'row' }}>
+                            <Skeleton loading={changelog.operation === undefined} sx={{ width: '95%' }} animation={'wave'}>
+                              <Typography level={'title-md'} fontWeight={'bold'} sx={{ width: '100%' }}>
+                                {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).format('YYYY-MM-DD HH:mm:ss')}
                               </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
-                              <Box>
-                                <Typography level={'body-md'}>Updating:</Typography>
-                                <Stack direction={'row'}>
-                                  <Card>
-                                    <CardContent>
-                                      <Typography level={'body-sm'} fontWeight={'bold'}>
-                                        Old Row
-                                      </Typography>
-                                      <Divider orientation={'horizontal'} sx={{ my: 0.25 }} />
-                                      {changelog.oldRowState !== undefined &&
-                                        changelog.oldRowState !== null &&
-                                        Object.entries(changelog.oldRowState).map(([key, value]) => (
-                                          <Stack direction={'row'} key={key}>
-                                            <Typography level={'body-md'}>
-                                              <strong>{key}</strong>: {value ?? 'NULL'}
-                                            </Typography>
-                                          </Stack>
-                                        ))}
-                                      {changelog.oldRowState === null && (
-                                        <Typography level={'body-sm'} fontWeight={'bold'}>
-                                          NULL
-                                        </Typography>
-                                      )}
-                                    </CardContent>
-                                  </Card>
-                                  <Typography level={'body-md'} fontWeight={'bold'} sx={{ mx: 2 }}>
-                                    to
+                            </Skeleton>
+                          </Box>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Box>
+                            <Typography level={'body-md'}>Updating:</Typography>
+                            <Stack direction={'row'}>
+                              <Card>
+                                <CardContent>
+                                  <Typography level={'body-sm'} fontWeight={'bold'}>
+                                    Old Row
                                   </Typography>
-                                  <Card>
-                                    <CardContent>
-                                      <Typography level={'body-sm'} fontWeight={'bold'}>
-                                        New Row
-                                      </Typography>
-                                      <Divider orientation={'horizontal'} sx={{ my: 0.25 }} />
-                                      {changelog.newRowState !== undefined &&
-                                        changelog.newRowState !== null &&
-                                        Object.entries(changelog.newRowState).map(([key, value]) => (
-                                          <Stack direction={'row'} key={key}>
-                                            <Typography level={'body-md'}>
-                                              <strong>{key}</strong>: {value ?? 'NULL'}
-                                            </Typography>
-                                          </Stack>
-                                        ))}
-                                      {changelog.newRowState === null && (
-                                        <Typography level={'body-sm'} fontWeight={'bold'}>
-                                          NULL
+                                  <Divider orientation={'horizontal'} sx={{ my: 0.25 }} />
+                                  {changelog.oldRowState && Object.keys(changelog.oldRowState).length > 0 ? (
+                                    Object.entries(changelog.oldRowState).map(([key, value]) => (
+                                      <Stack direction={'row'} key={key}>
+                                        <Typography level={'body-md'}>
+                                          <strong>{key}</strong>: {value ?? 'NULL'}
                                         </Typography>
-                                      )}
-                                    </CardContent>
-                                  </Card>
-                                </Stack>
-                              </Box>
-                            </AccordionDetails>
-                          </Accordion>
-                        </AccordionGroup>
-
-                        <Stepper>
-                          <Step orientation={'vertical'}></Step>
-                        </Stepper>
-                      </Step>
-                    ))}
-                </Stepper>
-              </Box>
-            )}
+                                      </Stack>
+                                    ))
+                                  ) : (
+                                    <Typography level={'body-sm'} fontWeight={'bold'}>
+                                      No previous data available
+                                    </Typography>
+                                  )}
+                                </CardContent>
+                              </Card>
+                              <Typography level={'body-md'} fontWeight={'bold'} sx={{ mx: 2 }}>
+                                to
+                              </Typography>
+                              <Card>
+                                <CardContent>
+                                  <Typography level={'body-sm'} fontWeight={'bold'}>
+                                    New Row
+                                  </Typography>
+                                  <Divider orientation={'horizontal'} sx={{ my: 0.25 }} />
+                                  {changelog.newRowState && Object.keys(changelog.newRowState).length > 0 ? (
+                                    Object.entries(changelog.newRowState).map(([key, value]) => (
+                                      <Stack direction={'row'} key={key}>
+                                        <Typography level={'body-md'}>
+                                          <strong>{key}</strong>: {value ?? 'NULL'}
+                                        </Typography>
+                                      </Stack>
+                                    ))
+                                  ) : (
+                                    <Typography level={'body-sm'} fontWeight={'bold'}>
+                                      No new data available
+                                    </Typography>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            </Stack>
+                          </Box>
+                        </AccordionDetails>
+                      </Accordion>
+                    </AccordionGroup>
+                    <Stepper>
+                      <Step orientation={'vertical'}></Step>
+                    </Stepper>
+                  </Step>
+                ))}
+              </Stepper>
+            </Box>
           </CardContent>
         </Card>
       </Stack>

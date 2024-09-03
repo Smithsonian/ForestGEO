@@ -1,7 +1,7 @@
 import moment from 'moment';
 import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
-import { SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { SpeciesLimitsRDS, SpeciesLimitsResult, SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
@@ -184,6 +184,8 @@ class MapperFactory {
         return new SitesMapper() as any;
       case 'species':
         return new GenericMapper<SpeciesRDS, SpeciesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'specieslimits':
+        return new GenericMapper<SpeciesLimitsRDS, SpeciesLimitsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stemtaxonomiesview':
         return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':

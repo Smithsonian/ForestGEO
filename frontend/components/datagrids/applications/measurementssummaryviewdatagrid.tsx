@@ -8,7 +8,7 @@ import { randomId } from '@mui/x-data-grid-generator';
 import { Box, Button, Snackbar, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
-import { measurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import { initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views';
 
@@ -112,7 +112,7 @@ export default function MeasurementsSummaryViewDataGrid() {
       <MeasurementsCommons
         locked={true}
         gridType={'measurementssummary'}
-        gridColumns={measurementsSummaryViewGridColumns}
+        gridColumns={MeasurementsSummaryViewGridColumns}
         rows={rows}
         setRows={setRows}
         rowCount={rowCount}

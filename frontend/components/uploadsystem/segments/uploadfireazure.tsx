@@ -7,7 +7,7 @@ import { Box, Typography } from '@mui/material';
 import { Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
 import CircularProgress from '@mui/joy/CircularProgress';
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
@@ -31,6 +31,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors
@@ -74,6 +75,29 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]
   );
 
+  const refreshViews = useCallback(
+    async (fileName: string) => {
+      try {
+        setCurrentlyRunning(`Refreshing measurement summary view for "${fileName}"...`);
+        const refreshSummaryResponse = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName}`, { method: 'POST' });
+        if (!refreshSummaryResponse.ok) throw new Error('REFRESH ERROR: ' + refreshSummaryResponse.statusText);
+
+        setCompletedOperations(prevCompleted => prevCompleted + 1);
+
+        setCurrentlyRunning(`Refreshing full table view for "${fileName}"...`);
+        const refreshViewResponse = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName}`, { method: 'POST' });
+        if (!refreshViewResponse.ok) throw new Error('REFRESH ERROR: ' + refreshViewResponse.statusText);
+
+        setCompletedOperations(prevCompleted => prevCompleted + 1);
+      } catch (error) {
+        setUploadError(error);
+        setErrorComponent('UploadFireAzure');
+        setReviewState(ReviewStates.ERRORS);
+      }
+    },
+    [currentSite?.schemaName, setUploadError, setErrorComponent, setReviewState]
+  );
+
   useEffect(() => {
     const calculateTotalOperations = () => {
       let totalOps = 0;
@@ -97,6 +121,10 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         console.log(`file: ${file.name}`);
         const storageResult = await uploadToStorage(file);
         uploadResults.push(`File: ${file.name}, Storage: ${storageResult}`);
+
+        if (uploadForm === 'measurements') {
+          await refreshViews(file.name);
+        }
       }
 
       setResults(uploadResults);
@@ -108,7 +136,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       uploadFiles().catch(console.error);
       hasUploaded.current = true;
     }
-  }, []);
+  }, [acceptedFiles, uploadToStorage, refreshViews, uploadForm, setIsDataUnsaved]);
 
   // Effect for handling countdown and state transition
   useEffect(() => {

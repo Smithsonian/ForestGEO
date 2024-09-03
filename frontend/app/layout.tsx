@@ -9,7 +9,6 @@ import { DataValidityProvider } from '@/app/contexts/datavalidityprovider';
 
 import { Providers } from './providers';
 import { LockAnimationProvider } from './contexts/lockanimationcontext';
-import { ValidityLoadingIndicator } from '@/styles/validityloadingindicator';
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -22,7 +21,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Providers>
           <LoadingProvider>
             <GlobalLoadingIndicator />
-            <ValidityLoadingIndicator />
             <ListSelectionProvider>
               <UserSelectionProvider>
                 <DataValidityProvider>
