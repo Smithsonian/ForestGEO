@@ -676,7 +676,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (column.field !== 'measurementDate') {
       return column;
     }
-    console.log('Modifying column: ', column.field);
+    Object.keys(validationErrors).forEach(validationError => {
+      console.log('validationerror: ', validationError);
+    });
     return column;
     // return {
     //   ...column,
