@@ -9,21 +9,11 @@ import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { getAllSchemas } from '@/components/processors/processorhelperfunctions';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import {
-  useOrgCensusListContext,
-  useOrgCensusListDispatch,
-  usePlotListContext,
-  usePlotListDispatch,
-  useQuadratListContext,
-  useQuadratListDispatch,
-  useSiteListDispatch
-} from '@/app/contexts/listselectionprovider';
+import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
-
-import { useDataValidityContext } from '../contexts/datavalidityprovider';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 
@@ -51,22 +41,16 @@ function renderSwitch(endpoint: string) {
 
 export default function HubLayout({ children }: { children: React.ReactNode }) {
   const { setLoading } = useLoading();
-  const { triggerRefresh } = useDataValidityContext();
 
   const censusListDispatch = useOrgCensusListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const siteListDispatch = useSiteListDispatch();
   const plotListDispatch = usePlotListDispatch();
 
-  const censusListContext = useOrgCensusListContext();
-  const quadratListContext = useQuadratListContext();
-  const plotListContext = usePlotListContext();
-
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const { data: session } = useSession();
-  const { validity } = useDataValidityContext();
   const previousSiteRef = useRef<string | undefined>(undefined);
   const previousPlotRef = useRef<number | undefined>(undefined);
   const previousCensusRef = useRef<number | undefined>(undefined);
@@ -82,184 +66,165 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
-  const loadCensusData = useCallback(async () => {
-    if (!currentPlot)
-      return {
-        success: false,
-        message: 'Plot must be selected to load census data'
-      };
-    if (censusListContext !== undefined && censusListContext.length > 0) return { success: true };
-
-    setLoading(true, 'Loading raw census data');
-    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
-    const censusRDSLoad = await response.json();
-
-    const censusList = await createAndUpdateCensusList(censusRDSLoad);
-    console.log('censusList: ', censusList);
-    if (censusListDispatch) await censusListDispatch({ censusList });
-    setLoading(false);
-    setCensusListLoaded(true);
-    return { success: true };
-  }, [censusListContext, censusListDispatch, currentPlot, currentSite, setLoading, validity]);
-
-  const loadPlotsData = useCallback(async () => {
-    if (!currentSite)
-      return {
-        success: false,
-        message: 'Site must be selected to load plot data'
-      };
-    if (plotListContext !== undefined && plotListContext.length > 0) return { success: true };
-
-    setLoading(true, 'Loading plot list information...');
-    const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
-    const plotsData = await plotsResponse.json();
-    if (!plotsData) return { success: false, message: 'Failed to load plots data' };
-
-    if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
-    else return { success: false, message: 'Failed to dispatch plots data' };
-    setLoading(false);
-    setPlotListLoaded(true);
-    return { success: true };
-  }, [plotListContext, plotListDispatch, currentSite, setLoading, validity]);
-
-  const loadQuadratsData = useCallback(async () => {
-    if (!currentPlot || !currentCensus)
-      return {
-        success: false,
-        message: 'Plot and Census must be selected to load quadrat data'
-      };
-    if (quadratListContext !== undefined && quadratListContext.length > 0) return { success: true };
-
-    setLoading(true, 'Loading quadrat list information...');
-    const quadratsResponse = await fetch(
-      `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
-    );
-    const quadratsData = await quadratsResponse.json();
-    if (!quadratsData) return { success: false, message: 'Failed to load quadrats data' };
-
-    if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
-    else return { success: false, message: 'Failed to dispatch quadrats data' };
-    setLoading(false);
-    setQuadratListLoaded(true);
-    return { success: true };
-  }, [quadratListContext, quadratListDispatch, currentPlot, currentCensus, currentSite, setLoading, validity]);
 
   const fetchSiteList = useCallback(async () => {
-    setLoading(true, 'Loading Sites...');
     try {
+      setLoading(true, 'Loading Sites...');
       if (session && !siteListLoaded) {
         const sites = session?.user?.allsites ?? [];
         if (sites.length === 0) {
           throw new Error('Session sites undefined');
         } else {
-          siteListDispatch ? await siteListDispatch({ siteList: sites }) : undefined;
+          if (siteListDispatch) await siteListDispatch({ siteList: sites });
         }
       }
     } catch (e: any) {
       const allsites = await getAllSchemas();
-      siteListDispatch ? await siteListDispatch({ siteList: allsites }) : undefined;
+      if (siteListDispatch) await siteListDispatch({ siteList: allsites });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, [session, siteListLoaded, siteListDispatch, setLoading, validity]);
+  }, [session, siteListLoaded, siteListDispatch, setLoading]);
 
-  // Detect first update from undefined to defined for currentSite and currentPlot
-  useEffect(() => {
-    const hasSiteJustBeenDefined = previousSiteRef.current === undefined && currentSite !== undefined;
-    const hasPlotJustBeenDefined = previousPlotRef.current === undefined && currentPlot !== undefined;
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true, 'Loading data...');
 
-    if (hasSiteJustBeenDefined || hasPlotJustBeenDefined) {
-      previousSiteRef.current = currentSite?.siteName;
-      previousPlotRef.current = currentPlot?.plotID;
+      const promises = [];
 
-      if (currentSite && currentPlot) {
-        console.log('Triggering API call as currentSite and currentPlot have been defined for the first time.');
-        setLoading(true, 'Updating census date information...');
-        fetch(`/api/dates?schema=${currentSite.schemaName}`, { method: 'GET' }).then(() => setLoading(false));
+      // Load plot data
+      if (currentSite && !plotListLoaded) {
+        const loadPlots = fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`)
+          .then(response => response.json())
+          .then(plotsData => {
+            if (!plotsData) throw new Error('Failed to load plots data');
+            if (plotListDispatch) return plotListDispatch({ plotList: plotsData });
+          });
+        promises.push(loadPlots);
+        setPlotListLoaded(true);
       }
-    }
-  }, [currentSite, currentPlot]);
 
-  useEffect(() => {
-    if (session && !siteListLoaded) {
-      fetchSiteList()
-        .then(() => setSiteListLoaded(true))
-        .catch(console.error);
-    }
-  }, [fetchSiteList, session, siteListLoaded]);
+      // Load census data
+      if (currentSite && currentPlot && !censusListLoaded) {
+        const loadCensus = fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite.schemaName}`)
+          .then(response => response.json())
+          .then(async censusRDSLoad => {
+            if (!censusRDSLoad) throw new Error('Failed to load census data');
+            const censusList = await createAndUpdateCensusList(censusRDSLoad);
+            if (censusListDispatch) return censusListDispatch({ censusList });
+          });
+        promises.push(loadCensus);
+        setCensusListLoaded(true);
+      }
 
-  useEffect(() => {
-    if (!plotListLoaded && plotListDispatch) {
-      plotListDispatch({ plotList: undefined }).catch(console.error);
-    }
-    if (!censusListLoaded && censusListDispatch) {
-      censusListDispatch({ censusList: undefined }).catch(console.error);
-    }
-    if (!quadratListLoaded && quadratListDispatch) {
-      quadratListDispatch({ quadratList: undefined }).catch(console.error);
-    }
-  }, [plotListLoaded, censusListLoaded, quadratListLoaded]);
+      // Load quadrat data
+      if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
+        const loadQuadrats = fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`)
+          .then(response => response.json())
+          .then(quadratsData => {
+            if (!quadratsData) throw new Error('Failed to load quadrats data');
+            if (quadratListDispatch) return quadratListDispatch({ quadratList: quadratsData });
+          });
+        promises.push(loadQuadrats);
+        setQuadratListLoaded(true);
+      }
 
-  useEffect(() => {
-    const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
-    const hasPlotChanged = previousPlotRef.current !== currentPlot?.plotID;
-    const hasCensusChanged = previousCensusRef.current !== currentCensus?.dateRanges[0]?.censusID;
-    if (hasSiteChanged && !hasPlotChanged && !hasCensusChanged) {
-      if (siteListLoaded && currentSite) {
-        setPlotListLoaded(false);
-        setCensusListLoaded(false);
-        setQuadratListLoaded(false);
-        previousSiteRef.current = currentSite.siteName;
-      }
-    } else if (!hasSiteChanged && hasPlotChanged && !hasCensusChanged) {
-      if (plotListLoaded && currentPlot) {
-        setCensusListLoaded(false);
-        setQuadratListLoaded(false);
-        previousPlotRef.current = currentPlot.plotID;
-      }
-    } else if (!hasSiteChanged && !hasPlotChanged && hasCensusChanged) {
-      if (censusListLoaded && currentCensus) {
-        setQuadratListLoaded(false);
-        previousCensusRef.current = currentCensus.dateRanges[0].censusID;
-      }
-    }
-    if (siteListLoaded && currentSite && !plotListLoaded) {
-      loadPlotsData().catch(console.error);
-    }
-    if (siteListLoaded && currentSite && plotListLoaded && !censusListLoaded) {
-      loadCensusData().catch(console.error);
-    }
-    if (siteListLoaded && currentSite && plotListLoaded && censusListLoaded && !quadratListLoaded) {
-      loadQuadratsData().catch(console.error);
+      // Wait for all promises to resolve
+      await Promise.all(promises);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
     }
   }, [
     currentSite,
     currentPlot,
     currentCensus,
-    siteListLoaded,
     plotListLoaded,
     censusListLoaded,
     quadratListLoaded,
-    loadCensusData,
-    loadPlotsData,
-    loadQuadratsData
+    plotListDispatch,
+    censusListDispatch,
+    quadratListDispatch,
+    setLoading
   ]);
+
+  useEffect(() => {
+    if (currentSite || currentPlot || currentCensus) {
+      loadData().catch(console.error);
+    }
+  }, [currentSite, currentPlot, currentCensus, loadData]);
 
   useEffect(() => {
     if (manualReset) {
       setLoading(true, 'Manual refresh beginning...');
+      setSiteListLoaded(false);
       setPlotListLoaded(false);
       setCensusListLoaded(false);
       setQuadratListLoaded(false);
-      setSiteListLoaded(false);
       setManualReset(false);
-      setLoading(false);
+      loadData().catch(console.error);
     }
-  }, [manualReset]);
+  }, [manualReset, loadData]);
+
+  useEffect(() => {
+    if (session && !siteListLoaded) {
+      fetchSiteList().catch(console.error);
+    }
+  }, [fetchSiteList, session, siteListLoaded]);
+
+  useEffect(() => {
+    const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
+    const hasPlotChanged = previousPlotRef.current !== currentPlot?.plotID;
+    const hasCensusChanged = previousCensusRef.current !== currentCensus?.dateRanges[0]?.censusID;
+
+    const clearLists = async () => {
+      const promises = [];
+
+      if (hasSiteChanged) {
+        // Clear plot, census, and quadrat lists when a new site is selected
+        setPlotListLoaded(false);
+        setCensusListLoaded(false);
+        setQuadratListLoaded(false);
+        if (plotListDispatch) promises.push(plotListDispatch({ plotList: undefined }));
+        if (censusListDispatch) promises.push(censusListDispatch({ censusList: undefined }));
+        if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
+        previousSiteRef.current = currentSite?.siteName;
+      }
+
+      if (hasPlotChanged) {
+        // Clear census and quadrat lists when a new plot is selected
+        setCensusListLoaded(false);
+        setQuadratListLoaded(false);
+        if (censusListDispatch) promises.push(censusListDispatch({ censusList: undefined }));
+        if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
+        previousPlotRef.current = currentPlot?.plotID;
+      }
+
+      if (hasCensusChanged) {
+        // Clear quadrat list when a new census is selected
+        setQuadratListLoaded(false);
+        if (quadratListDispatch) promises.push(quadratListDispatch({ quadratList: undefined }));
+        previousCensusRef.current = currentCensus?.dateRanges[0]?.censusID;
+      }
+
+      await Promise.all(promises);
+
+      // After clearing, load the new data
+      loadData().catch(console.error);
+    };
+
+    if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
+      clearLists().catch(console.error);
+    }
+  }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadData]);
 
   useEffect(() => {
     // if contexts are reset due to website refresh, system needs to redirect user back to dashboard
-    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard') redirect('/dashboard');
-  }, [pathname]);
+    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard') {
+      redirect('/dashboard');
+    }
+  }, [pathname, currentSite, currentPlot, currentCensus]);
 
   useEffect(() => {
     if (session) {
@@ -315,7 +280,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         >
           {renderSwitch(pathname)}
         </Box>
-        <Divider orientation={'horizontal'} sx={{ my: '5px' }} />
+        <Divider orientation="horizontal" sx={{ my: '5px' }} />
         <Box
           className={isPulsing ? 'animate-fade-blur-in' : ''}
           sx={{
@@ -329,7 +294,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         >
           {session?.user.name && session.user.email && session.user.userStatus && <>{children}</>}
         </Box>
-        <Divider orientation={'horizontal'} />
+        <Divider orientation="horizontal" />
         <Box
           sx={{
             display: 'flex',

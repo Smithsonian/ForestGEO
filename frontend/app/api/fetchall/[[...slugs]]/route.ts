@@ -50,14 +50,13 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
 
   console.log('fetchall --> slugs provided: fetchType: ', dataType, 'plotID: ', plotID, 'plotcensusnumber: ', plotCensusNumber, 'quadratID: ', quadratID);
   const query = buildQuery(schema, dataType, plotID, plotCensusNumber, quadratID);
+  console.log(query);
   let conn: PoolConnection | null = null;
 
   try {
     conn = await getConn();
     const results = await runQuery(conn, query);
-    if (!results) {
-      return new NextResponse(null, { status: 500 });
-    }
+    console.log(results);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error) {
     console.error('Error:', error);

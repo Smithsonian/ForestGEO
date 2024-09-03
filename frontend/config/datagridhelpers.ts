@@ -15,6 +15,7 @@ import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel
 import { Dispatch, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
+import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -34,7 +35,8 @@ export type FetchQueryFunction = (
   pageSize: number,
   plotID?: number,
   plotCensusNumber?: number,
-  quadratID?: number
+  quadratID?: number,
+  speciesID?: number // This is a special case for specieslimits
 ) => string;
 
 export type ProcessPostPatchQueryFunction = (
@@ -81,18 +83,30 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   personnel: {
     id: false,
     ...getPersonnelHCs()
+  },
+  specieslimits: {
+    id: false,
+    ...getSpeciesLimitsHCs()
   }
 };
 
 export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
   return columnVisibilityMap[gridType] || columnVisibilityMap.default;
 };
-
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
   return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;
 };
-export const createFetchQuery: FetchQueryFunction = (siteSchema: string, gridType, page, pageSize, plotID?, plotCensusNumber?, quadratID?: number) => {
-  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID}/${plotCensusNumber}` + `${quadratID ? `/${quadratID}` : ``}`;
+export const createFetchQuery: FetchQueryFunction = (
+  siteSchema: string,
+  gridType,
+  page,
+  pageSize,
+  plotID?,
+  plotCensusNumber?,
+  quadratID?: number,
+  speciesID?: number
+) => {
+  return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string) => {
@@ -127,6 +141,8 @@ export function getGridID(gridType: string): string {
     case 'alltaxonomiesview':
     case 'species':
       return 'speciesID';
+    case 'specieslimits':
+      return 'speciesLimitID';
     case 'validationprocedures':
       return 'validationID';
     default:
@@ -166,6 +182,7 @@ export interface DataGridCommonProps {
   initialRow?: GridRowModel;
   locked?: boolean;
   selectionOptions?: { value: string | number; label: string }[];
+  handleOpenSpeciesLimits?: (id: GridRowId) => void;
 }
 
 // Define types for the new states and props
@@ -200,7 +217,8 @@ export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
  * Function to filter out columns where all entries are null, except the actions column.
  */
 export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || !allValuesAreNull(rows, col.field));
+  return columns.filter(col => col.field === 'actions' || col.field === 'speciesLimits' || col.field === 'isValidated' || !allValuesAreNull(rows, col.field));
+  // return columns;
 }
 
 /**

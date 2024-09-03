@@ -78,5 +78,7 @@ export type UnifiedChangelogRDS = {
   newRowState?: Record<string, any>;
   changeTimestamp?: Date;
   changedBy?: string;
+  plotID?: number;
+  censusID?: number;
 };
 export type UnifiedChangelogResult = ResultType<UnifiedChangelogRDS>;

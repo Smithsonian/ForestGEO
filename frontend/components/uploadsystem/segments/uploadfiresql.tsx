@@ -104,21 +104,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         }
 
-        // Additional API calls for measurements
-        if (uploadForm === 'measurements') {
-          setCurrentlyRunning(`Refreshing measurement summary view for "${fileName}"...`);
-          const refreshSummaryResponse = await fetch(`/api/refreshviews/measurementssummary/${schema}`, { method: 'POST' });
-          if (!refreshSummaryResponse.ok) throw new Error('REFRESH ERROR: ' + refreshSummaryResponse.statusText);
-
-          setCompletedOperations(prevCompleted => prevCompleted + 1);
-
-          setCurrentlyRunning(`Refreshing full table view for "${fileName}"...`);
-          const refreshViewResponse = await fetch(`/api/refreshviews/viewfulltable/${schema}`, { method: 'POST' });
-          if (!refreshViewResponse.ok) throw new Error('REFRESH ERROR: ' + refreshViewResponse.statusText);
-
-          setCompletedOperations(prevCompleted => prevCompleted + 1);
-        }
-
         return response.ok ? 'SQL load successful' : 'SQL load failed';
       } catch (error) {
         setUploadError(error);
@@ -140,12 +125,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   useEffect(() => {
     const calculateTotalOperations = () => {
-      let totalOps = acceptedFiles.length;
-
-      // Include additional steps if form type is measurements
-      if (uploadForm === 'measurements') {
-        totalOps += 2; // Two additional operations for refreshing views
-      }
+      const totalOps = acceptedFiles.length;
 
       setTotalOperations(totalOps);
     };

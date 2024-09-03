@@ -93,7 +93,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
     }
   };
 
-  const getOptionLabel = (field: string, value: any) => {
+  const getOptionLabel = (_field: string, value: any) => {
     if (selectionOptions) {
       const option = selectionOptions.find(opt => opt.value === value);
       return option ? option.label : value;
@@ -115,7 +115,15 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                   return null;
                 }
                 if (type === 'singleSelect') {
-                  const valueOptions = selectionOptions ? selectionOptions : field !== 'status' ? unitSelectionOptions : AttributeStatusOptions;
+                  let valueOptions;
+                  if (field.toLowerCase().includes('unit')) {
+                    valueOptions = unitSelectionOptions;
+                  } else if (field === 'status') {
+                    valueOptions = AttributeStatusOptions;
+                  } else {
+                    valueOptions = selectionOptions;
+                  }
+                  // const valueOptions = selectionOptions ? selectionOptions : field !== 'status' ? unitSelectionOptions : AttributeStatusOptions;
 
                   return (
                     <FormControl key={field}>
@@ -134,7 +142,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                             </Option>
                           ))}
                         {valueOptions === selectionOptions &&
-                          valueOptions.map(option => (
+                          valueOptions?.map(option => (
                             <Option key={option.value} value={option.value}>
                               {option.label}
                             </Option>

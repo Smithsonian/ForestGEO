@@ -90,7 +90,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         setCountdown(5); // Start the countdown after all async tasks complete
       }
     };
-    runAsyncTasks();
+    runAsyncTasks().catch(console.error);
   }, [triggerRefresh]);
 
   // Effect for handling countdown and state transition

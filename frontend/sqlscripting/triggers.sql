@@ -36,7 +36,7 @@ BEGIN
     VALUES ('attributes', OLD.Code, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 DELIMITER
 //
@@ -64,8 +64,8 @@ BEGIN
             'PlotShape', NEW.PlotShape,
             'PlotDescription', NEW.PlotDescription
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('plots', NEW.PlotID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID)
+    VALUES ('plots', NEW.PlotID, 'INSERT', new_json, NOW(), 'User', NEW.PlotID);
 END //
 
 CREATE TRIGGER after_update_plots
@@ -109,8 +109,9 @@ BEGIN
             'PlotShape', NEW.PlotShape,
             'PlotDescription', NEW.PlotDescription
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('plots', NEW.PlotID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  PlotID)
+    VALUES ('plots', NEW.PlotID, 'UPDATE', old_json, new_json, NOW(), 'User', NEW.PlotID);
 END //
 
 CREATE TRIGGER after_delete_plots
@@ -136,11 +137,11 @@ BEGIN
             'PlotShape', OLD.PlotShape,
             'PlotDescription', OLD.PlotDescription
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('plots', OLD.PlotID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID)
+    VALUES ('plots', OLD.PlotID, 'DELETE', old_json, NOW(), 'User', OLD.PlotID);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 DELIMITER
 //
@@ -159,8 +160,9 @@ BEGIN
             'Description', NEW.Description,
             'PlotCensusNumber', NEW.PlotCensusNumber
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('census', NEW.CensusID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('census', NEW.CensusID, 'INSERT', new_json, NOW(), 'User', NEW.PlotID, NEW.CensusID);
 END //
 
 CREATE TRIGGER after_update_census
@@ -186,8 +188,9 @@ BEGIN
             'Description', NEW.Description,
             'PlotCensusNumber', NEW.PlotCensusNumber
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('census', NEW.CensusID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  PlotID, CensusID)
+    VALUES ('census', NEW.CensusID, 'UPDATE', old_json, new_json, NOW(), 'User', NEW.PlotID, NEW.CensusID);
 END //
 
 CREATE TRIGGER after_delete_census
@@ -204,11 +207,12 @@ BEGIN
             'Description', OLD.Description,
             'PlotCensusNumber', OLD.PlotCensusNumber
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('census', OLD.CensusID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('census', OLD.CensusID, 'DELETE', old_json, NOW(), 'User', OLD.PlotID, OLD.CensusID);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -235,8 +239,9 @@ BEGIN
             'AreaUnits', NEW.AreaUnits,
             'QuadratShape', NEW.QuadratShape
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('quadrats', NEW.QuadratID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('quadrats', NEW.QuadratID, 'INSERT', new_json, NOW(), 'User', NEW.PlotID, NEW.CensusID);
 END //
 
 CREATE TRIGGER after_update_quadrats
@@ -276,8 +281,9 @@ BEGIN
             'AreaUnits', NEW.AreaUnits,
             'QuadratShape', NEW.QuadratShape
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('quadrats', NEW.QuadratID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  PlotID, CensusID)
+    VALUES ('quadrats', NEW.QuadratID, 'UPDATE', old_json, new_json, NOW(), 'User', NEW.PlotID, NEW.CensusID);
 END //
 
 CREATE TRIGGER after_delete_quadrats
@@ -301,11 +307,12 @@ BEGIN
             'AreaUnits', OLD.AreaUnits,
             'QuadratShape', OLD.QuadratShape
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('quadrats', OLD.QuadratID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('quadrats', OLD.QuadratID, 'DELETE', old_json, NOW(), 'User', OLD.PlotID, OLD.CensusID);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -370,7 +377,7 @@ BEGIN
     VALUES ('reference', OLD.ReferenceID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -427,7 +434,7 @@ BEGIN
     VALUES ('family', OLD.FamilyID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -492,7 +499,7 @@ BEGIN
     VALUES ('genus', OLD.GenusID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -549,7 +556,7 @@ BEGIN
     VALUES ('roles', OLD.RoleID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -568,8 +575,8 @@ BEGIN
             'LastName', NEW.LastName,
             'RoleID', NEW.RoleID
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('personnel', NEW.PersonnelID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, CensusID)
+    VALUES ('personnel', NEW.PersonnelID, 'INSERT', new_json, NOW(), 'User', NEW.CensusID);
 END //
 
 CREATE TRIGGER after_update_personnel
@@ -593,8 +600,9 @@ BEGIN
             'LastName', NEW.LastName,
             'RoleID', NEW.RoleID
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('personnel', NEW.PersonnelID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  CensusID)
+    VALUES ('personnel', NEW.PersonnelID, 'UPDATE', old_json, new_json, NOW(), 'User', NEW.CensusID);
 END //
 
 CREATE TRIGGER after_delete_personnel
@@ -610,11 +618,11 @@ BEGIN
             'LastName', OLD.LastName,
             'RoleID', OLD.RoleID
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('personnel', OLD.PersonnelID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, CensusID)
+    VALUES ('personnel', OLD.PersonnelID, 'DELETE', old_json, NOW(), 'User', OLD.CensusID);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -626,14 +634,20 @@ CREATE TRIGGER after_insert_quadratpersonnel
     FOR EACH ROW
 BEGIN
     DECLARE new_json JSON;
+    DECLARE plot_id INT;
+
+    -- Fetch PlotID associated with the QuadratID
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+
     SET new_json = JSON_OBJECT(
             'QuadratPersonnelID', NEW.QuadratPersonnelID,
             'QuadratID', NEW.QuadratID,
             'PersonnelID', NEW.PersonnelID,
             'CensusID', NEW.CensusID
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('quadratpersonnel', NEW.QuadratPersonnelID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('quadratpersonnel', NEW.QuadratPersonnelID, 'INSERT', new_json, NOW(), 'User', plot_id, NEW.CensusID);
 END //
 
 CREATE TRIGGER after_update_quadratpersonnel
@@ -643,6 +657,11 @@ CREATE TRIGGER after_update_quadratpersonnel
 BEGIN
     DECLARE old_json JSON;
     DECLARE new_json JSON;
+    DECLARE plot_id INT;
+
+    -- Fetch PlotID associated with the QuadratID
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+
     SET old_json = JSON_OBJECT(
             'QuadratPersonnelID', OLD.QuadratPersonnelID,
             'QuadratID', OLD.QuadratID,
@@ -655,8 +674,10 @@ BEGIN
             'PersonnelID', NEW.PersonnelID,
             'CensusID', NEW.CensusID
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('quadratpersonnel', NEW.QuadratPersonnelID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  PlotID, CensusID)
+    VALUES ('quadratpersonnel', NEW.QuadratPersonnelID, 'UPDATE', old_json, new_json, NOW(), 'User', plot_id,
+            NEW.CensusID);
 END //
 
 CREATE TRIGGER after_delete_quadratpersonnel
@@ -665,17 +686,23 @@ CREATE TRIGGER after_delete_quadratpersonnel
     FOR EACH ROW
 BEGIN
     DECLARE old_json JSON;
+    DECLARE plot_id INT;
+
+    -- Fetch PlotID associated with the QuadratID
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = OLD.QuadratID;
+
     SET old_json = JSON_OBJECT(
             'QuadratPersonnelID', OLD.QuadratPersonnelID,
             'QuadratID', OLD.QuadratID,
             'PersonnelID', OLD.PersonnelID,
             'CensusID', OLD.CensusID
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('quadratpersonnel', OLD.QuadratPersonnelID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('quadratpersonnel', OLD.QuadratPersonnelID, 'DELETE', old_json, NOW(), 'User', plot_id, OLD.CensusID);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -768,7 +795,7 @@ BEGIN
     VALUES ('species', OLD.SpeciesID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -782,7 +809,7 @@ BEGIN
     DECLARE new_json JSON;
     SET new_json = JSON_OBJECT(
             'SpeciesLimitID', NEW.SpeciesLimitID,
-            'SpeciesCode', NEW.SpeciesCode,
+            'SpeciesID', NEW.SpeciesID,
             'LimitType', NEW.LimitType,
             'UpperBound', NEW.UpperBound,
             'LowerBound', NEW.LowerBound,
@@ -801,7 +828,7 @@ BEGIN
     DECLARE new_json JSON;
     SET old_json = JSON_OBJECT(
             'SpeciesLimitID', OLD.SpeciesLimitID,
-            'SpeciesCode', OLD.SpeciesCode,
+            'SpeciesID', OLD.SpeciesID,
             'LimitType', OLD.LimitType,
             'UpperBound', OLD.UpperBound,
             'LowerBound', OLD.LowerBound,
@@ -809,7 +836,7 @@ BEGIN
                    );
     SET new_json = JSON_OBJECT(
             'SpeciesLimitID', NEW.SpeciesLimitID,
-            'SpeciesCode', NEW.SpeciesCode,
+            'SpeciesID', NEW.SpeciesID,
             'LimitType', NEW.LimitType,
             'UpperBound', NEW.UpperBound,
             'LowerBound', NEW.LowerBound,
@@ -827,7 +854,7 @@ BEGIN
     DECLARE old_json JSON;
     SET old_json = JSON_OBJECT(
             'SpeciesLimitID', OLD.SpeciesLimitID,
-            'SpeciesCode', OLD.SpeciesCode,
+            'SpeciesID', OLD.SpeciesID,
             'LimitType', OLD.LimitType,
             'UpperBound', OLD.UpperBound,
             'LowerBound', OLD.LowerBound,
@@ -837,7 +864,7 @@ BEGIN
     VALUES ('specieslimits', OLD.SpeciesLimitID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -922,7 +949,7 @@ BEGIN
     VALUES ('subquadrats', OLD.SubquadratID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -979,7 +1006,7 @@ BEGIN
     VALUES ('trees', OLD.TreeID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -991,6 +1018,12 @@ CREATE TRIGGER after_insert_stems
     FOR EACH ROW
 BEGIN
     DECLARE new_json JSON;
+    DECLARE plot_id INT;
+    DECLARE census_id INT;
+
+    -- Fetch PlotID and CensusID associated with the QuadratID
+    SELECT PlotID, CensusID INTO plot_id, census_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+
     SET new_json = JSON_OBJECT(
             'StemID', NEW.StemID,
             'TreeID', NEW.TreeID,
@@ -1003,10 +1036,10 @@ BEGIN
             'Moved', NEW.Moved,
             'StemDescription', NEW.StemDescription
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('stems', NEW.StemID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('stems', NEW.StemID, 'INSERT', new_json, NOW(), 'User', plot_id, census_id);
 END //
-
 CREATE TRIGGER after_update_stems
     AFTER UPDATE
     ON stems
@@ -1014,6 +1047,12 @@ CREATE TRIGGER after_update_stems
 BEGIN
     DECLARE old_json JSON;
     DECLARE new_json JSON;
+    DECLARE plot_id INT;
+    DECLARE census_id INT;
+
+    -- Fetch PlotID and CensusID associated with the QuadratID
+    SELECT PlotID, CensusID INTO plot_id, census_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
             'TreeID', OLD.TreeID,
@@ -1038,9 +1077,11 @@ BEGIN
             'Moved', NEW.Moved,
             'StemDescription', NEW.StemDescription
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('stems', NEW.StemID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  PlotID, CensusID)
+    VALUES ('stems', NEW.StemID, 'UPDATE', old_json, new_json, NOW(), 'User', plot_id, census_id);
 END //
+
 
 CREATE TRIGGER after_delete_stems
     AFTER DELETE
@@ -1048,6 +1089,12 @@ CREATE TRIGGER after_delete_stems
     FOR EACH ROW
 BEGIN
     DECLARE old_json JSON;
+    DECLARE plot_id INT;
+    DECLARE census_id INT;
+
+    -- Fetch PlotID and CensusID associated with the QuadratID
+    SELECT PlotID, CensusID INTO plot_id, census_id FROM quadrats WHERE QuadratID = OLD.QuadratID;
+
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
             'TreeID', OLD.TreeID,
@@ -1060,11 +1107,12 @@ BEGIN
             'Moved', OLD.Moved,
             'StemDescription', OLD.StemDescription
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('stems', OLD.StemID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('stems', OLD.StemID, 'DELETE', old_json, NOW(), 'User', plot_id, census_id);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -1076,6 +1124,15 @@ CREATE TRIGGER after_insert_coremeasurements
     FOR EACH ROW
 BEGIN
     DECLARE new_json JSON;
+    DECLARE plot_id INT;
+
+    -- Fetch PlotID associated with the StemID's QuadratID
+    SELECT PlotID
+    INTO plot_id
+    FROM quadrats q
+             JOIN stems s ON q.QuadratID = s.QuadratID
+    WHERE s.StemID = NEW.StemID;
+
     SET new_json = JSON_OBJECT(
             'CoreMeasurementID', NEW.CoreMeasurementID,
             'CensusID', NEW.CensusID,
@@ -1089,8 +1146,9 @@ BEGIN
             'Description', NEW.Description,
             'UserDefinedFields', NEW.UserDefinedFields
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('coremeasurements', NEW.CoreMeasurementID, 'INSERT', new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('coremeasurements', NEW.CoreMeasurementID, 'INSERT', new_json, NOW(), 'User', plot_id, NEW.CensusID);
 END //
 
 CREATE TRIGGER after_update_coremeasurements
@@ -1100,6 +1158,15 @@ CREATE TRIGGER after_update_coremeasurements
 BEGIN
     DECLARE old_json JSON;
     DECLARE new_json JSON;
+    DECLARE plot_id INT;
+
+    -- Fetch PlotID associated with the StemID's QuadratID
+    SELECT PlotID
+    INTO plot_id
+    FROM quadrats q
+             JOIN stems s ON q.QuadratID = s.QuadratID
+    WHERE s.StemID = NEW.StemID;
+
     SET old_json = JSON_OBJECT(
             'CoreMeasurementID', OLD.CoreMeasurementID,
             'CensusID', OLD.CensusID,
@@ -1126,8 +1193,10 @@ BEGIN
             'Description', NEW.Description,
             'UserDefinedFields', NEW.UserDefinedFields
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('coremeasurements', NEW.CoreMeasurementID, 'UPDATE', old_json, new_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
+                                  PlotID, CensusID)
+    VALUES ('coremeasurements', NEW.CoreMeasurementID, 'UPDATE', old_json, new_json, NOW(), 'User', plot_id,
+            NEW.CensusID);
 END //
 
 CREATE TRIGGER after_delete_coremeasurements
@@ -1136,6 +1205,15 @@ CREATE TRIGGER after_delete_coremeasurements
     FOR EACH ROW
 BEGIN
     DECLARE old_json JSON;
+    DECLARE plot_id INT;
+
+    -- Fetch PlotID associated with the StemID's QuadratID
+    SELECT PlotID
+    INTO plot_id
+    FROM quadrats q
+             JOIN stems s ON q.QuadratID = s.QuadratID
+    WHERE s.StemID = OLD.StemID;
+
     SET old_json = JSON_OBJECT(
             'CoreMeasurementID', OLD.CoreMeasurementID,
             'CensusID', OLD.CensusID,
@@ -1149,11 +1227,12 @@ BEGIN
             'Description', OLD.Description,
             'UserDefinedFields', OLD.UserDefinedFields
                    );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('coremeasurements', OLD.CoreMeasurementID, 'DELETE', old_json, NOW(), 'User');
+    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
+                                  CensusID)
+    VALUES ('coremeasurements', OLD.CoreMeasurementID, 'DELETE', old_json, NOW(), 'User', plot_id, OLD.CensusID);
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -1210,7 +1289,7 @@ BEGIN
     VALUES ('cmattributes', OLD.CMAID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -1267,7 +1346,7 @@ BEGIN
     VALUES ('cmverrors', OLD.CMVErrorID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -1352,7 +1431,7 @@ BEGIN
     VALUES ('specimens', OLD.SpecimenID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
+DELIMITER ;
 
 
 DELIMITER
@@ -1437,6 +1516,4 @@ BEGIN
     VALUES ('validationchangelog', OLD.ValidationRunID, 'DELETE', old_json, NOW(), 'User');
 END //
 
-DELIMITER;
-
-
+DELIMITER ;

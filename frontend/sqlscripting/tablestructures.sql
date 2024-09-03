@@ -227,13 +227,13 @@ create table specieslimits
 (
     SpeciesLimitID int auto_increment
         primary key,
-    SpeciesCode    varchar(25)                                                  null,
+    SpeciesID      int                                                          null,
     LimitType      enum ('DBH')                                                 null,
     UpperBound     decimal(10, 6)                                               null,
     LowerBound     decimal(10, 6)                                               null,
     Unit           enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'cm' null,
-    constraint specieslimits_ibfk_1
-        foreign key (SpeciesCode) references species (SpeciesCode)
+    constraint specieslimits_species_SpeciesID_fk
+        foreign key (SpeciesID) references species (SpeciesID)
 );
 
 create table subquadrats
@@ -392,6 +392,8 @@ create table unifiedchangelog
     NewRowState     json                                null,
     ChangeTimestamp datetime default CURRENT_TIMESTAMP  null,
     ChangedBy       varchar(64)                         null,
+    PlotID          int                                 null,
+    CensusID        int                                 null,
     primary key (ChangeID, TableName)
 )
     partition by key (`TableName`) partitions 24;

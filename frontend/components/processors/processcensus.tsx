@@ -89,6 +89,17 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
               );
             }
           }
+          const combinedQuery = `
+            UPDATE ${schema}.census c
+            JOIN (
+              SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
+              FROM ${schema}.coremeasurements
+              GROUP BY CensusID
+            ) m ON c.CensusID = m.CensusID
+            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
+            WHERE c.CensusID = ${censusID};`;
+
+          await runQuery(connection, combinedQuery);
           await connection.commit();
           console.log('Upsert successful. CoreMeasurement ID generated:', coreMeasurementID);
           return coreMeasurementID;

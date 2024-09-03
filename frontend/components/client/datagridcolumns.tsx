@@ -7,10 +7,9 @@ import { ExpandMore } from '@mui/icons-material';
 import { useSession } from 'next-auth/react';
 import CodeMirror from '@uiw/react-codemirror';
 import { sql } from '@codemirror/lang-sql';
-
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
-const formatHeader = (word1: string, word2: string) => (
+export const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
     <Typography level="body-sm" fontWeight={'bold'}>
       {word1}
@@ -159,151 +158,6 @@ export const quadratGridColumns: GridColDef[] = [
     renderHeader: () => formatHeader('Quadrat', 'Shape'),
     align: 'right',
     headerAlign: 'right',
-    type: 'string',
-    editable: true
-  }
-];
-
-export const AllTaxonomiesViewGridColumns: GridColDef[] = [
-  {
-    field: 'id',
-    headerName: '#',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
-    editable: false
-  },
-  {
-    field: 'speciesID',
-    headerName: '#',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'number',
-    editable: false
-  },
-  {
-    field: 'speciesCode',
-    headerName: 'Species Code',
-    renderHeader: () => formatHeader('Species', 'Code'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'familyID',
-    headerName: 'Family ID',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'family',
-    headerName: 'Family',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'genusID',
-    headerName: 'Genus ID',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'number',
-    editable: true
-  },
-  {
-    field: 'genus',
-    headerName: 'Genus',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'genusAuthority',
-    headerName: 'Genus Auth',
-    renderHeader: () => formatHeader('Genus', 'Authority'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'speciesName',
-    headerName: 'Species',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'subspeciesName',
-    headerName: 'Subspecies',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'speciesIDLevel',
-    headerName: 'Species ID Level',
-    renderHeader: () => formatHeader('Species', 'ID Level'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'speciesAuthority',
-    headerName: 'Species Auth',
-    renderHeader: () => formatHeader('Species', 'Authority'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'subspeciesAuthority',
-    headerName: 'Subspecies Auth',
-    renderHeader: () => formatHeader('Subspecies', 'Authority'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'fieldFamily',
-    headerName: 'Field Family',
-    renderHeader: () => formatHeader('Field', 'Family'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'string',
-    editable: true
-  },
-  {
-    field: 'speciesDescription',
-    headerName: 'Species Description',
-    renderHeader: () => formatHeader('Species', 'Description'),
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
     type: 'string',
     editable: true
   }
@@ -610,7 +464,7 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
   );
 };
 
-export const measurementsSummaryViewGridColumns: GridColDef[] = [
+export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'id',
     headerName: 'ID',
@@ -750,18 +604,18 @@ export const measurementsSummaryViewGridColumns: GridColDef[] = [
     //   return `${value} ${units}`;
     // }
   },
-  {
-    field: 'dbhUnits',
-    headerName: 'DBH Units',
-    headerClassName: 'header',
-    flex: 0.4,
-    maxWidth: 65,
-    renderHeader: () => formatHeader('DBH', 'Units'),
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  },
+  // {
+  //   field: 'dbhUnits',
+  //   headerName: 'DBH Units',
+  //   headerClassName: 'header',
+  //   flex: 0.4,
+  //   maxWidth: 65,
+  //   renderHeader: () => formatHeader('DBH', 'Units'),
+  //   align: 'center',
+  //   editable: true,
+  //   type: 'singleSelect',
+  //   valueOptions: unitSelectionOptions
+  // },
   {
     field: 'measuredHOM',
     headerName: 'HOM',
@@ -782,18 +636,18 @@ export const measurementsSummaryViewGridColumns: GridColDef[] = [
     //   return `${value} ${units}`;
     // }
   },
-  {
-    field: 'homUnits',
-    headerName: 'HOM Units',
-    headerClassName: 'header',
-    flex: 0.4,
-    maxWidth: 65,
-    renderHeader: () => formatHeader('HOM', 'Units'),
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  },
+  // {
+  //   field: 'homUnits',
+  //   headerName: 'HOM Units',
+  //   headerClassName: 'header',
+  //   flex: 0.4,
+  //   maxWidth: 65,
+  //   renderHeader: () => formatHeader('HOM', 'Units'),
+  //   align: 'center',
+  //   editable: true,
+  //   type: 'singleSelect',
+  //   valueOptions: unitSelectionOptions
+  // },
   {
     field: 'description',
     headerName: 'Description',
@@ -1151,7 +1005,6 @@ export const SpeciesGridColumns: GridColDef[] = [
     headerAlign: 'right',
     editable: false
   },
-  // { field: 'id', headerName: '#', headerClassName: 'header', flex: 1, align: 'left', maxWidth: 50},
   {
     field: 'speciesCode',
     headerName: 'SpCode',
@@ -1162,9 +1015,6 @@ export const SpeciesGridColumns: GridColDef[] = [
     editable: true,
     maxWidth: 125
   },
-  // {field: 'genusID', headerName: 'GenusID', headerClassName: 'header', flex: 1, align: 'left',},
-  // { field: 'currentTaxonFlag', headerName: 'Current?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
-  // { field: 'obsoleteTaxonFlag', headerName: 'Obsolete?', headerClassName: 'header', flex: 1, align: 'left', type: 'boolean', editable: true },
   {
     field: 'speciesName',
     headerName: 'Species',
@@ -1237,7 +1087,76 @@ export const SpeciesGridColumns: GridColDef[] = [
     type: 'string',
     editable: true
   }
-  // {field: 'referenceID', headerName: 'ReferenceID', headerClassName: 'header', flex: 1, align: 'left',},
+];
+
+export const SpeciesLimitsGridColumns: GridColDef[] = [
+  {
+    field: 'id',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'right',
+    headerAlign: 'right',
+    editable: false
+  },
+  {
+    field: 'speciesLimitID',
+    headerName: '#',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'left',
+    headerAlign: 'left',
+    editable: false
+  },
+  {
+    field: 'speciesID',
+    headerName: 'SpeciesID',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'left',
+    headerAlign: 'left',
+    editable: false
+  },
+  {
+    field: 'limitType',
+    headerName: 'LimitType',
+    renderHeader: () => formatHeader('Limit', 'Type'),
+    flex: 0.5,
+    align: 'left',
+    headerAlign: 'left',
+    type: 'singleSelect',
+    valueOptions: ['DBH', 'HOM'],
+    editable: true
+  },
+  {
+    field: 'lowerBound',
+    headerName: 'LowerBound',
+    renderHeader: () => formatHeader('Lower', 'Limit'),
+    flex: 0.5,
+    align: 'left',
+    headerAlign: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'upperBound',
+    headerName: 'UpperBound',
+    renderHeader: () => formatHeader('Upper', 'Limit'),
+    flex: 0.5,
+    align: 'left',
+    headerAlign: 'left',
+    type: 'number',
+    editable: true
+  },
+  {
+    field: 'unit',
+    headerName: 'Units',
+    headerClassName: 'header',
+    flex: 0.3,
+    align: 'left',
+    type: 'singleSelect',
+    valueOptions: unitSelectionOptions
+  }
 ];
 
 export const RolesGridColumns: GridColDef[] = [
@@ -1528,7 +1447,7 @@ const combineColumns = (primary: GridColDef[], secondary: GridColDef[]): GridCol
   return combined;
 };
 
-const rawColumns: GridColDef[] = combineColumns(measurementsSummaryViewGridColumns, StemTaxonomiesViewGridColumns);
+const rawColumns: GridColDef[] = combineColumns(MeasurementsSummaryViewGridColumns, StemTaxonomiesViewGridColumns);
 
 export const ViewFullTableGridColumns = rawColumns.map(column => {
   if (column.field === 'speciesCode') {

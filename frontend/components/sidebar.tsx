@@ -34,7 +34,6 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 
 import RolloverModal from './client/rollovermodal';
 import RolloverStemsModal from './client/rolloverstemsmodal';
@@ -157,10 +156,6 @@ export default function Sidebar(props: SidebarProps) {
   const { siteListLoaded, setCensusListLoaded } = props;
 
   const { triggerRefresh } = useDataValidityContext();
-
-  const { isPulsing, triggerPulse } = useLockAnimation();
-  const reopenButtonRef = useRef(null);
-  const addButtonRef = useRef(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);

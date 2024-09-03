@@ -205,7 +205,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
   const cellHasError = (colField: string, rowId: GridRowId) => {
-    const error = validationErrors[Number(rowId)];
+    const row = rows.find(row => rowId === row.id);
+    const error = validationErrors[row?.coreMeasurementID];
     if (!error) return false;
     const errorFields = error.validationErrorIDs.flatMap(id => errorMapping[id.toString()] || []);
     return errorFields.includes(colField);
@@ -219,8 +220,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     return rows.filter(row => rowHasError(row.id));
   };
   const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
-    const error = validationErrors[Number(rowId)];
-    if (!error) return [];
+    const row = rows.find(row => rowId === row.id);
+    const error = validationErrors[row?.coreMeasurementID];
+    console.log('error: ', error);
+    console.log('validationerrorids: ', validationErrors);
     return error.validationErrorIDs.map(id => {
       const index = error.validationErrorIDs.indexOf(id);
       return error.descriptions[index]; // Assumes that descriptions are stored in the CMError object
@@ -440,7 +443,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         return;
       }
 
-      console.log('fetchPaginatedData called.');
       setRefresh(true);
       const paginatedQuery = createFetchQuery(
         currentSite?.schemaName ?? '',
@@ -455,7 +457,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         const response = await fetch(paginatedQuery, { method: 'GET' });
         if (!response.ok) throw new Error(response.statusText || 'Error fetching data');
         const data = await response.json();
-        console.log('data: ', data);
         setRows(data.output);
         setRowCount(data.totalCount);
 
@@ -466,7 +467,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       } catch (error) {
         handleError(error, 'Error fetching data');
       } finally {
-        setRefresh(false); // Reset refresh state here
+        try {
+          await fetchValidationErrors();
+        } catch (error: any) {
+          handleError(error, 'Error fetching validation errors');
+        } finally {
+          setRefresh(false);
+        }
       }
     }, 500),
     [
@@ -608,8 +615,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const fetchValidationErrors = useCallback(async () => {
     try {
       const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`);
-      const data = await response.json();
 
+      if (!response.ok) {
+        throw new Error('Failed to fetch validation errors');
+      }
+
+      const data = await response.json();
       const errors: CMError[] = data?.failed ?? [];
       const errorMap = Array.isArray(errors)
         ? errors.reduce<Record<number, CMError>>((acc, error) => {
@@ -622,55 +633,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       if (JSON.stringify(validationErrors) !== JSON.stringify(errorMap)) {
         setValidationErrors(errorMap);
       }
+      return errorMap; // Return the errorMap if you need to log it outside
     } catch (error) {
       console.error('Error fetching validation errors:', error);
     }
   }, [currentSite?.schemaName, validationErrors]);
-
-  // Use useEffect to trigger fetchValidationErrors only when rows change
-  useEffect(() => {
-    if (rows.length > 0) {
-      fetchValidationErrors().then(r => console.log(r));
-    }
-  }, [rows, fetchValidationErrors]);
-
-  const getCellErrorMessages = (colField: string, rowId: GridRowId) => {
-    const error = validationErrors[Number(rowId)];
-    if (!error) return '';
-
-    return error.validationErrorIDs
-      .filter(id => errorMapping[id.toString()]?.includes(colField))
-      .map(id => {
-        const index = error.validationErrorIDs.indexOf(id);
-        return error.descriptions[index];
-      })
-      .join('; ');
-  };
-
-  const renderMeasurementDateCell = (params: GridCellParams) => {
-    const cellValue = params.value ? moment(params.value).utc().format('YYYY-MM-DD') : '';
-    const cellError = cellHasError('measurementDate', params.id) ? getCellErrorMessages('measurementDate', params.id) : '';
-    return (
-      <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5 }}>
-        <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
-        {cellError && (
-          <Typography
-            color={'danger'}
-            variant={'solid'}
-            sx={{
-              color: 'error.main',
-              fontSize: '0.75rem',
-              mt: 1,
-              whiteSpace: 'normal',
-              lineHeight: 'normal'
-            }}
-          >
-            {cellError}
-          </Typography>
-        )}
-      </Box>
-    );
-  };
 
   const fetchFullData = async () => {
     setLoading(true, 'Fetching full dataset...');
@@ -683,12 +650,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     try {
       const response = await fetch(fullDataQuery, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filterModel)
+        headers: { 'Content-Type': 'application/json' }
+        // body: JSON.stringify(filterModel)
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Error fetching full data');
-      return data.output;
+      if (!response.ok) throw new Error(response.statusText || 'Error fetching full data');
+      return await response.json();
     } catch (error) {
       console.error('Error fetching full data:', error);
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
@@ -710,10 +676,48 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (column.field !== 'measurementDate') {
       return column;
     }
-    return {
-      ...column,
-      renderCell: renderMeasurementDateCell
-    };
+    console.log('Modifying column: ', column.field);
+    return column;
+    // return {
+    //   ...column,
+    //   renderCell: (params: GridCellParams) => {
+    //     const cellValue = params.value !== undefined ? params.value?.toString() : '';
+    //     console.log('cellValue', cellValue);
+    //     const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
+    //     console.log('cellERror', cellError);
+    //     return (
+    //       <Box
+    //         sx={{
+    //           display: 'flex',
+    //           flex: 1,
+    //           flexDirection: 'column',
+    //           marginY: 1.5
+    //         }}
+    //       >
+    //         {cellError ? (
+    //           <>
+    //             <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
+    //             <Typography
+    //               color={'danger'}
+    //               variant={'solid'}
+    //               sx={{
+    //                 color: 'error.main',
+    //                 fontSize: '0.75rem',
+    //                 mt: 1,
+    //                 whiteSpace: 'normal',
+    //                 lineHeight: 'normal'
+    //               }}
+    //             >
+    //               {cellError}
+    //             </Typography>
+    //           </>
+    //         ) : (
+    //           <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
+    //         )}
+    //       </Box>
+    //     );
+    //   }
+    // };
   });
 
   // custom column formatting:
@@ -724,14 +728,14 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     align: 'center',
     width: 50,
     renderCell: (params: GridCellParams) => {
-      const rowId = params.row.id;
+      const rowId = params.row.coreMeasurementID;
       const validationError = validationErrors[Number(rowId)];
       const isPendingValidation = !params.row.isValidated && !validationError;
       const isValidated = params.row.isValidated;
 
       if (validationError) {
         return (
-          <Tooltip title="Failed Validation" size="md">
+          <Tooltip title={validationError.descriptions.join(', ')} size="md">
             <ErrorIcon color="error" />
           </Tooltip>
         );
