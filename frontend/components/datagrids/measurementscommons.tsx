@@ -672,56 +672,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     });
   };
 
-  const modifiedColumns = gridColumns.map(column => {
-    if (column.field !== 'measurementDate') {
-      return column;
-    }
-    Object.keys(validationErrors).forEach(validationError => {
-      console.log('validationerror: ', validationError);
-    });
-    return column;
-    // return {
-    //   ...column,
-    //   renderCell: (params: GridCellParams) => {
-    //     const cellValue = params.value !== undefined ? params.value?.toString() : '';
-    //     console.log('cellValue', cellValue);
-    //     const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
-    //     console.log('cellERror', cellError);
-    //     return (
-    //       <Box
-    //         sx={{
-    //           display: 'flex',
-    //           flex: 1,
-    //           flexDirection: 'column',
-    //           marginY: 1.5
-    //         }}
-    //       >
-    //         {cellError ? (
-    //           <>
-    //             <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
-    //             <Typography
-    //               color={'danger'}
-    //               variant={'solid'}
-    //               sx={{
-    //                 color: 'error.main',
-    //                 fontSize: '0.75rem',
-    //                 mt: 1,
-    //                 whiteSpace: 'normal',
-    //                 lineHeight: 'normal'
-    //               }}
-    //             >
-    //               {cellError}
-    //             </Typography>
-    //           </>
-    //         ) : (
-    //           <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
-    //         )}
-    //       </Box>
-    //     );
-    //   }
-    // };
-  });
-
   // custom column formatting:
   const validationStatusColumn: GridColDef = {
     field: 'isValidated',
@@ -782,12 +732,59 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
   const columns = useMemo(() => {
-    const commonColumns = modifiedColumns;
+    console.log('test: ');
+    const commonColumns = gridColumns.map(column => {
+      Object.keys(validationErrors).forEach(validationError => {
+        console.log('validationerror: ', validationError);
+      });
+      return column;
+      // return {
+      //   ...column,
+      //   renderCell: (params: GridCellParams) => {
+      //     const cellValue = params.value !== undefined ? params.value?.toString() : '';
+      //     console.log('cellValue', cellValue);
+      //     const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
+      //     console.log('cellERror', cellError);
+      //     return (
+      //       <Box
+      //         sx={{
+      //           display: 'flex',
+      //           flex: 1,
+      //           flexDirection: 'column',
+      //           marginY: 1.5
+      //         }}
+      //       >
+      //         {cellError ? (
+      //           <>
+      //             <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
+      //             <Typography
+      //               color={'danger'}
+      //               variant={'solid'}
+      //               sx={{
+      //                 color: 'error.main',
+      //                 fontSize: '0.75rem',
+      //                 mt: 1,
+      //                 whiteSpace: 'normal',
+      //                 lineHeight: 'normal'
+      //               }}
+      //             >
+      //               {cellError}
+      //             </Typography>
+      //           </>
+      //         ) : (
+      //           <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
+      //         )}
+      //       </Box>
+      //     );
+      //   }
+      // };
+    });
+    console.log('common columns', commonColumns);
     if (locked) {
       return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
     return [validationStatusColumn, measurementDateColumn, ...commonColumns, getGridActionsColumn()];
-  }, [modifiedColumns, locked]);
+  }, [gridColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
 
