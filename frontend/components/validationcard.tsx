@@ -44,7 +44,8 @@ const ValidationCard: React.FC<ValidationCardProps> = ({ validation, onSaveChang
           transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0)',
           transition: 'transform 0.6s',
           perspective: 1000,
-          minHeight: 'inherit'
+          minHeight: 'inherit',
+          overflow: 'auto'
         }}
       >
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
