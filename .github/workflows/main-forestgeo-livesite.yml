@@ -10,17 +10,9 @@ on:
       - 'forestgeo-app-*'
   workflow_dispatch:
 
-permissions:
-  id-token: write
-  pages: write
-
-env:
-  INSTANCE: 'documentation/fad'
-  ARTIFACT: 'webHelpFAD2-all.zip'
-  DOCKER_VERSION: '241.18775'
-
 jobs:
-  build-app:
+  build-app-development:
+    if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
     runs-on: ubuntu-latest
     environment: development
 
@@ -32,31 +24,8 @@ jobs:
         with:
           node-version: '18.x'
 
-      - name: create env file (in frontend/ directory) -- production
-        id: create-env-file-prod
-        if: github.ref == 'refs/heads/main'
-        run: |
-          touch frontend/.env
-          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
-          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
-          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
-          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
-          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }} >> frontend/.env
-          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
-          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
-          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
-          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
-          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
-          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
-          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
-          echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
-          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
-          echo NODE_ENV=development >> frontend/.env
-          echo PORT=3000 >> frontend/.env
-
       - name: create env file (in frontend/ directory) -- development
         id: create-env-file-dev
-        if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
         run: |
           touch frontend/.env
           echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
@@ -79,10 +48,6 @@ jobs:
           echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
           echo REPO=${{ secrets.REPO }} >> frontend/.env
-
-      - name: Write Certificate to File
-        run: |
-          echo "${{ secrets.CERTIFICATE }}" > frontend/DigiCertGlobalRootCA.crt.pem
 
       - name: Cache node modules
         uses: actions/cache@v2
@@ -120,10 +85,110 @@ jobs:
           name: app-build
           path: frontend/build/standalone
 
-  deploy-app:
-    needs: build-app
+  build-app-production:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: development
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      - name: create env file (in frontend/ directory) -- production
+        id: create-env-file-prod
+        run: |
+          touch frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
+          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }} >> frontend/.env
+          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
+          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
+          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
+          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
+          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
+          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
+          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
+          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
+          echo NEXTAUTH_DEBUG=true >> frontend/.env
+          echo NODE_ENV=production >> frontend/.env
+          echo PORT=3000 >> frontend/.env
+          echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
+          echo OWNER=${{ secrets.OWNER }} >> frontend/.env
+          echo REPO=${{ secrets.REPO }} >> frontend/.env
+
+      - name: create env file (in frontend/ directory) -- development
+        id: create-env-file-dev
+        if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
+        run: |
+          touch frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
+          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }} >> frontend/.env
+          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
+          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
+          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
+          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
+          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
+          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
+          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
+          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
+          echo NEXTAUTH_DEBUG=true >> frontend/.env
+          echo NODE_ENV=development >> frontend/.env
+          echo PORT=3000 >> frontend/.env
+          echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
+          echo OWNER=${{ secrets.OWNER }} >> frontend/.env
+          echo REPO=${{ secrets.REPO }} >> frontend/.env
+
+      - name: Cache node modules
+        uses: actions/cache@v2
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Cache Next.js build
+        uses: actions/cache@v2
+        with:
+          path: frontend/.next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/.next/cache') }}
+          restore-keys: |
+            ${{ runner.os }}-next-
+            ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}
+
+      - name: move into frontend --> npm install, build, and test
+        run: |
+          cd frontend/
+          npm install
+          npm run build
+          npm run test --if-present
+
+      - name: Move directories into build/standalone to reduce app load
+        run: |
+          mv ./frontend/build/static ./frontend/build/standalone/build
+          mv ./frontend/public ./frontend/build/standalone
+          mv ./frontend/*.pem ./frontend/build/standalone/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-build
+          path: frontend/build/standalone
+
+  deploy-app-production:
+    needs: build-app-production
+    runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Download build artifact
@@ -139,8 +204,20 @@ jobs:
         with:
           app-name: 'forestgeo-livesite'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_852346BD764D45D08854E6679137F844 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_PRODUCTION }}
           package: ./frontend/build/standalone
+
+  deploy-app-development:
+    needs: build-app-development
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-build
+          path: frontend/build/standalone
 
       - name: 'Deploy to Azure Web App (development)'
         id: deploy-to-webapp-dev
@@ -151,50 +228,3 @@ jobs:
           slot-name: 'development'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: ./frontend/build/standalone
-
-  build-docs-deploy-docs:
-    runs-on: ubuntu-latest
-    needs: deploy-app
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Build docs using Writerside Docker builder
-        uses: JetBrains/writerside-github-action@v4
-        with:
-          instance: ${{ env.INSTANCE }}
-          artifact: ${{ env.ARTIFACT }}
-          docker-version: ${{ env.DOCKER_VERSION }}
-
-      - name: Upload documentation artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs
-          path: |
-            artifacts/${{ env.ARTIFACT }}
-            artifacts/report.json  # Ensure report.json is included
-          retention-days: 7
-      - name: Download documentation artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docs
-
-      - name: Unzip documentation artifact
-        run: unzip -O UTF-8 -qq 'artifacts/${{ env.ARTIFACT }}' -d dir
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Package and upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dir
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
