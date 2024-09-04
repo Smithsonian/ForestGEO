@@ -8,9 +8,9 @@ const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET as string,
   providers: [
     AzureADProvider({
-      clientId: process.env.AZURE_AD_CLIENT_ID_DEVELOPMENT!,
-      clientSecret: process.env.AZURE_AD_CLIENT_SECRET_DEVELOPMENT!,
-      tenantId: process.env.AZURE_AD_CLIENT_ID_DEVELOPMENT!,
+      clientId: process.env.AZURE_AD_CLIENT_ID!,
+      clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
+      tenantId: process.env.AZURE_AD_CLIENT_ID!,
       authorization: { params: { scope: 'openid profile email user.Read' } }
     })
   ],
