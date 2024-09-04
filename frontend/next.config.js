@@ -22,8 +22,6 @@ const nextConfig = withBundleAnalyzer({
     unoptimized: true // since images are served from public directory
   },
   env: {
-    NEXTAUTH_URL: process.env.NEXTAUTH_URL,
-    NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
     AZURE_SQL_USER: process.env.AZURE_SQL_USER,
     AZURE_SQL_PASSWORD: process.env.AZURE_SQL_PASSWORD,
     AZURE_SQL_SERVER: process.env.AZURE_SQL_SERVER,
