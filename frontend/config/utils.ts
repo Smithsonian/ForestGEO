@@ -1,4 +1,3 @@
-import 'reflect-metadata';
 import { PoolConnection } from 'mysql2/promise';
 import { runQuery } from '@/components/processors/processormacros';
 

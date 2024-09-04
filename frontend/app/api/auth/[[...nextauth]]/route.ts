@@ -5,12 +5,12 @@ import { UserAuthRoles } from '@/config/macros';
 import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 
 const handler = NextAuth({
-  secret: process.env.NEXTAUTH_SECRET as string,
+  secret: process.env.NEXTAUTH_SECRET!,
   providers: [
     AzureADProvider({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
-      tenantId: process.env.AZURE_AD_CLIENT_ID!,
+      tenantId: process.env.AZURE_AD_TENANT_ID!,
       authorization: { params: { scope: 'openid profile email user.Read' } }
     })
   ],
@@ -20,6 +20,8 @@ const handler = NextAuth({
   },
   callbacks: {
     async signIn({ user, account, profile, email: signInEmail, credentials }) {
+      console.log('callback -- signin');
+      console.log('process envs: ', process.env);
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
       if (typeof userEmail !== 'string') {
