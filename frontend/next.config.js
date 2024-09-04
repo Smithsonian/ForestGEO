@@ -33,9 +33,6 @@ const nextConfig = withBundleAnalyzer({
     FG_PAT: process.env.FG_PAT,
     OWNER: process.env.OWNER,
     REPO: process.env.REPO,
-    AZURE_AD_CLIENT_SECRET: process.env.NODE_ENV === 'production' ? process.env.AZURE_AD_CLIENT_SECRET : process.env.AZURE_AD_DEVELOPMENT_CLIENT_SECRET,
-    AZURE_AD_CLIENT_ID: process.env.NODE_ENV === 'production' ? process.env.AZURE_AD_CLIENT_ID : process.env.AZURE_AD_DEVELOPMENT_CLIENT_ID,
-    AZURE_AD_TENANT_ID: process.env.NODE_ENV === 'production' ? process.env.AZURE_AD_TENANT_ID : process.env.AZURE_AD_DEVELOPMENT_TENANT_ID,
   }
 });
 
