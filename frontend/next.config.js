@@ -32,7 +32,7 @@ const nextConfig = withBundleAnalyzer({
     AZURE_SQL_CATALOG_SCHEMA: process.env.AZURE_SQL_CATALOG_SCHEMA,
     FG_PAT: process.env.FG_PAT,
     OWNER: process.env.OWNER,
-    REPO: process.env.REPO,
+    REPO: process.env.REPO
   }
 });
 
