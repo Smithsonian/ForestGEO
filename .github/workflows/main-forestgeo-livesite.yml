@@ -77,7 +77,6 @@ jobs:
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
           mv ./frontend/public ./frontend/build/standalone
-          mv ./frontend/*.pem ./frontend/build/standalone/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -177,7 +176,6 @@ jobs:
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
           mv ./frontend/public ./frontend/build/standalone
-          mv ./frontend/*.pem ./frontend/build/standalone/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
