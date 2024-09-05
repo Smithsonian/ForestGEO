@@ -59,7 +59,7 @@ jobs:
       - name: Cache Next.js build
         uses: actions/cache@v2
         with:
-          path: frontend/.next/cache
+          path: frontend/build/cache
           key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/.next/cache') }}
           restore-keys: |
             ${{ runner.os }}-next-
