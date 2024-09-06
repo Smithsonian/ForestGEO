@@ -21,7 +21,7 @@ import {
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
 import { usePathname, useRouter } from 'next/navigation';
-import { Badge, Button, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
+import { Badge, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
@@ -222,9 +222,9 @@ export default function Sidebar(props: SidebarProps) {
       const mapper = new OrgCensusToCensusResultMapper();
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
       if (!newCensusID) throw new Error('census creation failure');
-      await new Promise(resolve => setTimeout(resolve, 500)); // debounce
+      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
     } else {
-      await new Promise(resolve => setTimeout(resolve, 500)); // debounce
+      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
       // if (rolledOverQuadrats) { // passing census list loading trigger to stems rollover function:
       //   setIsRolloverStemsModalOpen(true);
       // } else setCensusListLoaded(false);
@@ -242,7 +242,7 @@ export default function Sidebar(props: SidebarProps) {
     // additional note: dialog handles actual rollover process. do not need to perform any API calls here.
     // --> stem rollover will not be triggered if quadrats are NOT rolled over
     setIsRolloverStemsModalOpen(false);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 100));
     setCensusListLoaded(false);
   };
 
@@ -786,7 +786,7 @@ export default function Sidebar(props: SidebarProps) {
                             onMouseLeave={() => setHoveredIndex(null)}
                           >
                             {site !== undefined && plot !== undefined && census !== undefined ? (
-                              <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow disableHoverListener={!isDataIncomplete}>
+                              <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }}>
                                   <ListItemButton
                                     selected={pathname === item.href}
@@ -956,8 +956,6 @@ export default function Sidebar(props: SidebarProps) {
           </Box>
           <RolloverModal open={isRolloverModalOpen} onClose={() => setIsRolloverModalOpen(false)} onConfirm={handleConfirmRollover} />
           <RolloverStemsModal open={isRolloverStemsModalOpen} onClose={() => setIsRolloverStemsModalOpen(false)} onConfirm={handleConfirmStemsRollover} />
-          <Divider orientation={'horizontal'} sx={{ mb: 2 }} />
-          {site && plot && census && <Button onClick={() => triggerRefresh()}>Reload Prevalidation</Button>}
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>

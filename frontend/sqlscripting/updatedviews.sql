@@ -161,7 +161,7 @@ FROM coremeasurements cm
          LEFT JOIN species sp ON t.SpeciesID = sp.SpeciesID
          LEFT JOIN genus g ON sp.GenusID = g.GenusID
          LEFT JOIN family fam ON g.FamilyID = fam.FamilyID
-         LEFT JOIN specieslimits sl ON sp.SpeciesCode = sl.SpeciesCode
+         LEFT JOIN specieslimits sl ON sp.SpeciesID = sl.SpeciesID
          LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
          LEFT JOIN quadratpersonnel qp ON q.QuadratID = qp.QuadratID
          LEFT JOIN personnel per ON qp.PersonnelID = per.PersonnelID

@@ -4,18 +4,18 @@ import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/joy';
+import { Box, IconButton, Stack, Typography } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { getAllSchemas } from '@/components/processors/processorhelperfunctions';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
-import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
+import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -67,7 +67,25 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
 
+  const lastExecutedRef = useRef<number | null>(null);
+  // Refs for debouncing
+  const plotLastExecutedRef = useRef<number | null>(null);
+  const censusLastExecutedRef = useRef<number | null>(null);
+  const quadratLastExecutedRef = useRef<number | null>(null);
+
+  // Debounce delay
+  const debounceDelay = 100;
+
   const fetchSiteList = useCallback(async () => {
+    const now = Date.now();
+    if (lastExecutedRef.current && now - lastExecutedRef.current < debounceDelay + 200) {
+      console.log('Debounced fetchSiteList: Too soon since last call.');
+      return;
+    }
+
+    // Update last executed timestamp
+    lastExecutedRef.current = now;
+
     try {
       setLoading(true, 'Loading Sites...');
       if (session && !siteListLoaded) {
@@ -86,74 +104,92 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [session, siteListLoaded, siteListDispatch, setLoading]);
 
-  const loadData = useCallback(async () => {
+  const loadPlotData = useCallback(async () => {
+    const now = Date.now();
+    if (plotLastExecutedRef.current && now - plotLastExecutedRef.current < debounceDelay) {
+      console.log('Debounced loadPlotData: Too soon since last call.');
+      return;
+    }
+    plotLastExecutedRef.current = now;
+
     try {
-      setLoading(true, 'Loading data...');
-
-      const promises = [];
-
-      // Load plot data
+      setLoading(true, 'Loading plot data...');
       if (currentSite && !plotListLoaded) {
-        const loadPlots = fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`)
-          .then(response => response.json())
-          .then(plotsData => {
-            if (!plotsData) throw new Error('Failed to load plots data');
-            if (plotListDispatch) return plotListDispatch({ plotList: plotsData });
-          });
-        promises.push(loadPlots);
+        const response = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+        const plotsData = await response.json();
+        if (!plotsData) throw new Error('Failed to load plots data');
+        if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
         setPlotListLoaded(true);
       }
-
-      // Load census data
-      if (currentSite && currentPlot && !censusListLoaded) {
-        const loadCensus = fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite.schemaName}`)
-          .then(response => response.json())
-          .then(async censusRDSLoad => {
-            if (!censusRDSLoad) throw new Error('Failed to load census data');
-            const censusList = await createAndUpdateCensusList(censusRDSLoad);
-            if (censusListDispatch) return censusListDispatch({ censusList });
-          });
-        promises.push(loadCensus);
-        setCensusListLoaded(true);
-      }
-
-      // Load quadrat data
-      if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
-        const loadQuadrats = fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`)
-          .then(response => response.json())
-          .then(quadratsData => {
-            if (!quadratsData) throw new Error('Failed to load quadrats data');
-            if (quadratListDispatch) return quadratListDispatch({ quadratList: quadratsData });
-          });
-        promises.push(loadQuadrats);
-        setQuadratListLoaded(true);
-      }
-
-      // Wait for all promises to resolve
-      await Promise.all(promises);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading plot data:', error);
     } finally {
       setLoading(false);
     }
-  }, [
-    currentSite,
-    currentPlot,
-    currentCensus,
-    plotListLoaded,
-    censusListLoaded,
-    quadratListLoaded,
-    plotListDispatch,
-    censusListDispatch,
-    quadratListDispatch,
-    setLoading
-  ]);
+  }, [currentSite, plotListLoaded, plotListDispatch, setLoading]);
+
+  // Function to load census data with debounce
+  const loadCensusData = useCallback(async () => {
+    const now = Date.now();
+    if (censusLastExecutedRef.current && now - censusLastExecutedRef.current < debounceDelay) {
+      console.log('Debounced loadCensusData: Too soon since last call.');
+      return;
+    }
+    censusLastExecutedRef.current = now;
+
+    try {
+      setLoading(true, 'Loading census data...');
+      if (currentSite && currentPlot && !censusListLoaded) {
+        const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite.schemaName}`);
+        const censusRDSLoad = await response.json();
+        if (!censusRDSLoad) throw new Error('Failed to load census data');
+        const censusList = await createAndUpdateCensusList(censusRDSLoad);
+        if (censusListDispatch) await censusListDispatch({ censusList });
+        setCensusListLoaded(true);
+      }
+    } catch (error) {
+      console.error('Error loading census data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSite, currentPlot, censusListLoaded, censusListDispatch, setLoading]);
+
+  // Function to load quadrat data with debounce
+  const loadQuadratData = useCallback(async () => {
+    const now = Date.now();
+    if (quadratLastExecutedRef.current && now - quadratLastExecutedRef.current < debounceDelay) {
+      console.log('Debounced loadQuadratData: Too soon since last call.');
+      return;
+    }
+    quadratLastExecutedRef.current = now;
+
+    try {
+      setLoading(true, 'Loading quadrat data...');
+      if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
+        const response = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite.schemaName}`);
+        const quadratsData = await response.json();
+        if (!quadratsData) throw new Error('Failed to load quadrats data');
+        if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
+        setQuadratListLoaded(true);
+      }
+    } catch (error) {
+      console.error('Error loading quadrat data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, quadratListDispatch, setLoading]);
 
   useEffect(() => {
-    if (currentSite || currentPlot || currentCensus) {
-      loadData().catch(console.error);
+    if (currentSite && siteListLoaded) {
+      loadPlotData().catch(console.error);
     }
-  }, [currentSite, currentPlot, currentCensus, loadData]);
+    if (currentSite && siteListLoaded && currentPlot && plotListLoaded) {
+      loadCensusData().catch(console.error);
+    }
+    if (currentSite && siteListLoaded && currentPlot && plotListLoaded && currentCensus && censusListLoaded) {
+      loadQuadratData().catch(console.error);
+    }
+  }, [currentSite, currentPlot, currentCensus, loadPlotData, loadCensusData, loadQuadratData]);
 
   useEffect(() => {
     if (manualReset) {
@@ -163,9 +199,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       setCensusListLoaded(false);
       setQuadratListLoaded(false);
       setManualReset(false);
-      loadData().catch(console.error);
     }
-  }, [manualReset, loadData]);
+  }, [manualReset]);
 
   useEffect(() => {
     if (session && !siteListLoaded) {
@@ -211,13 +246,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       await Promise.all(promises);
 
       // After clearing, load the new data
-      loadData().catch(console.error);
+      loadPlotData()
+        .then(() => loadCensusData())
+        .then(() => loadQuadratData())
+        .catch(console.error);
     };
 
     if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
       clearLists().catch(console.error);
     }
-  }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadData]);
+  }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadPlotData, loadCensusData, loadQuadratData]);
 
   useEffect(() => {
     // if contexts are reset due to website refresh, system needs to redirect user back to dashboard
@@ -325,15 +363,16 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
                 justifyContent: 'center'
               }}
             >
-              {siteConfig.name}
+              {/*{siteConfig.name}*/}
+              <AcaciaVersionTypography>{siteConfig.name}</AcaciaVersionTypography>
             </Typography>
-            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>
-              <Tooltip title="Version" variant="solid" placement="top" arrow>
-                <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>
-                  <AcaciaVersionTypography>{siteConfig.version}</AcaciaVersionTypography>
-                </Box>
-              </Tooltip>
-            </Stack>
+            {/*<Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>*/}
+            {/*  <Tooltip title="Version" variant="solid" placement="top" arrow sx={{ pointerEvents: 'none' }}>*/}
+            {/*    <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>*/}
+            {/*      <AcaciaVersionTypography>{siteConfig.version}</AcaciaVersionTypography>*/}
+            {/*    </Box>*/}
+            {/*  </Tooltip>*/}
+            {/*</Stack>*/}
           </Stack>
           <IconButton
             onClick={() => setIsFeedbackModalOpen(true)}

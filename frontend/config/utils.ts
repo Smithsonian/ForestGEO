@@ -71,40 +71,56 @@ export type InitialValue<T> = T extends string
               : undefined;
 
 export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> } {
-  return new Proxy(
-    {},
-    {
-      get: (_target, prop) => {
-        if (typeof prop === 'string' && prop.toLowerCase().includes('id')) {
-          return 0; // Set the id field to 0
-        }
-        const typeMap: { [key: string]: any } = {
-          string: '',
-          number: 0,
-          boolean: false,
-          object: null,
-          bigint: BigInt(0),
-          function: () => {},
-          symbol: Symbol()
-        };
-        const propType = typeof ({} as T)[prop as keyof T];
-        return typeMap[propType as keyof typeof typeMap] ?? null;
+  const typeMap: { [key: string]: any } = {
+    string: '',
+    number: 0,
+    boolean: false,
+    object: null,
+    bigint: BigInt(0),
+    function: () => {},
+    symbol: Symbol()
+  };
+
+  // Create an object where each property of T is initialized based on its type
+  const initializedObject = {} as { [K in keyof T]: InitialValue<T[K]> };
+
+  // Initialize all properties of T in the proxy
+  for (const prop in initializedObject) {
+    const propType = typeof initializedObject[prop as keyof T];
+    initializedObject[prop as keyof T] =
+      prop.toLowerCase().includes('id') && true
+        ? 0 // If the property name includes 'id', set it to 0
+        : (typeMap[propType as keyof typeof typeMap] ?? null); // Otherwise, assign default value based on type
+  }
+
+  return new Proxy(initializedObject, {
+    get: (target, prop) => {
+      if (typeof prop === 'string' && prop.toLowerCase().includes('id')) {
+        return 0; // Set the id field to 0
       }
+      const propType = typeof target[prop as keyof T];
+      return typeMap[propType as keyof typeof typeMap] ?? null;
     }
-  ) as { [K in keyof T]: InitialValue<T[K]> };
+  }) as { [K in keyof T]: InitialValue<T[K]> };
 }
 
 export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>): string {
-  const whereConditions = Object.keys(whereClause)
-    .map(key => `${key} = ?`)
+  const whereKeys = Object.keys(whereClause);
+
+  if (whereKeys.length === 0) {
+    throw new Error('No conditions provided for WHERE clause');
+  }
+
+  const whereConditions = whereKeys
+    .map(key => `\`${key}\` = ?`) // Escaping column names with backticks
     .join(' AND ');
 
-  return `SELECT * FROM ${schema}.${tableName} WHERE ${whereConditions}`;
+  return `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
 }
 
 export function createInsertOrUpdateQuery<Result>(schema: string, tableName: string, data: Partial<Result>): string {
   const columns = Object.keys(data)
-    .map(key => key)
+    .map(key => `\`${key}\``) // Escaping column names with backticks
     .join(', ');
 
   const values = Object.keys(data)
@@ -112,10 +128,10 @@ export function createInsertOrUpdateQuery<Result>(schema: string, tableName: str
     .join(', ');
 
   const updates = Object.keys(data)
-    .map(key => `${key} = VALUES(${key})`)
+    .map(key => `\`${key}\` = VALUES(\`${key}\`)`)
     .join(', ');
 
-  return `INSERT INTO ${schema}.${tableName} (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${updates}`;
+  return `INSERT INTO \`${schema}\`.\`${tableName}\` (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${updates}`;
 }
 
 export async function fetchPrimaryKey<Result>(

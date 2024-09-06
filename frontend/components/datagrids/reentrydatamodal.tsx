@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { DataGrid, GridColDef, GridRenderCellParams, GridRowModel } from '@mui/x-data-grid';
 import moment from 'moment';
-import { unitSelectionOptions } from '@/config/macros';
+import { ColumnStates, unitSelectionOptions } from '@/config/macros';
 import {
   Box,
   Button,
@@ -30,9 +30,10 @@ interface ReEnterDataModalProps {
   handleSave: (selectedRow: GridRowModel) => void;
   columns: GridColDef[];
   selectionOptions?: { value: string | number; label: string }[];
+  hiddenColumns?: ColumnStates;
 }
 
-const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, handleClose, handleSave, columns, selectionOptions }) => {
+const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, handleClose, handleSave, columns, selectionOptions, hiddenColumns }) => {
   const [localData, setLocalData] = useState<GridRowModel>({ ...reEnterData });
   const [selectedRow, setSelectedRow] = useState<GridRowModel | null>(null);
   const [isConfirmStep, setIsConfirmStep] = useState(false);
@@ -101,6 +102,12 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
     return value;
   };
 
+  // Filter the columns based on hiddenColumns
+  const filteredColumns = columns.filter(column => {
+    const isHidden = hiddenColumns ? hiddenColumns[column.field] === false : false;
+    return !isHidden;
+  });
+
   return (
     <Modal open onClose={handleClose}>
       <ModalDialog variant="outlined" role="alertdialog" sx={{ width: 'auto', maxWidth: '90vw', overflow: 'auto' }}>
@@ -108,7 +115,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
         <DialogContent>
           {!isConfirmStep ? (
             <Stack direction={'row'} spacing={2} sx={{ width: '100%' }}>
-              {columns.map(column => {
+              {filteredColumns.map(column => {
                 const { field, type, editable } = column;
                 const value = localData[field];
                 if (!editable) {
@@ -123,7 +130,6 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                   } else {
                     valueOptions = selectionOptions;
                   }
-                  // const valueOptions = selectionOptions ? selectionOptions : field !== 'status' ? unitSelectionOptions : AttributeStatusOptions;
 
                   return (
                     <FormControl key={field}>
@@ -211,7 +217,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                         </Typography>
                       )
                     },
-                    ...columns.map(col => ({
+                    ...filteredColumns.map(col => ({
                       ...col,
                       flex: col.flex || 1,
                       minWidth: col.minWidth || 150,

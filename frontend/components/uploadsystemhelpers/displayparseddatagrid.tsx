@@ -14,7 +14,7 @@ import { validateQuadratsRow, validateSubquadratsRow } from '@/config/sqlrdsdefi
 import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views';
 import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/personnel';
 
-import { validateAttributesRow } from '@/config/sqlrdsdefinitions/core';
+import { AttributeStatusOptions, validateAttributesRow } from '@/config/sqlrdsdefinitions/core';
 
 const validationFunctions: Record<string, ValidationFunction> = {
   attributes: validateAttributesRow,
@@ -95,7 +95,8 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
             (cellError.includes('were auto-filled based on table defaults') ||
               cellError.includes('was auto-calculated based on dimension submission') ||
               cellError === 'Genus was auto-filled based on species field.' ||
-              cellError === 'Species field was split into genus and species.');
+              cellError === 'Species field was split into genus and species.' ||
+              cellError.includes('Attribute status must be one of the following:'));
 
           return (
             <Box
@@ -126,7 +127,12 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                   )}
                 </>
               ) : (
-                <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>
+                <Typography
+                  sx={{
+                    whiteSpace: 'normal',
+                    lineHeight: 'normal'
+                  }}
+                >
                   {displayValue !== undefined && displayValue !== null ? displayValue.toString() : ''}
                 </Typography>
               )}
@@ -199,6 +205,13 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
           if (!homUnits) {
             row['homunit'] = 'm';
             rowErrors['homunit'] = 'HOM units were auto-filled based on table defaults.';
+          }
+        } else if (formType === 'attributes') {
+          rowErrors = rowErrors || {};
+          const [status] = [row['status']];
+          if (status && !AttributeStatusOptions.includes(status)) {
+            row['status'] = null;
+            rowErrors['status'] = 'Attribute status must be one of the following: ' + AttributeStatusOptions.join(', ');
           }
         }
 
