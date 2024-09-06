@@ -155,6 +155,11 @@ export async function getConn() {
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
   try {
+    // If params exist, replace any undefined values with null
+    if (params) {
+      params = params.map(param => (param === undefined ? null : param));
+    }
+
     // Check if the query is for calling a stored procedure
     if (query.trim().startsWith('CALL')) {
       // Use `connection.query` for stored procedures

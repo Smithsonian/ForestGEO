@@ -7,49 +7,45 @@ import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefin
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
   const { connection, rowData, schema, plotID, censusID } = props;
-  if (!plotID || !censusID) throw new Error('Process Census: Missing plotID, censusID, quadratID or full name');
+  if (!plotID || !censusID) {
+    console.error('Missing required parameters: plotID or censusID');
+    throw new Error('Process Census: Missing plotID or censusID');
+  }
 
   const { tag, stemtag, spcode, quadrat, lx, ly, coordinateunit, dbh, dbhunit, hom, homunit, date, codes } = rowData;
 
   try {
     await connection.beginTransaction();
 
+    // Fetch species
     const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connection, 'SpeciesID');
+
+    // Fetch quadrat
     const quadratID = await fetchPrimaryKey<QuadratsResult>(
       schema,
       'quadrats',
-      {
-        QuadratName: quadrat,
-        PlotID: plotID,
-        CensusID: censusID
-      },
+      { QuadratName: quadrat, PlotID: plotID, CensusID: censusID },
       connection,
       'QuadratID'
     );
-    // const subquadratID = subquadrat
-    //   ? await fetchPrimaryKey<SubquadratResult, SubquadratRDS>(schema, 'subquadrats', { SubquadratName: subquadrat }, connection)
-    //   : null;
 
     if (tag) {
+      // Handle Tree Upsert
       const treeID = await handleUpsert<TreeResult>(connection, schema, 'trees', { TreeTag: tag, SpeciesID: speciesID }, 'TreeID');
 
       if (stemtag && lx && ly) {
+        console.log('Processing stem with StemTag:', stemtag);
+        // Handle Stem Upsert
         const stemID = await handleUpsert<StemResult>(
           connection,
           schema,
           'stems',
-          {
-            StemTag: stemtag,
-            TreeID: treeID,
-            QuadratID: quadratID,
-            LocalX: lx,
-            LocalY: ly,
-            CoordinateUnits: coordinateunit
-          },
+          { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit },
           'StemID'
         );
 
         if (dbh && hom && date) {
+          // Handle Core Measurement Upsert
           const coreMeasurementID = await handleUpsert<CoreMeasurementsResult>(
             connection,
             schema,
@@ -67,33 +63,32 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             'CoreMeasurementID'
           );
 
+          // Handle CM Attributes Upsert
           if (codes) {
             const parsedCodes = codes
               .split(';')
               .map(code => code.trim())
               .filter(Boolean);
-            for (const code of parsedCodes) {
-              const attributeRows = await runQuery(connection, `SELECT COUNT(*) as count FROM ${schema}.attributes WHERE Code = ?`, [code]);
-              if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
-                throw createError(`Attribute code ${code} not found or query failed.`, { code });
+            if (parsedCodes.length === 0) {
+              console.error('No valid attribute codes found:', codes);
+            } else {
+              for (const code of parsedCodes) {
+                const attributeRows = await runQuery(connection, `SELECT COUNT(*) as count FROM ${schema}.attributes WHERE Code = ?`, [code]);
+                if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
+                  throw createError(`Attribute code ${code} not found or query failed.`, { code });
+                }
+                await handleUpsert<CMAttributesResult>(connection, schema, 'cmattributes', { CoreMeasurementID: coreMeasurementID, Code: code }, 'CMAID');
               }
-              await handleUpsert<CMAttributesResult>(
-                connection,
-                schema,
-                'cmattributes',
-                {
-                  CoreMeasurementID: coreMeasurementID,
-                  Code: code
-                },
-                'CMAID'
-              );
             }
           }
+
+          // Update Census Start/End Dates
           const combinedQuery = `
             UPDATE ${schema}.census c
             JOIN (
               SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
               FROM ${schema}.coremeasurements
+              WHERE CensusID = ${censusID} 
               GROUP BY CensusID
             ) m ON c.CensusID = m.CensusID
             SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate

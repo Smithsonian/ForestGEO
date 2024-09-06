@@ -11,9 +11,13 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import { AttributeGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 
-import { initialAttributesRDSRow } from '@/config/sqlrdsdefinitions/core';
-
 export default function AttributesDataGrid() {
+  const initialAttributesRDSRow = {
+    id: 0,
+    code: '',
+    description: '',
+    status: ''
+  };
   const [rows, setRows] = useState([initialAttributesRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});

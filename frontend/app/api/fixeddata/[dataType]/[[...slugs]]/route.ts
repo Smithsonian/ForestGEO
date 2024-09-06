@@ -349,7 +349,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       const { [viewConfig.primaryKey]: primaryKeyValue } = deleteRowData;
       if (!primaryKeyValue) throw new Error(`Primary key value missing for ${viewConfig.primaryKey} in view ${params.dataType}`);
 
-      const deleteQuery = `DELETE FROM ${schema}.${viewConfig.table} WHERE ${viewConfig.primaryKey} = ${primaryKeyValue}`;
+      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, viewConfig.primaryKey, primaryKeyValue]);
       await runQuery(conn, deleteQuery);
       await conn.commit();
       return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
@@ -357,7 +357,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
-    const deleteQuery = `DELETE FROM ${schema}.${params.dataType} WHERE ${demappedGridID} = ${gridIDKey}`;
+    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);
     await conn.commit();
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });

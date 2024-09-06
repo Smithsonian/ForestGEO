@@ -40,6 +40,14 @@ const theme = extendTheme({
           })
         })
       }
+    },
+    JoyTooltip: {
+      defaultProps: {
+        // Automatically apply this prop globally
+        sx: {
+          pointerEvents: 'none'
+        }
+      }
     }
   }
 });

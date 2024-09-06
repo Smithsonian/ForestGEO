@@ -123,7 +123,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
   useEffect(() => {
     if (open) {
-      validatePreviousCensusData();
+      validatePreviousCensusData().catch(console.error);
     }
   }, [open]);
 
@@ -139,7 +139,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
       if (foundCensus) {
         const plotCensusNumber = foundCensus.plotCensusNumber;
-        fetchPreviousQuadratsData(plotCensusNumber);
+        fetchPreviousQuadratsData(plotCensusNumber).catch(console.error);
       }
     }
   }, [selectedQuadratsCensus, censusListContext]);
@@ -149,7 +149,7 @@ export default function RolloverModal(props: RolloverModalProps) {
       const foundCensus = censusListContext?.find(census => census?.dateRanges.some(dateRange => dateRange.censusID === selectedPersonnelCensus.censusID));
       if (foundCensus) {
         const plotCensusNumber = foundCensus.plotCensusNumber;
-        fetchPreviousPersonnelData(plotCensusNumber);
+        fetchPreviousPersonnelData(plotCensusNumber).catch(console.error);
       }
     }
   }, [selectedPersonnelCensus, censusListContext]);

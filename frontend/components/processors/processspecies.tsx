@@ -6,7 +6,7 @@ function cleanInputData(data: any) {
   const cleanedData: any = {};
   for (const key in data) {
     if (data.hasOwnProperty(key)) {
-      cleanedData[key] = data[key] !== undefined ? data[key] : null;
+      cleanedData[key] = data[key] !== undefined && data[key] !== '' ? data[key] : null;
     }
   }
   return cleanedData;
@@ -22,13 +22,23 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
     // Handle Family insertion/updation
     let familyID: number | undefined;
     if (rowData.family) {
-      familyID = await handleUpsert<FamilyResult>(connection, schema, 'family', { Family: rowData.family }, 'FamilyID');
+      try {
+        familyID = await handleUpsert<FamilyResult>(connection, schema, 'family', { Family: rowData.family }, 'FamilyID');
+      } catch (error: any) {
+        console.error('Family upsert failed:', error.message);
+        throw createError('Family upsert failed', { error });
+      }
     }
 
     // Handle Genus insertion/updation
     let genusID: number | undefined;
     if (rowData.genus) {
-      genusID = await handleUpsert<GenusResult>(connection, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID');
+      try {
+        genusID = await handleUpsert<GenusResult>(connection, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID');
+      } catch (error: any) {
+        console.error('Genus upsert failed:', error.message);
+        throw createError('Genus upsert failed', { error });
+      }
     }
 
     // Handle Species insertion/updation
@@ -45,7 +55,14 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);
-      speciesID = await handleUpsert<SpeciesResult>(connection, schema, 'species', cleanedSpeciesData, 'SpeciesID');
+      console.log('Cleaned species data: ', cleanedSpeciesData);
+
+      try {
+        speciesID = await handleUpsert<SpeciesResult>(connection, schema, 'species', cleanedSpeciesData, 'SpeciesID');
+      } catch (error: any) {
+        console.error('Species upsert failed:', error.message);
+        throw createError('Species upsert failed', { error });
+      }
     }
 
     await connection.commit();
