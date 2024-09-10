@@ -12,9 +12,16 @@ import { GridSelections } from '@/config/macros';
 import { useRouter } from 'next/navigation';
 
 import DataGridCommons from '../datagridcommons';
-import { initialQuadratPersonnelRDSRow } from '@/config/sqlrdsdefinitions/personnel';
+import { QuadratPersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 
 export default function QuadratPersonnelDataGrid() {
+  const initialQuadratPersonnelRDSRow: QuadratPersonnelRDS = {
+    id: 0,
+    quadratPersonnelID: 0,
+    quadratID: 0,
+    personnelID: 0,
+    censusID: 0
+  };
   const [rows, setRows] = useState([initialQuadratPersonnelRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});

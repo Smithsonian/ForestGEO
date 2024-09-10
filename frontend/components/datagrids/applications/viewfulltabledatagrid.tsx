@@ -9,10 +9,85 @@ import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
-import { initialViewFullTableViewRDS } from '@/config/sqlrdsdefinitions/views';
+import { ViewFullTableViewRDS } from '@/config/sqlrdsdefinitions/views';
 
 export default function ViewFullTableDataGrid() {
-  const [rows, setRows] = useState<GridRowsProp>([initialViewFullTableViewRDS] as GridRowsProp);
+  const initialViewFullTableViewRDSRow: ViewFullTableViewRDS = {
+    id: 0,
+    coreMeasurementID: 0,
+    plotID: 0,
+    PlotDimensionUnits: '',
+    attributeCode: '',
+    attributeDescription: '',
+    attributeStatus: '',
+    censusDescription: '',
+    censusEndDate: undefined,
+    censusID: 0,
+    censusStartDate: undefined,
+    countryName: '',
+    dbhUnits: '',
+    description: '',
+    dimensionX: 0,
+    dimensionY: 0,
+    family: '',
+    familyID: 0,
+    firstName: '',
+    genus: '',
+    genusAuthority: '',
+    genusID: 0,
+    homUnits: '',
+    idLevel: '',
+    isValidated: false,
+    lastName: '',
+    locationName: '',
+    measuredDBH: 0,
+    measuredHOM: 0,
+    measurementDate: undefined,
+    personnelID: 0,
+    personnelRoles: '',
+    plotArea: 0,
+    plotAreaUnits: '',
+    plotCensusNumber: 0,
+    plotCoordinateUnits: '',
+    plotDescription: '',
+    plotGlobalX: 0,
+    plotGlobalY: 0,
+    plotGlobalZ: 0,
+    plotName: '',
+    plotShape: '',
+    quadratArea: 0,
+    quadratAreaUnits: '',
+    quadratCoordinateUnits: '',
+    quadratDimensionUnits: '',
+    quadratDimensionX: 0,
+    quadratDimensionY: 0,
+    quadratID: 0,
+    quadratName: '',
+    quadratShape: '',
+    quadratStartX: 0,
+    quadratStartY: 0,
+    speciesCode: '',
+    speciesID: 0,
+    speciesName: '',
+    stemCoordinateUnits: '',
+    stemID: 0,
+    stemLocalX: 0,
+    stemLocalY: 0,
+    stemTag: '',
+    subquadratCoordinateUnits: '',
+    subquadratDimensionUnits: '',
+    subquadratDimensionX: 0,
+    subquadratDimensionY: 0,
+    subquadratID: 0,
+    subquadratName: '',
+    subquadratX: 0,
+    subquadratY: 0,
+    subspeciesAuthority: '',
+    subspeciesName: '',
+    treeID: 0,
+    treeTag: ''
+  };
+  const [rows, setRows] = useState<GridRowsProp>([initialViewFullTableViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
@@ -28,7 +103,7 @@ export default function ViewFullTableDataGrid() {
   const addNewRowToGrid = () => {
     const id = randomId();
     const newRow = {
-      ...initialViewFullTableViewRDS,
+      ...initialViewFullTableViewRDSRow,
       id,
       isNew: true
     };

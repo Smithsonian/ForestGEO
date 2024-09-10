@@ -4,7 +4,6 @@ import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
 import { Box, LinearProgress } from '@mui/joy';
 import React, { useEffect, useState } from 'react';
-import CircularProgress from '@mui/joy/CircularProgress';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -12,7 +11,6 @@ import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeepin
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const { uploadForm, handleCloseUploadModal } = props;
-  const [countdown, setCountdown] = useState(5);
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
 
@@ -81,29 +79,15 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     const runAsyncTasks = async () => {
       try {
         triggerRefresh();
-        await loadCensusData();
-        await loadPlotsData();
-        await loadQuadratsData();
+        await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
       } catch (error) {
         console.error(error);
       } finally {
-        setCountdown(5); // Start the countdown after all async tasks complete
+        handleCloseUploadModal();
       }
     };
     runAsyncTasks().catch(console.error);
   }, [triggerRefresh]);
-
-  // Effect for handling countdown and state transition
-  useEffect(() => {
-    let timer: number;
-
-    if (countdown > 0) {
-      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
-    } else if (countdown === 0) {
-      handleCloseUploadModal();
-    }
-    return () => clearTimeout(timer);
-  }, [countdown, handleCloseUploadModal]);
 
   return (
     <Box
@@ -123,19 +107,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       <Typography>{progressText.plots}</Typography>
       <LinearProgress determinate value={progress.quadrats} sx={{ width: '80%', margin: '1rem 0' }} />
       <Typography>{progressText.quadrats}</Typography>
-
-      {countdown > 0 && (
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <CircularProgress />
-          <Typography>{countdown} seconds remaining</Typography>
-        </Box>
-      )}
     </Box>
   );
 }

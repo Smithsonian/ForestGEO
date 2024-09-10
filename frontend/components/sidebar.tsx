@@ -155,7 +155,6 @@ export default function Sidebar(props: SidebarProps) {
 
   const { siteListLoaded, setCensusListLoaded } = props;
 
-  const { triggerRefresh } = useDataValidityContext();
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -356,8 +355,6 @@ export default function Sidebar(props: SidebarProps) {
 
     const selectedValue = option.value;
     const selectedCensus = censusListContext?.find(c => c?.plotCensusNumber?.toString() === selectedValue);
-    // return selectedCensus ? <Typography>{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography> :
-    //   <Typography>No Census</Typography>;
     return (
       <>
         {selectedCensus ? (
@@ -758,6 +755,7 @@ export default function Sidebar(props: SidebarProps) {
 
                     const getDisabledState = (href: string) => {
                       switch (href) {
+                        case '/measurementshub':
                         case '/summary':
                           return !isAllValiditiesTrue;
                         case '/subquadrats':
@@ -871,7 +869,6 @@ export default function Sidebar(props: SidebarProps) {
                             >
                               <List size={'md'}>
                                 {item.expanded.map((link, subIndex) => {
-                                  if (link.href === '/subquadrats' && !currentPlot?.usesSubquadrats) return null;
                                   const SubIcon = link.icon;
                                   const delay = (subIndex + 1) * 200;
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
@@ -880,12 +877,6 @@ export default function Sidebar(props: SidebarProps) {
 
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} style={{ transitionDelay: `${delay}ms` }} direction="down">
-                                      {/* <ListItem
-                                        className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : ''}`}
-                                        onMouseEnter={() => setHoveredIndex(index)}
-                                        onMouseLeave={() => setHoveredIndex(null)}
-                                        sx={{ marginTop: 0.75 }}
-                                      > */}
                                       <ListItem>
                                         {site !== undefined && plot !== undefined && census !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>

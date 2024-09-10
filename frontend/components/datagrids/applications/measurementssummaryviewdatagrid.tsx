@@ -10,7 +10,35 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
-import { initialMeasurementsSummaryViewRDSRow } from '@/config/sqlrdsdefinitions/views';
+import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
+
+const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
+  id: 0,
+  coreMeasurementID: 0,
+  censusID: 0,
+  quadratID: 0,
+  plotID: 0,
+  treeID: 0,
+  stemID: 0,
+  speciesID: 0,
+  quadratName: '',
+  speciesName: '',
+  subspeciesName: '',
+  speciesCode: '',
+  treeTag: '',
+  stemTag: '',
+  stemLocalX: 0,
+  stemLocalY: 0,
+  stemUnits: '',
+  measurementDate: null,
+  measuredDBH: 0,
+  dbhUnits: '',
+  measuredHOM: 0,
+  homUnits: '',
+  isValidated: false,
+  description: '',
+  attributes: ''
+};
 
 export default function MeasurementsSummaryViewDataGrid() {
   const currentPlot = usePlotContext();

@@ -4,10 +4,14 @@ import { Box, Card, CardContent, Typography } from '@mui/joy';
 import React, { useEffect, useState } from 'react';
 import ValidationCard from '@/components/validationcard';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function ValidationsPage() {
   const [globalValidations, setGlobalValidations] = React.useState<ValidationProceduresRDS[]>([]);
   const [loading, setLoading] = useState<boolean>(true); // Use a loading state instead of refresh
+  const [schemaDetails, setSchemaDetails] = useState<{ table_name: string; column_name: string }[]>([]);
+
+  const currentSite = useSiteContext();
 
   const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
     try {
@@ -62,6 +66,25 @@ export default function ValidationsPage() {
     fetchValidations().catch(console.error); // Initial load
   }, []);
 
+  // Fetch schema details when component mounts
+  useEffect(() => {
+    const fetchSchema = async () => {
+      try {
+        const response = await fetch(`/api/structure/${currentSite?.schemaName ?? ''}`);
+        const data = await response.json();
+        if (data.schema) {
+          setSchemaDetails(data.schema);
+        }
+      } catch (error) {
+        console.error('Error fetching schema:', error);
+      }
+    };
+
+    if (currentSite?.schemaName) {
+      fetchSchema();
+    }
+  }, [currentSite?.schemaName]);
+
   return (
     <Box sx={{ width: '100%' }}>
       <Card variant={'plain'} sx={{ width: '100%' }}>
@@ -70,7 +93,13 @@ export default function ValidationsPage() {
             Review Global Validations
           </Typography>
           {globalValidations.map(validation => (
-            <ValidationCard onDelete={handleDelete} onSaveChanges={handleSaveChanges} validation={validation} key={validation.validationID} />
+            <ValidationCard
+              onDelete={handleDelete}
+              onSaveChanges={handleSaveChanges}
+              validation={validation}
+              key={validation.validationID}
+              schemaDetails={schemaDetails}
+            />
           ))}
         </CardContent>
       </Card>

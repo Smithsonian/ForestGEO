@@ -30,7 +30,6 @@ export type SpeciesLimitsRDS = {
   unit?: string;
 };
 export type SpeciesLimitsResult = ResultType<SpeciesLimitsRDS>;
-export const initialSpeciesLimitsRDSRow = createInitialObject<SpeciesLimitsRDS>();
 
 export function getSpeciesLimitsHCs(): ColumnStates {
   return {

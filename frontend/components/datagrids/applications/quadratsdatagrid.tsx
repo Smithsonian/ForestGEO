@@ -12,9 +12,25 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import Link from 'next/link';
 import { quadratGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
-import { initialQuadratRDSRow } from '@/config/sqlrdsdefinitions/zones';
+import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 
 export default function QuadratsDataGrid() {
+  const initialQuadratRDSRow: QuadratRDS = {
+    id: 0,
+    quadratID: 0,
+    plotID: 0,
+    censusID: 0,
+    quadratName: '',
+    startX: 0,
+    startY: 0,
+    coordinateunit: '',
+    dimensionX: 0,
+    dimensionY: 0,
+    dimensionunit: '',
+    area: 0,
+    areaunit: '',
+    quadratShape: ''
+  };
   const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});

@@ -85,10 +85,11 @@ export interface DropzoneProps {
 
 export function bitToBoolean(bitField: any): boolean {
   if (Buffer.isBuffer(bitField)) {
-    // If the BIT field is a Buffer, use the first byte for conversion
-    return bitField[0] === 1;
+    // Ensure non-zero bytes are considered `true`
+    return bitField[0] !== 0;
+  } else if (bitField instanceof Uint8Array) {
+    return bitField[0] !== 0;
   } else {
-    // If it's not a Buffer, it might be a number or boolean
     return Boolean(bitField);
   }
 }

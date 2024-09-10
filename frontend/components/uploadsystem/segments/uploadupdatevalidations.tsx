@@ -8,7 +8,6 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   const { setReviewState, schema } = props;
 
   const [isUpdateValidationComplete, setIsUpdateValidationComplete] = useState(false);
-  const [countdown, setCountdown] = useState(5);
   const [ellipsis, setEllipsis] = useState('');
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -28,25 +27,13 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   }, []);
 
   useEffect(() => {
-    let timer: number;
-
-    if (isUpdateValidationComplete && countdown > 0) {
-      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000);
-    } else if (countdown === 0) {
-      setReviewState(ReviewStates.UPLOAD_AZURE);
-    }
-
-    return () => clearTimeout(timer);
-  }, [countdown, isUpdateValidationComplete, setReviewState]);
-
-  useEffect(() => {
     if (!isUpdateValidationComplete) {
       const ellipsisTimer = setInterval(() => {
         setEllipsis(prev => (prev.length < 4 ? prev + '.' : ''));
       }, 500);
 
       return () => clearInterval(ellipsisTimer);
-    }
+    } else setReviewState(ReviewStates.UPLOAD_AZURE);
   }, [isUpdateValidationComplete]);
 
   return (
@@ -74,7 +61,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
           }}
         >
           <Typography variant="h6">Complete!</Typography>
-          <Typography variant={'body1'}>Continuing to Azure upload in {countdown} seconds.</Typography>
+          <Typography variant={'body1'}>Continuing to Azure upload.</Typography>
         </Box>
       )}
     </Box>

@@ -166,6 +166,7 @@ export default function UploadParent(props: UploadParentProps) {
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     const fileToReplace = acceptedFiles[fileIndex];
+    console.log('filetoreplace: ', fileToReplace);
     setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), newFile, ...prevFiles.slice(fileIndex + 1)]);
 
     await parseFile(newFile);
@@ -173,7 +174,9 @@ export default function UploadParent(props: UploadParentProps) {
     // Update headers after replacement
     setAllFileHeaders(prevHeaders => {
       const updatedHeaders = { ...prevHeaders };
+      console.log('updated headers: ', updatedHeaders);
       delete updatedHeaders[fileToReplace.name];
+      console.log('post-deletion updated headers: ', updatedHeaders);
       return updatedHeaders;
     });
   };

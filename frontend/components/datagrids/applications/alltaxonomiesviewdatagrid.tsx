@@ -9,13 +9,30 @@ import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
-import { initialAllTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views';
+import { AllTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
 import { formatHeader } from '@/components/client/datagridcolumns';
 import { SpeciesLimitsRDS, SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import SpeciesLimitsDataGrid from '@/components/datagrids/applications/specieslimitsdatagrid';
 
 export default function AllTaxonomiesViewDataGrid() {
+  const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
+    id: 0,
+    familyID: 0,
+    genusID: 0,
+    speciesID: 0,
+    family: '',
+    genus: '',
+    genusAuthority: '',
+    speciesCode: '',
+    speciesName: '',
+    subspeciesName: '',
+    speciesIDLevel: '',
+    speciesAuthority: '',
+    subspeciesAuthority: '',
+    fieldFamily: '',
+    speciesDescription: ''
+  };
   const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});

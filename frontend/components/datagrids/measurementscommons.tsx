@@ -457,6 +457,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         const response = await fetch(paginatedQuery, { method: 'GET' });
         if (!response.ok) throw new Error(response.statusText || 'Error fetching data');
         const data = await response.json();
+        console.log('data: ', data);
         setRows(data.output);
         setRowCount(data.totalCount);
 
@@ -630,6 +631,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         : {};
 
       // Only update state if there is a difference
+      console.log('existing valerrors: ', validationErrors);
+      console.log('new valerrors: ', errorMap);
       if (JSON.stringify(validationErrors) !== JSON.stringify(errorMap)) {
         setValidationErrors(errorMap);
       }
@@ -637,7 +640,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     } catch (error) {
       console.error('Error fetching validation errors:', error);
     }
-  }, [currentSite?.schemaName, validationErrors]);
+  }, [currentSite?.schemaName, fetchPaginatedData]);
 
   const fetchFullData = async () => {
     setLoading(true, 'Fetching full dataset...');
@@ -680,9 +683,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     align: 'center',
     width: 50,
     renderCell: (params: GridCellParams) => {
-      const rowId = params.row.coreMeasurementID;
+      const rowId = params.row.coremeasurementID;
       const validationError = validationErrors[Number(rowId)];
-      const isPendingValidation = !params.row.isValidated && !validationError;
+      const isPendingValidation = rows.find(row => row.coreMeasurementID === rowId)?.isValidated && !validationError;
       const isValidated = params.row.isValidated;
 
       if (validationError) {

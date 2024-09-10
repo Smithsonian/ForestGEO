@@ -1,20 +1,26 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Box, Button, Card, Modal, Stack, Switch, Textarea, Typography } from '@mui/joy';
+import React, { useEffect, useState } from 'react';
+import { Box, Button, Card, Modal, Stack, Switch, Typography } from '@mui/joy';
+import dynamic from 'next/dynamic';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
+
+// Dynamically import Monaco Editor and avoid SSR issues
+const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 type ValidationCardProps = {
   validation: ValidationProceduresRDS;
   onSaveChanges: (validation: ValidationProceduresRDS) => Promise<void>;
   onDelete: (validationID?: number) => Promise<void>;
+  schemaDetails: { table_name: string; column_name: string }[];
 };
 
-const ValidationCard: React.FC<ValidationCardProps> = ({ validation, onSaveChanges, onDelete }) => {
+const ValidationCard: React.FC<ValidationCardProps> = ({ validation, onSaveChanges, onDelete, schemaDetails }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [scriptContent, setScriptContent] = useState(validation.definition);
 
-  const handleCardClick = async () => {
+  const handleCardClick = () => {
     setIsFlipped(true);
     setIsModalOpen(true);
   };
@@ -25,9 +31,50 @@ const ValidationCard: React.FC<ValidationCardProps> = ({ validation, onSaveChang
   };
 
   const handleSaveChanges = async () => {
-    await onSaveChanges(validation);
+    const updatedValidation = { ...validation, definition: scriptContent };
+    await onSaveChanges(updatedValidation);
     await handleCloseModal();
   };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && schemaDetails.length > 0) {
+      // Dynamically import the monaco-editor instance and use its types
+      import('monaco-editor').then(monaco => {
+        monaco.languages.registerCompletionItemProvider('mysql', {
+          provideCompletionItems: (model, position) => {
+            const suggestions: any[] = [];
+            const word = model.getWordUntilPosition(position);
+            const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+
+            // Add table names to the suggestions
+            const tables = Array.from(new Set(schemaDetails.map(row => row.table_name)));
+            tables.forEach(table => {
+              suggestions.push({
+                label: table,
+                kind: monaco.languages.CompletionItemKind.Function,
+                insertText: table,
+                detail: 'Table',
+                range
+              });
+            });
+
+            // Add column names to the suggestions, grouped by table
+            schemaDetails.forEach(({ table_name, column_name }) => {
+              suggestions.push({
+                label: `${table_name}.${column_name}`,
+                kind: monaco.languages.CompletionItemKind.Property,
+                insertText: `${table_name}.${column_name}`,
+                detail: `Column from ${table_name}`,
+                range
+              });
+            });
+
+            return { suggestions };
+          }
+        });
+      });
+    }
+  }, [schemaDetails]);
 
   return (
     <Box sx={{ position: 'relative', width: 300, minHeight: 200 }}>
@@ -95,17 +142,31 @@ const ValidationCard: React.FC<ValidationCardProps> = ({ validation, onSaveChang
           justifyContent: 'center'
         }}
       >
-        <Card variant="outlined" sx={{ width: 400, padding: 4 }}>
-          <Textarea
-            minRows={6}
-            value={validation.definition}
-            onChange={async e => {
-              const updatedValidation = { ...validation, definition: e.target.value };
-              await onSaveChanges(updatedValidation); // Pass the updated object to the parent
+        <Card
+          variant="outlined"
+          sx={{
+            display: 'flex',
+            flex: 1,
+            maxWidth: '50vw',
+            padding: 4,
+            maxHeight: '80vh', // Limit the modal height
+            overflowY: 'auto' // Enable scrolling for the entire modal
+          }}
+        >
+          <Editor
+            height="60vh"
+            language="mysql" // Use default MySQL language for syntax highlighting
+            value={scriptContent} // script content from state
+            onChange={value => setScriptContent(value || '')}
+            theme="vs-dark" // optional theme
+            options={{
+              minimap: { enabled: false }, // Disable minimap
+              scrollBeyondLastLine: false,
+              wordWrap: 'on'
             }}
-            sx={{ marginBottom: 2 }}
           />
-          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
             <Button variant="solid" onClick={handleSaveChanges}>
               Save Changes
             </Button>

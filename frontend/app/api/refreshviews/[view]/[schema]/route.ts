@@ -7,16 +7,9 @@ export async function POST(_request: NextRequest, { params }: { params: { view: 
   if (!params.schema || params.schema === 'undefined' || !params.view || params.view === 'undefined' || !params) throw new Error('schema not provided');
   const { view, schema } = params;
   let connection: PoolConnection | null = null;
-
-  // subfunction to convert lowercased view names to internally capitalized ones ==> measurementssummary becomes MeasurementsSummary
-  const formattedView = view
-    .split(/(?=[A-Z])|[^a-zA-Z0-9]+/) // Split by non-alphanumeric characters or before capital letters
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()) // Capitalize each word
-    .join(''); // Join them back without spaces
-
   try {
     connection = await getConn();
-    const query = `CALL ${schema}.Refresh${formattedView}();`;
+    const query = `CALL ${schema}.Refresh${view === 'viewfulltable' ? 'ViewFullTable' : view === 'measurementssummary' ? 'MeasurementsSummary' : ''}();`;
     await runQuery(connection, query);
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {

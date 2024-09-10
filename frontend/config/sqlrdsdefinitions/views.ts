@@ -1,16 +1,15 @@
 import { ColumnStates } from '@/config/macros';
-import { createInitialObject, ResultType } from '@/config/utils';
+import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
-export const initialAllTaxonomiesViewRDSRow = createInitialObject<AllTaxonomiesViewRDS>();
 export type AllTaxonomiesViewRDS = {
   id?: number;
   familyID?: number;
-  family?: string;
   genusID?: number;
+  speciesID?: number;
+  family?: string;
   genus?: string;
   genusAuthority?: string;
-  speciesID?: number;
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
@@ -41,7 +40,6 @@ export const validateMeasurementsRow: ValidationFunction = row => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
-export const initialMeasurementsSummaryViewRDSRow = createInitialObject<MeasurementsSummaryRDS>();
 export type MeasurementsSummaryRDS = {
   id?: number;
   coreMeasurementID?: number;
@@ -85,7 +83,6 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
   };
 }
 
-export const initialStemTaxonomiesViewRDSRow = createInitialObject<StemTaxonomiesViewRDS>();
 export type StemTaxonomiesViewRDS = {
   id?: number;
   stemID?: number;
@@ -225,7 +222,6 @@ export type ViewFullTableViewRDS = {
   attributeStatus?: string;
 };
 export type ViewFullTableViewResult = ResultType<ViewFullTableViewRDS>;
-export const initialViewFullTableViewRDS: ViewFullTableViewRDS = createInitialObject<ViewFullTableViewRDS>();
 
 export function getAllViewFullTableViewsHCs(): ColumnStates {
   return {

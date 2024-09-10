@@ -191,17 +191,50 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [currentSite, currentPlot, currentCensus, loadPlotData, loadCensusData, loadQuadratData]);
 
+  // Fetch site list when siteListLoaded is false
+  useEffect(() => {
+    if (!siteListLoaded) {
+      fetchSiteList().catch(console.error);
+    }
+  }, [siteListLoaded, fetchSiteList]);
+
+  // Fetch plot data when plotListLoaded is false and currentSite is defined
+  useEffect(() => {
+    if (currentSite && !plotListLoaded) {
+      loadPlotData().catch(console.error);
+    }
+  }, [plotListLoaded, currentSite, loadPlotData]);
+
+  // Fetch census data when censusListLoaded is false and currentSite and currentPlot are defined
+  useEffect(() => {
+    if (currentSite && currentPlot && !censusListLoaded) {
+      loadCensusData().catch(console.error);
+    }
+  }, [censusListLoaded, currentSite, currentPlot, loadCensusData]);
+
+  // Fetch quadrat data when quadratListLoaded is false and currentSite, currentPlot, and currentCensus are defined
+  useEffect(() => {
+    if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
+      loadQuadratData().catch(console.error);
+    }
+  }, [quadratListLoaded, currentSite, currentPlot, currentCensus, loadQuadratData]);
+
+  // Manual reset logic
   useEffect(() => {
     if (manualReset) {
       setLoading(true, 'Manual refresh beginning...');
+
+      // Set all loaded states to false to trigger the re-fetching
       setSiteListLoaded(false);
       setPlotListLoaded(false);
       setCensusListLoaded(false);
       setQuadratListLoaded(false);
+
       setManualReset(false);
     }
   }, [manualReset]);
 
+  // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {
     if (session && !siteListLoaded) {
       fetchSiteList().catch(console.error);
@@ -245,11 +278,13 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
       await Promise.all(promises);
 
-      // After clearing, load the new data
-      loadPlotData()
-        .then(() => loadCensusData())
-        .then(() => loadQuadratData())
-        .catch(console.error);
+      // Add a short delay to ensure UI reflects clearing lists before loading new data
+      setTimeout(() => {
+        loadPlotData()
+          .then(() => loadCensusData())
+          .then(() => loadQuadratData())
+          .catch(console.error);
+      }, 300); // 300ms delay for UI reset
     };
 
     if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {

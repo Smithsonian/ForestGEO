@@ -1,5 +1,5 @@
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { createInitialObject, ResultType } from '@/config/utils';
+import { ResultType } from '@/config/utils';
 import { ColumnStates } from '@/config/macros';
 
 export type PersonnelRDS = {
@@ -11,7 +11,6 @@ export type PersonnelRDS = {
   roleID?: number;
 };
 export type PersonnelResult = ResultType<PersonnelRDS>;
-export const initialPersonnelRDSRow = createInitialObject<PersonnelRDS>();
 // personnel table column character limits
 const PERSONNEL_FIRSTNAME_LIMIT = 50;
 const PERSONNEL_LASTNAME_LIMIT = 50;
@@ -47,9 +46,7 @@ export interface QuadratPersonnelRDS {
   censusID?: number;
 }
 
-export const initialQuadratPersonnelRDSRow = createInitialObject<QuadratPersonnelRDS>();
 export type QuadratPersonnelResult = ResultType<QuadratPersonnelRDS>;
-export const quadratPersonnelFields = ['quadratPersonnelID', 'quadratID', 'personnelID', 'censusID'];
 export type RoleRDS = {
   id?: number;
   roleID?: number;
@@ -57,4 +54,3 @@ export type RoleRDS = {
   roleDescription?: string;
 };
 export type RoleResult = ResultType<RoleRDS>;
-export const initialRoleRDSRow = createInitialObject<RoleRDS>();

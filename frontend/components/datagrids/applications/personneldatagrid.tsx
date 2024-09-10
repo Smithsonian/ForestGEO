@@ -14,9 +14,17 @@ import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import CloseIcon from '@mui/icons-material/Close';
 import RolesDataGrid from '@/components/datagrids/applications/rolesdatagrid';
-import { initialPersonnelRDSRow, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
+import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 
 export default function PersonnelDataGrid() {
+  const initialPersonnelRDSRow: PersonnelRDS = {
+    id: 0,
+    personnelID: 0,
+    censusID: 0,
+    firstName: '',
+    lastName: '',
+    roleID: 0
+  };
   const [rows, setRows] = React.useState([initialPersonnelRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0); // total number of rows
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
@@ -41,7 +49,7 @@ export default function PersonnelDataGrid() {
     }
 
     fetchRoles().catch(console.error);
-  }, []);
+  }, [refresh]);
 
   const roleIDColumn: GridColDef = {
     field: 'roleID',
