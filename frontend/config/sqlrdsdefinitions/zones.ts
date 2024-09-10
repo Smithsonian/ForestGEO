@@ -1,5 +1,5 @@
 import { IDataMapper } from '@/config/datamapper';
-import { createInitialObject, ResultType } from '@/config/utils';
+import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { ColumnStates } from '@/config/macros';
 
@@ -89,7 +89,6 @@ export type QuadratRDS = {
   quadratShape?: string;
 };
 export type QuadratsResult = ResultType<QuadratRDS>;
-export const initialQuadratRDSRow = createInitialObject<QuadratRDS>();
 export type Quadrat = QuadratRDS | undefined;
 export const validateQuadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};

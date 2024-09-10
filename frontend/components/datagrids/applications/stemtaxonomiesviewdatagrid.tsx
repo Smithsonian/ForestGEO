@@ -11,9 +11,31 @@ import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmoda
 import { useOrgCensusContext } from '@/app/contexts/userselectionprovider';
 import { StemTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
-import { initialStemTaxonomiesViewRDSRow } from '@/config/sqlrdsdefinitions/views';
+import { StemTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
 
 export default function StemTaxonomiesViewDataGrid() {
+  const initialStemTaxonomiesViewRDSRow: StemTaxonomiesViewRDS = {
+    id: 0,
+    stemID: 0,
+    treeID: 0,
+    speciesID: 0,
+    genusID: 0,
+    familyID: 0,
+    quadratID: 0,
+    stemTag: '',
+    treeTag: '',
+    speciesCode: '',
+    family: '',
+    genus: '',
+    speciesName: '',
+    subspeciesName: '',
+    validCode: '',
+    genusAuthority: '',
+    speciesAuthority: '',
+    subspeciesAuthority: '',
+    speciesIDLevel: '',
+    speciesFieldFamily: ''
+  };
   const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});

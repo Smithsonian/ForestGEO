@@ -18,7 +18,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
   const [errorsFound, setErrorsFound] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
-  const [countdown, setCountdown] = useState(5);
   const [isUpdatingRows, setIsUpdatingRows] = useState<boolean>(false); // New state for row update status
   const [rowsPassed, setRowsPassed] = useState<CoreMeasurementsRDS[]>([]);
 
@@ -141,16 +140,8 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
   };
 
   useEffect(() => {
-    let timer: number;
-
-    if (isValidationComplete && countdown > 0) {
-      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
-    } else if (countdown === 0) {
-      setReviewState(ReviewStates.UPDATE);
-    }
-
-    return () => clearTimeout(timer);
-  }, [countdown, isValidationComplete]);
+    if (isValidationComplete) setReviewState(ReviewStates.UPDATE);
+  }, [isValidationComplete]);
 
   return (
     <>
@@ -197,16 +188,6 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
                 justifyContent: 'center'
               }}
             >
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <CircularProgress />
-                <Typography>{countdown} seconds remaining</Typography>
-              </Box>
               <Typography variant="h6">Validation Results</Typography>
               {apiErrors.length > 0 && (
                 <Box sx={{ mb: 2 }}>

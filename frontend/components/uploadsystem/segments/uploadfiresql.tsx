@@ -6,7 +6,6 @@ import { FileCollectionRowSet, FileRow } from '@/config/macros/formdetails';
 import { Stack } from '@mui/joy';
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
-import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 
 interface IDToRow {
@@ -36,8 +35,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState<string>('');
   const hasUploaded = useRef(false);
-  const [countdown, setCountdown] = useState(5);
-  const [startCountdown, setStartCountdown] = useState(false);
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
@@ -152,21 +149,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [parsedData, uploadToSql]);
 
   useEffect(() => {
-    let timer: number;
-
-    if (startCountdown && countdown > 0) {
-      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
-    } else if (countdown === 0) {
+    if (!loading && completedOperations === totalOperations) {
       if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
       else setReviewState(ReviewStates.UPLOAD_AZURE);
-    }
-
-    return () => clearTimeout(timer);
-  }, [startCountdown, countdown, uploadForm, setReviewState]);
-
-  useEffect(() => {
-    if (!loading && completedOperations === totalOperations) {
-      setStartCountdown(true);
     }
   }, [loading, completedOperations, totalOperations]);
 
@@ -205,20 +190,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             <Typography variant="h5" gutterBottom>
               Upload Complete
             </Typography>
-            {startCountdown && (
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexDirection: 'column'
-                }}
-              >
-                <CircularProgress />
-                <Typography>{countdown} seconds remaining</Typography>
-                <Typography>{uploadCompleteMessage}</Typography>
-              </Box>
-            )}
           </Stack>
         </Box>
       )}

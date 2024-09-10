@@ -46,7 +46,7 @@ import { useLoading } from '@/app/contexts/loadingprovider';
 import ReEnterDataModal from '@/components/datagrids/reentrydatamodal';
 import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
-import { initialSpeciesLimitsRDSRow } from '@/config/sqlrdsdefinitions/taxonomies';
+import { SpeciesLimitsRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import { SpeciesLimitsGridColumns } from '@/components/client/datagridcolumns';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
@@ -84,6 +84,15 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, 
 };
 
 export default function SpeciesLimitsDataGrid({ speciesID }: { speciesID: number }) {
+  const initialSpeciesLimitsRDSRow: SpeciesLimitsRDS = {
+    id: 0,
+    speciesLimitID: 0,
+    speciesID: 0,
+    limitType: '',
+    upperBound: 0,
+    lowerBound: 0,
+    unit: ''
+  };
   const [rows, setRows] = useState([initialSpeciesLimitsRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});

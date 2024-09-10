@@ -134,15 +134,26 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
       return undefined;
     } else if (typeof value === 'string' && value === '') {
       return undefined;
-    } else if (key.toLowerCase().includes('date') && value !== null) {
-      return parseDate(value);
-    } else if (Buffer.isBuffer(value)) {
+    }
+    // Check for buffers and Uint8Arrays first
+    else if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
       return bitToBoolean(value);
+    }
+    // Now process date-like fields more carefully
+    else if (this.isDateKey(key) && value !== null) {
+      return parseDate(value);
     } else if (value !== undefined && value !== null) {
       return value;
     } else {
       return null;
     }
+  }
+
+  // Helper function to identify date-like keys more specifically
+  private isDateKey(key: string): boolean {
+    const lowerKey = key.toLowerCase();
+    // Add other specific date-related keys as needed
+    return ['measurementdate', 'createddate', 'updateddate'].includes(lowerKey);
   }
 }
 

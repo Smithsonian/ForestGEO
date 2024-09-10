@@ -152,22 +152,24 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   useEffect(() => {
     if (refresh && currentSite) {
       handleRefresh().then(() => {
-        setRefresh(false);
+        if (refresh) {
+          setRefresh(false); // Only update state if it hasn't already been reset
+        }
       });
     }
-  }, [refresh, setRefresh]);
+  }, [refresh, currentSite]); // No need for setRefresh in dependencies
 
   useEffect(() => {
     const updatedRowModesModel = rows.reduce((acc, row) => {
-      if (!rowModesModel[row.id]) {
-        acc[row.id] = { mode: GridRowModes.View };
-      } else {
-        acc[row.id] = rowModesModel[row.id];
-      }
+      acc[row.id] = rowModesModel[row.id] || { mode: GridRowModes.View };
       return acc;
     }, {} as GridRowModesModel);
-    setRowModesModel(updatedRowModesModel);
-  }, [rows]); // Only runs when rows change
+
+    // Only update if the rowModesModel has actually changed to avoid infinite re-rendering
+    if (JSON.stringify(updatedRowModesModel) !== JSON.stringify(rowModesModel)) {
+      setRowModesModel(updatedRowModesModel);
+    }
+  }, [rows]); // Removed rowModesModel from the dependencies array
 
   const fetchFullData = async () => {
     setLoading(true, 'Fetching full dataset...');
@@ -213,13 +215,14 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
     setIsDialogOpen(false);
     setIsDeleteDialogOpen(false);
 
-    if (promiseArguments) {
+    if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
+      // Call performDeleteAction if the confirmed action is delete
+      await performDeleteAction(pendingAction.actionId);
+    } else if (promiseArguments) {
       try {
         const resolvedRow = confirmedRow || promiseArguments.newRow;
-
         // Proceed with saving the row after confirmation
         await performSaveAction(promiseArguments.newRow.id, resolvedRow);
-
         setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
       } catch (error: any) {
         setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
@@ -283,48 +286,62 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
 
   const performDeleteAction = async (id: GridRowId) => {
     if (locked) return;
+
     setLoading(true, 'Deleting...');
-    const deletionID = rows.find(row => String(row.id) === String(id))?.id;
-    if (!deletionID) return;
-    const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), deletionID);
-    const response = await fetch(deleteQuery, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        oldRow: undefined,
-        newRow: rows.find(row => String(row.id) === String(id))!
-      })
-    });
-    setLoading(false);
-    if (!response.ok) {
-      const error = await response.json();
-      if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
-        setSnackbar({
-          children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
-          severity: 'error'
-        });
-      } else {
-        setSnackbar({
-          children: `Error: ${error.message || 'Deletion failed'}`,
-          severity: 'error'
-        });
-      }
-    } else {
-      if (handleSelectQuadrat) handleSelectQuadrat(null);
-      setSnackbar({
-        children: 'Row successfully deleted',
-        severity: 'success'
+
+    const rowToDelete = rows.find(row => String(row.id) === String(id));
+    if (!rowToDelete) return; // Ensure row exists
+
+    const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
+
+    try {
+      const response = await fetch(deleteQuery, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ newRow: rowToDelete })
       });
-      setRows(rows.filter(row => String(row.id) !== String(id)));
-      triggerRefresh([gridType as keyof UnifiedValidityFlags]);
-      await fetchPaginatedData(paginationModel.page);
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
+          setSnackbar({
+            children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
+            severity: 'error'
+          });
+        } else {
+          setSnackbar({
+            children: `Error: ${error.message || 'Deletion failed'}`,
+            severity: 'error'
+          });
+        }
+      } else {
+        setRows(prevRows => prevRows.filter(row => row.id !== id)); // Update rows by removing the deleted row
+        setSnackbar({
+          children: 'Row successfully deleted',
+          severity: 'success'
+        });
+        triggerRefresh([gridType as keyof UnifiedValidityFlags]);
+        await fetchPaginatedData(paginationModel.page);
+      }
+    } catch (error: any) {
+      setSnackbar({
+        children: `Error: ${error.message || 'Deletion failed'}`,
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSaveClick = (id: GridRowId) => async () => {
     if (locked) return;
+
+    const updatedRowModesModel = { ...rowModesModel };
+    if (!updatedRowModesModel[id] || updatedRowModesModel[id].mode === undefined) {
+      updatedRowModesModel[id] = { mode: GridRowModes.View }; // Set default mode if it doesn't exist
+    }
 
     // Stop edit mode and apply changes locally without committing to the server yet
     apiRef.current.stopRowEditMode({ id, ignoreModifications: true });
@@ -547,8 +564,16 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
   );
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
-    console.log('new row modes model: ', newRowModesModel);
-    setRowModesModel(newRowModesModel);
+    const updatedRowModesModel = { ...rowModesModel }; // Copy the existing row modes model
+
+    Object.keys(newRowModesModel).forEach(id => {
+      if (!updatedRowModesModel[id] || updatedRowModesModel[id].mode === undefined) {
+        updatedRowModesModel[id] = { mode: GridRowModes.View }; // Set default mode if it doesn't exist
+      }
+      updatedRowModesModel[id] = { ...updatedRowModesModel[id], ...newRowModesModel[id] }; // Merge the new modes
+    });
+
+    setRowModesModel(updatedRowModesModel); // Update the state with the merged modes
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -631,6 +656,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
       flex: 1,
       cellClassName: 'actions',
       getActions: ({ id }) => {
+        if (!rowModesModel[id]?.mode) return [];
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
         if (isInEditMode && !locked) {
           return [

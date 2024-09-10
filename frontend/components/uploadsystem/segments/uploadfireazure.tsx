@@ -3,10 +3,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireAzureProps } from '@/config/macros/uploadsystemmacros';
 import { FileWithPath } from 'react-dropzone';
-import { Box, Typography } from '@mui/material';
+import { Box, Button, Typography } from '@mui/material';
 import { Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
-import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
@@ -25,10 +24,10 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState('');
-  const hasUploaded = useRef(false);
-  const [countdown, setCountdown] = useState(5);
-  const [startCountdown, setStartCountdown] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null); // For tracking refresh errors
+  const [continueDisabled, setContinueDisabled] = useState<boolean>(true); // To control the Continue button
 
+  const hasUploaded = useRef(false);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
@@ -63,7 +62,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
             body: formData
           }
         );
-        // Increment completedOperations when an operation is completed
         setCompletedOperations(prevCompleted => prevCompleted + 1);
         return response.ok ? 'Storage load successful' : 'Storage load failed';
       } catch (error) {
@@ -78,17 +76,31 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const refreshViews = useCallback(
     async (fileName: string) => {
       try {
+        const errorMessages: string[] = []; // Track errors
+
+        // Refresh measurement summary view
         setCurrentlyRunning(`Refreshing measurement summary view for "${fileName}"...`);
         const refreshSummaryResponse = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName}`, { method: 'POST' });
-        if (!refreshSummaryResponse.ok) throw new Error('REFRESH ERROR: ' + refreshSummaryResponse.statusText);
+        if (!refreshSummaryResponse.ok) {
+          errorMessages.push('Failed to refresh measurement summary view.');
+        } else {
+          setCompletedOperations(prevCompleted => prevCompleted + 1);
+        }
 
-        setCompletedOperations(prevCompleted => prevCompleted + 1);
-
+        // Refresh full table view
         setCurrentlyRunning(`Refreshing full table view for "${fileName}"...`);
         const refreshViewResponse = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName}`, { method: 'POST' });
-        if (!refreshViewResponse.ok) throw new Error('REFRESH ERROR: ' + refreshViewResponse.statusText);
+        if (!refreshViewResponse.ok) {
+          errorMessages.push('Failed to refresh full table view.');
+        } else {
+          setCompletedOperations(prevCompleted => prevCompleted + 1);
+        }
 
-        setCompletedOperations(prevCompleted => prevCompleted + 1);
+        // If there are any errors, show them to the user and disable "Continue" until acknowledged
+        if (errorMessages.length > 0) {
+          setRefreshError(errorMessages.join(' '));
+          setContinueDisabled(false);
+        }
       } catch (error) {
         setUploadError(error);
         setErrorComponent('UploadFireAzure');
@@ -100,14 +112,10 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
   useEffect(() => {
     const calculateTotalOperations = () => {
-      let totalOps = 0;
-
-      for (const _file of acceptedFiles) {
-        // Increment totalOps for each file and each operation (SQL and storage)
-        totalOps += 1;
+      let totalOps = acceptedFiles.length; // Count each file as 1 operation for uploading
+      if (uploadForm === 'measurements') {
+        totalOps += acceptedFiles.length * 2; // For measurements, add 2 more operations per file for the refresh views
       }
-
-      // Set the total number of operations
       setTotalOperations(totalOps);
     };
 
@@ -118,7 +126,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       calculateTotalOperations();
 
       for (const file of acceptedFiles) {
-        console.log(`file: ${file.name}`);
         const storageResult = await uploadToStorage(file);
         uploadResults.push(`File: ${file.name}, Storage: ${storageResult}`);
 
@@ -138,25 +145,11 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     }
   }, [acceptedFiles, uploadToStorage, refreshViews, uploadForm, setIsDataUnsaved]);
 
-  // Effect for handling countdown and state transition
   useEffect(() => {
-    let timer: number; // Declare timer as a number
-
-    if (startCountdown && countdown > 0) {
-      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
-      // Use 'window.setTimeout' and type assertion to treat the return as a number
-    } else if (countdown === 0) {
+    if (!loading && completedOperations === totalOperations && !refreshError) {
       setReviewState(ReviewStates.COMPLETE);
     }
-
-    return () => clearTimeout(timer); // Clear timeout using the timer variable
-  }, [startCountdown, countdown, setReviewState]);
-
-  useEffect(() => {
-    if (!loading && completedOperations === totalOperations) {
-      setStartCountdown(true); // Start countdown after upload is complete
-    }
-  }, [loading, completedOperations, totalOperations]);
+  }, [loading, completedOperations, totalOperations, refreshError]);
 
   return (
     <>
@@ -173,6 +166,26 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
           <Stack direction={'column'}>
             <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
             <LinearProgressWithLabel variant={'determinate'} value={(completedOperations / totalOperations) * 100} currentlyrunningmsg={currentlyRunning} />
+          </Stack>
+        </Box>
+      ) : refreshError ? (
+        <Box
+          sx={{
+            display: 'flex',
+            flex: 1,
+            width: '100%',
+            alignItems: 'center',
+            mt: 4
+          }}
+        >
+          <Stack direction={'column'} sx={{ display: 'inherit' }}>
+            <Typography variant="h5" gutterBottom>
+              Some errors occurred during refresh:
+            </Typography>
+            <Typography color="error">{refreshError}</Typography>
+            <Button variant="contained" onClick={() => setRefreshError(null)} disabled={continueDisabled}>
+              Continue
+            </Button>
           </Stack>
         </Box>
       ) : (
@@ -193,19 +206,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
               <Typography key={result}>{result}</Typography>
             ))}
             <Typography>Azure upload complete! Finalizing changes...</Typography>
-            {startCountdown && (
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  mb: 0.5
-                }}
-              >
-                <CircularProgress />
-                <Typography>{countdown} seconds remaining</Typography>
-              </Box>
-            )}
           </Stack>
         </Box>
       )}
