@@ -1,5 +1,5 @@
-import AllTaxonomiesViewDataGrid from '@/components/datagrids/applications/alltaxonomiesviewdatagrid';
+import IsolatedAllTaxonomiesViewDataGrid from '@/components/datagrids/applications/isolated/isolatedalltaxonomiesdatagrid';
 
 export default function AllTaxonomiesPage() {
-  return <AllTaxonomiesViewDataGrid />;
+  return <IsolatedAllTaxonomiesViewDataGrid />;
 }

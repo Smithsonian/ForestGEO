@@ -23,12 +23,12 @@ export default function QuadratsDataGrid() {
     quadratName: '',
     startX: 0,
     startY: 0,
-    coordinateunit: '',
+    coordinateUnits: '',
     dimensionX: 0,
     dimensionY: 0,
-    dimensionunit: '',
+    dimensionUnits: '',
     area: 0,
-    areaunit: '',
+    areaUnits: '',
     quadratShape: ''
   };
   const [rows, setRows] = React.useState([initialQuadratRDSRow] as GridRowsProp);

@@ -15,6 +15,7 @@ export type AllTaxonomiesViewRDS = {
   subspeciesName?: string;
   speciesIDLevel?: string;
   speciesAuthority?: string;
+  validCode?: string;
   subspeciesAuthority?: string;
   fieldFamily?: string;
   speciesDescription?: string;

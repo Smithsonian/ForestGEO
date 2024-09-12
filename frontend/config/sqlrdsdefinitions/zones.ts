@@ -1,7 +1,7 @@
 import { IDataMapper } from '@/config/datamapper';
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { ColumnStates } from '@/config/macros';
+import { AreaSelection, areaSelectionOptions, ColumnStates, UnitSelection, unitSelectionOptions } from '@/config/macros';
 
 export type SitesRDS = {
   siteID?: number;
@@ -80,12 +80,12 @@ export type QuadratRDS = {
   quadratName?: string;
   startX?: number;
   startY?: number;
-  coordinateunit?: string;
+  coordinateUnits?: string;
   dimensionX?: number;
   dimensionY?: number;
-  dimensionunit?: string;
+  dimensionUnits?: string;
   area?: number;
-  areaunit?: string;
+  areaUnits?: string;
   quadratShape?: string;
 };
 export type QuadratsResult = ResultType<QuadratRDS>;
@@ -93,13 +93,13 @@ export type Quadrat = QuadratRDS | undefined;
 export const validateQuadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
 
-  if (!row['coordinateunit'] || (row['coordinateunit'] !== null && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['coordinateunit']))) {
+  if (!row['coordinateunit'] || (row['coordinateunit'] !== null && !unitSelectionOptions.includes(row['coordinateunit'] as UnitSelection))) {
     errors['coordinateunit'] = 'Invalid unit value.';
   }
-  if (!row['dimensionunit'] || (row['dimensionunit'] !== null && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['dimensionunit']))) {
+  if (!row['dimensionunit'] || (row['dimensionunit'] !== null && !unitSelectionOptions.includes(row['dimensionunit'] as UnitSelection))) {
     errors['dimensionunit'] = 'Invalid unit value.';
   }
-  if (!row['areaunit'] || (row['areaunit'] !== null && !['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'].includes(row['areaunit']))) {
+  if (!row['areaunit'] || (row['areaunit'] !== null && !areaSelectionOptions.includes(row['areaunit'] as AreaSelection))) {
     errors['areaunit'] = 'Invalid unit value.';
   }
 
@@ -130,7 +130,7 @@ export type SubquadratResult = ResultType<SubquadratRDS>;
 export const validateSubquadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
 
-  if (row['unit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['unit'])) {
+  if (row['unit'] && !unitSelectionOptions.includes(row['unit'] as UnitSelection)) {
     errors['unit'] = 'Invalid unit value.';
   }
 

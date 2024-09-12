@@ -151,11 +151,25 @@ export function getGridID(gridType: string): string {
 }
 
 export interface EditToolbarCustomProps {
-  handleAddNewRow?: () => void;
+  handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
   handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
   filterModel?: GridFilterModel;
   locked?: boolean;
+}
+
+export interface IsolatedDataGridCommonProps {
+  gridType: string;
+  gridColumns: GridColDef[];
+  refresh: boolean;
+  setRefresh: Dispatch<SetStateAction<boolean>>;
+  initialRow?: GridRowModel;
+  fieldToFocus?: string;
+  locked?: boolean;
+  selectionOptions?: { value: string | number; label: string }[];
+  handleOpenSpeciesLimits?: (id: GridRowId) => void;
+  onDataUpdate?: () => void; // Add the onDataUpdate prop
+  clusters?: Record<string, string[]>;
 }
 
 export interface DataGridCommonProps {
@@ -210,15 +224,23 @@ export const CellItemContainer = styled('div')({
  * Function to determine if all entries in a column are null
  */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === null || row[field] === undefined);
+  return rows.length > 0 && rows.every(row => row[field] === undefined);
 }
 
 /**
  * Function to filter out columns where all entries are null, except the actions column.
  */
 export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || col.field === 'speciesLimits' || col.field === 'isValidated' || !allValuesAreNull(rows, col.field));
-  // return columns;
+  console.log('Rows before filtering:', rows);
+  return columns.filter(
+    col =>
+      col.field === 'actions' ||
+      col.field === 'dimensionX' ||
+      col.field === 'dimensionY' ||
+      col.field === 'speciesLimits' ||
+      col.field === 'isValidated' ||
+      !allValuesAreNull(rows, col.field)
+  );
 }
 
 /**

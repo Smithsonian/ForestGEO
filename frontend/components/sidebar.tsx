@@ -95,7 +95,7 @@ function MenuRenderToggle(
       }}
       sx={{ width: '100%', padding: 0, margin: 0 }}
     >
-      <Tooltip title={isParentDataIncomplete ? 'Missing Core Data!' : 'Requirements Met'} arrow>
+      <Tooltip title={isParentDataIncomplete ? 'Missing Core Data!' : undefined} arrow>
         <Badge
           color="danger"
           variant={isParentDataIncomplete ? 'solid' : 'soft'}
@@ -337,7 +337,7 @@ export default function Sidebar(props: SidebarProps) {
             <Typography level="body-md" className="sidebar-item">{`Plot: ${selectedPlot?.plotName}`}</Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
               <Typography level="body-sm" color={'primary'}>
-                &mdash; {selectedPlot.numQuadrats ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
+                &mdash; {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>
@@ -355,34 +355,40 @@ export default function Sidebar(props: SidebarProps) {
 
     const selectedValue = option.value;
     const selectedCensus = censusListContext?.find(c => c?.plotCensusNumber?.toString() === selectedValue);
+
+    if (!selectedCensus) {
+      return <Typography className="sidebar-item">Select a Census</Typography>;
+    }
+
+    const startDate = census?.dateRanges[0]?.startDate;
+    const endDate = census?.dateRanges[0]?.endDate;
+
+    const hasStartDate = startDate !== undefined && startDate !== null;
+    const hasEndDate = endDate !== undefined && endDate !== null;
+
+    // Determine the message based on the presence of startDate and endDate
+    const dateMessage =
+      hasStartDate || hasEndDate ? (
+        <>
+          {hasStartDate && `— First Record: ${new Date(startDate).toDateString()}`}
+          {hasEndDate && ` — Last Record: ${new Date(endDate).toDateString()}`}
+        </>
+      ) : (
+        ' — No Measurements'
+      ); // Display "No Measurements" if both dates are missing
+
     return (
-      <>
-        {selectedCensus ? (
-          <Stack direction={'column'} alignItems={'start'}>
-            <Typography level="body-md" className="sidebar-item">{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
-            <Stack direction={'column'} alignItems={'start'}>
-              <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item">
-                {census !== undefined && (
-                  <>
-                    {census.dateRanges[0]?.startDate !== undefined
-                      ? `\u2014 First Record: ${new Date(census?.dateRanges[0]?.startDate).toDateString()}`
-                      : 'No Records'}
-                  </>
-                )}
-              </Typography>
-              <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item">
-                {census !== undefined && (
-                  <>{census.dateRanges[0]?.endDate !== undefined ? `\u2014 Last Record ${new Date(census.dateRanges[0]?.endDate).toDateString()}` : ``}</>
-                )}
-              </Typography>
-            </Stack>
-          </Stack>
-        ) : (
-          <Typography className="sidebar-item">Select a Census</Typography>
-        )}
-      </>
+      <Stack direction={'column'} alignItems={'start'}>
+        <Typography level="body-md" className="sidebar-item">{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
+        <Stack direction={'column'} alignItems={'start'}>
+          <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item">
+            {census !== undefined && dateMessage}
+          </Typography>
+        </Stack>
+      </Stack>
     );
   };
+
   type ToggleObject = {
     toggle?: boolean;
     setToggle?: Dispatch<SetStateAction<boolean>>;
@@ -460,8 +466,8 @@ export default function Sidebar(props: SidebarProps) {
                 {item?.dateRanges?.map((dateRange, index) => (
                   <React.Fragment key={index}>
                     <Stack direction={'row'}>
-                      <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em' }}>
-                        {`${dateRange.startDate ? `First Msmt: ${new Date(dateRange.startDate).toDateString()}` : 'No Measurements'}`}
+                      <Typography level="body-sm" color={'neutral'}>
+                        {`${dateRange.startDate ? ` — First Msmt: ${new Date(dateRange.startDate).toDateString()}` : ' — No Measurements'}`}
                       </Typography>
                       {dateRange.endDate && (
                         <Typography level="body-sm" color={'neutral'} sx={{ paddingLeft: '1em', paddingRight: '1em' }}>
@@ -469,7 +475,7 @@ export default function Sidebar(props: SidebarProps) {
                         </Typography>
                       )}
                       <Typography level="body-sm" color={'neutral'}>
-                        {`${dateRange.endDate ? `Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
+                        {`${dateRange.endDate ? ` — Last Msmt: ${new Date(dateRange.endDate).toDateString()}` : ''}`}
                       </Typography>
                     </Stack>
                   </React.Fragment>
@@ -509,8 +515,8 @@ export default function Sidebar(props: SidebarProps) {
           >
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
               <Typography level="body-md">{item?.plotName}</Typography>
-              <Typography level="body-sm" color={'primary'} sx={{ paddingLeft: '1em' }}>
-                Quadrats: {item?.numQuadrats}
+              <Typography level="body-sm" color={'primary'}>
+                {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
               </Typography>
             </Box>
           </Box>
@@ -749,7 +755,7 @@ export default function Sidebar(props: SidebarProps) {
                             return 'Data needed to complete census!';
                         }
                       } else {
-                        return 'Requirements Met';
+                        return undefined;
                       }
                     };
 

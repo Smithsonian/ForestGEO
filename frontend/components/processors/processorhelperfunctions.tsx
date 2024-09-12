@@ -3,6 +3,7 @@ import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from '@/
 import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import { capitalizeAndTransformField } from '@/config/utils';
 
 // need to try integrating this into validation system:
 
@@ -226,14 +227,30 @@ export function detectFieldChanges(newRow: any, oldRow: any, fieldList: string[]
   return fieldList.filter(field => newRow[field] !== oldRow[field]);
 }
 
-export function generateUpdateQueries(schema: string, table: string, changedFields: string[], newRow: any, primaryKey: string): string[] {
-  if (!newRow[primaryKey]) {
+export function generateUpdateQueries<Result>(
+  schema: string,
+  table: string,
+  changedFields: string[],
+  newRow: Record<string, any>, // Explicitly define newRow as a Record
+  primaryKey: keyof Result
+): string[] {
+  if (!newRow[primaryKey as string]) {
     // Skip queries where primary key is null
     return [];
   }
 
   return changedFields.map(field => {
-    return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [`${schema}.${table}`, field, newRow[field], primaryKey, newRow[primaryKey]]);
+    // Apply the combined capitalization and transformation function
+    const transformedField = capitalizeAndTransformField(field);
+
+    // Format the query using mysql.format
+    return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [
+      `${schema}.${table}`, // Table reference
+      transformedField, // Transformed column name
+      newRow[field], // Value from newRow corresponding to the field
+      primaryKey as string, // Primary key as a string
+      newRow[primaryKey as string] // Primary key value from newRow
+    ]);
   });
 }
 
@@ -303,14 +320,21 @@ export function generateInsertOperations(schema: string, newRow: any, config: Up
     .filter(query => query.length > 0);
 }
 
-export function generateInsertQuery(schema: string, table: string, fields: string[], newRow: any): string {
+export function generateInsertQuery<Result>(
+  schema: string,
+  table: string,
+  fields: string[],
+  newRow: Record<string, any> // Explicitly define newRow as a Record
+): string {
   // Create an object containing only the fields in this slice
   const dataToInsert = fields.reduce(
     (obj, field) => {
-      obj[field] = newRow[field];
+      // Apply the combined capitalization and transformation function
+      const transformedField = capitalizeAndTransformField(field);
+      obj[transformedField] = newRow[field]; // Safely assign the value from newRow
       return obj;
     },
-    {} as Record<string, any>
+    {} as Record<string, any> // Define the accumulator as a Record
   );
 
   // Use mysql.format to safely construct the query
@@ -325,10 +349,9 @@ export const allTaxonomiesFields = [
   'genusAuthority',
   'speciesCode',
   'speciesName',
+  'validCode',
   'subspeciesName',
   'speciesAuthority',
-  'currentTaxonFlag',
-  'obsoleteTaxonFlag',
   'fieldFamily',
   'speciesDescription'
 ];
@@ -354,11 +377,7 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   slices: {
     family: { range: [0, 1], primaryKey: 'FamilyID' },
     genus: { range: [1, 3], primaryKey: 'GenusID' },
-    species: { range: [3, 11], primaryKey: 'SpeciesID' },
-    reference: {
-      range: [11, allTaxonomiesFields.length],
-      primaryKey: 'ReferenceID'
-    }
+    species: { range: [3, allTaxonomiesFields.length], primaryKey: 'SpeciesID' }
   }
 };
 

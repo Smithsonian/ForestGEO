@@ -105,8 +105,11 @@ export function formatDate(isoDateString: string): string {
   return new Date(isoDateString).toLocaleDateString(undefined, options);
 }
 
-export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
-export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
+export type UnitSelection = 'km' | 'hm' | 'dam' | 'm' | 'dm' | 'cm' | 'mm';
+export type AreaSelection = 'km2' | 'hm2' | 'dam2' | 'm2' | 'dm2' | 'cm2' | 'mm2';
+
+export const unitSelectionOptions: UnitSelection[] = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export const areaSelectionOptions: AreaSelection[] = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
 export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
   required?: boolean;
 };
