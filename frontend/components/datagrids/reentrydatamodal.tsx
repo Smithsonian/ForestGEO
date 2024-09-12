@@ -1,8 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { DataGrid, GridColDef, GridRenderCellParams, GridRowModel } from '@mui/x-data-grid';
+import { DataGrid, GridColDef, GridRowModel } from '@mui/x-data-grid';
 import moment from 'moment';
-import { ColumnStates, unitSelectionOptions } from '@/config/macros';
 import {
   Box,
   Button,
@@ -20,8 +19,8 @@ import {
   Typography
 } from '@mui/joy';
 import { DatePicker } from '@mui/x-date-pickers';
-
-import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 
 interface ReEnterDataModalProps {
   row: GridRowModel;
@@ -30,25 +29,27 @@ interface ReEnterDataModalProps {
   handleSave: (selectedRow: GridRowModel) => void;
   columns: GridColDef[];
   selectionOptions?: { value: string | number; label: string }[];
-  hiddenColumns?: ColumnStates;
+  clusters?: Record<string, string[]>; // New clusters prop for field grouping
+  hiddenColumns?: Record<string, boolean>;
 }
 
-const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, handleClose, handleSave, columns, selectionOptions, hiddenColumns }) => {
+const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
+  row,
+  reEnterData,
+  handleClose,
+  handleSave,
+  columns,
+  selectionOptions,
+  clusters,
+  hiddenColumns
+}) => {
   const [localData, setLocalData] = useState<GridRowModel>({ ...reEnterData });
   const [selectedRow, setSelectedRow] = useState<GridRowModel | null>(null);
   const [isConfirmStep, setIsConfirmStep] = useState(false);
   const [isRowSelected, setIsRowSelected] = useState(false);
 
-  const calculateDialogWidth = () => {
-    const baseWidth = 300;
-    const totalFlex = columns.reduce((acc, column) => acc + (column.flex || 0), 0);
-    const totalMinWidth = columns.reduce((acc, column) => acc + (column.minWidth || 0), 0);
-    const flexWidth = totalFlex ? totalFlex * 100 : 0;
-
-    return Math.max(baseWidth + flexWidth, totalMinWidth);
-  };
-
-  const dialogWidth = calculateDialogWidth();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
 
   useEffect(() => {
     if (reEnterData) {
@@ -58,11 +59,9 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
         if (
           editable &&
           initialData[field] !== localData[field] &&
-          (initialData[field] !== '' ||
-            initialData[field] !== null ||
-            initialData[field] !== undefined ||
-            initialData[field] !== false ||
-            initialData[field] !== 0)
+          initialData[field] !== '' &&
+          initialData[field] !== null &&
+          initialData[field] !== undefined
         ) {
           initialData[field] = '';
         }
@@ -71,10 +70,53 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
     }
   }, [row, reEnterData, columns]);
 
+  const normalizeRowData = (row: GridRowModel): GridRowModel => {
+    return Object.keys(row).reduce((acc, key) => {
+      const value = row[key];
+      const column = columns.find(col => col.field === key);
+
+      // If column is not found or field is non-editable, skip processing this field
+      if (!column || !column.editable) {
+        acc[key] = value;
+        return acc;
+      }
+
+      // Handle specific fields like PlotID, CensusID that should not be normalized to empty or default
+      if (key === 'plotID' || key === 'censusID') {
+        // Keep PlotID and CensusID intact or use the default context values
+        acc[key] = value !== null && value !== undefined ? value : key === 'plotID' ? currentPlot?.plotID : currentCensus?.dateRanges[0]?.censusID;
+      }
+      // Handle normal cases for null/undefined values or fields that require normalization
+      else if (value === null || value === undefined) {
+        if (column.type === 'number') {
+          acc[key] = 0; // Normalize numbers to 0
+        } else if (column.type === 'date') {
+          acc[key] = null; // Normalize date fields to null
+        } else if (column.type === 'singleSelect') {
+          const fieldSelectionOptions = getFieldSelectionOptions(key) as string[];
+          if (fieldSelectionOptions.includes('m')) {
+            acc[key] = 'm'; // Default unit for specific fields
+          } else if (fieldSelectionOptions.includes('m2')) {
+            acc[key] = 'm2'; // Default area unit
+          } else {
+            acc[key] = ''; // Default to empty string for other single select fields
+          }
+        } else {
+          acc[key] = ''; // Default to empty string for other cases
+        }
+      } else {
+        // Keep valid values as they are
+        acc[key] = value;
+      }
+
+      return acc;
+    }, {} as GridRowModel);
+  };
+
   const handleInputChange = (field: string, value: any) => {
     setLocalData(prevData => ({
       ...prevData,
-      [field]: value
+      [field]: value === null || value === undefined ? '' : value
     }));
   };
 
@@ -90,7 +132,10 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
   const handleFinalConfirm = () => {
     if (selectedRow) {
       const { label, ...remaining } = selectedRow;
-      handleSave(remaining);
+      console.log('selectedRow: ', selectedRow);
+      const normalizedData = normalizeRowData(remaining);
+      console.log('normalized row: ', normalizedData);
+      handleSave(normalizedData);
     }
   };
 
@@ -102,83 +147,104 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
     return value;
   };
 
-  // Filter the columns based on hiddenColumns
-  const filteredColumns = columns.filter(column => {
-    const isHidden = hiddenColumns ? hiddenColumns[column.field] === false : false;
-    return !isHidden;
-  });
+  const getFieldSelectionOptions = (field: string) => {
+    const fieldLower = field.toLowerCase();
+    if ((fieldLower.includes('coordinate') || fieldLower.includes('dimension')) && fieldLower.includes('units')) {
+      return unitSelectionOptions;
+    }
+    if (fieldLower.includes('area') && fieldLower.includes('units')) {
+      return areaSelectionOptions;
+    }
+    return selectionOptions || [];
+  };
+
+  const renderFormFields = (fields: string[]) =>
+    fields.map(field => {
+      const column = columns.find(col => col.field === field);
+      if (!column || !column.editable) return null;
+
+      const { headerName, type } = column;
+      const value = localData[field];
+      const fieldOptions = getFieldSelectionOptions(field);
+
+      if (type === 'singleSelect') {
+        return (
+          <FormControl key={field} sx={{ minWidth: 200 }}>
+            <FormLabel>{headerName}</FormLabel>
+            <Select placeholder={headerName} value={value} onChange={(_, newValue) => handleInputChange(field, newValue)}>
+              {fieldOptions?.map(option => {
+                if (typeof option === 'object' && 'value' in option && 'label' in option) {
+                  return (
+                    <Option key={option.value} value={option.value}>
+                      {option.label}
+                    </Option>
+                  );
+                } else {
+                  return (
+                    <Option key={option} value={option}>
+                      {option}
+                    </Option>
+                  );
+                }
+              })}
+            </Select>
+          </FormControl>
+        );
+      }
+
+      if (type === 'date') {
+        return (
+          <FormControl key={field} sx={{ minWidth: 200 }}>
+            <FormLabel>{headerName}</FormLabel>
+            <DatePicker
+              label={headerName}
+              value={value ? moment(value).utc() : null}
+              onChange={newValue => handleInputChange(field, moment(newValue).utc().format('YYYY-MM-DD'))}
+            />
+          </FormControl>
+        );
+      }
+
+      return (
+        <FormControl key={field} sx={{ minWidth: 200 }}>
+          <FormLabel>{headerName}</FormLabel>
+          <Input placeholder={headerName} value={value} onChange={e => handleInputChange(field, e.target.value)} fullWidth />
+        </FormControl>
+      );
+    });
+
+  const filteredColumns = columns.filter(column => !hiddenColumns?.[column.field] && !column.field.includes('ID'));
+
+  const rowsData = [
+    row ? { ...row, id: 'starter', label: 'Original' } : null,
+    reEnterData ? { ...reEnterData, id: 'original', label: 'First Modification' } : null,
+    localData ? { ...localData, id: 'modified', label: 'Second Modification (Re-entry)' } : null
+  ].filter(rowItem => rowItem && rowItem.id); // Filter out rows without an ID
+
+  useEffect(() => {
+    console.log('reEnterData:', reEnterData);
+    console.log('localData:', localData);
+  }, [reEnterData, localData]);
 
   return (
     <Modal open onClose={handleClose}>
-      <ModalDialog variant="outlined" role="alertdialog" sx={{ width: 'auto', maxWidth: '90vw', overflow: 'auto' }}>
-        <DialogTitle>Confirm Changes</DialogTitle>
+      <ModalDialog variant="outlined" sx={{ maxWidth: '90vw', overflow: 'auto' }}>
+        <DialogTitle>Re-Enter Data</DialogTitle>
         <DialogContent>
           {!isConfirmStep ? (
-            <Stack direction={'row'} spacing={2} sx={{ width: '100%' }}>
-              {filteredColumns.map(column => {
-                const { field, type, editable } = column;
-                const value = localData[field];
-                if (!editable) {
-                  return null;
-                }
-                if (type === 'singleSelect') {
-                  let valueOptions;
-                  if (field.toLowerCase().includes('unit')) {
-                    valueOptions = unitSelectionOptions;
-                  } else if (field === 'status') {
-                    valueOptions = AttributeStatusOptions;
-                  } else {
-                    valueOptions = selectionOptions;
-                  }
-
-                  return (
-                    <FormControl key={field}>
-                      <FormLabel>{column.headerName}</FormLabel>
-                      <Select
-                        placeholder={column.headerName}
-                        value={value}
-                        onChange={(_event, newValue) => {
-                          handleInputChange(field, newValue);
-                        }}
-                      >
-                        {(valueOptions === unitSelectionOptions || valueOptions === AttributeStatusOptions) &&
-                          valueOptions.map(option => (
-                            <Option key={option} value={option}>
-                              {option}
-                            </Option>
-                          ))}
-                        {valueOptions === selectionOptions &&
-                          valueOptions?.map(option => (
-                            <Option key={option.value} value={option.value}>
-                              {option.label}
-                            </Option>
-                          ))}
-                      </Select>
-                    </FormControl>
-                  );
-                }
-                if (type === 'date') {
-                  return (
-                    <FormControl key={field}>
-                      <FormLabel>{column.headerName}</FormLabel>
-                      <DatePicker
-                        label={column.headerName}
-                        value={value ? moment(value).utc() : null}
-                        onChange={newValue => {
-                          if (newValue) handleInputChange(field, moment(newValue).utc().format('YYYY-MM-DD'));
-                        }}
-                      />
-                    </FormControl>
-                  );
-                }
-                return (
-                  <FormControl key={field}>
-                    <FormLabel>{column.headerName}</FormLabel>
-                    <Input placeholder={column.headerName} value={value} onChange={e => handleInputChange(field, e.target.value)} fullWidth />
-                  </FormControl>
-                );
-              })}
-            </Stack>
+            <>
+              {clusters &&
+                Object.entries(clusters).map(([clusterName, fields]) => (
+                  <Box key={clusterName} sx={{ marginBottom: 4 }}>
+                    <Typography level="body-lg" sx={{ marginBottom: 1 }}>
+                      {clusterName}
+                    </Typography>
+                    <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
+                      {renderFormFields(fields)}
+                    </Stack>
+                  </Box>
+                ))}
+            </>
           ) : (
             <Box className="mt-4" sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
               <Typography level="title-lg">Please choose from the following -- </Typography>
@@ -193,19 +259,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
               </Typography>
               <Box sx={{ display: 'flex', flex: 1, width: '100%' }}>
                 <DataGrid
-                  rows={[
-                    { ...row, id: 'starter', label: 'Original' },
-                    {
-                      ...reEnterData,
-                      id: 'original',
-                      label: 'First Modification'
-                    },
-                    {
-                      ...localData,
-                      id: 'modified',
-                      label: 'Second Modification (Re-entry)'
-                    }
-                  ]}
+                  rows={rowsData}
                   columns={[
                     {
                       field: 'label',
@@ -221,17 +275,21 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({ row, reEnterData, h
                       ...col,
                       flex: col.flex || 1,
                       minWidth: col.minWidth || 150,
-                      renderCell: (params: GridRenderCellParams) => (
-                        <Box
-                          sx={{
-                            whiteSpace: 'normal',
-                            wordWrap: 'break-word',
-                            width: '100%'
-                          }}
-                        >
-                          {selectionOptions && col.type === 'singleSelect' ? getOptionLabel(col.field, params.value) : params.value}
-                        </Box>
-                      )
+                      renderCell: (params: any) => {
+                        const value = params.value;
+                        const displayValue = typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
+                        return (
+                          <Box
+                            sx={{
+                              whiteSpace: 'normal',
+                              wordWrap: 'break-word',
+                              width: '100%'
+                            }}
+                          >
+                            {selectionOptions && col.type === 'singleSelect' ? getOptionLabel(col.field, displayValue) : displayValue}
+                          </Box>
+                        );
+                      }
                     }))
                   ]}
                   getRowId={row => row.id}

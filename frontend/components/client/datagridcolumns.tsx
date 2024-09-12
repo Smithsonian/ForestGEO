@@ -79,7 +79,7 @@ export const quadratGridColumns: GridColDef[] = [
     headerName: 'Coordinate Units',
     headerClassName: 'header',
     flex: 1,
-    renderHeader: () => formatHeader('Coordinate', 'Units'),
+    // renderHeader: () => formatHeader('Coordinate', 'Units'),
     align: 'right',
     headerAlign: 'right',
     editable: true,
@@ -104,7 +104,7 @@ export const quadratGridColumns: GridColDef[] = [
     headerName: 'Area Unit',
     headerClassName: 'header',
     flex: 1,
-    renderHeader: () => formatHeader('Area', 'Unit'),
+    // renderHeader: () => formatHeader('Area', 'Unit'),
     align: 'right',
     headerAlign: 'right',
     editable: true,
@@ -120,7 +120,9 @@ export const quadratGridColumns: GridColDef[] = [
     align: 'right',
     type: 'number',
     valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+      let parsedValue = Number(value);
+      if (isNaN(value)) parsedValue = 0.0;
+      return parsedValue.toFixed(2);
     },
     editable: true
   },
@@ -134,7 +136,9 @@ export const quadratGridColumns: GridColDef[] = [
     headerAlign: 'right',
     type: 'number',
     valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
+      let parsedValue = Number(value);
+      if (isNaN(value)) parsedValue = 0.0;
+      return parsedValue.toFixed(2);
     },
     editable: true
   },

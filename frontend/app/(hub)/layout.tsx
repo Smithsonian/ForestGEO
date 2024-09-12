@@ -79,7 +79,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const fetchSiteList = useCallback(async () => {
     const now = Date.now();
     if (lastExecutedRef.current && now - lastExecutedRef.current < debounceDelay + 200) {
-      console.log('Debounced fetchSiteList: Too soon since last call.');
       return;
     }
 
@@ -88,7 +87,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
     try {
       setLoading(true, 'Loading Sites...');
-      if (session && !siteListLoaded) {
+      if (session && !siteListLoaded && !currentSite) {
         const sites = session?.user?.allsites ?? [];
         if (sites.length === 0) {
           throw new Error('Session sites undefined');
@@ -107,7 +106,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const loadPlotData = useCallback(async () => {
     const now = Date.now();
     if (plotLastExecutedRef.current && now - plotLastExecutedRef.current < debounceDelay) {
-      console.log('Debounced loadPlotData: Too soon since last call.');
       return;
     }
     plotLastExecutedRef.current = now;
@@ -132,7 +130,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const loadCensusData = useCallback(async () => {
     const now = Date.now();
     if (censusLastExecutedRef.current && now - censusLastExecutedRef.current < debounceDelay) {
-      console.log('Debounced loadCensusData: Too soon since last call.');
       return;
     }
     censusLastExecutedRef.current = now;
@@ -158,7 +155,6 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const loadQuadratData = useCallback(async () => {
     const now = Date.now();
     if (quadratLastExecutedRef.current && now - quadratLastExecutedRef.current < debounceDelay) {
-      console.log('Debounced loadQuadratData: Too soon since last call.');
       return;
     }
     quadratLastExecutedRef.current = now;

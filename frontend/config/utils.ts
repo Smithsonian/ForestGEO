@@ -206,3 +206,26 @@ export type CommonKeys<T, U> = {
 }[keyof T & keyof U];
 
 export type Common<T, U> = Pick<T & U, CommonKeys<T, U>>;
+
+export function capitalizeFirstLetter(field: string): string {
+  return field.charAt(0).toUpperCase() + field.slice(1);
+}
+
+export function transformSpecialCases(field: string): string {
+  if (/dbh/i.test(field)) {
+    return field.replace(/dbh/gi, 'DBH');
+  } else if (/hom/i.test(field)) {
+    return field.replace(/hom/gi, 'HOM');
+  } else if (/id/i.test(field)) {
+    return field.replace(/id/gi, 'ID');
+  } else if (/cma/i.test(field)) {
+    return field.replace(/cma/gi, 'CMA');
+  }
+  return field;
+}
+
+// Combined function that first capitalizes and then applies the special cases
+export function capitalizeAndTransformField(field: string): string {
+  const capitalized = capitalizeFirstLetter(field);
+  return transformSpecialCases(capitalized);
+}

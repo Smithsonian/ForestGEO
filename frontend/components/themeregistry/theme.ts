@@ -44,7 +44,9 @@ const theme = extendTheme({
     JoyTooltip: {
       defaultProps: {
         // Automatically apply this prop globally
+        disableTouchListener: true,
         sx: {
+          leaveDelay: 100,
           pointerEvents: 'none'
         }
       }
