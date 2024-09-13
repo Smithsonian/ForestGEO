@@ -54,6 +54,9 @@ export default function IsolatedRolesDataGrid(props: IsolatedRolesDataGridProps)
         initialRow={initialRoleRDSRow}
         fieldToFocus={'roleName'}
         onDataUpdate={onRolesUpdated}
+        clusters={{
+          Role: ['roleName', 'roleDescription']
+        }}
       />
     </>
   );

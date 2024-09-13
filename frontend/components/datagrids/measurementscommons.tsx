@@ -944,6 +944,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         )}
         {isDialogOpen && promiseArguments && (
           <ReEnterDataModal
+            gridType={gridType}
             row={promiseArguments.oldRow}
             reEnterData={promiseArguments.newRow}
             handleClose={handleCancelAction}

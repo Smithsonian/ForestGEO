@@ -781,6 +781,7 @@ export default function DataGridCommons(props: Readonly<DataGridCommonProps>) {
         )}
         {isDialogOpen && promiseArguments && (
           <ReEnterDataModal
+            gridType={gridType}
             row={promiseArguments.oldRow} // Pass oldRow
             reEnterData={promiseArguments.newRow} // Pass newRow
             handleClose={handleCancelAction}

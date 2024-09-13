@@ -75,6 +75,7 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
       />
 
       <IsolatedDataGridCommons
+        locked
         gridType="stemtaxonomiesview"
         gridColumns={StemTaxonomiesViewGridColumns}
         refresh={refresh}
