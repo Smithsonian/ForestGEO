@@ -6,33 +6,36 @@ import { HTTPResponses } from '@/config/macros';
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
+  const currentPlotParam = request.nextUrl.searchParams.get('currentPlotParam');
+  if (!currentPlotParam) throw new Error('no current PlotParam');
   const currentCensusParam = request.nextUrl.searchParams.get('currentCensusParam');
   if (!currentCensusParam) throw new Error('no current CensusParam');
+  const currentPlotID = parseInt(currentPlotParam);
   const currentCensusID = parseInt(currentCensusParam);
   const queries = {
     numRecordsByQuadrat: `SELECT q.QuadratID, COUNT(cm.CoreMeasurementID) AS MeasurementCount
                           FROM ${schema}.coremeasurements cm
                                    JOIN ${schema}.quadrats q ON q.CensusID = cm.CensusID
-                          WHERE cm.CensusID = ${currentCensusID}
+                          WHERE cm.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
                           GROUP BY QuadratID;`,
     allStemRecords: `SELECT COUNT(s.StemID) AS TotalStems
                      FROM ${schema}.stems s
                               JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
                               JOIN ${schema}.attributes a ON cma.Code = a.Code
                               JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
-                     WHERE q.CensusID = ${currentCensusID};`,
+                     WHERE q.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};`,
     liveStemRecords: `SELECT COUNT(s.StemID) AS LiveStems
                       FROM ${schema}.stems s
                                JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
                                JOIN ${schema}.attributes a ON cma.Code = a.Code
                                JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
                       WHERE a.Status = 'alive'
-                        AND q.CensusID = ${currentCensusID};`,
+                        AND q.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};`,
     treeCount: `SELECT COUNT(t.TreeID) AS TotalTrees
                 FROM ${schema}.trees t
                          JOIN ${schema}.stems s ON s.TreeID = t.TreeID
                          JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
-                WHERE q.CensusID = ${currentCensusID};`,
+                WHERE q.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};`,
     countNumDeadMissingByCensus: `SELECT cm.CensusID, COUNT(s.StemID) AS DeadOrMissingStems
                                   FROM ${schema}.stems s
                                            JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
@@ -48,7 +51,8 @@ export async function GET(request: NextRequest) {
                          WHERE s.LocalX IS NULL
                             OR s.LocalY IS NULL
                             OR s.LocalX > p.DimensionX
-                            OR s.LocalY > p.DimensionY;`,
+                            OR s.LocalY > p.DimensionY 
+                            AND p.PlotID = ${currentPlotID};`,
     largestDBHHOMBySpecies: `SELECT sp.SpeciesID, sp.SpeciesName, MAX(cm.MeasuredDBH) AS LargestDBH, MAX(cm.MeasuredHOM) AS LargestHOM
                              FROM ${schema}.species sp
                                       JOIN ${schema}.trees t ON sp.SpeciesID = t.SpeciesID
