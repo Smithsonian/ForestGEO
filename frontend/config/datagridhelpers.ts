@@ -237,6 +237,7 @@ export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridCo
       col.field === 'actions' ||
       col.field === 'dimensionX' ||
       col.field === 'dimensionY' ||
+      col.field === 'subspeciesName' ||
       col.field === 'speciesLimits' ||
       col.field === 'isValidated' ||
       !allValuesAreNull(rows, col.field)

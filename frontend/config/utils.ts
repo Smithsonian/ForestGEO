@@ -212,15 +212,25 @@ export function capitalizeFirstLetter(field: string): string {
 }
 
 export function transformSpecialCases(field: string): string {
+  // Special case for ValidCode
+  if (/validcode/i.test(field)) {
+    return field.replace(/validcode/gi, 'ValidCode');
+  }
+
+  // Transform DBH, HOM, and CMA cases
   if (/dbh/i.test(field)) {
     return field.replace(/dbh/gi, 'DBH');
   } else if (/hom/i.test(field)) {
     return field.replace(/hom/gi, 'HOM');
-  } else if (/id/i.test(field)) {
-    return field.replace(/id/gi, 'ID');
   } else if (/cma/i.test(field)) {
     return field.replace(/cma/gi, 'CMA');
   }
+
+  // General transformation for ID
+  if (/id/i.test(field)) {
+    return field.replace(/id/gi, 'ID');
+  }
+
   return field;
 }
 

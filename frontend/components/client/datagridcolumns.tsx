@@ -1029,7 +1029,7 @@ export const SpeciesGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'subSpeciesName',
+    field: 'subspeciesName',
     headerName: 'Subspecies',
     headerClassName: 'header',
     flex: 1,

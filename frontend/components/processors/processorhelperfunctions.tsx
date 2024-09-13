@@ -1,9 +1,9 @@
-import mysql, { PoolConnection } from 'mysql2/promise';
+import { PoolConnection } from 'mysql2/promise';
 import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from '@/components/processors/processormacros';
 import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
-import { capitalizeAndTransformField } from '@/config/utils';
+import { handleUpsert } from '@/config/utils';
 
 // need to try integrating this into validation system:
 
@@ -49,70 +49,6 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       }
     }
     return undefined;
-  }
-}
-
-/**
- * Runs a validation procedure on the database to validate data for a given schema, procedure name, plot ID, and census ID.
- * If the procedure name is 'ValidateScreenMeasuredDiameterMinMax' or 'ValidateHOMUpperAndLowerBounds', the function will also pass minimum and maximum values to the procedure.
- *
- * @param schema - The schema name where the validation procedure is located.
- * @param procedureName - The name of the validation procedure to execute.
- * @param plotID - The plot ID to use in the validation procedure.
- * @param censusID - The census ID to use in the validation procedure.
- * @param min - The minimum value to pass to the validation procedure (optional).
- * @param max - The maximum value to pass to the validation procedure (optional).
- * @returns A validation response object containing the total rows, failed rows, a message, and optionally the failed core measurement IDs.
- */
-export async function runValidationProcedure(
-  schema: string,
-  procedureName: string,
-  plotID: number | null,
-  censusID: number | null,
-  min?: number | null, // Adjusted type here
-  max?: number | null // And here
-) {
-  const conn = await getConn();
-  let query, parameters;
-
-  // Since min and max are already either numbers or null, you don't need to convert them here
-  if (procedureName === 'ValidateScreenMeasuredDiameterMinMax' || procedureName === 'ValidateHOMUpperAndLowerBounds') {
-    // validation procedures have been updated to use new species limits tables
-    query = `CALL ${schema}.${procedureName}(?, ?, ?, ?)`;
-    parameters = [censusID, plotID, min, max];
-  } else {
-    query = `CALL ${schema}.${procedureName}(?, ?)`;
-    parameters = [censusID, plotID];
-  }
-  try {
-    await conn.beginTransaction();
-    const resultSets = await runQuery(conn, query, parameters);
-
-    // The first result set contains the expectedRows, insertedRows, and message
-    const validationSummary = resultSets[0][0];
-
-    // The second result set contains the failedValidationIds (if present)
-    const failedValidationIds = resultSets.length > 1 ? resultSets[1].map((row: any) => row.CoreMeasurementID) : [];
-
-    const validationResponse = {
-      totalRows: validationSummary.TotalRows,
-      failedRows: validationSummary.FailedRows,
-      message: validationSummary.Message,
-      ...(failedValidationIds.length > 0 && {
-        failedCoreMeasurementIDs: failedValidationIds
-      })
-    };
-
-    await conn.commit();
-    return validationResponse;
-  } catch (error: any) {
-    if (error.code === 'PROTOCOL_CONNECTION_LOST' || error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
-      // rollback should ONLY occur when the connection to MySQL is lost
-      await conn.rollback();
-      throw error;
-    }
-  } finally {
-    if (conn) conn.release();
   }
 }
 
@@ -215,45 +151,6 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
   }
 }
 
-// helper functions for precise field changes
-/**
- * Detects which fields have changed between two rows.
- * @param newRow The updated row data.
- * @param oldRow The original row data.
- * @param fieldList List of fields to check for changes.
- * @returns An array of fields that have changed.
- */
-export function detectFieldChanges(newRow: any, oldRow: any, fieldList: string[]): string[] {
-  return fieldList.filter(field => newRow[field] !== oldRow[field]);
-}
-
-export function generateUpdateQueries<Result>(
-  schema: string,
-  table: string,
-  changedFields: string[],
-  newRow: Record<string, any>, // Explicitly define newRow as a Record
-  primaryKey: keyof Result
-): string[] {
-  if (!newRow[primaryKey as string]) {
-    // Skip queries where primary key is null
-    return [];
-  }
-
-  return changedFields.map(field => {
-    // Apply the combined capitalization and transformation function
-    const transformedField = capitalizeAndTransformField(field);
-
-    // Format the query using mysql.format
-    return mysql.format(`UPDATE ?? SET ?? = ? WHERE ?? = ?`, [
-      `${schema}.${table}`, // Table reference
-      transformedField, // Transformed column name
-      newRow[field], // Value from newRow corresponding to the field
-      primaryKey as string, // Primary key as a string
-      newRow[primaryKey as string] // Primary key value from newRow
-    ]);
-  });
-}
-
 type FieldList = string[];
 
 interface UpdateQueryConfig {
@@ -266,110 +163,143 @@ interface UpdateQueryConfig {
   fieldList: FieldList;
 }
 
-/**
- * Generates a set of SQL update queries based on the changes between a new row and an old row.
- *
- * @param schema - The database schema name.
- * @param newRow - The updated row data.
- * @param oldRow - The original row data.
- * @param config - An object containing configuration for the update queries, including field slices and primary keys.
- * @returns An array of SQL update queries.
- */
-export function generateUpdateOperations(schema: string, newRow: any, oldRow: any, config: UpdateQueryConfig): string[] {
-  const { fieldList, slices } = config;
-  const changedFields = detectFieldChanges(newRow, oldRow, fieldList);
-
-  const generateQueriesFromSlice = (type: keyof typeof slices): string[] => {
-    const sliceConfig = slices[type];
-    if (!sliceConfig) {
-      return []; // Safety check in case of an undefined slice
-    }
-    const { range, primaryKey } = sliceConfig;
-    const fieldsInSlice = fieldList.slice(range[0], range[1]);
-    const changedInSlice = changedFields.filter(field => fieldsInSlice.includes(field));
-    return generateUpdateQueries(schema, type as string, changedInSlice, newRow, primaryKey);
-  };
-
-  return Object.keys(slices)
-    .reduce((acc, typeKey) => {
-      const type = typeKey as keyof typeof slices; // Assert the correct type explicitly
-      const queries = generateQueriesFromSlice(type);
-      return [...acc, ...queries];
-    }, [] as string[])
-    .filter(query => query.length > 0);
-}
-
-export function generateInsertOperations(schema: string, newRow: any, config: UpdateQueryConfig): string[] {
-  const { fieldList, slices } = config;
-
-  const generateQueriesFromSlice = (type: keyof typeof slices): string => {
-    const sliceConfig = slices[type];
-    if (!sliceConfig) {
-      return ''; // Safety check in case of an undefined slice
-    }
-    const { range } = sliceConfig;
-    const fieldsInSlice = fieldList.slice(range[0], range[1]);
-    return generateInsertQuery(schema, type as string, fieldsInSlice, newRow);
-  };
-
-  return Object.keys(slices)
-    .map(typeKey => {
-      const type = typeKey as keyof typeof slices;
-      return generateQueriesFromSlice(type);
-    })
-    .filter(query => query.length > 0);
-}
-
-export function generateInsertQuery<Result>(
+export async function handleUpsertForSlices<Result>(
+  connection: PoolConnection,
   schema: string,
-  table: string,
-  fields: string[],
-  newRow: Record<string, any> // Explicitly define newRow as a Record
-): string {
-  // Create an object containing only the fields in this slice
-  const dataToInsert = fields.reduce(
-    (obj, field) => {
-      // Apply the combined capitalization and transformation function
-      const transformedField = capitalizeAndTransformField(field);
-      obj[transformedField] = newRow[field]; // Safely assign the value from newRow
-      return obj;
-    },
-    {} as Record<string, any> // Define the accumulator as a Record
-  );
+  newRow: Partial<Result>,
+  config: UpdateQueryConfig
+): Promise<{ [key: string]: number }> {
+  const insertedIds: { [key: string]: number } = {};
+  console.log('Initial newRow data:', newRow);
 
-  // Use mysql.format to safely construct the query
-  return mysql.format(`INSERT INTO ?? SET ?`, [`${schema}.${table}`, dataToInsert]);
+  for (const sliceKey in config.slices) {
+    console.log('sliceKey: ', sliceKey);
+    const { range, primaryKey } = config.slices[sliceKey];
+    console.log('range: ', range);
+    console.log('primaryKey: ', primaryKey);
+    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
+    console.log('fieldsInSlice: ', fieldsInSlice);
+
+    // Build the row data for this slice
+    const rowData: Partial<Result> = {};
+    fieldsInSlice.forEach(field => {
+      console.log('field in slice: ', field);
+      rowData[field as keyof Result] = newRow[field as keyof Result];
+      console.log('updated rowData: ', rowData);
+    });
+
+    // Check if a foreign key from the previous slice should be included
+    if (Object.keys(insertedIds).length > 0) {
+      const prevKey = Object.keys(insertedIds).pop();
+      if (prevKey && newRow[prevKey as keyof Result] === undefined) {
+        // Cast rowData to any to avoid type issues with assigning number
+        (rowData as any)[`${prevKey}ID`] = insertedIds[prevKey];
+      }
+    }
+
+    // Perform the upsert (insert or update) and store the ID
+    insertedIds[sliceKey] = await handleUpsert<Result>(connection, schema, sliceKey, rowData, primaryKey as keyof Result);
+  }
+  return insertedIds;
+}
+
+export async function handleDeleteForSlices<Result>(
+  connection: PoolConnection,
+  schema: string,
+  rowData: Partial<Result>,
+  config: UpdateQueryConfig
+): Promise<void> {
+  // Iterate over the slices in reverse order to handle foreign key constraints
+  const sliceKeys = Object.keys(config.slices).reverse();
+
+  for (const sliceKey of sliceKeys) {
+    console.log('Deleting sliceKey: ', sliceKey);
+    const { range, primaryKey } = config.slices[sliceKey];
+    console.log('range: ', range);
+    console.log('primaryKey: ', primaryKey);
+
+    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
+    console.log('fieldsInSlice: ', fieldsInSlice);
+
+    // Build the row data for this slice
+    const deleteConditions: Partial<Result> = {};
+    fieldsInSlice.forEach(field => {
+      deleteConditions[field as keyof Result] = rowData[field as keyof Result];
+    });
+
+    // Ensure that a primary key is present for deletion
+    const primaryKeyValue = rowData[primaryKey as keyof Result];
+    if (!primaryKeyValue) {
+      console.error(`Primary key ${primaryKey} is missing in rowData for slice: ${sliceKey}`);
+      throw new Error(`Primary key ${primaryKey} is required for deletion in ${sliceKey}.`);
+    }
+
+    // If the slice is 'species', check for foreign key constraints in related tables (e.g., 'trees')
+    if (sliceKey === 'species') {
+      const deleteFromRelatedTableQuery = `
+        DELETE FROM \`${schema}\`.trees
+        WHERE \`SpeciesID\` = ?;
+      `;
+      try {
+        console.log('Deleting related rows from trees for SpeciesID:', primaryKeyValue);
+        await runQuery(connection, deleteFromRelatedTableQuery, [primaryKeyValue]);
+      } catch (error) {
+        console.error(`Error deleting related rows from trees for SpeciesID ${primaryKeyValue}:`, error);
+        throw new Error(`Failed to delete related rows from trees for SpeciesID ${primaryKeyValue}.`);
+      }
+    }
+
+    // Perform the deletion based on the primary key
+    const deleteQuery = `
+      DELETE FROM \`${schema}\`.\`${sliceKey}\`
+      WHERE \`${primaryKey}\` = ?;
+    `;
+
+    try {
+      console.log('Executing delete query for slice:', sliceKey);
+      console.log('Delete query:', deleteQuery);
+
+      // Use runQuery helper for executing the delete query
+      await runQuery(connection, deleteQuery, [primaryKeyValue]);
+    } catch (error) {
+      console.error(`Error during deletion in ${sliceKey}:`, error);
+      throw new Error(`Failed to delete from ${sliceKey}. Please check the logs for details.`);
+    }
+  }
+  console.log('Deletion completed successfully.');
 }
 
 // Field definitions and configurations
 
 export const allTaxonomiesFields = [
-  'family',
-  'genus',
-  'genusAuthority',
-  'speciesCode',
-  'speciesName',
-  'validCode',
-  'subspeciesName',
-  'speciesAuthority',
-  'fieldFamily',
-  'speciesDescription'
+  'Family',
+  'Genus',
+  'GenusAuthority',
+  'SpeciesCode',
+  'SpeciesName',
+  'ValidCode',
+  'SubspeciesName',
+  'SpeciesAuthority',
+  'IDLevel',
+  'SubspeciesAuthority',
+  'FieldFamily',
+  'Description'
 ];
 
 const stemTaxonomiesViewFields = [
-  'stemTag',
-  'treeTag',
-  'speciesCode',
-  'family',
-  'genus',
-  'speciesName',
-  'subspeciesName',
-  'validCode',
-  'genusAuthority',
-  'speciesAuthority',
-  'subspeciesAuthority',
-  'speciesIDLevel',
-  'speciesFieldFamily'
+  'StemTag',
+  'TreeTag',
+  'SpeciesCode',
+  'Family',
+  'Genus',
+  'SpeciesName',
+  'SubspeciesName',
+  'ValidCode',
+  'GenusAuthority',
+  'SpeciesAuthority',
+  'SubspeciesAuthority',
+  'SpeciesIDLevel',
+  'SpeciesFieldFamily'
 ];
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
