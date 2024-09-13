@@ -80,7 +80,8 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
     stemID: false,
     personnelID: false,
     dbhUnits: false,
-    homUnits: false
+    homUnits: false,
+    speciesID: false
   };
 }
 

@@ -275,6 +275,20 @@ export interface MeasurementsCommonsProps {
   locked?: boolean;
 }
 
+export interface IsolatedMeasurementsCommonsProps {
+  gridType: string;
+  gridColumns: GridColDef[];
+  refresh: boolean;
+  setRefresh: Dispatch<SetStateAction<boolean>>;
+  initialRow?: GridRowModel;
+  fieldToFocus?: string;
+  locked?: boolean;
+  selectionOptions?: { value: string | number; label: string }[];
+  onDataUpdate?: () => void;
+  clusters?: Record<string, string[]>;
+  handleExportErrors?: () => Promise<GridRowModel[]>;
+}
+
 export const errorMapping: { [key: string]: string[] } = {
   '1': ['attributes'],
   '2': ['measuredDBH'],
