@@ -366,16 +366,14 @@ export default function Sidebar(props: SidebarProps) {
     const hasStartDate = startDate !== undefined && startDate !== null;
     const hasEndDate = endDate !== undefined && endDate !== null;
 
-    // Determine the message based on the presence of startDate and endDate
-    const dateMessage =
-      hasStartDate || hasEndDate ? (
-        <>
-          {hasStartDate && `— First Record: ${new Date(startDate).toDateString()}`}
-          {hasEndDate && ` — Last Record: ${new Date(endDate).toDateString()}`}
-        </>
-      ) : (
-        ' — No Measurements'
-      ); // Display "No Measurements" if both dates are missing
+    // Ensure dates are rendered in a block layout to stack them vertically
+    const dateMessage = (
+      <>
+        {hasStartDate && <Typography display="block">&mdash;{` First Record: ${new Date(startDate).toDateString()}`}</Typography>}
+        {hasEndDate && <Typography display="block">&mdash;{` Last Record: ${new Date(endDate).toDateString()}`}</Typography>}
+        {!hasStartDate && !hasEndDate && <Typography display="block">No Measurements</Typography>}
+      </>
+    );
 
     return (
       <Stack direction={'column'} alignItems={'start'}>
