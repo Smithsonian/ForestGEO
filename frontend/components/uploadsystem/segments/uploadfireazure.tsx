@@ -183,7 +183,15 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
               Some errors occurred during refresh:
             </Typography>
             <Typography color="error">{refreshError}</Typography>
-            <Button variant="contained" onClick={() => setRefreshError(null)} disabled={continueDisabled}>
+            <Button
+              variant="contained"
+              onClick={() => {
+                setRefreshError(null); // Clear the error
+                setContinueDisabled(true); // Enable the continuation
+                setReviewState(ReviewStates.COMPLETE); // Finalize the process
+              }}
+              disabled={continueDisabled}
+            >
               Continue
             </Button>
           </Stack>
