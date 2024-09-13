@@ -100,17 +100,27 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   }
 
   private transformSpecialCases(key: string): string {
-    return key.replace(/dbh/gi, 'DBH').replace(/hom/gi, 'HOM').replace(/id/gi, 'ID');
+    // Add special handling for ValidCode before applying the ID transformation
+    if (/validcode/i.test(key)) {
+      return key.replace(/validcode/gi, 'ValidCode');
+    }
+
+    // Existing transformations for DBH, HOM, CMA, and ID
+    return key.replace(/dbh/gi, 'DBH').replace(/hom/gi, 'HOM').replace(/cma/gi, 'CMA').replace(/id/gi, 'ID');
   }
 
   private detransformSpecialCases(key: string): string {
-    return key
-      .replace(/DBHUnits/gi, 'dbhUnits')
-      .replace(/HOMUnits/gi, 'homUnits')
-      .replace(/measureddbh/gi, 'measuredDBH')
-      .replace(/measuredhom/gi, 'measuredHOM')
-      .replace(/cam/gi, 'CAM')
-      .replace(/Cam/gi, 'CAM');
+    return (
+      key
+        // Add reverse transformation for ValidCode
+        .replace(/ValidCode/gi, 'validCode')
+        .replace(/DBHUnits/gi, 'dbhUnits')
+        .replace(/HOMUnits/gi, 'homUnits')
+        .replace(/measureddbh/gi, 'measuredDBH')
+        .replace(/measuredhom/gi, 'measuredHOM')
+        .replace(/cam/gi, 'CAM')
+        .replace(/Cam/gi, 'CAM')
+    );
   }
 
   private transformValue(value: any): any {

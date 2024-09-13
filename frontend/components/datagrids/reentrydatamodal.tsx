@@ -23,6 +23,7 @@ import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 
 interface ReEnterDataModalProps {
+  gridType: string;
   row: GridRowModel;
   reEnterData: GridRowModel | null;
   handleClose: () => void;
@@ -34,6 +35,7 @@ interface ReEnterDataModalProps {
 }
 
 const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
+  gridType,
   row,
   reEnterData,
   handleClose,
@@ -135,7 +137,16 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       console.log('selectedRow: ', selectedRow);
       const normalizedData = normalizeRowData(remaining);
       console.log('normalized row: ', normalizedData);
-      handleSave(normalizedData);
+      if (gridType === 'alltaxonomiesview') {
+        // need to switch the speciesDescription to description:
+        const { speciesDescription, speciesIDLevel, ...rest } = normalizedData;
+        const updatedData = {
+          ...rest,
+          description: speciesDescription,
+          idLevel: speciesIDLevel
+        };
+        handleSave(updatedData);
+      } else handleSave(normalizedData);
     }
   };
 

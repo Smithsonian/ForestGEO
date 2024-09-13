@@ -28,6 +28,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     speciesIDLevel: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
+    validCode: '',
     fieldFamily: '',
     speciesDescription: ''
   };
@@ -172,6 +173,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       field: 'speciesName',
       headerName: 'Species',
       headerClassName: 'header',
+      renderHeader: () => formatHeader('Species', 'Name'),
       flex: 1,
       align: 'center',
       headerAlign: 'center',
@@ -182,6 +184,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       field: 'subspeciesName',
       headerName: 'Subspecies',
       headerClassName: 'header',
+      renderHeader: () => formatHeader('Subspecies', 'Name'),
       flex: 1,
       align: 'center',
       headerAlign: 'center',
@@ -225,6 +228,17 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       field: 'fieldFamily',
       headerName: 'Field Family',
       renderHeader: () => formatHeader('Field', 'Family'),
+      headerClassName: 'header',
+      flex: 1,
+      align: 'center',
+      headerAlign: 'center',
+      type: 'string',
+      editable: true
+    },
+    {
+      field: 'validCode',
+      headerName: 'Valid Code',
+      renderHeader: () => formatHeader('Valid', 'Code'),
       headerClassName: 'header',
       flex: 1,
       align: 'center',
@@ -303,7 +317,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         clusters={{
           Family: ['family'],
           Genus: ['genus', 'genusAuthority'],
-          Species: ['speciesCode', 'speciesName', 'speciesIDLevel', 'speciesAuthority', 'fieldFamily', 'speciesDescription'],
+          Species: ['speciesCode', 'speciesName', 'speciesIDLevel', 'speciesAuthority', 'fieldFamily', 'validCode', 'speciesDescription'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
       />

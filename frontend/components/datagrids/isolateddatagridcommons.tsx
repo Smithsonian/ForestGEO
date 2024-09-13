@@ -281,7 +281,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       if (locked || !promiseArguments) return;
 
       setLoading(true, 'Saving changes...');
-
       try {
         // Set the row to view mode after confirmation
         setRowModesModel(prevModel => ({
@@ -876,6 +875,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         )}
         {isDialogOpen && promiseArguments && (
           <ReEnterDataModal
+            gridType={gridType}
             row={promiseArguments.oldRow} // Pass oldRow
             reEnterData={promiseArguments.newRow} // Pass newRow
             handleClose={handleCancelAction}
