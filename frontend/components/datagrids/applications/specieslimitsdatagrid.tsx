@@ -619,11 +619,15 @@ export default function SpeciesLimitsDataGrid({ speciesID }: { speciesID: number
       )}
       {isDialogOpen && promiseArguments && (
         <ReEnterDataModal
+          gridType={'specieslimits'}
           row={promiseArguments.oldRow}
           reEnterData={promiseArguments.newRow}
           handleClose={handleCancelAction}
           handleSave={handleConfirmAction}
           columns={SpeciesLimitsGridColumns}
+          clusters={{
+            SpeciesLimits: ['limitType', 'upperBound', 'lowerBound', 'unit']
+          }}
           selectionOptions={['DBH', 'HOM'].map(limit => ({
             value: limit,
             label: limit
