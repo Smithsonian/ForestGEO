@@ -123,30 +123,6 @@ export const siteConfigNav: SiteConfigProps[] = [
         tip: '',
         icon: FilterIcon
       }
-      // {
-      //   label: 'Subquadrats',
-      //   href: '/subquadrats',
-      //   tip: '',
-      //   icon: WidgetsIcon,
-      // },
-      // {
-      //   label: 'QuadratPersonnel',
-      //   href: '/quadratpersonnel',
-      //   tip: '',
-      //   icon: WidgetsIcon,
-      // },
-      // {
-      //   label: 'Species',
-      //   href: '/species',
-      //   tip: '',
-      //   icon: BugReportIcon,
-      // },
-      // {
-      //   label: 'Measurements Form',
-      //   href: '/measurementsform',
-      //   tip: '',
-      //   icon: DescriptionIcon,
-      // },
     ]
   }
 ];
