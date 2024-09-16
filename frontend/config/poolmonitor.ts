@@ -52,11 +52,10 @@ export class PoolMonitor {
       this.logPoolStatus();
       this.resetInactivityTimer();
     });
-
+    
     // Initialize inactivity timer
     this.resetInactivityTimer();
   }
-
   async getConnection(): Promise<PoolConnection> {
     if (this.poolClosed) {
       throw new Error('Connection pool is closed');
