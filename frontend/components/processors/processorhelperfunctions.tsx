@@ -69,6 +69,7 @@ export async function verifyEmail(email: string): Promise<{ emailVerified: boole
                    WHERE Email = ?
                    LIMIT 1`;
     const results = await runQuery(connection, query, [email]);
+    console.log('results: ', results);
 
     // emailVerified is true if there is at least one result
     const emailVerified = results.length > 0;
