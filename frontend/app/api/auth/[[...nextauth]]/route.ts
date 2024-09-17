@@ -24,6 +24,7 @@ const handler = NextAuth({
       console.log('process envs: ', process.env);
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
+      console.log('user email: ', userEmail);
       if (typeof userEmail !== 'string') {
         console.error('User email is not a string:', userEmail);
         return false; // Email is not a valid string, abort sign-in
