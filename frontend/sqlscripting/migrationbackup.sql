@@ -20,6 +20,125 @@ truncate subquadrats;
 truncate unifiedchangelog;
 truncate validationchangelog;
 
+DROP VIEW IF EXISTS `alltaxonomiesview`;
+DROP VIEW IF EXISTS `measurementssummaryview`;
+DROP VIEW IF EXISTS `stemtaxonomiesview`;
+DROP VIEW IF EXISTS `viewfulltableview`;
+
+DROP PROCEDURE IF EXISTS `UpdateValidationStatus`;
+DROP PROCEDURE IF EXISTS `ValidateDBHGrowthExceedsMax`;
+DROP PROCEDURE IF EXISTS `ValidateDBHShrinkageExceedsMax`;
+DROP PROCEDURE IF EXISTS `ValidateFindAllInvalidSpeciesCodes`;
+DROP PROCEDURE IF EXISTS `ValidateFindDuplicatedQuadratsByName`;
+DROP PROCEDURE IF EXISTS `ValidateFindDuplicateStemTreeTagCombinationsPerCensus`;
+DROP PROCEDURE IF EXISTS `ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat`;
+DROP PROCEDURE IF EXISTS `ValidateFindStemsInTreeWithDifferentSpecies`;
+DROP PROCEDURE IF EXISTS `ValidateFindStemsOutsidePlots`;
+DROP PROCEDURE IF EXISTS `ValidateFindTreeStemsInDifferentQuadrats`;
+DROP PROCEDURE IF EXISTS `ValidateHOMUpperAndLowerBounds`;
+DROP PROCEDURE IF EXISTS `ValidateScreenMeasuredDiameterMinMax`;
+DROP PROCEDURE IF EXISTS `ValidateScreenStemsWithMeasurementsButDeadAttributes`;
+
+# attributes
+DROP TRIGGER IF EXISTS after_insert_attributes;
+DROP TRIGGER IF EXISTS after_update_attributes;
+DROP TRIGGER IF EXISTS after_delete_attributes;
+
+# census
+DROP TRIGGER IF EXISTS after_insert_census;
+DROP TRIGGER IF EXISTS after_update_census;
+DROP TRIGGER IF EXISTS after_delete_census;
+
+# cmattributes
+DROP TRIGGER IF EXISTS after_insert_cmattributes;
+DROP TRIGGER IF EXISTS after_update_cmattributes;
+DROP TRIGGER IF EXISTS after_delete_cmattributes;
+
+# cmverrors
+DROP TRIGGER IF EXISTS after_insert_cmverrors;
+DROP TRIGGER IF EXISTS after_update_cmverrors;
+DROP TRIGGER IF EXISTS after_delete_cmverrors;
+
+# coremeasurements
+DROP TRIGGER IF EXISTS after_insert_coremeasurements;
+DROP TRIGGER IF EXISTS after_update_coremeasurements;
+DROP TRIGGER IF EXISTS after_delete_coremeasurements;
+
+# family
+DROP TRIGGER IF EXISTS after_insert_family;
+DROP TRIGGER IF EXISTS after_update_family;
+DROP TRIGGER IF EXISTS after_delete_family;
+
+# genus
+DROP TRIGGER IF EXISTS after_insert_genus;
+DROP TRIGGER IF EXISTS after_update_genus;
+DROP TRIGGER IF EXISTS after_delete_genus;
+
+# personnel
+DROP TRIGGER IF EXISTS after_insert_personnel;
+DROP TRIGGER IF EXISTS after_update_personnel;
+DROP TRIGGER IF EXISTS after_delete_personnel;
+
+# plots
+DROP TRIGGER IF EXISTS after_insert_plots;
+DROP TRIGGER IF EXISTS after_update_plots;
+DROP TRIGGER IF EXISTS after_delete_plots;
+
+# quadratpersonnel
+DROP TRIGGER IF EXISTS after_insert_quadratpersonnel;
+DROP TRIGGER IF EXISTS after_update_quadratpersonnel;
+DROP TRIGGER IF EXISTS after_delete_quadratpersonnel;
+
+# quadrats
+DROP TRIGGER IF EXISTS after_insert_quadrats;
+DROP TRIGGER IF EXISTS after_update_quadrats;
+DROP TRIGGER IF EXISTS after_delete_quadrats;
+
+# reference
+DROP TRIGGER IF EXISTS after_insert_reference;
+DROP TRIGGER IF EXISTS after_update_reference;
+DROP TRIGGER IF EXISTS after_delete_reference;
+
+# roles
+DROP TRIGGER IF EXISTS after_insert_roles;
+DROP TRIGGER IF EXISTS after_update_roles;
+DROP TRIGGER IF EXISTS after_delete_roles;
+
+# species
+DROP TRIGGER IF EXISTS after_insert_species;
+DROP TRIGGER IF EXISTS after_update_species;
+DROP TRIGGER IF EXISTS after_delete_species;
+
+# specieslimits
+DROP TRIGGER IF EXISTS after_insert_specieslimits;
+DROP TRIGGER IF EXISTS after_update_specieslimits;
+DROP TRIGGER IF EXISTS after_delete_specieslimits;
+
+# specimens
+DROP TRIGGER IF EXISTS after_insert_specimens;
+DROP TRIGGER IF EXISTS after_update_specimens;
+DROP TRIGGER IF EXISTS after_delete_specimens;
+
+# stems
+DROP TRIGGER IF EXISTS after_insert_stems;
+DROP TRIGGER IF EXISTS after_update_stems;
+DROP TRIGGER IF EXISTS after_delete_stems;
+
+# subquadrats
+DROP TRIGGER IF EXISTS after_insert_subquadrats;
+DROP TRIGGER IF EXISTS after_update_subquadrats;
+DROP TRIGGER IF EXISTS after_delete_subquadrats;
+
+# trees
+DROP TRIGGER IF EXISTS after_insert_trees;
+DROP TRIGGER IF EXISTS after_update_trees;
+DROP TRIGGER IF EXISTS after_delete_trees;
+
+# validationchangelog
+DROP TRIGGER IF EXISTS after_insert_validationchangelog;
+DROP TRIGGER IF EXISTS after_update_validationchangelog;
+DROP TRIGGER IF EXISTS after_delete_validationchangelog;
+
 -- Insert into plots with ON DUPLICATE KEY UPDATE
 INSERT INTO plots (PlotID, PlotName, LocationName, CountryName, DimensionX, DimensionY, DimensionUnits, Area, AreaUnits,
                    GlobalX, GlobalY, GlobalZ, CoordinateUnits, PlotShape, PlotDescription)
@@ -271,40 +390,28 @@ ON DUPLICATE KEY UPDATE TreeID          = VALUES(TreeID),
 -- Insert into coremeasurements with ON DUPLICATE KEY UPDATE
 INSERT INTO coremeasurements (CoreMeasurementID, CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, DBHUnit,
                               MeasuredHOM, HOMUnit, Description, UserDefinedFields)
-SELECT
-    dbh.DBHID,
-    dbh.CensusID,
-    dbh.StemID,
-    NULL,  -- Placeholder for IsValidated
-    dbh.ExactDate,
-    CAST(dbh.DBH AS DECIMAL(10, 6)),
-    'cm',  -- DBHUnit
-    CAST(dbh.HOM AS DECIMAL(10, 6)),
-    'm',   -- HOMUnit
-    LEFT(dbh.Comments, 65535),
-    NULL   -- Placeholder for UserDefinedFields
-FROM (
-    -- Combine dbh and dbhbackup using UNION
-    SELECT
-        DBHID, CensusID, StemID, DBH, HOM, ExactDate, Comments
-    FROM stable_panama.dbh
-    UNION
-    SELECT
-        DBHID, CensusID, StemID, DBH, HOM, ExactDate, Comments
-    FROM stable_panama.dbhbackup
-) dbh
-ON DUPLICATE KEY UPDATE
-    StemID            = VALUES(StemID),
-    IsValidated       = VALUES(IsValidated),
-    MeasurementDate   = VALUES(MeasurementDate),
-    MeasuredDBH       = VALUES(MeasuredDBH),
-    DBHUnit           = VALUES(DBHUnit),
-    MeasuredHOM       = VALUES(MeasuredHOM),
-    HOMUnit           = VALUES(HOMUnit),
-    Description       = IF(VALUES(Description) != '', VALUES(Description),
-                           coremeasurements.Description),
-    UserDefinedFields = VALUES(UserDefinedFields);
-
+SELECT dbh.DBHID,
+       dbh.CensusID,
+       dbh.StemID,
+       NULL,
+       dbh.ExactDate,
+       CAST(dbh.DBH AS DECIMAL(10, 6)),
+       'cm',
+       CAST(dbh.HOM AS DECIMAL(10, 6)),
+       'm',
+       LEFT(dbh.Comments, 65535),
+       NULL
+FROM stable_panama.dbh dbh
+ON DUPLICATE KEY UPDATE StemID            = VALUES(StemID),
+                        IsValidated       = VALUES(IsValidated),
+                        MeasurementDate   = VALUES(MeasurementDate),
+                        MeasuredDBH       = VALUES(MeasuredDBH),
+                        DBHUnit           = VALUES(DBHUnit),
+                        MeasuredHOM       = VALUES(MeasuredHOM),
+                        HOMUnit           = VALUES(HOMUnit),
+                        Description       = IF(VALUES(Description) != '', VALUES(Description),
+                                               coremeasurements.Description),
+                        UserDefinedFields = VALUES(UserDefinedFields);
 
 -- Insert into quadratpersonnel with ON DUPLICATE KEY UPDATE
 INSERT INTO quadratpersonnel (QuadratPersonnelID, QuadratID, PersonnelID, CensusID)
@@ -328,24 +435,11 @@ ON DUPLICATE KEY UPDATE Description = IF(VALUES(Description) != '', VALUES(Descr
 
 -- Insert into cmattributes with ON DUPLICATE KEY UPDATE
 INSERT INTO cmattributes (CMAID, CoreMeasurementID, Code)
-SELECT
-    dbha.DBHAttID,
-    dbha.DBHID,
-    ta.TSMCode
-FROM (
-    -- Combine dbhattributes and dbhattributes_backup using UNION
-    SELECT
-        DBHAttID, DBHID, TSMID
-    FROM stable_panama.dbhattributes
-    UNION
-    SELECT
-        DBHAttID, DBHID, TSMID
-    FROM stable_panama.dbhattributes_backup
-) dbha
-JOIN stable_panama.tsmattributes ta ON dbha.TSMID = ta.TSMID
-ON DUPLICATE KEY UPDATE
-    CoreMeasurementID = VALUES(CoreMeasurementID),
-    Code              = VALUES(Code);
+SELECT dbha.DBHAttID, dbha.DBHID, ta.TSMCode
+FROM stable_panama.dbhattributes dbha
+         JOIN stable_panama.tsmattributes ta ON dbha.TSMID = ta.TSMID
+ON DUPLICATE KEY UPDATE CoreMeasurementID = VALUES(CoreMeasurementID),
+                        Code              = VALUES(Code);
 
 -- Insert into specimens with ON DUPLICATE KEY UPDATE
 INSERT INTO specimens (SpecimenID, StemID, PersonnelID, SpecimenNumber, SpeciesID, Herbarium, Voucher, CollectionDate,

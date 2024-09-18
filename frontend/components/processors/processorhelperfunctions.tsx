@@ -100,7 +100,6 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     `;
     const sitesParams: any[] | undefined = [];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
-    console.log('getallschemas: ', sitesResults);
 
     return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
   } catch (error: any) {

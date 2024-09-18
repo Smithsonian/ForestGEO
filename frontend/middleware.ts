@@ -15,17 +15,19 @@ export async function middleware(request: NextRequest) {
     secret: process.env.NEXTAUTH_SECRET
   });
   const url = request.nextUrl.clone();
-
-  if (
-    url.pathname.startsWith('/dashboard') ||
-    url.pathname.startsWith('/measurementshub') ||
-    url.pathname.startsWith('/fixeddatainput') ||
-    url.pathname.startsWith('/admin')
-  ) {
+  if (url.pathname.startsWith('/dashboard') || url.pathname.startsWith('/measurementshub') || url.pathname.startsWith('/fixeddatainput')) {
     if (!session) {
       // If user is not authenticated and tries to access protected routes, redirect to login
       url.pathname = '/login';
       return NextResponse.redirect(url);
+    } else {
+      if (url.pathname.startsWith('/measurementshub/validations')) {
+        const status = session.userStatus;
+        if (status !== 'global' && status !== 'db admin') {
+          url.pathname = '/access-denied';
+          return NextResponse.redirect(url);
+        }
+      }
     }
   } else if (url.pathname === '/') {
     // Redirect from home to dashboard if authenticated, or login if not
@@ -42,5 +44,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/dashboard', '/measurementshub', '/fixeddatainput', '/admin']
+  matcher: ['/', '/dashboard', '/measurementshub/:path*', '/fixeddatainput/:path*']
 };

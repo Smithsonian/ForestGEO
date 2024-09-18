@@ -32,7 +32,7 @@ declare module 'next-auth' {
   }
 
   // Extend the Token type
-  interface Token {
+  interface JWT {
     userStatus: UserAuthRoles;
     sites: SitesRDS[];
     allsites: SitesRDS[];
