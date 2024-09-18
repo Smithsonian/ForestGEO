@@ -1,8 +1,9 @@
 import NextAuth, { AzureADProfile } from 'next-auth';
 import AzureADProvider from 'next-auth/providers/azure-ad';
-import { getAllowedSchemas, getAllSchemas, verifyEmail } from '@/components/processors/processorhelperfunctions';
+import { getAllowedSchemas, getAllSchemas } from '@/components/processors/processorhelperfunctions';
 import { UserAuthRoles } from '@/config/macros';
 import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
+import { getConn, runQuery } from '@/components/processors/processormacros';
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET!,
@@ -19,9 +20,8 @@ const handler = NextAuth({
     maxAge: 24 * 60 * 60 // 24 hours (you can adjust this value as needed)
   },
   callbacks: {
-    async signIn({ user, account, profile, email: signInEmail, credentials }) {
+    async signIn({ user, profile, email: signInEmail }) {
       console.log('callback -- signin');
-      console.log('process envs: ', process.env);
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
       console.log('user email: ', userEmail);
@@ -30,17 +30,38 @@ const handler = NextAuth({
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        const { emailVerified, userStatus } = await verifyEmail(userEmail);
-        if (!emailVerified) {
-          throw new Error('User email not found.');
+        console.log('getting connection');
+        let conn, emailVerified, userStatus;
+        try {
+          conn = await getConn();
+          console.log('obtained');
+          const query = `SELECT UserStatus FROM catalog.users WHERE Email = '${userEmail}' LIMIT 1`;
+          const results = await runQuery(conn, query);
+          console.log('results: ', results);
+
+          // emailVerified is true if there is at least one result
+          emailVerified = results.length > 0;
+          console.log('emailVerified: ', emailVerified);
+          if (!emailVerified) {
+            console.error('User email not found.');
+            return false;
+          }
+          userStatus = results[0].UserStatus;
+          console.log('userStatus: ', userStatus);
+        } catch (e: any) {
+          console.error('Error fetching user status:', e);
+          throw new Error('Failed to fetch user status.');
+        } finally {
+          if (conn) conn.release();
         }
-        user.userStatus = userStatus as UserAuthRoles; // Add userStatus property to the user object
+        user.userStatus = userStatus as UserAuthRoles;
         user.email = userEmail;
         // console.log('getting all sites: ');
         const allSites = await getAllSchemas();
         const allowedSites = await getAllowedSchemas(userEmail);
         if (!allowedSites || !allSites) {
-          throw new Error('User does not have any allowed sites.');
+          console.error('User does not have any allowed sites.');
+          return false;
         }
 
         user.sites = allowedSites;
@@ -51,9 +72,12 @@ const handler = NextAuth({
     },
 
     async jwt({ token, user }) {
-      if (user?.userStatus !== undefined) token.userStatus = user.userStatus; // Persist admin status in the JWT token
-      if (user?.sites !== undefined) token.sites = user.sites; // persist allowed sites in JWT token
-      if (user?.allsites !== undefined) token.allsites = user.allsites;
+      // If this is the first time the JWT is issued, persist custom properties
+      if (user) {
+        token.userStatus = user.userStatus;
+        token.sites = user.sites;
+        token.allsites = user.allsites;
+      }
       return token;
     },
 
