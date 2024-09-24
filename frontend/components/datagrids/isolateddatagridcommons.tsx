@@ -47,9 +47,9 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import { redirect } from 'next/navigation';
 import Box from '@mui/joy/Box';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import ReEnterDataModal from '@/components/datagrids/reentrydatamodal';
 import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
+import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
@@ -873,17 +873,25 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
+        {/*{isDialogOpen && promiseArguments && (*/}
+        {/*  <ReEnterDataModal*/}
+        {/*    gridType={gridType}*/}
+        {/*    row={promiseArguments.oldRow} // Pass oldRow*/}
+        {/*    reEnterData={promiseArguments.newRow} // Pass newRow*/}
+        {/*    handleClose={handleCancelAction}*/}
+        {/*    handleSave={handleConfirmAction}*/}
+        {/*    columns={gridColumns}*/}
+        {/*    selectionOptions={selectionOptions}*/}
+        {/*    clusters={clusters}*/}
+        {/*    hiddenColumns={getColumnVisibilityModel(gridType)}*/}
+        {/*  />*/}
+        {/*)}*/}
         {isDialogOpen && promiseArguments && (
-          <ReEnterDataModal
+          <SkipReEnterDataModal
             gridType={gridType}
-            row={promiseArguments.oldRow} // Pass oldRow
-            reEnterData={promiseArguments.newRow} // Pass newRow
+            row={promiseArguments.newRow} // Pass the newRow directly
             handleClose={handleCancelAction}
             handleSave={handleConfirmAction}
-            columns={gridColumns}
-            selectionOptions={selectionOptions}
-            clusters={clusters}
-            hiddenColumns={getColumnVisibilityModel(gridType)}
           />
         )}
         {isDeleteDialogOpen && (
