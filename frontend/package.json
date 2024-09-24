@@ -1,6 +1,6 @@
 {
-  "name": "forestgeo-app",
-  "version": "acacia",
+  "name": "forestgeo-app-baobab",
+  "version": "baobab",
   "private": true,
   "overrides": {
     "glob": "^10.3.10",
