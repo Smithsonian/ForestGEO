@@ -202,7 +202,7 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
   }
 
   return (
-    <Modal open={open} onClose={undefined}>
+    <Modal open={open} onClose={undefined} data-testid={'rollover-stems-modal'}>
       <ModalDialog role="alertdialog">
         <DialogTitle>
           <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} mb={2}>

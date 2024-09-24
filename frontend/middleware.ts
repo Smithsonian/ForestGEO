@@ -20,14 +20,6 @@ export async function middleware(request: NextRequest) {
       // If user is not authenticated and tries to access protected routes, redirect to login
       url.pathname = '/login';
       return NextResponse.redirect(url);
-    } else {
-      if (url.pathname.startsWith('/measurementshub/validations')) {
-        const status = session.userStatus;
-        if (status !== 'global' && status !== 'db admin') {
-          url.pathname = '/access-denied';
-          return NextResponse.redirect(url);
-        }
-      }
     }
   } else if (url.pathname === '/') {
     // Redirect from home to dashboard if authenticated, or login if not

@@ -231,7 +231,6 @@ export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
  * Function to filter out columns where all entries are null, except the actions column.
  */
 export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  console.log('Rows before filtering:', rows);
   return columns.filter(
     col =>
       col.field === 'actions' ||

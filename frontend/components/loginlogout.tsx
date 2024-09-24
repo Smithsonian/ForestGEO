@@ -25,7 +25,7 @@ export const LoginLogout = () => {
 
   if (status == 'unauthenticated') {
     return (
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }} data-testid={'login-logout-component'}>
         <Avatar variant="outlined" size="sm">
           UNK
         </Avatar>
@@ -40,7 +40,7 @@ export const LoginLogout = () => {
     );
   } else {
     return (
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }} data-testid={'login-logout-component'}>
         <Avatar variant="outlined" size="sm" src="">
           <Skeleton loading={status == 'loading'}>
             {typeof session?.user?.name == 'string'

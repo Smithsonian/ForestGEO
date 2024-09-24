@@ -74,7 +74,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const quadratLastExecutedRef = useRef<number | null>(null);
 
   // Debounce delay
-  const debounceDelay = 100;
+  const debounceDelay = 300;
 
   const fetchSiteList = useCallback(async () => {
     const now = Date.now();
@@ -175,52 +175,41 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [currentSite, currentPlot, currentCensus, quadratListLoaded, quadratListDispatch, setLoading]);
 
+  // Fetch site list if session exists and site list has not been loaded
   useEffect(() => {
-    if (currentSite && siteListLoaded) {
-      loadPlotData().catch(console.error);
-    }
-    if (currentSite && siteListLoaded && currentPlot && plotListLoaded) {
-      loadCensusData().catch(console.error);
-    }
-    if (currentSite && siteListLoaded && currentPlot && plotListLoaded && currentCensus && censusListLoaded) {
-      loadQuadratData().catch(console.error);
-    }
-  }, [currentSite, currentPlot, currentCensus, loadPlotData, loadCensusData, loadQuadratData]);
-
-  // Fetch site list when siteListLoaded is false
-  useEffect(() => {
-    if (!siteListLoaded) {
+    // Ensure session is ready before attempting to fetch site list
+    if (session && !siteListLoaded) {
       fetchSiteList().catch(console.error);
     }
-  }, [siteListLoaded, fetchSiteList]);
+  }, [session, siteListLoaded, fetchSiteList]);
 
-  // Fetch plot data when plotListLoaded is false and currentSite is defined
+  // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
       loadPlotData().catch(console.error);
     }
-  }, [plotListLoaded, currentSite, loadPlotData]);
+  }, [currentSite, plotListLoaded, loadPlotData]);
 
-  // Fetch census data when censusListLoaded is false and currentSite and currentPlot are defined
+  // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
       loadCensusData().catch(console.error);
     }
-  }, [censusListLoaded, currentSite, currentPlot, loadCensusData]);
+  }, [currentSite, currentPlot, censusListLoaded, loadCensusData]);
 
-  // Fetch quadrat data when quadratListLoaded is false and currentSite, currentPlot, and currentCensus are defined
+  // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
       loadQuadratData().catch(console.error);
     }
-  }, [quadratListLoaded, currentSite, currentPlot, currentCensus, loadQuadratData]);
+  }, [currentSite, currentPlot, currentCensus, quadratListLoaded, loadQuadratData]);
 
-  // Manual reset logic
+  // Handle manual reset logic
   useEffect(() => {
     if (manualReset) {
       setLoading(true, 'Manual refresh beginning...');
 
-      // Set all loaded states to false to trigger the re-fetching
+      // Reset all loading states
       setSiteListLoaded(false);
       setPlotListLoaded(false);
       setCensusListLoaded(false);
@@ -230,13 +219,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [manualReset]);
 
-  // Fetch site list if session exists and site list has not been loaded
-  useEffect(() => {
-    if (session && !siteListLoaded) {
-      fetchSiteList().catch(console.error);
-    }
-  }, [fetchSiteList, session, siteListLoaded]);
-
+  // Clear lists and reload data when site, plot, or census changes
   useEffect(() => {
     const hasSiteChanged = previousSiteRef.current !== currentSite?.siteName;
     const hasPlotChanged = previousPlotRef.current !== currentPlot?.plotID;
@@ -288,18 +271,19 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadPlotData, loadCensusData, loadQuadratData]);
 
+  // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard
   useEffect(() => {
-    // if contexts are reset due to website refresh, system needs to redirect user back to dashboard
     if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard') {
       redirect('/dashboard');
     }
   }, [pathname, currentSite, currentPlot, currentCensus]);
 
+  // Handle sidebar visibility based on session presence
   useEffect(() => {
     if (session) {
       const timer = setTimeout(() => {
         setSidebarVisible(true);
-      }, 300); // Debounce the sidebar visibility with a delay
+      }, 300); // Debounce sidebar visibility with a delay
       return () => clearTimeout(timer);
     }
   }, [session]);
