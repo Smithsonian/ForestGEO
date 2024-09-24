@@ -51,6 +51,7 @@ export function SimpleToggler({ isOpen, renderToggle, children }: Readonly<Simpl
     <React.Fragment>
       {renderToggle}
       <Box
+        data-testid={'simple-toggler'}
         sx={{
           display: 'grid',
           gridTemplateRows: isOpen ? '1fr' : '0fr',
@@ -93,10 +94,12 @@ function MenuRenderToggle(
           setMenuOpen(!menuOpen);
         }
       }}
+      data-testid={'menu-render-toggle'}
       sx={{ width: '100%', padding: 0, margin: 0 }}
     >
-      <Tooltip title={isParentDataIncomplete ? 'Missing Core Data!' : undefined} arrow>
+      <Tooltip data-testid={'menu-render-toggle-tooltip'} title={isParentDataIncomplete ? 'Missing Core Data!' : undefined} arrow>
         <Badge
+          data-testid={'menu-render-toggle-tooltip-badge'}
           color="danger"
           variant={isParentDataIncomplete ? 'solid' : 'soft'}
           badgeContent={isParentDataIncomplete ? '!' : undefined}
@@ -105,7 +108,7 @@ function MenuRenderToggle(
           <Icon />
         </Badge>
       </Tooltip>
-      <ListItemContent>
+      <ListItemContent data-testid={'menu-render-toggle-content'}>
         <Typography level={'title-sm'}>{siteConfigProps.label}</Typography>
       </ListItemContent>
       <KeyboardArrowDownIcon sx={{ transform: menuOpen ? 'rotate(180deg)' : 'none' }} />
@@ -297,7 +300,7 @@ export default function Sidebar(props: SidebarProps) {
 
   const renderSiteValue = (option: SelectOption<string> | null) => {
     if (!option) {
-      return <Typography>Select a Site</Typography>;
+      return <Typography data-testid={'pending-site-select'}>Select a Site</Typography>;
     }
 
     const selectedValue = option.value;
@@ -306,15 +309,15 @@ export default function Sidebar(props: SidebarProps) {
       <>
         {selectedSite ? (
           <Stack direction={'column'} alignItems={'start'}>
-            <Typography level="body-lg" className="sidebar-item">{`Site: ${selectedSite?.siteName}`}</Typography>
+            <Typography level="body-lg" className="sidebar-item" data-testid={'selected-site-name'}>{`Site: ${selectedSite?.siteName}`}</Typography>
             <Stack direction={'column'} alignItems={'start'}>
-              <Typography level="body-sm" color={'primary'} className="sidebar-item">
+              <Typography level="body-sm" color={'primary'} className="sidebar-item" data-testid={'selected-site-schema'}>
                 &mdash; Schema: {selectedSite.schemaName}
               </Typography>
             </Stack>
           </Stack>
         ) : (
-          <Typography level="body-lg" className="sidebar-item">
+          <Typography level="body-lg" className="sidebar-item" data-testid={'pending-site-select'}>
             Select a Site
           </Typography>
         )}
@@ -324,7 +327,7 @@ export default function Sidebar(props: SidebarProps) {
 
   const renderPlotValue = (option: SelectOption<string> | null) => {
     if (!option) {
-      return <Typography>Select a Plot</Typography>;
+      return <Typography data-testid={'pending-plot-select'}>Select a Plot</Typography>;
     }
 
     const selectedValue = option.value;
@@ -334,15 +337,17 @@ export default function Sidebar(props: SidebarProps) {
       <>
         {selectedPlot ? (
           <Stack direction="column" alignItems="start">
-            <Typography level="body-md" className="sidebar-item">{`Plot: ${selectedPlot?.plotName}`}</Typography>
+            <Typography level="body-md" className="sidebar-item" data-testid={'selected-plot-name'}>{`Plot: ${selectedPlot?.plotName}`}</Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }} className="sidebar-item">
-              <Typography level="body-sm" color={'primary'}>
+              <Typography level="body-sm" color={'primary'} data-testid={'selected-plot-quadrats'}>
                 &mdash; {selectedPlot.numQuadrats || selectedPlot.numQuadrats === 0 ? `Quadrats: ${selectedPlot.numQuadrats}` : 'No Quadrats'}
               </Typography>
             </Box>
           </Stack>
         ) : (
-          <Typography className="sidebar-item">Select a Plot</Typography>
+          <Typography className="sidebar-item" data-testid={'pending-plot-select'}>
+            Select a Plot
+          </Typography>
         )}
       </>
     );
@@ -350,7 +355,7 @@ export default function Sidebar(props: SidebarProps) {
 
   const renderCensusValue = (option: SelectOption<string> | null) => {
     if (!option) {
-      return <Typography>Select a Census</Typography>;
+      return <Typography data-testid={'pending-census-select'}>Select a Census</Typography>;
     }
 
     const selectedValue = option.value;
@@ -377,9 +382,13 @@ export default function Sidebar(props: SidebarProps) {
 
     return (
       <Stack direction={'column'} alignItems={'start'}>
-        <Typography level="body-md" className="sidebar-item">{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
+        <Typography
+          level="body-md"
+          className="sidebar-item"
+          data-testid={'selected-census-plotcensusnumber'}
+        >{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
         <Stack direction={'column'} alignItems={'start'}>
-          <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item">
+          <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item" data-testid={'selected-census-dates'}>
             {census !== undefined && dateMessage}
           </Typography>
         </Stack>
@@ -409,6 +418,7 @@ export default function Sidebar(props: SidebarProps) {
       autoFocus
       size={'md'}
       renderValue={renderCensusValue}
+      data-testid={'census-select-component'}
       onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
         if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
         else {
@@ -436,6 +446,7 @@ export default function Sidebar(props: SidebarProps) {
           <IconButton
             size="sm"
             color="primary"
+            data-testid={'add-new-census-button'}
             onClick={event => {
               event.stopPropagation();
               handleOpenNewCensus();
@@ -449,7 +460,7 @@ export default function Sidebar(props: SidebarProps) {
       {censusListContext
         ?.sort((a, b) => (b?.plotCensusNumber ?? 0) - (a?.plotCensusNumber ?? 0))
         .map(item => (
-          <Option key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
+          <Option data-testid={'census-selection-option'} key={item?.plotCensusNumber} value={item?.plotCensusNumber?.toString()}>
             <Box
               sx={{
                 display: 'flex',
@@ -460,7 +471,9 @@ export default function Sidebar(props: SidebarProps) {
               className="sidebar-item"
             >
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                <Typography level="body-lg">Census: {item?.plotCensusNumber}</Typography>
+                <Typography level="body-lg" data-testid={'census-selection-option-plotcensusnumber'}>
+                  Census: {item?.plotCensusNumber}
+                </Typography>
                 {item?.dateRanges?.map((dateRange, index) => (
                   <React.Fragment key={index}>
                     <Stack direction={'row'}>
@@ -493,6 +506,7 @@ export default function Sidebar(props: SidebarProps) {
       required
       autoFocus
       size={'md'}
+      data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
       onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
         const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
@@ -501,7 +515,7 @@ export default function Sidebar(props: SidebarProps) {
     >
       <Option value={''}>None</Option>
       {plotListContext?.map(item => (
-        <Option value={item?.plotName} key={item?.plotName}>
+        <Option value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
           <Box
             sx={{
               display: 'flex',
@@ -512,8 +526,10 @@ export default function Sidebar(props: SidebarProps) {
             className="sidebar-item"
           >
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-              <Typography level="body-md">{item?.plotName}</Typography>
-              <Typography level="body-sm" color={'primary'}>
+              <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
+                {item?.plotName}
+              </Typography>
+              <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
                 {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
               </Typography>
             </Box>
@@ -552,6 +568,7 @@ export default function Sidebar(props: SidebarProps) {
         sx={{ marginRight: '1em' }}
         size={'md'}
         renderValue={renderSiteValue}
+        data-testid={'site-select-component'}
         value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ''}
         onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
           const selectedSite = siteListContext?.find(site => site?.siteName === newValue) || undefined;
@@ -576,7 +593,7 @@ export default function Sidebar(props: SidebarProps) {
             </Typography>
           </ListItem>
           {allowedSites?.map(site => (
-            <Option key={site.siteID} value={site.siteName}>
+            <Option key={site.siteID} value={site.siteName} data-testid={'site-selection-option-allowed'}>
               {site.siteName}
             </Option>
           ))}
@@ -589,7 +606,7 @@ export default function Sidebar(props: SidebarProps) {
             </Typography>
           </ListItem>
           {otherSites?.map(site => (
-            <Option key={site.siteID} value={site.siteName} disabled>
+            <Option key={site.siteID} value={site.siteName} disabled data-testid={'site-selection-option-other'}>
               {site.siteName}
             </Option>
           ))}
@@ -669,11 +686,6 @@ export default function Sidebar(props: SidebarProps) {
                     </Box>
                     ForestGEO
                   </Box>
-                  {session?.user.userStatus !== 'field crew' && (
-                    <Typography level="h1" color="danger" sx={{ marginLeft: 0.5 }}>
-                      (Admin)
-                    </Typography>
-                  )}
                 </Typography>
               </Stack>
               <Divider orientation="horizontal" sx={{ my: 0.75 }} />
@@ -685,7 +697,7 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
               {site !== undefined && (
                 <>
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'plot-selection-box'}>
                     <Avatar size={'sm'} sx={{ marginRight: 1 }}>
                       <PlotLogo />
                     </Avatar>
@@ -693,7 +705,7 @@ export default function Sidebar(props: SidebarProps) {
                   </Box>
                   {plot !== undefined && (
                     <>
-                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'census-selection-box'}>
                         <Avatar size={'sm'} sx={{ marginRight: 1 }}>
                           <CensusLogo />
                         </Avatar>
@@ -783,15 +795,17 @@ export default function Sidebar(props: SidebarProps) {
                           direction="down"
                         >
                           <ListItem
+                            data-testid={`navigate-list-item-nonexpanding-${item.label}`}
                             // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : ''}`}
                             onMouseEnter={() => setHoveredIndex(index)}
                             onMouseLeave={() => setHoveredIndex(null)}
                           >
                             {site !== undefined && plot !== undefined && census !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
-                                <Box sx={{ display: 'flex', flex: 1 }}>
+                                <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
                                     selected={pathname === item.href}
+                                    data-testid={`navigate-list-item-button-nonexpanding-${item.href}`}
                                     sx={{ flex: 1, width: '100%' }}
                                     disabled={isLinkDisabled}
                                     color={pathname === item.href ? 'primary' : undefined}
@@ -816,7 +830,7 @@ export default function Sidebar(props: SidebarProps) {
                                 </Box>
                               </Tooltip>
                             ) : (
-                              <Box sx={{ display: 'flex', flex: 1 }}>
+                              <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-undefined-box-wrapper'}>
                                 <ListItemButton
                                   selected={pathname === item.href}
                                   sx={{ flex: 1, width: '100%' }}
@@ -853,6 +867,7 @@ export default function Sidebar(props: SidebarProps) {
                         >
                           <ListItem
                             nested
+                            data-testid={`navigate-list-item-expanding-${item.label}`}
                             // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
                             onMouseEnter={() => setHoveredIndex(index)}
                             onMouseLeave={() => setHoveredIndex(null)}
@@ -881,11 +896,17 @@ export default function Sidebar(props: SidebarProps) {
 
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} style={{ transitionDelay: `${delay}ms` }} direction="down">
-                                      <ListItem>
+                                      <ListItem
+                                        data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}
+                                        className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
+                                        onMouseEnter={() => setHoveredIndex(index)}
+                                        onMouseLeave={() => setHoveredIndex(null)}
+                                      >
                                         {site !== undefined && plot !== undefined && census !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
-                                            <Box sx={{ display: 'flex', flex: 1 }}>
+                                            <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
+                                                data-testid={`navigate-list-item-expanded-button-${item.label}-${link.label}-${link.href}`}
                                                 sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname == item.href + link.href}
                                                 color={pathname === item.href ? 'primary' : undefined}
@@ -915,7 +936,7 @@ export default function Sidebar(props: SidebarProps) {
                                             </Box>
                                           </Tooltip>
                                         ) : (
-                                          <Box sx={{ display: 'flex', flex: 1 }}>
+                                          <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-undefined-box-wrapper'}>
                                             <ListItemButton
                                               sx={{ flex: 1, width: '100%' }}
                                               selected={pathname == item.href + link.href}

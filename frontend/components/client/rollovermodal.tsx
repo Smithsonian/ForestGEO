@@ -278,7 +278,7 @@ export default function RolloverModal(props: RolloverModalProps) {
   }
 
   return (
-    <Modal open={open} onClose={undefined}>
+    <Modal open={open} onClose={undefined} data-testid={'rollover-modal'}>
       <ModalDialog
         role="alertdialog"
         sx={{

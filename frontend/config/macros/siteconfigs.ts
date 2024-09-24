@@ -67,6 +67,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: VisibilityIcon
       },
       {
+        label: 'Post-Census Statistics',
+        href: '/postvalidation',
+        tip: '',
+        icon: VisibilityIcon
+      },
+      {
         label: 'Uploaded Files',
         href: '/uploadedfiles',
         tip: 'uploaded file display',

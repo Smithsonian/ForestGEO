@@ -5,13 +5,21 @@ import React, { useEffect, useState } from 'react';
 import ValidationCard from '@/components/validationcard';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSession } from 'next-auth/react';
 
 export default function ValidationsPage() {
   const [globalValidations, setGlobalValidations] = React.useState<ValidationProceduresRDS[]>([]);
   const [loading, setLoading] = useState<boolean>(true); // Use a loading state instead of refresh
   const [schemaDetails, setSchemaDetails] = useState<{ table_name: string; column_name: string }[]>([]);
+  const { data: session } = useSession();
 
   const currentSite = useSiteContext();
+
+  useEffect(() => {
+    if (session !== null && !['db admin', 'global'].includes(session.user.userStatus)) {
+      throw new Error('access-denied');
+    }
+  }, []);
 
   const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
     try {
@@ -81,7 +89,7 @@ export default function ValidationsPage() {
     };
 
     if (currentSite?.schemaName) {
-      fetchSchema();
+      fetchSchema().then(r => console.log(r));
     }
   }, [currentSite?.schemaName]);
 
