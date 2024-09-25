@@ -20,8 +20,12 @@ const acaciaColors = [
 
 // Define the animation for the gradient colors
 const waveAnimation = keyframes`
-  0% { background-position: 0% 50%; }
-  100% { background-position: 400% 50%; }
+    0% {
+        background-position: 0% 50%;
+    }
+    100% {
+        background-position: 400% 50%;
+    }
 `;
 
 const RainbowText = styled(Typography)`
