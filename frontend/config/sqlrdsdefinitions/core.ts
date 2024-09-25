@@ -16,16 +16,49 @@ export type CoreMeasurementsRDS = {
   description?: string;
   userDefinedFields?: string;
 };
+
 export type CoreMeasurementsResult = ResultType<CoreMeasurementsRDS>;
-export const initialCoreMeasurementsRDSRow = createInitialObject<CoreMeasurementsRDS>();
 
 export function getCoreMeasurementsHCs(): ColumnStates {
   return {
     censusID: false,
+    stemID: false,
     description: false,
     userDefinedFields: false
   };
-} // cmverrors custom data type
+}
+
+export type StagingCoreMeasurementsRDS = {
+  id?: number;
+  stagingMeasurementID?: number;
+  censusID?: number;
+  stemID?: number;
+  measuredDBH?: number;
+  dbhUnit?: string;
+  measuredHOM?: number;
+  homUnit?: string;
+  description?: string;
+  userDefinedFields?: string;
+  submittedBy?: number; // ID --> need to pull from catalog.sites
+  isReviewed?: boolean;
+  isSelected?: boolean;
+  submissionDate?: Date;
+  reviewerID?: number; // ID --> need to pull from catalog.sites
+  reviewedDate?: Date;
+};
+
+export type StagingCoreMeasurementsResult = ResultType<StagingCoreMeasurementsRDS>;
+
+export function getStagingCoreMeasurementsHCs(): ColumnStates {
+  return {
+    censusID: false,
+    stemID: false,
+    description: false,
+    userDefinedFields: false
+  };
+}
+
+// cmverrors custom data type
 export type CMAttributesRDS = {
   id?: number;
   cmaID?: number;
