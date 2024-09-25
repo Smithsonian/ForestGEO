@@ -204,14 +204,6 @@ export type PendingAction = {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
 };
-
-export interface ConfirmationDialogProps {
-  isOpen: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-  message: string;
-}
-
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
