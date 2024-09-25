@@ -5,13 +5,12 @@ import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectio
 import React, { useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Box, Button, Typography } from '@mui/joy';
-import Link from 'next/link';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
-import { quadratGridColumns } from '@/components/client/datagridcolumns';
+import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 
-export default function MeasurementsSummaryDraftDataGrid() {
+export default function IsolatedMeasurementsSummaryDraftDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const initialMeasurementsSummaryDraftRDSRow: MeasurementsSummaryDraftRDS = {
@@ -81,14 +80,8 @@ export default function MeasurementsSummaryDraftDataGrid() {
             }}
             color={'primary'}
           >
-            Upload Quadrats
+            Upload Measurements
           </Button>
-          {/* Link to Quadrat Personnel Data Grid */}
-          <Link href="/fixeddatainput/quadratpersonnel" passHref>
-            <Button variant="solid" color="primary" sx={{ ml: 2 }}>
-              View Quadrat Personnel
-            </Button>
-          </Link>
         </Box>
       </Box>
       <UploadParentModal
@@ -97,22 +90,15 @@ export default function MeasurementsSummaryDraftDataGrid() {
           setIsUploadModalOpen(false);
           setRefresh(true);
         }}
-        formType={FormType.quadrats}
+        formType={FormType.measurements}
       />
       <IsolatedDataGridCommons
         gridType="measurementssummary_draft"
-        gridColumns={quadratGridColumns}
+        gridColumns={MeasurementsSummaryViewGridColumns}
         refresh={refresh}
         setRefresh={setRefresh}
         initialRow={initialMeasurementsSummaryDraftRDSRow}
         fieldToFocus={'quadratName'}
-        clusters={{
-          Name: ['quadratName'],
-          Coordinates: ['startX', 'startY', 'coordinateUnits'],
-          Dimensions: ['dimensionX', 'dimensionY', 'dimensionUnits'],
-          Area: ['area', 'areaUnits'],
-          Misc: ['quadratShape']
-        }}
       />
     </>
   );

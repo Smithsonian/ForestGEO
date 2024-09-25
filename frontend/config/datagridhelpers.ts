@@ -64,6 +64,10 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getMeasurementsSummaryViewHCs()
   },
+  measurementssummary_draft: {
+    id: false,
+    ...getMeasurementsSummaryViewHCs()
+  },
   measurementssummaryview: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
@@ -117,6 +121,7 @@ export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coremeasurements':
     case 'measurementssummaryview':
+    case 'measurementssummary_draft':
     case 'viewfulltableview':
     case 'measurementssummary': // materialized view --> should not be modified
     case 'viewfulltable': // materialized view --> should not be modified
