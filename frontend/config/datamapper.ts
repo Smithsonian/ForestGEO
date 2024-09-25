@@ -6,6 +6,8 @@ import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
+  MeasurementsSummaryDraftRDS,
+  MeasurementsSummaryDraftResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
   StemTaxonomiesViewRDS,
@@ -32,6 +34,8 @@ import {
   CMVErrorResult,
   CoreMeasurementsRDS,
   CoreMeasurementsResult,
+  StagingCoreMeasurementsRDS,
+  StagingCoreMeasurementsResult,
   UnifiedChangelogRDS,
   UnifiedChangelogResult
 } from '@/config/sqlrdsdefinitions/core';
@@ -179,10 +183,14 @@ class MapperFactory {
         return new GenericMapper<CensusRDS, CensusResult>() as unknown as IDataMapper<RDS, Result>;
       case 'coremeasurements':
         return new GenericMapper<CoreMeasurementsRDS, CoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'coremeasurements_staging':
+        return new GenericMapper<StagingCoreMeasurementsRDS, StagingCoreMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmverrors':
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'measurementssummary_draft':
+        return new GenericMapper<MeasurementsSummaryDraftRDS, MeasurementsSummaryDraftResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;

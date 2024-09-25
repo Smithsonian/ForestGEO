@@ -85,6 +85,12 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
   };
 }
 
+export type MeasurementsSummaryDraftRDS = MeasurementsSummaryRDS & {
+  submittedBy?: number;
+};
+
+export type MeasurementsSummaryDraftResult = ResultType<MeasurementsSummaryDraftRDS>;
+
 export type StemTaxonomiesViewRDS = {
   id?: number;
   stemID?: number;
