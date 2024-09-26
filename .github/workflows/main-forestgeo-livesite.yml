@@ -10,9 +10,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build-app-production:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: development
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
@@ -22,14 +23,14 @@ jobs:
         with:
           node-version: '18.x'
 
-      - name: create env file (in frontend/ directory)
+      - name: create env file (in frontend/ directory) -- production
+        id: create-env-file-prod
         run: |
           touch frontend/.env
-          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
-          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
-          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET_PRODUCTION }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID_PRODUCTION }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID_PRODUCTION }} >> frontend/.env
           echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
-          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
           echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
@@ -39,12 +40,12 @@ jobs:
           echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
           echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
-          echo NODE_ENV=development >> frontend/.env
+          echo NEXTAUTH_DEBUG=true >> frontend/.env
+          echo NODE_ENV=production >> frontend/.env
           echo PORT=3000 >> frontend/.env
-
-      - name: Write Certificate to File
-        run: |
-          echo "${{ secrets.CERTIFICATE }}" > frontend/DigiCertGlobalRootCA.crt.pem
+          echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
+          echo OWNER=${{ secrets.OWNER }} >> frontend/.env
+          echo REPO=${{ secrets.REPO }} >> frontend/.env
 
       - name: Cache node modules
         uses: actions/cache@v2
@@ -53,6 +54,15 @@ jobs:
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
+
+      - name: Cache Next.js build
+        uses: actions/cache@v2
+        with:
+          path: frontend/.next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/.next/cache') }}
+          restore-keys: |
+            ${{ runner.os }}-next-
+            ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}
 
       - name: move into frontend --> npm install, build, and test
         run: |
@@ -65,13 +75,31 @@ jobs:
         run: |
           mv ./frontend/build/static ./frontend/build/standalone/build
           mv ./frontend/public ./frontend/build/standalone
-          mv ./frontend/*.pem ./frontend/build/standalone/
 
-      - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-build
+          path: frontend/build/standalone
+
+  deploy-app-production:
+    needs: build-app-production
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-build
+          path: frontend/build/standalone
+
+      - name: 'Deploy to Azure Web App (main)'
+        id: deploy-to-webapp-main
+        if: github.ref == 'refs/heads/main'
         uses: azure/webapps-deploy@v2
         with:
           app-name: 'forestgeo-livesite'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_852346BD764D45D08854E6679137F844 }}
-          package: ./frontend/build/standalone
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_PRODUCTION }}
+          package: frontend/build/standalone

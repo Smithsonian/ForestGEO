@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE instance-profile
+        SYSTEM "https://resources.jetbrains.com/writerside/1.0/product-profile.dtd">
+
+<instance-profile id="fad"
+                  name="ForestGEO Application Documentation"
+                  start-page="Getting-Started.md">
+
+    <toc-element topic="Getting-Started.md">
+        <toc-element topic="Understanding-the-Dashboard.md"/>
+        <toc-element topic="Working-with-the-Sidebar.md"/>
+        <toc-element topic="The-Census-Hub.md"/>
+        <toc-element topic="Stem-Plot-Details.md"/>
+        <toc-element topic="Adding-New-Information.md"/>
+        <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>
+    </toc-element>
+</instance-profile>

@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "target": "es2017",
     "lib": [
       "dom",
@@ -35,12 +37,14 @@
     ]
   },
   "include": [
+    "types/next-auth.d.ts",
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
     "build/types/**/*.ts",
-    "./vitest.setup.ts"
+    "./vitest.setup.ts",
+    "**/*.sql"
   ],
   "exclude": [
     "node_modules"

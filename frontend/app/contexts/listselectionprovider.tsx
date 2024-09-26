@@ -1,17 +1,9 @@
 // ListSelectionProvider.tsx
-"use client";
-import React, {createContext, Dispatch, useContext, useReducer} from 'react';
-import {
-  createEnhancedDispatch,
-  EnhancedDispatch,
-  genericLoadReducer,
-  LoadAction
-} from "@/config/macros/contextreducers";
-import {QuadratRDS} from "@/config/sqlrdsdefinitions/tables/quadratrds";
-import {PlotRDS} from "@/config/sqlrdsdefinitions/tables/plotrds";
-import {SubquadratRDS} from '@/config/sqlrdsdefinitions/tables/subquadratrds';
-import {SitesRDS} from '@/config/sqlrdsdefinitions/tables/sitesrds';
-import {OrgCensus} from '@/config/sqlrdsdefinitions/orgcensusrds';
+'use client';
+import React, { createContext, Dispatch, useContext, useReducer } from 'react';
+import { createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction } from '@/config/macros/contextreducers';
+import { PlotRDS, QuadratRDS, SitesRDS, SubquadratRDS } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 // contexts
 export const PlotListContext = createContext<PlotRDS[] | undefined>([]);
@@ -28,25 +20,18 @@ export const SubquadratListDispatchContext = createContext<EnhancedDispatch<Subq
 export const SiteListDispatchContext = createContext<EnhancedDispatch<SitesRDS[]> | undefined>(undefined);
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | undefined>(undefined);
 
-export function ListSelectionProvider({children}: Readonly<{ children: React.ReactNode }>) {
+export function ListSelectionProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [plotList, plotListDispatch] = useReducer<React.Reducer<PlotRDS[] | undefined, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
 
-  const [orgCensusList, orgCensusListDispatch] =
-    useReducer<React.Reducer<OrgCensus[] | undefined, LoadAction<OrgCensus[]>>>(genericLoadReducer, []);
+  const [orgCensusList, orgCensusListDispatch] = useReducer<React.Reducer<OrgCensus[] | undefined, LoadAction<OrgCensus[]>>>(genericLoadReducer, []);
 
-  const [quadratList, quadratListDispatch] =
-    useReducer<React.Reducer<QuadratRDS[] | undefined, LoadAction<QuadratRDS[]>>>(genericLoadReducer, []);
+  const [quadratList, quadratListDispatch] = useReducer<React.Reducer<QuadratRDS[] | undefined, LoadAction<QuadratRDS[]>>>(genericLoadReducer, []);
 
-  const [subquadratList, subquadratListDispatch] =
-    useReducer<React.Reducer<SubquadratRDS[] | undefined, LoadAction<SubquadratRDS[]>>>(genericLoadReducer, []);
+  const [subquadratList, subquadratListDispatch] = useReducer<React.Reducer<SubquadratRDS[] | undefined, LoadAction<SubquadratRDS[]>>>(genericLoadReducer, []);
 
-  const [siteList, siteListDispatch] =
-    useReducer<React.Reducer<SitesRDS[] | undefined, LoadAction<SitesRDS[]>>>(genericLoadReducer, []);
+  const [siteList, siteListDispatch] = useReducer<React.Reducer<SitesRDS[] | undefined, LoadAction<SitesRDS[]>>>(genericLoadReducer, []);
 
-  const [firstLoad, firstLoadDispatch] = useReducer(
-    firstLoadReducer,
-    true
-  );
+  const [firstLoad, firstLoadDispatch] = useReducer(firstLoadReducer, true);
 
   const enhancedPlotListDispatch = createEnhancedDispatch(plotListDispatch, 'plotList');
   const enhancedOrgCensusListDispatch = createEnhancedDispatch(orgCensusListDispatch, 'censusList');
@@ -66,9 +51,7 @@ export function ListSelectionProvider({children}: Readonly<{ children: React.Rea
                     <OrgCensusListContext.Provider value={orgCensusList}>
                       <OrgCensusListDispatchContext.Provider value={enhancedOrgCensusListDispatch}>
                         <FirstLoadContext.Provider value={firstLoad}>
-                          <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>
-                            {children}
-                          </FirstLoadDispatchContext.Provider>
+                          <FirstLoadDispatchContext.Provider value={firstLoadDispatch}>{children}</FirstLoadDispatchContext.Provider>
                         </FirstLoadContext.Provider>
                       </OrgCensusListDispatchContext.Provider>
                     </OrgCensusListContext.Provider>

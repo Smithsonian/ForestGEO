@@ -1,5 +1,5 @@
-"use client";
-import React, {useState, useEffect} from 'react';
+'use client';
+import React, { useEffect, useState } from 'react';
 import {
   DataGrid,
   GridActionsCellItem,
@@ -15,26 +15,27 @@ import {
   GridToolbarProps,
   GridValidRowModel
 } from '@mui/x-data-grid';
-import {randomId} from "@mui/x-data-grid-generator";
-import AddIcon from "@mui/icons-material/Add";
-import SaveIcon from "@mui/icons-material/Save";
-import CancelIcon from "@mui/icons-material/Close";
-import EditIcon from "@mui/icons-material/Edit";
-import DeleteIcon from "@mui/icons-material/Delete";
-import {Box, Button} from "@mui/material";
-import Divider from "@mui/joy/Divider";
-import Typography from "@mui/joy/Typography";
-import {useOrgCensusContext, usePlotContext, useSiteContext} from "@/app/contexts/userselectionprovider";
-import {useSession} from 'next-auth/react';
-import {unitSelectionOptions} from '@/config/macros';
+import { randomId } from '@mui/x-data-grid-generator';
+import AddIcon from '@mui/icons-material/Add';
+import SaveIcon from '@mui/icons-material/Save';
+import CancelIcon from '@mui/icons-material/Close';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { Box, Button } from '@mui/material';
+import Divider from '@mui/joy/Divider';
+import Typography from '@mui/joy/Typography';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSession } from 'next-auth/react';
+import { unitSelectionOptions } from '@/config/macros';
 
 type EditToolbarProps = GridToolbarProps;
 
 function EditToolbar(props: EditToolbarProps) {
-  const {setRows, setRowModesModel} = props;
+  const { setRows, setRowModesModel } = props;
   const handleClick = () => {
     const id = randomId();
-    setRows((oldRows: GridValidRowModel[]) => [...oldRows,
+    setRows((oldRows: GridValidRowModel[]) => [
+      ...oldRows,
       {
         id,
         stemTag: '',
@@ -52,16 +53,17 @@ function EditToolbar(props: EditToolbarProps) {
         codes: [], // Initialize codes as an empty array
         comments: '',
         isNew: true
-      }]);
+      }
+    ]);
     setRowModesModel((oldModel: GridRowModesModel) => ({
       ...oldModel,
-      [id]: {mode: GridRowModes.Edit, fieldToFocus: 'quadratName'},
+      [id]: { mode: GridRowModes.Edit, fieldToFocus: 'quadratName' }
     }));
   };
 
   return (
     <GridToolbarContainer>
-      <Button color="primary" startIcon={<AddIcon/>} onClick={handleClick}>
+      <Button color="primary" startIcon={<AddIcon />} onClick={handleClick}>
         Add record
       </Button>
     </GridToolbarContainer>
@@ -69,23 +71,25 @@ function EditToolbar(props: EditToolbarProps) {
 }
 
 const CensusAutocompleteInputForm = () => {
-  const initialRows: GridRowsProp = [{
-    id: 0,
-    stemTag: '',
-    treeTag: '',
-    speciesCode: '',
-    subquadratName: '',
-    stemX: 0,
-    stemY: 0,
-    date: new Date(),
-    dbh: 0,
-    dbhUnit: '',
-    hom: 0,
-    homUnit: '',
-    codes: '', // Initialize codes as an empty array
-    personnel: '',
-    comments: ''
-  }];
+  const initialRows: GridRowsProp = [
+    {
+      id: 0,
+      stemTag: '',
+      treeTag: '',
+      speciesCode: '',
+      subquadratName: '',
+      stemX: 0,
+      stemY: 0,
+      date: new Date(),
+      dbh: 0,
+      dbhUnit: '',
+      hom: 0,
+      homUnit: '',
+      codes: '', // Initialize codes as an empty array
+      personnel: '',
+      comments: ''
+    }
+  ];
 
   // Custom render function to show errors
   const renderValidationCell = (params: GridRenderCellParams, fieldName: string) => {
@@ -93,23 +97,24 @@ const CensusAutocompleteInputForm = () => {
     const cellError = cellHasError(fieldName, params.id) ? getCellErrorMessages(fieldName, params.id) : '';
     console.log(`Rendering cell - Field: ${fieldName}, Error: ${cellError}`);
     return (
-      <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5}}>
+      <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', marginY: 1.5 }}>
         {cellError ? (
           <>
-            <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
-              {cellValue}
-            </Typography>
+            <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
             <Typography
-              color='danger'
-              sx={{fontSize: '0.75rem', mt: 1, whiteSpace: 'normal', lineHeight: 'normal'}}
+              color="danger"
+              sx={{
+                fontSize: '0.75rem',
+                mt: 1,
+                whiteSpace: 'normal',
+                lineHeight: 'normal'
+              }}
             >
               {cellError}
             </Typography>
           </>
         ) : (
-          <Typography sx={{whiteSpace: 'normal', lineHeight: 'normal'}}>
-            {cellValue}
-          </Typography>
+          <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{cellValue}</Typography>
         )}
       </Box>
     );
@@ -187,7 +192,7 @@ const CensusAutocompleteInputForm = () => {
       align: 'left',
       editable: true,
       type: 'singleSelect',
-      valueOptions: unitSelectionOptions,
+      valueOptions: unitSelectionOptions
     },
     {
       field: 'hom',
@@ -207,7 +212,7 @@ const CensusAutocompleteInputForm = () => {
       align: 'left',
       editable: true,
       type: 'singleSelect',
-      valueOptions: unitSelectionOptions,
+      valueOptions: unitSelectionOptions
     },
     {
       field: 'codes',
@@ -215,7 +220,7 @@ const CensusAutocompleteInputForm = () => {
       width: 200,
       flex: 1,
       align: 'left',
-      editable: true,
+      editable: true
     },
     {
       field: 'actions',
@@ -225,67 +230,49 @@ const CensusAutocompleteInputForm = () => {
       cellClassName: 'actions',
       flex: 1,
       align: 'center',
-      getActions: ({id}) => {
+      getActions: ({ id }) => {
         const isInEditMode = rowModesModel[id]?.mode === GridRowModes.Edit;
 
         if (isInEditMode) {
           return [
             <GridActionsCellItem
-              icon={<SaveIcon/>}
+              icon={<SaveIcon />}
               label="Save"
               key="Save"
               sx={{
-                color: 'primary.main',
+                color: 'primary.main'
               }}
               onClick={handleSaveClick(id)}
             />,
-            <GridActionsCellItem
-              icon={<CancelIcon/>}
-              label="Cancel"
-              key="Cancel"
-              className="textPrimary"
-              onClick={handleCancelClick(id)}
-              color="inherit"
-            />,
+            <GridActionsCellItem icon={<CancelIcon />} label="Cancel" key="Cancel" className="textPrimary" onClick={handleCancelClick(id)} color="inherit" />
           ];
         }
 
         return [
-          <GridActionsCellItem
-            icon={<EditIcon/>}
-            label="Edit"
-            key="Edit"
-            className="textPrimary"
-            onClick={handleEditClick(id)}
-            color="inherit"
-          />,
-          <GridActionsCellItem
-            icon={<DeleteIcon/>}
-            label="Delete"
-            key="Delete"
-            onClick={handleDeleteClick(id)}
-            color="inherit"
-          />,
+          <GridActionsCellItem icon={<EditIcon />} label="Edit" key="Edit" className="textPrimary" onClick={handleEditClick(id)} color="inherit" />,
+          <GridActionsCellItem icon={<DeleteIcon />} label="Delete" key="Delete" onClick={handleDeleteClick(id)} color="inherit" />
         ];
-      },
-    },
+      }
+    }
   ];
 
   const [rows, setRows] = useState(initialRows);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
-  const [validationErrors, setValidationErrors] = useState<{ [key: string]: string | null }>({});
+  const [validationErrors, setValidationErrors] = useState<{
+    [key: string]: string | null;
+  }>({});
   const [isFormComplete, setIsFormComplete] = useState(false);
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
 
-  const {data: session} = useSession();
+  const { data: session } = useSession();
 
   const validateField = async (tableName: string, fieldName: string, value: string, rowId: GridRowId) => {
     try {
       const response = await fetch(`/api/formvalidation/${currentSite?.schemaName}/${tableName}/${fieldName}/${value}`, {
-        method: 'GET',
+        method: 'GET'
       });
       if (!response.ok) {
         const errorText = `${value}: Invalid ${fieldName}, not found in ${tableName}.`;
@@ -330,15 +317,18 @@ const CensusAutocompleteInputForm = () => {
   };
 
   const handleEditClick = (id: GridRowId) => () => {
-    setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.Edit}});
+    setRowModesModel({ ...rowModesModel, [id]: { mode: GridRowModes.Edit } });
   };
 
   const handleSaveClick = (id: GridRowId) => async () => {
-    const row = rows.find((row) => row.id === id);
+    const row = rows.find(row => row.id === id);
     if (row) {
       const isValid = await validateAllFields(row);
       if (isValid) {
-        setRowModesModel({...rowModesModel, [id]: {mode: GridRowModes.View}});
+        setRowModesModel({
+          ...rowModesModel,
+          [id]: { mode: GridRowModes.View }
+        });
       } else {
         console.error('Validation failed for row:', id);
       }
@@ -346,24 +336,24 @@ const CensusAutocompleteInputForm = () => {
   };
 
   const handleDeleteClick = (id: GridRowId) => () => {
-    setRows(rows.filter((row) => row.id !== id));
+    setRows(rows.filter(row => row.id !== id));
   };
 
   const handleCancelClick = (id: GridRowId) => () => {
     setRowModesModel({
       ...rowModesModel,
-      [id]: {mode: GridRowModes.View, ignoreModifications: true},
+      [id]: { mode: GridRowModes.View, ignoreModifications: true }
     });
 
-    const editedRow = rows.find((row) => row.id === id);
+    const editedRow = rows.find(row => row.id === id);
     if (editedRow!.isNew) {
-      setRows(rows.filter((row) => row.id !== id));
+      setRows(rows.filter(row => row.id !== id));
     }
   };
 
   const processRowUpdate = (newRow: GridRowModel) => {
-    const updatedRow = {...newRow, isNew: false};
-    setRows(rows.map((row) => (row.id === newRow.id ? updatedRow : row)));
+    const updatedRow = { ...newRow, isNew: false };
+    setRows(rows.map(row => (row.id === newRow.id ? updatedRow : row)));
     return updatedRow;
   };
 
@@ -382,9 +372,8 @@ const CensusAutocompleteInputForm = () => {
     checkFormCompletion();
   }, [rows]);
 
-
   // Prevent saving row on Enter key press or any other shortcut
-  const handleCellKeyDown = (params: any, event: { key: string; preventDefault: () => void; }) => {
+  const handleCellKeyDown = (params: any, event: { key: string; preventDefault: () => void }) => {
     if (event.key === 'Enter') {
       event.preventDefault();
     }
@@ -407,12 +396,19 @@ const CensusAutocompleteInputForm = () => {
     return validationErrors[`${rowId}-${fieldName}`];
   };
 
-
   return (
-    <Box sx={{display: 'flex', width: '100%', height: '100%', flexDirection: 'column'}}>
-      <Typography level={"title-md"} color={"primary"}>Plot Name: {currentPlot?.plotName ?? 'None'}, Census
-        ID: {currentCensus?.dateRanges[0].censusID ?? '0'}</Typography>
-      <Box sx={{display: 'flex', justifyContent: 'flex-end', marginTop: 2}}>
+    <Box
+      sx={{
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        flexDirection: 'column'
+      }}
+    >
+      <Typography level={'title-md'} color={'primary'}>
+        Plot Name: {currentPlot?.plotName ?? 'None'}, Census ID: {currentCensus?.dateRanges[0].censusID ?? '0'}
+      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
         {/* <Button
           variant="contained"
           disabled={!isFormComplete || Object.values(validationErrors).some(error => error !== null)}
@@ -421,10 +417,10 @@ const CensusAutocompleteInputForm = () => {
           Submit
         </Button> */}
       </Box>
-      <Divider orientation={"horizontal"}/>
+      <Divider orientation={'horizontal'} />
       <DataGrid
         getRowClassName={getRowClassName}
-        getCellClassName={() => "dataGridCell"}
+        getCellClassName={() => 'dataGridCell'}
         rows={rows}
         columns={columns}
         getRowHeight={() => 'auto'}
@@ -437,10 +433,10 @@ const CensusAutocompleteInputForm = () => {
         processRowUpdate={processRowUpdate}
         onCellKeyDown={handleCellKeyDown}
         slots={{
-          toolbar: EditToolbar,
+          toolbar: EditToolbar
         }}
         slotProps={{
-          toolbar: {setRows, setRowModesModel}, // Ensure these methods are passed correctly
+          toolbar: { setRows, setRowModesModel } // Ensure these methods are passed correctly
         }}
       />
     </Box>

@@ -1,23 +1,20 @@
-"use client";
+'use client';
 
-import {UploadCompleteProps} from "@/config/macros/uploadsystemmacros";
-import Typography from "@mui/joy/Typography";
-import {Box} from "@mui/joy";
-import {redirect} from "next/navigation";
-import React, {useEffect, useState} from "react";
-import CircularProgress from "@mui/joy/CircularProgress";
-import { useDataValidityContext } from "@/app/contexts/datavalidityprovider";
-import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from "@/app/contexts/listselectionprovider";
-import { createAndUpdateCensusList } from "@/config/sqlrdsdefinitions/orgcensusrds";
-import { useLoading } from "@/app/contexts/loadingprovider";
-import { useOrgCensusContext, usePlotContext, useSiteContext } from "@/app/contexts/userselectionprovider";
+import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
+import Typography from '@mui/joy/Typography';
+import { Box, LinearProgress } from '@mui/joy';
+import React, { useEffect, useState } from 'react';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const {uploadForm, handleCloseUploadModal} = props;
-  const [countdown, setCountdown] = useState(5);
+  const { uploadForm, handleCloseUploadModal } = props;
+  const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
+  const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
 
-  const {triggerRefresh} = useDataValidityContext();
-  const {setLoading} = useLoading();
+  const { triggerRefresh } = useDataValidityContext();
 
   const currentPlot = usePlotContext();
   const currentSite = useSiteContext();
@@ -30,99 +27,86 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const loadCensusData = async () => {
     if (!currentPlot) return;
 
-    setLoading(true, 'Loading raw census data');
+    setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
     const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
     const censusRDSLoad = await response.json();
-    setLoading(false);
 
-    setLoading(true, 'Converting raw census data...');
+    setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     if (censusListDispatch) {
-      censusListDispatch({ censusList });
+      await censusListDispatch({ censusList });
     }
-    setLoading(false);
+    setProgress(prev => ({ ...prev, census: 100 }));
+    setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
   };
 
   const loadPlotsData = async () => {
     if (!currentSite) return;
 
-    setLoading(true, "Loading plot list information...");
+    setProgressText(prev => ({ ...prev, plots: 'Loading plot list information...' }));
     const plotsResponse = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
     const plotsData = await plotsResponse.json();
     if (!plotsData) return;
-    setLoading(false);
 
-    setLoading(true, "Dispatching plot list information...");
+    setProgressText(prev => ({ ...prev, plots: 'Dispatching plot list information...' }));
     if (plotListDispatch) {
       await plotListDispatch({ plotList: plotsData });
-    } else return;
-    setLoading(false);
+    }
+    setProgress(prev => ({ ...prev, plots: 100 }));
+    setProgressText(prev => ({ ...prev, plots: 'Plot list information loaded.' }));
   };
 
   const loadQuadratsData = async () => {
     if (!currentPlot || !currentCensus) return;
 
-    setLoading(true, "Loading quadrat list information...");
-    const quadratsResponse = await fetch(`/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`);
+    setProgressText(prev => ({ ...prev, quadrats: 'Loading quadrat list information...' }));
+    const quadratsResponse = await fetch(
+      `/api/fetchall/quadrats/${currentPlot.plotID}/${currentCensus.plotCensusNumber}?schema=${currentSite?.schemaName || ''}`
+    );
     const quadratsData = await quadratsResponse.json();
     if (!quadratsData) return;
-    setLoading(false);
 
-    setLoading(true, "Dispatching quadrat list information...");
+    setProgressText(prev => ({ ...prev, quadrats: 'Dispatching quadrat list information...' }));
     if (quadratListDispatch) {
       await quadratListDispatch({ quadratList: quadratsData });
-    } else return;
-    setLoading(false);
+    }
+    setProgress(prev => ({ ...prev, quadrats: 100 }));
+    setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
   };
 
-  // Effect for handling countdown and state transition
+  // Effect to run async tasks before countdown
   useEffect(() => {
-    let timer: number; // Declare timer as a number
+    const runAsyncTasks = async () => {
+      try {
+        triggerRefresh();
+        await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        handleCloseUploadModal();
+      }
+    };
+    runAsyncTasks().catch(console.error);
+  }, [triggerRefresh]);
 
-    if (countdown > 0) {
-      timer = window.setTimeout(() => setCountdown(countdown - 1), 1000) as unknown as number;
-      // Use 'window.setTimeout' and type assertion to treat the return as a number
-    } else if (countdown === 0) {
-      triggerRefresh();
-      loadCensusData()
-        .catch(console.error)
-        .then(loadPlotsData)
-        .catch(console.error)
-        .then(loadQuadratsData)
-        .catch(console.error)
-        .then(handleCloseUploadModal);
-    }
-    return () => clearTimeout(timer); // Clear timeout using the timer variable
-  }, [countdown, handleCloseUploadModal]);
-
-  const redirectLink = () => {
-    switch (uploadForm) {
-      case 'attributes':
-        return redirect('/fixeddatainput/attributes');
-      case 'personnel':
-        return redirect('/fixeddatainput/personnel');
-      case 'species':
-        return redirect('/fixeddatainput/species');
-      case 'quadrats':
-        return redirect('/fixeddatainput/quadrats');
-      case 'measurements':
-        return redirect('/measurementshub/summary');
-      case 'arcgis_files':
-        return redirect('/dashboard');
-      default:
-        return redirect('/dashboard');
-    }
-  };
   return (
-    <Box sx={{display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center'}}>
-      <Typography variant={"solid"} level={"h1"} color={"success"}>Upload Complete!</Typography>
-      {countdown > 0 && (
-        <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-          <CircularProgress/>
-          <Typography>{countdown} seconds remaining</Typography>
-        </Box>
-      )}
-      {countdown === 0 && redirectLink()}
+    <Box
+      sx={{
+        display: 'flex',
+        flex: 1,
+        flexDirection: 'column',
+        alignItems: 'center'
+      }}
+    >
+      <Typography variant={'solid'} level={'h1'} color={'success'}>
+        Upload Complete!
+      </Typography>
+      <LinearProgress determinate value={progress.census} sx={{ width: '80%', margin: '1rem 0' }} />
+      <Typography>{progressText.census}</Typography>
+      <LinearProgress determinate value={progress.plots} sx={{ width: '80%', margin: '1rem 0' }} />
+      <Typography>{progressText.plots}</Typography>
+      <LinearProgress determinate value={progress.quadrats} sx={{ width: '80%', margin: '1rem 0' }} />
+      <Typography>{progressText.quadrats}</Typography>
     </Box>
   );
 }

@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/liquibase
 /.pnp
 .pnp.js
 /.idea/*
@@ -38,10 +39,14 @@ yarn-error.log*
 next-env.d.ts
 /.idea
 /.vscode
+/.idea
+/.vscode
 /*.zip
 .github/workflows/new-file-upload-system_forestgeo-livesite.yml
 /.fleet
 /frontend/sampledata
 /frontend/scripts
-/frontend/sqlscripting
 /frontend/.vscode
+/documentation/.obsidian
+/documentation/.obsidian/*
+frontend/liquibase/

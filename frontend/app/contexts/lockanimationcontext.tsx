@@ -1,5 +1,5 @@
-"use client";
-import React, {createContext, useContext, useState, ReactNode} from 'react';
+'use client';
+import React, { createContext, ReactNode, useContext, useState } from 'react';
 
 interface LockAnimationContextProps {
   isPulsing: boolean;
@@ -8,21 +8,17 @@ interface LockAnimationContextProps {
 
 const LockAnimationContext = createContext<LockAnimationContextProps | undefined>(undefined);
 
-export const LockAnimationProvider: React.FC<{ children: ReactNode }> = ({children}) => {
+export const LockAnimationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isPulsing, setIsPulsing] = useState(false);
 
   const triggerPulse = () => {
     setIsPulsing(true);
     setTimeout(() => {
       setIsPulsing(false);
-    }, 3000);
+    }, 5000);
   };
 
-  return (
-    <LockAnimationContext.Provider value={{isPulsing, triggerPulse}}>
-      {children}
-    </LockAnimationContext.Provider>
-  );
+  return <LockAnimationContext.Provider value={{ isPulsing, triggerPulse }}>{children}</LockAnimationContext.Provider>;
 };
 
 export const useLockAnimation = () => {
