@@ -335,26 +335,29 @@ create table if not exists coremeasurements
         foreign key (CensusID) references census (CensusID)
 );
 
-CREATE TABLE coremeasurements_staging
+create table coremeasurements_staging
 (
-    StagingMeasurementID INT AUTO_INCREMENT PRIMARY KEY,  -- Unique ID for each staging record
-    CensusID            INT NULL,
-    StemID              INT NULL,
-    MeasuredDBH         DECIMAL(10, 6) NULL,
-    DBHUnit             ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'cm' NULL,
-    MeasuredHOM         DECIMAL(10, 6) NULL,
-    HOMUnit             ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NULL,
-    Description         VARCHAR(255) NULL,
-    UserDefinedFields   TEXT NULL,  -- For additional flexibility to store any extra information
-    SubmittedBy         INT NOT NULL,  -- ID of the user who submitted this measurement (User A or User B)
-    IsReviewed          BIT DEFAULT b'0',  -- Indicates if the measurement has been reviewed by User C (0 = not reviewed, 1 = reviewed)
-    IsSelected          BIT DEFAULT b'0',  -- Indicates if this measurement was selected as the final one by User C (0 = not selected, 1 = selected),
-    SubmissionDate      DATETIME DEFAULT CURRENT_TIMESTAMP,  -- Timestamp of when this measurement was submitted
-    ReviewerID          INT NULL,  -- ID of the reviewer (User C) who selected this measurement
-    ReviewedDate        DATETIME NULL,  -- Timestamp of when the review was completed
-
-    CONSTRAINT FK_CoreMeasurementsStaging_Stems FOREIGN KEY (StemID) REFERENCES stems(StemID),
-    CONSTRAINT FK_CoreMeasurementsStaging_CensusID FOREIGN KEY (CensusID) REFERENCES census(CensusID)
+    StagingMeasurementID int auto_increment
+        primary key,
+    CensusID             int                                                                       null,
+    StemID               int                                                                       null,
+    MeasuredDBH          decimal(10, 6)                                                            null,
+    DBHUnit              enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'cm'              null,
+    MeasuredHOM          decimal(10, 6)                                                            null,
+    HOMUnit              enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'               null,
+    MeasurementDate      date                                                                      null,
+    Description          varchar(255)                                                              null,
+    UserDefinedFields    text                                                                      null,
+    SubmittedBy          int                                                                       not null,
+    IsReviewed           bit                                             default b'0'              null,
+    IsSelected           bit                                             default b'0'              null,
+    SubmissionDate       datetime                                        default CURRENT_TIMESTAMP null,
+    ReviewerID           int                                                                       null,
+    ReviewedDate         datetime                                                                  null,
+    constraint FK_CoreMeasurementsStaging_CensusID
+        foreign key (CensusID) references census (CensusID),
+    constraint FK_CoreMeasurementsStaging_Stems
+        foreign key (StemID) references stems (StemID)
 );
 
 create table if not exists cmattributes
@@ -367,6 +370,18 @@ create table if not exists cmattributes
         foreign key (Code) references attributes (Code),
     constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
         foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
+);
+
+create table cmattributes_staging
+(
+    CMAID                int auto_increment
+        primary key,
+    StagingMeasurementID int         null,
+    Code                 varchar(10) null,
+    constraint CMAttributes_Attributes_Code_fk_staging
+        foreign key (Code) references attributes (Code),
+    constraint CMAttributes_CoreMeasurements_StagingMeasurementID_fk_staging
+        foreign key (StagingMeasurementID) references coremeasurements_staging (StagingMeasurementID)
 );
 
 create table if not exists cmverrors
@@ -398,6 +413,24 @@ create index idx_measurementdate_coremeasurements
 
 create index idx_stemid_coremeasurements
     on coremeasurements (StemID);
+
+create index idx_censusid_coremeasurements_staging
+    on coremeasurements_staging (CensusID);
+
+create index idx_cmid_cid_coremeasurements_staging
+    on coremeasurements_staging (StagingMeasurementID, CensusID);
+
+create index idx_cmid_cid_sid_coremeasurements_staging
+    on coremeasurements_staging (StagingMeasurementID, CensusID, StemID);
+
+create index idx_coremeasurementid_coremeasurements_staging
+    on coremeasurements_staging (StagingMeasurementID);
+
+create index idx_measurementdate_coremeasurements_staging
+    on coremeasurements_staging (MeasurementDate);
+
+create index idx_stemid_coremeasurements_staging
+    on coremeasurements_staging (StemID);
 
 create table if not exists specimens
 (
