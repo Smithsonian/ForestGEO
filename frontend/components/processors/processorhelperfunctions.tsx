@@ -158,7 +158,6 @@ interface UpdateQueryConfig {
     [key: string]: {
       range: [number, number];
       primaryKey: string;
-      foreignKeys?: string[];
     };
   };
   fieldList: FieldList;
@@ -317,8 +316,10 @@ const stemTaxonomiesViewFields = [
   'FieldFamily'
 ];
 
-const measurementSummaryStagingFields = [
-  'QuadratName',
+const measurementSummaryViewFields = [
+  'PlotID',
+  'CensusID',
+  'QuadratName', // needs custom handling -- context values plot/census needed
   'SpeciesName',
   'SubspeciesName',
   'SpeciesCode',
@@ -335,6 +336,18 @@ const measurementSummaryStagingFields = [
   'Description',
   'Attributes'
 ];
+
+export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
+  fieldList: measurementSummaryViewFields,
+  slices: {
+    quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
+    species: { range: [1, 4], primaryKey: 'SpeciesID' },
+    trees: { range: [4, 5], primaryKey: 'TreeID' },
+    stems: { range: [5, 9], primaryKey: 'StemID' },
+    coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
+    cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
+  }
+};
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
