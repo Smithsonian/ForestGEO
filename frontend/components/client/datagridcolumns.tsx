@@ -543,7 +543,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'stemLocalX',
+    field: 'localX',
     headerName: 'X',
     headerAlign: 'left',
     headerClassName: 'header',
@@ -557,7 +557,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'stemLocalY',
+    field: 'localY',
     headerName: 'Y',
     headerAlign: 'left',
     headerClassName: 'header',
@@ -571,7 +571,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'stemUnits',
+    field: 'coordinateUnits',
     headerName: 'Stem Units',
     headerClassName: 'header',
     flex: 0.4,

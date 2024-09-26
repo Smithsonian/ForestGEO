@@ -25,12 +25,12 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     speciesCode: '',
     speciesName: '',
     subspeciesName: '',
-    speciesIDLevel: '',
+    idLevel: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
     validCode: '',
     fieldFamily: '',
-    speciesDescription: ''
+    description: ''
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);

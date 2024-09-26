@@ -13,12 +13,12 @@ export type AllTaxonomiesViewRDS = {
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
-  speciesIDLevel?: string;
+  idLevel?: string;
   speciesAuthority?: string;
   validCode?: string;
   subspeciesAuthority?: string;
   fieldFamily?: string;
-  speciesDescription?: string;
+  description?: string;
 };
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
@@ -56,9 +56,9 @@ export type MeasurementsSummaryRDS = {
   speciesCode?: string;
   treeTag?: string;
   stemTag?: string;
-  stemLocalX?: number;
-  stemLocalY?: number;
-  stemUnits?: string;
+  localX?: number;
+  localY?: number;
+  coordinateUnits?: string;
   measurementDate?: any;
   measuredDBH?: number;
   dbhUnits?: string;
@@ -123,8 +123,8 @@ export type StemTaxonomiesViewRDS = {
   genusAuthority?: string;
   speciesAuthority?: string;
   subspeciesAuthority?: string;
-  speciesIDLevel?: string;
-  speciesFieldFamily?: string;
+  idLevel?: string;
+  fieldFamily?: string;
 };
 export type StemTaxonomiesViewResult = ResultType<StemTaxonomiesViewRDS>;
 
@@ -133,16 +133,7 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
     treeID: false,
     speciesID: false,
     familyID: false,
-    genusID: false,
-    quadratName: false,
-    plotName: false,
-    locationName: false,
-    countryName: false,
-    quadratDimensionX: false,
-    quadratDimensionY: false,
-    stemQuadX: false,
-    stemQuadY: false,
-    stemDescription: false
+    genusID: false
   };
 }
 
