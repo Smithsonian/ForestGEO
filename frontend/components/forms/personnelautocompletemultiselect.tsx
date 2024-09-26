@@ -1,10 +1,11 @@
-"use client";
-import React, {useEffect, useState} from 'react';
+'use client';
+import React, { useEffect, useState } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import CircularProgress from '@mui/material/CircularProgress';
-import {useSiteContext} from "@/app/contexts/userselectionprovider";
-import {PersonnelRDS} from '@/config/sqlrdsdefinitions/tables/personnelrds';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
+
+import { PersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 
 export interface PersonnelAutocompleteMultiSelectProps {
   initialValue: PersonnelRDS[];
@@ -12,8 +13,8 @@ export interface PersonnelAutocompleteMultiSelectProps {
   locked: boolean;
 }
 
-export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMultiSelectProps> = (props) => {
-  const {locked, onChange} = props;
+export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMultiSelectProps> = props => {
+  const { locked, onChange } = props;
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<PersonnelRDS[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -22,16 +23,16 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
 
   const loading = open && options.length === 0;
   const currentSite = useSiteContext();
-  if (!currentSite) throw new Error("Site must be selected!");
+  if (!currentSite) throw new Error('Site must be selected!');
 
   // Function to refresh data
   const refreshData = () => {
     fetch(`/api/formsearch/personnelblock?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`)
-      .then((response) => response.json())
-      .then((data) => {
+      .then(response => response.json())
+      .then(data => {
         setOptions(data);
       })
-      .catch((error) => {
+      .catch(error => {
         console.error('Error fetching data:', error);
       });
   };
@@ -49,7 +50,6 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
     };
   }, [inputValue]);
 
-
   useEffect(() => {
     let active = true;
 
@@ -58,7 +58,9 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
     }
 
     (async () => {
-      const response = await fetch(`/api/formsearch/personnelblock?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`, {method: 'GET'});
+      const response = await fetch(`/api/formsearch/personnelblock?schema=${currentSite.schemaName}&searchfor=${encodeURIComponent(inputValue)}`, {
+        method: 'GET'
+      });
       const items = await response.json();
       console.log(items);
       if (active) {
@@ -86,12 +88,12 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
     <>
       <Autocomplete
         multiple
-        className={"fullWidthAutoComplete"}
+        className={'fullWidthAutoComplete'}
         open={open}
         onOpen={() => setOpen(true)}
         onClose={() => setOpen(false)}
         options={options}
-        getOptionLabel={(option) => `${option.lastName}, ${option.firstName} | ${option.role}`}
+        getOptionLabel={option => `${option.lastName}, ${option.firstName} | ${option.roleID}`}
         isOptionEqualToValue={(option, value) => JSON.stringify(option) === JSON.stringify(value)}
         loading={loading}
         value={undefined}
@@ -104,9 +106,9 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
         inputValue={inputValue}
         onInputChange={(_event, newInputValue) => setInputValue(newInputValue)}
         filterSelectedOptions
-        renderInput={(params) => (
+        renderInput={params => (
           <TextField
-            sx={{marginTop: '10px', marginBottom: '5px'}}
+            sx={{ marginTop: '10px', marginBottom: '5px' }}
             {...params}
             fullWidth
             label="Select Personnel"
@@ -114,10 +116,10 @@ export const PersonnelAutocompleteMultiSelect: React.FC<PersonnelAutocompleteMul
               ...params.InputProps,
               endAdornment: (
                 <>
-                  {loading ? <CircularProgress color="inherit" size={20}/> : null}
+                  {loading ? <CircularProgress color="inherit" size={20} /> : null}
                   {params.InputProps.endAdornment}
                 </>
-              ),
+              )
             }}
           />
         )}

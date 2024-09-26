@@ -1,4 +1,4 @@
-import {openDB, IDBPDatabase, DBSchema} from 'idb';
+import { DBSchema, IDBPDatabase, openDB } from 'idb';
 
 interface MyDB extends DBSchema {
   MyStore: {
@@ -18,7 +18,7 @@ async function getDb(): Promise<IDBPDatabase<MyDB>> {
         console.log(`Creating object store: ${storeName}`);
         db.createObjectStore(storeName);
       }
-    },
+    }
   });
 
   return db;
@@ -34,7 +34,7 @@ export async function ensureObjectStore() {
         if (!db.objectStoreNames.contains(storeName)) {
           db.createObjectStore(storeName);
         }
-      },
+      }
     });
     db.close();
   } catch (err) {
@@ -60,9 +60,9 @@ export async function fetchDataFromMySQL(key: string, endpoint: string): Promise
       if (idbData !== undefined) {
         return idbData;
       }
-      throw new Error("No data found in backup IDB");
+      throw new Error('No data found in backup IDB');
     } catch (error) {
-      console.error("Failed to retrieve data from backup IDB", error);
+      console.error('Failed to retrieve data from backup IDB', error);
       throw error;
     }
   }
@@ -108,7 +108,7 @@ export async function clearAllIDBData(): Promise<void> {
           db.deleteObjectStore(storeName);
         }
         db.createObjectStore(storeName);
-      },
+      }
     });
     newDb.close();
   } catch (err) {

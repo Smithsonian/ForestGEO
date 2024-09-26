@@ -1,5 +1,5 @@
-import AttributesDataGrid from "@/components/datagrids/applications/attributesdatagrid";
+import IsolatedAttributesDataGrid from '@/components/datagrids/applications/isolated/isolatedattributesdatagrid';
 
 export default function AttributesPage() {
-  return <AttributesDataGrid/>;
+  return <IsolatedAttributesDataGrid />;
 }

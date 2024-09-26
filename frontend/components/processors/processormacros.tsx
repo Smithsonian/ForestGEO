@@ -1,28 +1,9 @@
-import {PoolConnection, PoolOptions} from 'mysql2/promise';
-import {booleanToBit} from "@/config/macros";
-import {FileRow} from "@/config/macros/formdetails";
-
-import {processSpecies} from "@/components/processors/processspecies";
-import {NextRequest} from "next/server";
-import {processCensus} from "@/components/processors/processcensus";
-import {PoolMonitor} from "@/config/poolmonitor";
-import {AttributesResult} from '@/config/sqlrdsdefinitions/tables/attributerds';
-import {GridValidRowModel} from '@mui/x-data-grid';
-
-export async function getConn() {
-  let conn: PoolConnection | null = null;
-  try {
-    const i = 0;
-    conn = await getSqlConnection(i);
-  } catch (error: any) {
-    console.error("Error processing files:", error.message);
-    throw new Error(error.message);
-  }
-  if (!conn) {
-    throw new Error('conn empty');
-  }
-  return conn;
-}
+import { PoolConnection, PoolOptions } from 'mysql2/promise';
+import { FileRow } from '@/config/macros/formdetails';
+import { processSpecies } from '@/components/processors/processspecies';
+import { processCensus } from '@/components/processors/processcensus';
+import { PoolMonitor } from '@/config/poolmonitor';
+import { processPersonnel } from '@/components/processors/processpersonnel';
 
 export interface SpecialProcessingProps {
   connection: PoolConnection;
@@ -46,94 +27,100 @@ export type FileMapping = {
 
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
-  "attributes": {
-    tableName: "Attributes",
+  attributes: {
+    tableName: 'Attributes',
     columnMappings: {
-      "code": "Code",
-      "description": "Description",
-      "status": "Status"
+      code: 'Code',
+      description: 'Description',
+      status: 'Status'
     }
   },
-  "personnel": {
-    tableName: "Personnel",
+  personnel: {
+    tableName: 'Personnel',
     columnMappings: {
-      "firstname": "FirstName",
-      "lastname": "LastName",
-      "role": "Role"
-    }
+      firstname: 'FirstName',
+      lastname: 'LastName',
+      role: 'Role'
+    },
+    specialProcessing: processPersonnel
   },
-  "species": {
-    tableName: "",
+  species: {
+    tableName: '',
     columnMappings: {
-      "spcode": "Species.SpeciesCode",
-      "family": "Family.Family",
-      "genus": "Genus.GenusName",
-      "species": "Species.SpeciesName",
-      "subspecies": "Species.SubspeciesName", // optional
-      "IDLevel": "Species.IDLevel",
-      "authority": "Species.Authority",
-      "subauthority": "Species.SubspeciesAuthority", // optional
+      spcode: 'Species.SpeciesCode',
+      family: 'Family.Family',
+      genus: 'Genus.GenusName',
+      species: 'Species.SpeciesName',
+      subspecies: 'Species.SubspeciesName', // optional
+      IDLevel: 'Species.IDLevel',
+      authority: 'Species.Authority',
+      subauthority: 'Species.SubspeciesAuthority' // optional
     },
     specialProcessing: processSpecies
   },
-  "quadrats": {
-    tableName: "quadrats",
+  quadrats: {
+    tableName: 'quadrats',
     // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
     columnMappings: {
-      "quadrat": "QuadratName",
-      "plotID": "PlotID",
-      "censusID": "CensusID",
-      "startx": "StartX",
-      "starty": "StartY",
-      "dimx": "DimensionX",
-      "dimy": "DimensionY",
-      "unit": "Unit",
-      "quadratshape": "QuadratShape",
-    },
-  },
-  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
-  "subquadrats": {
-    tableName: "subquadrats",
-    columnMappings: {
-      "subquadrat": "SubquadratName",
-      "quadrat": "QuadratID",
-      "plotID": "PlotID",
-      "censusID": "CensusID",
-      "dimx": "DimensionX",
-      "dimy": "DimensionY",
-      "xindex": "X",
-      "yindex": "Y",
-      "unit": "Unit",
-      "orderindex": "Ordering",
+      quadrat: 'QuadratName',
+      plotID: 'PlotID',
+      censusID: 'CensusID',
+      startx: 'StartX',
+      starty: 'StartY',
+      coordinateunit: 'CoordinateUnits',
+      dimx: 'DimensionX',
+      dimy: 'DimensionY',
+      dimensionunit: 'DimensionUnits',
+      quadratshape: 'QuadratShape'
     }
   },
-  "measurements": {
-    tableName: "", // Multiple tables involved
+  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
+  subquadrats: {
+    tableName: 'subquadrats',
+    columnMappings: {
+      subquadrat: 'SubquadratName',
+      quadrat: 'QuadratID',
+      plotID: 'PlotID',
+      censusID: 'CensusID',
+      dimx: 'DimensionX',
+      dimy: 'DimensionY',
+      xindex: 'X',
+      yindex: 'Y',
+      unit: 'Unit',
+      orderindex: 'Ordering'
+    }
+  },
+  measurements: {
+    tableName: '', // Multiple tables involved
     columnMappings: {},
     specialProcessing: processCensus
-  },
+  }
 };
 const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER, // better stored in an app setting such as process.env.DB_USER
-  password: process.env.AZURE_SQL_PASSWORD, // better stored in an app setting such as process.env.DB_PASSWORD
-  host: process.env.AZURE_SQL_SERVER, // better stored in an app setting such as process.env.DB_SERVER
-  port: parseInt(process.env.AZURE_SQL_PORT!), // optional, defaults to 1433, better stored in an app setting such as process.env.DB_PORT
+  user: process.env.AZURE_SQL_USER,
+  password: process.env.AZURE_SQL_PASSWORD,
+  host: process.env.AZURE_SQL_SERVER,
+  port: parseInt(process.env.AZURE_SQL_PORT!),
   database: process.env.AZURE_SQL_CATALOG_SCHEMA,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 100, // increased from 10 to prevent bottlenecks
   queueLimit: 0,
   keepAliveInitialDelay: 10000, // 0 by default.
   enableKeepAlive: true, // false by default.
+  connectTimeout: 20000 // 10 seconds by default.
 };
-// database: process.env.AZURE_SQL_SCHEMA!, // better stored in an app setting such as process.env.DB_NAME
 export const poolMonitor = new PoolMonitor(sqlConfig);
-// const pool = createPool(sqlConfig);
 
-// Function to get a connection from the pool
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
     console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
-    // const connection = await pool.getConnection();
+
+    // Check if the pool is closed and reinitialize if necessary
+    if (poolMonitor.isPoolClosed()) {
+      console.log('Connection pool is closed. Reinitializing...');
+      poolMonitor.reinitializePool();
+    }
+
     const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
     console.log('Connection successful');
@@ -141,18 +128,38 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   } catch (err) {
     console.error(`Connection attempt ${tries + 1} failed:`, err);
     if (tries == 5) {
-      console.error("!!! Cannot connect !!! Error:", err);
+      console.error('!!! Cannot connect !!! Error:', err);
       throw err;
     } else {
-      console.log("Retrying connection...");
+      console.log('Retrying connection...');
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
   }
 }
 
+export async function getConn() {
+  let conn: PoolConnection | null = null;
+  try {
+    const i = 0;
+    conn = await getSqlConnection(i);
+  } catch (error: any) {
+    console.error('Error processing files:', error.message);
+    throw new Error(error.message);
+  }
+  if (!conn) {
+    throw new Error('conn empty');
+  }
+  return conn;
+}
+
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
   try {
+    // If params exist, replace any undefined values with null
+    if (params) {
+      params = params.map(param => (param === undefined ? null : param));
+    }
+
     // Check if the query is for calling a stored procedure
     if (query.trim().startsWith('CALL')) {
       // Use `connection.query` for stored procedures
@@ -174,55 +181,6 @@ export async function runQuery(connection: PoolConnection, query: string, params
   }
 }
 
-// Helper function to get value or default
-function getValueOrDefault(value: any, defaultValue = null) {
-  return value ?? defaultValue;
-}
-
-// Function to transform request body into data object
-function transformRequestBody(requestBody: any) {
-  return {
-    CoreMeasurementID: getValueOrDefault(requestBody.coreMeasurementID),
-    CensusID: getValueOrDefault(requestBody.censusID),
-    PlotID: getValueOrDefault(requestBody.plotID),
-    QuadratID: getValueOrDefault(requestBody.quadratID),
-    SubQuadratID: getValueOrDefault(requestBody.subQuadratID),
-    TreeID: getValueOrDefault(requestBody.treeID),
-    StemID: getValueOrDefault(requestBody.stemID),
-    PersonnelID: getValueOrDefault(requestBody.personnelID),
-    IsRemeasurement: booleanToBit(getValueOrDefault(requestBody.isRemeasurement)),
-    IsCurrent: booleanToBit(getValueOrDefault(requestBody.isCurrent)),
-    IsPrimaryStem: booleanToBit(getValueOrDefault(requestBody.IsPrimaryStem)),
-    IsValidated: booleanToBit(getValueOrDefault(requestBody.IsValidated)),
-    MeasurementDate: requestBody.measurementDate ? new Date(requestBody.measurementDate) : null,
-    MeasuredDBH: getValueOrDefault(requestBody.measuredDBH),
-    MeasuredHOM: getValueOrDefault(requestBody.measuredHOM),
-    Description: getValueOrDefault(requestBody.description),
-    UserDefinedFields: getValueOrDefault(requestBody.userDefinedFields),
-  };
-}
-
-export async function parseCoreMeasurementsRequestBody(request: NextRequest) {
-  const requestBody = await request.json();
-  return transformRequestBody(requestBody);
-}
-
-export async function parseAttributeRequestBody(request: NextRequest, parseType: string): Promise<AttributesResult> {
-  const {newRow: requestBody}: { newRow: GridValidRowModel } = await request.json();
-  switch (parseType) {
-    case 'POST':
-    case 'PATCH': {
-      return {
-        Code: requestBody.code,
-        Description: requestBody.description ?? null,
-        Status: requestBody.status ?? null,
-      };
-    }
-    default:
-      throw new Error("Invalid parse type -- attributes");
-  }
-}
-
 export function getCatalogSchema() {
   const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
   if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
@@ -234,10 +192,10 @@ export type ValidationResponse = {
   failedRows: number;
   message: string;
   failedCoreMeasurementIDs?: number[];
-}
+};
 export type UpdateValidationResponse = {
   rowsValidated: any;
-}
+};
 
 export interface QueryConfig {
   schema: string;
@@ -255,14 +213,17 @@ export interface QueryConfig {
   extraParams?: any[];
 }
 
-export function buildPaginatedQuery(config: QueryConfig): { query: string, params: any[] } {
-  const {schema, table, joins, conditionals, pagination, extraParams} = config;
-  const {page, pageSize} = pagination;
+export function buildPaginatedQuery(config: QueryConfig): {
+  query: string;
+  params: any[];
+} {
+  const { schema, table, joins, conditionals, pagination, extraParams } = config;
+  const { page, pageSize } = pagination;
   const startRow = page * pageSize;
   const queryParams = extraParams || [];
 
   // Establish an alias for the primary table for consistency in joins and selections
-  const tableAlias = table[0].toLowerCase();  // Simple default alias based on first letter of table name
+  const tableAlias = table[0].toLowerCase(); // Simple default alias based on first letter of table name
 
   // Build the base query with possible joins
   let query = `SELECT SQL_CALC_FOUND_ROWS ${tableAlias}.* FROM ${schema}.${table} AS ${tableAlias}`;
@@ -280,7 +241,7 @@ export function buildPaginatedQuery(config: QueryConfig): { query: string, param
   query += ` LIMIT ?, ?`;
   queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
 
-  return {query, params: queryParams};
+  return { query, params: queryParams };
 }
 
 // Function to close all active connections

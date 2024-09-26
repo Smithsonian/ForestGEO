@@ -1,18 +1,17 @@
-"use client";
+'use client';
 import * as React from 'react';
 import GlobalStyles from '@mui/joy/GlobalStyles';
 import Sheet from '@mui/joy/Sheet';
 import IconButton from '@mui/joy/IconButton';
 import MenuIcon from '@mui/icons-material/Menu';
-
-import {toggleSidebar} from '@/config/utils';
+import { toggleSidebar } from '@/config/utils';
 
 export default function Header() {
   return (
     <Sheet
       role="banner"
       sx={{
-        display: {xs: 'flex', md: 'none'},
+        display: { xs: 'flex', md: 'none' },
         alignItems: 'center',
         justifyContent: 'space-between',
         position: 'fixed',
@@ -24,27 +23,21 @@ export default function Header() {
         gap: 1,
         borderBottom: '1px solid',
         borderColor: 'background.level1',
-        boxShadow: 'sm',
+        boxShadow: 'sm'
       }}
     >
       <GlobalStyles
-        styles={(theme) => ({
+        styles={theme => ({
           ':root': {
             '--Header-height': '52px',
             [theme.breakpoints.up('md')]: {
-              '--Header-height': '0px',
-            },
-          },
+              '--Header-height': '0px'
+            }
+          }
         })}
       />
-      <IconButton
-        role="button"
-        onClick={() => toggleSidebar()}
-        variant="outlined"
-        color="neutral"
-        size="sm"
-      >
-        <MenuIcon/>
+      <IconButton role="button" onClick={() => toggleSidebar()} variant="outlined" color="neutral" size="sm">
+        <MenuIcon />
       </IconButton>
     </Sheet>
   );

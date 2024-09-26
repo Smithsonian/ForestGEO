@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import StemTaxonomiesViewDataGrid from "@/components/datagrids/applications/stemtaxonomiesviewdatagrid";
+import IsolatedStemTaxonomiesViewDataGrid from '@/components/datagrids/applications/isolated/isolatedstemtaxonomiesviewdatagrid';
 
 export default function StemTaxonomiesPage() {
-  return <StemTaxonomiesViewDataGrid />;
+  return <IsolatedStemTaxonomiesViewDataGrid />;
 }

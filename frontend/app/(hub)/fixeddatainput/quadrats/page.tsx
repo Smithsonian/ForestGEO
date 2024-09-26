@@ -1,5 +1,5 @@
-import QuadratsDataGrid from "@/components/datagrids/applications/quadratsdatagrid";
+import IsolatedQuadratsDataGrid from '@/components/datagrids/applications/isolated/isolatedquadratsdatagrid';
 
 export default function QuadratsPage() {
-  return <QuadratsDataGrid/>;
+  return <IsolatedQuadratsDataGrid />;
 }

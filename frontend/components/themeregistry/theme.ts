@@ -1,11 +1,11 @@
-import {extendTheme} from '@mui/joy/styles';
-import {Inter, Source_Code_Pro} from 'next/font/google';
+import { extendTheme } from '@mui/joy/styles';
+import { Inter, Source_Code_Pro } from 'next/font/google';
 
 const inter = Inter({
   subsets: ['latin'],
   adjustFontFallback: false, // prevent NextJS from adding its own fallback font
   fallback: ['var(--joy-fontFamily-fallback)'], // use Joy UI's fallback font
-  display: 'swap',
+  display: 'swap'
 });
 
 const sourceCodePro = Source_Code_Pro({
@@ -20,28 +20,38 @@ const sourceCodePro = Source_Code_Pro({
     'Consolas',
     'Liberation Mono',
     'Courier New',
-    'monospace',
+    'monospace'
   ],
-  display: 'swap',
+  display: 'swap'
 });
 
 const theme = extendTheme({
   fontFamily: {
     body: inter.style.fontFamily,
     display: inter.style.fontFamily,
-    code: sourceCodePro.style.fontFamily,
+    code: sourceCodePro.style.fontFamily
   },
   components: {
     JoyButton: {
       styleOverrides: {
-        root: ({ownerState}) => ({
+        root: ({ ownerState }) => ({
           ...(ownerState.color === 'primary' && {
-            backgroundColor: '#4338ca',
-          }),
-        }),
-      },
+            backgroundColor: '#4338ca'
+          })
+        })
+      }
     },
-  },
+    JoyTooltip: {
+      defaultProps: {
+        // Automatically apply this prop globally
+        disableTouchListener: true,
+        sx: {
+          leaveDelay: 100,
+          pointerEvents: 'none'
+        }
+      }
+    }
+  }
 });
 
 export default theme;

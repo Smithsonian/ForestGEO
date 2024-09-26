@@ -1,17 +1,17 @@
-"use client";
-import {Button, Grow} from "@mui/material";
-import React from "react";
+'use client';
+import { Button, Grow } from '@mui/material';
+import React from 'react';
 
 interface FinalizeSelectionsButtonProps {
   onFinish: () => void; // Callback when button is clicked
   show: boolean; // Condition to show the button
 }
 
-const FinalizeSelectionsButton: React.FC<FinalizeSelectionsButtonProps> = ({onFinish, show}) => {
+const FinalizeSelectionsButton: React.FC<FinalizeSelectionsButtonProps> = ({ onFinish, show }) => {
   if (!show) return null;
 
   return (
-    <Grow in={show} style={{transformOrigin: '0 0 0'}} timeout={1000}>
+    <Grow in={show} style={{ transformOrigin: '0 0 0' }} timeout={1000}>
       <Button
         variant="contained"
         color="primary"
@@ -25,9 +25,9 @@ const FinalizeSelectionsButton: React.FC<FinalizeSelectionsButtonProps> = ({onFi
             animation: 'pulse 1s infinite'
           },
           '@keyframes pulse': {
-            '0%': {transform: 'scale(1)'},
-            '50%': {transform: 'scale(1.05)'},
-            '100%': {transform: 'scale(1)'}
+            '0%': { transform: 'scale(1)' },
+            '50%': { transform: 'scale(1.05)' },
+            '100%': { transform: 'scale(1)' }
           }
         }}
       >

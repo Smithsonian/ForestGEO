@@ -17,7 +17,6 @@
 # production
 /build
 /sampledata
-/sqlscripting
 /scripts
 DigiCertGlobalRootCA.crt.pem
 
@@ -45,6 +44,19 @@ yarn-error.log*
 /.fleet
 /.vscode
 /.idea
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/.fleet
+/.vscode
+/.idea
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+*storybook.log
 /test-results/
 /playwright-report/
 /blob-report/

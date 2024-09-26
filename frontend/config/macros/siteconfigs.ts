@@ -8,8 +8,9 @@ import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import SchemaIcon from '@mui/icons-material/Schema';
 import FilterIcon from '@mui/icons-material/FilterList';
-import PlaceIcon from '@mui/icons-material/Place';
-import React from "react";
+import HistoryIcon from '@mui/icons-material/History';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
 export type SiteConfigProps = {
@@ -25,8 +26,9 @@ export type SiteConfigProps = {
   }[];
 };
 export const siteConfig = {
-  name: "ForestGEO",
-  description: "Census data entry and storage",
+  name: 'ForestGEO',
+  description: 'Census data entry and storage',
+  version: 'Acacia' // needs to be updated as new versions are released
 };
 
 type DataValidityKey = keyof UnifiedValidityFlags;
@@ -50,102 +52,112 @@ export const siteConfigNav: SiteConfigProps[] = [
     href: '/dashboard',
     tip: 'Home Page',
     icon: DashboardIcon,
-    expanded: [],
+    expanded: []
   },
   {
-    label: "Measurements Hub",
-    href: "/measurementshub",
+    label: 'Census Hub',
+    href: '/measurementshub',
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
     icon: DataObjectIcon,
     expanded: [
       {
-        label: "View Measurements",
-        href: "/summary",
+        label: 'View Data',
+        href: '/summary',
         tip: '',
         icon: VisibilityIcon
       },
-      // {
-      //   label: "Validation History",
-      //   href: "/validationhistory",
-      //   tip: '',
-      //   icon: HistoryEduIcon
-      // },
       {
-        label: "Uploaded Files",
-        href: "/uploadedfiles",
-        tip: "uploaded file display",
-        icon: CloudCircleIcon,
+        label: 'Post-Census Statistics',
+        href: '/postvalidation',
+        tip: '',
+        icon: VisibilityIcon
       },
-    ],
+      {
+        label: 'Uploaded Files',
+        href: '/uploadedfiles',
+        tip: 'uploaded file display',
+        icon: CloudCircleIcon
+      },
+      {
+        label: 'View All Historical Data',
+        href: '/viewfulltable',
+        tip: 'all historical data view',
+        icon: HistoryIcon
+      },
+      {
+        label: 'Validations',
+        href: '/validations',
+        tip: 'data validations hub',
+        icon: FactCheckIcon
+      }
+    ]
   },
 
   {
-    label: "Supporting Data Views",
-    href: "/fixeddatainput",
+    label: 'Stem & Plot Details',
+    href: '/fixeddatainput',
     tip: 'View Modifiable Properties',
     icon: SettingsSuggestIcon,
     expanded: [
       {
-        label: 'Attributes',
+        label: 'Stem Codes',
         href: '/attributes',
         tip: '',
-        icon: DescriptionIcon,
+        icon: DescriptionIcon
       },
       {
         label: 'Personnel',
         href: '/personnel',
         tip: '',
-        icon: AccountCircleIcon,
+        icon: AccountCircleIcon
       },
       {
         label: 'Quadrats',
         href: '/quadrats',
         tip: '',
-        icon: WidgetsIcon,
+        icon: WidgetsIcon
       },
       {
-        label: 'Subquadrats',
-        href: '/subquadrats',
-        tip: '',
-        icon: WidgetsIcon,
-      },
-      // {
-      //   label: 'QuadratPersonnel',
-      //   href: '/quadratpersonnel',
-      //   tip: '',
-      //   icon: WidgetsIcon,
-      // },
-      // {
-      //   label: 'Species',
-      //   href: '/species',
-      //   tip: '',
-      //   icon: BugReportIcon,
-      // },
-      {
-        label: "View Stem Taxonomies",
-        href: "/stemtaxonomies",
-        tip: '',
-        icon: FilterIcon
-      },
-      {
-        label: "View Stem Dimensions",
-        href: "/stemdimensions",
-        tip: '',
-        icon: PlaceIcon
-      },
-      {
-        label: "View All Taxonomies",
-        href: "/alltaxonomies",
+        label: 'Species List',
+        href: '/alltaxonomies',
         tip: '',
         icon: SchemaIcon
       },
-      // {
-      //   label: 'Measurements Form',
-      //   href: '/measurementsform',
-      //   tip: '',
-      //   icon: DescriptionIcon,
-      // },
+      {
+        label: 'Plot-Species List',
+        href: '/stemtaxonomies',
+        tip: '',
+        icon: FilterIcon
+      }
     ]
-  },
+  }
 ];
 
+export function getEndpointHeaderName(endpoint: string) {
+  switch (endpoint) {
+    case '/dashboard':
+      return 'Dashboard';
+    case '/measurementshub/summary':
+      return 'View Data';
+    case '/measurementshub/validationhistory':
+      return 'Validation History';
+    case '/measurementshub/viewfulltable':
+      return 'All Historical Data';
+    case '/measurementshub/validations':
+      return 'Validations Hub';
+    case '/fixeddatainput/attributes':
+      return 'Stem Codes';
+    case '/fixeddatainput/personnel':
+      return 'Personnel';
+    case '/fixeddatainput/quadrats':
+      return 'Quadrats';
+    case '/fixeddatainput/subquadrats':
+      return 'Subquadrats';
+    case '/fixeddatainput/stemtaxonomies':
+      return 'Plot-Species List';
+    case '/fixeddatainput/quadratpersonnel':
+      return 'Quadrat-Assigned Personnel';
+    case '/fixeddatainput/alltaxonomies':
+      return 'Species List';
+  }
+}

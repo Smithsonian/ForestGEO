@@ -1,14 +1,14 @@
-import {DetailedCMIDRow} from "@/components/uploadsystem/uploadparent";
-import React, {Dispatch, SetStateAction} from "react";
-import {FileWithPath} from "react-dropzone";
-import {FileCollectionRowSet} from "./formdetails";
+import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
+import React, { Dispatch, SetStateAction } from 'react';
+import { FileWithPath } from 'react-dropzone';
+import { FileCollectionRowSet, FormType } from '@/config/macros/formdetails';
 
 export interface UploadStartProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   personnelRecording: string;
   // state setters
-  setUploadForm: Dispatch<SetStateAction<string>>;
+  setUploadForm: Dispatch<SetStateAction<FormType | undefined>>;
   setPersonnelRecording: Dispatch<SetStateAction<string>>;
   setExpectedHeaders: Dispatch<SetStateAction<string[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
@@ -16,7 +16,7 @@ export interface UploadStartProps {
 
 export interface UploadParseFilesProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   acceptedFiles: FileWithPath[];
   personnelRecording: string;
   dataViewActive: number;
@@ -35,7 +35,7 @@ export interface UploadReviewFilesProps {
   dbhUnit: string;
   homUnit: string;
   coordUnit: string;
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   acceptedFiles: FileWithPath[];
   expectedHeaders: string[];
   parsedData: FileCollectionRowSet;
@@ -54,7 +54,7 @@ export interface UploadReviewFilesProps {
   setUploadError: Dispatch<SetStateAction<any>>;
   setErrorComponent: Dispatch<SetStateAction<string>>;
   // centralized functions
-  areHeadersValid: (actualHeaders: string[]) => { isValid: boolean, missingHeaders: string[] };
+  areHeadersValid: (actualHeaders: string[]) => { isValid: boolean; missingHeaders: string[] };
   handleChange: (_event: React.ChangeEvent<unknown>, value: number) => void;
   handleApproval: () => Promise<void>;
   handleCancel: () => Promise<void>;
@@ -67,7 +67,7 @@ export interface UploadFireProps {
   // contexts
   schema: string;
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   personnelRecording: string;
   dbhUnit: string;
   homUnit: string;
@@ -88,7 +88,7 @@ export interface UploadFireAzureProps {
   // contexts
   user: string;
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   acceptedFiles: FileWithPath[];
   cmErrors: CMError[];
   allRowToCMID: DetailedCMIDRow[];
@@ -108,7 +108,7 @@ export interface UploadValidationProps {
 
 export interface UploadValidationErrorDisplayProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   allRowToCMID: DetailedCMIDRow[]; // Updated to use DetailedCMIDRow[]
   cmErrors: CMError[];
   // state setters
@@ -125,7 +125,7 @@ export interface UploadUpdateValidationsProps {
 
 export interface UploadCompleteProps {
   // state vars
-  uploadForm: string;
+  uploadForm: FormType | undefined;
   // state setters
   handleCloseUploadModal: () => void;
 }
@@ -150,17 +150,17 @@ export interface UploadErrorProps {
 }
 
 export enum ReviewStates {
-  START = "start",
-  UPLOAD_FILES = "upload_files",
-  REVIEW = "review",
-  UPLOAD_SQL = "upload_sql",
-  VALIDATE = "validate",
-  VALIDATE_ERRORS_FOUND = "validate_errors_found",
-  UPDATE = "update_rows",
-  UPLOAD_AZURE = "upload_azure",
-  COMPLETE = "complete",
-  ERRORS = "errors",
-  FILE_MISMATCH_ERROR = "file_mismatch_error"
+  START = 'start',
+  UPLOAD_FILES = 'upload_files',
+  REVIEW = 'review',
+  UPLOAD_SQL = 'upload_sql',
+  VALIDATE = 'validate',
+  VALIDATE_ERRORS_FOUND = 'validate_errors_found',
+  UPDATE = 'update_rows',
+  UPLOAD_AZURE = 'upload_azure',
+  COMPLETE = 'complete',
+  ERRORS = 'errors',
+  FILE_MISMATCH_ERROR = 'file_mismatch_error'
 }
 
 export enum ReviewProgress {
@@ -178,7 +178,7 @@ export enum ReviewProgress {
 // for validation error display ONLY
 
 export interface CMError {
-  CoreMeasurementID: number;
-  ValidationErrorIDs: number[];
-  Descriptions: string[];
+  coreMeasurementID: number;
+  validationErrorIDs: number[];
+  descriptions: string[];
 }

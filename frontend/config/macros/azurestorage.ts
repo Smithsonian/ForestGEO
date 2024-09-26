@@ -1,22 +1,21 @@
-import {BlobServiceClient, ContainerClient} from "@azure/storage-blob";
-
+import { BlobServiceClient, ContainerClient } from '@azure/storage-blob';
 
 export async function getContainerClient(containerName: string) {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
   console.log('Connection String:', storageAccountConnectionString);
   console.log(`container name: ${containerName.toLowerCase()}`);
   if (!storageAccountConnectionString) {
-    console.error("process envs failed");
-    throw new Error("process envs failed");
+    console.error('process envs failed');
+    throw new Error('process envs failed');
   }
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) console.error("blob service client creation failed");
-  else console.error("blob service client created & connected");
+  if (!blobServiceClient) console.error('blob service client creation failed');
+  else console.error('blob service client created & connected');
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
   console.log(containerClient.url);
-  if (!(await containerClient.createIfNotExists())) console.error("container client createifnotexists failure");
+  if (!(await containerClient.createIfNotExists())) console.error('container client createifnotexists failure');
   else {
     console.log(`container client with name ${containerName.toLowerCase()} created and accessed.`);
     return containerClient;
@@ -33,7 +32,6 @@ const MAX_RETRIES = 3; // Maximum number of retries
 
 const RETRY_DELAY_MS = 3000; // Delay between retries in milliseconds
 
-
 export const FORMSEARCH_LIMIT: number = 5;
 export type FileRowErrors = {
   stemtag: string;
@@ -41,7 +39,13 @@ export type FileRowErrors = {
   validationErrorID: number;
 };
 
-export async function uploadValidFileAsBuffer(containerClient: ContainerClient, file: File, user: string, formType: string, fileRowErrors: FileRowErrors[] = []) {
+export async function uploadValidFileAsBuffer(
+  containerClient: ContainerClient,
+  file: File,
+  user: string,
+  formType: string,
+  fileRowErrors: FileRowErrors[] = []
+) {
   const buffer = Buffer.from(await file.arrayBuffer());
   // New function to generate the filename with an incremented suffix
   const generateNewFileName = async (fileName: string) => {
@@ -83,7 +87,7 @@ export async function uploadValidFileAsBuffer(containerClient: ContainerClient, 
   // Retry mechanism for the upload
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, {metadata});
+      const uploadResponse = await containerClient.getBlockBlobClient(file.name).uploadData(buffer, { metadata });
 
       // If upload is successful, return the response
       if (uploadResponse) {

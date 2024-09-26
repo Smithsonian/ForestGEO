@@ -3,14 +3,13 @@
  *
  * This file defines types used throughout the upload system components to define props, state, contexts etc. It also defines some utility functions used in the upload flow.
  */
-import {FileRejection, FileWithPath} from "react-dropzone";
+import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
-import {GridColDef, GridValidRowModel} from "@mui/x-data-grid";
+import { GridColDef, GridValidRowModel } from '@mui/x-data-grid';
 
 export type ColumnStates = {
   [key: string]: boolean;
-}
-
+};
 
 export type ValidationErrorID = number;
 
@@ -24,20 +23,20 @@ export enum HTTPResponses {
   INVALID_REQUEST = 400,
   PRECONDITION_VALIDATION_FAILURE = 412,
   FOREIGN_KEY_CONFLICT = 555,
-  NOT_FOUND, // Custom code, example
+  NOT_FOUND // Custom code, example
 }
 
 export enum ErrorMessages {
-  SCF = "SQL Command Failure",
-  ICF = "Insertion Command Failed",
-  UCF = "Update Command Failed",
-  DCF = "Delete Command Failed",
-  UKAE = "Unique Key Already Exists",
+  SCF = 'SQL Command Failure',
+  ICF = 'Insertion Command Failed',
+  UCF = 'Update Command Failed',
+  DCF = 'Delete Command Failed',
+  UKAE = 'Unique Key Already Exists'
 }
 
 export const tableHeaderSettings = {
   fontWeight: 'bold',
-  fontSize: 16,
+  fontSize: 16
 };
 
 export interface DropzonePureProps {
@@ -86,15 +85,16 @@ export interface DropzoneProps {
 
 export function bitToBoolean(bitField: any): boolean {
   if (Buffer.isBuffer(bitField)) {
-    // If the BIT field is a Buffer, use the first byte for conversion
-    return bitField[0] === 1;
+    // Ensure non-zero bytes are considered `true`
+    return bitField[0] !== 0;
+  } else if (bitField instanceof Uint8Array) {
+    return bitField[0] !== 0;
   } else {
-    // If it's not a Buffer, it might be a number or boolean
     return Boolean(bitField);
   }
 }
 
-export const booleanToBit = (value: boolean | undefined): number => value ? 1 : 0;
+export const booleanToBit = (value: boolean | undefined): number => (value ? 1 : 0);
 
 export function formatDate(isoDateString: string): string {
   const options: Intl.DateTimeFormatOptions = {
@@ -105,7 +105,11 @@ export function formatDate(isoDateString: string): string {
   return new Date(isoDateString).toLocaleDateString(undefined, options);
 }
 
-export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export type UnitSelection = 'km' | 'hm' | 'dam' | 'm' | 'dm' | 'cm' | 'mm';
+export type AreaSelection = 'km2' | 'hm2' | 'dam2' | 'm2' | 'dm2' | 'cm2' | 'mm2';
+
+export const unitSelectionOptions: UnitSelection[] = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export const areaSelectionOptions: AreaSelection[] = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
 export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
   required?: boolean;
 };
@@ -116,8 +120,11 @@ export type UnifiedValidityFlags = {
   species: boolean;
   quadrats: boolean;
   quadratpersonnel: boolean;
-}
+};
 
 export type GridSelections = {
-  label: string; value: number;
-}
+  label: string;
+  value: number;
+};
+
+export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field crew';

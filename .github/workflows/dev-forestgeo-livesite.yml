@@ -1,0 +1,106 @@
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: ForestGEO Development Live Site Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - 'forestgeo-app-*'
+  workflow_dispatch:
+
+jobs:
+  build-app-development:
+    if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+
+      - name: create env file (in frontend/ directory) -- development
+        id: create-env-file-dev
+        run: |
+          touch frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
+          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL_DEV }} >> frontend/.env
+          echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
+          echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
+          echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
+          echo AZURE_SQL_DATABASE=${{ secrets.AZURE_SQL_DATABASE }} >> frontend/.env
+          echo AZURE_SQL_PORT=${{ secrets.AZURE_SQL_PORT }} >> frontend/.env
+          echo AZURE_STORAGE_SAS_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_SAS_CONNECTION_STRING }} >> frontend/.env
+          echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
+          echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
+          echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
+          echo NEXTAUTH_DEBUG=true >> frontend/.env
+          echo NODE_ENV=development >> frontend/.env
+          echo PORT=3000 >> frontend/.env
+          echo FG_PAT=${{ secrets.FG_PAT }} >> frontend/.env
+          echo OWNER=${{ secrets.OWNER }} >> frontend/.env
+          echo REPO=${{ secrets.REPO }} >> frontend/.env
+
+      - name: Cache node modules
+        uses: actions/cache@v2
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Cache Next.js build
+        uses: actions/cache@v2
+        with:
+          path: frontend/build/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/.next/cache') }}
+          restore-keys: |
+            ${{ runner.os }}-next-
+            ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}
+
+      - name: move into frontend --> npm install, build, and test
+        run: |
+          cd frontend/
+          npm install
+          npm run build
+          npm run test --if-present
+
+      - name: Move directories into build/standalone to reduce app load
+        run: |
+          mv ./frontend/build/static ./frontend/build/standalone/build
+          mv ./frontend/public ./frontend/build/standalone
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-build
+          path: frontend/build/standalone
+
+  deploy-app-development:
+    needs: build-app-development
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-build
+          path: frontend/build/standalone
+
+      - name: 'Deploy to Azure Web App (development)'
+        id: deploy-to-webapp-dev
+        if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: 'forestgeo-development'
+          slot-name: 'Production'
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
+          package: frontend/build/standalone
