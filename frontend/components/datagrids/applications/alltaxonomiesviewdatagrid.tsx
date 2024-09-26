@@ -27,11 +27,11 @@ export default function AllTaxonomiesViewDataGrid() {
     speciesCode: '',
     speciesName: '',
     subspeciesName: '',
-    speciesIDLevel: '',
+    idLevel: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
     fieldFamily: '',
-    speciesDescription: ''
+    description: ''
   };
   const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);

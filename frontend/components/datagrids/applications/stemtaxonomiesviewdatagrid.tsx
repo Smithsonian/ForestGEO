@@ -33,8 +33,8 @@ export default function StemTaxonomiesViewDataGrid() {
     genusAuthority: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
-    speciesIDLevel: '',
-    speciesFieldFamily: ''
+    idLevel: '',
+    fieldFamily: ''
   };
   const [rows, setRows] = useState([initialStemTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);

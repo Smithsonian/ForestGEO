@@ -29,8 +29,8 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
     genusAuthority: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
-    speciesIDLevel: '',
-    speciesFieldFamily: ''
+    idLevel: '',
+    fieldFamily: ''
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);

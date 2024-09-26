@@ -286,17 +286,16 @@ export async function handleDeleteForSlices<Result>(
 }
 
 // Field definitions and configurations
-
 export const allTaxonomiesFields = [
   'Family',
   'Genus',
   'GenusAuthority',
   'SpeciesCode',
   'SpeciesName',
-  'ValidCode',
   'SubspeciesName',
-  'SpeciesAuthority',
   'IDLevel',
+  'SpeciesAuthority',
+  'ValidCode',
   'SubspeciesAuthority',
   'FieldFamily',
   'Description'
@@ -314,8 +313,8 @@ const stemTaxonomiesViewFields = [
   'GenusAuthority',
   'SpeciesAuthority',
   'SubspeciesAuthority',
-  'SpeciesIDLevel',
-  'SpeciesFieldFamily'
+  'IDLevel',
+  'FieldFamily'
 ];
 
 const measurementSummaryStagingFields = [
@@ -325,9 +324,9 @@ const measurementSummaryStagingFields = [
   'SpeciesCode',
   'TreeTag',
   'StemTag',
-  'StemLocalX',
-  'StemLocalY',
-  'StemUnits',
+  'LocalX',
+  'LocalY',
+  'CoordinateUnits',
   'MeasurementDate',
   'MeasuredDBH',
   'DBHUnits',
