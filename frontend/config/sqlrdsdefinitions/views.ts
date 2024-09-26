@@ -85,11 +85,24 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
   };
 }
 
-export type MeasurementsSummaryDraftRDS = MeasurementsSummaryRDS & {
+export type MeasurementsSummaryStagingRDS = MeasurementsSummaryRDS & {
   submittedBy?: number;
+  isReviewed?: boolean;
+  isSelected?: boolean;
+  submissionDate?: Date;
 };
 
-export type MeasurementsSummaryDraftResult = ResultType<MeasurementsSummaryDraftRDS>;
+export type MeasurementsSummaryStagingResult = ResultType<MeasurementsSummaryStagingRDS>;
+
+export function getMeasurementsSummaryStagingViewHCs(): ColumnStates {
+  return {
+    ...getMeasurementsSummaryViewHCs(),
+    submittedBy: false,
+    isReviewed: false,
+    isSelected: false,
+    submissionDate: false
+  };
+}
 
 export type StemTaxonomiesViewRDS = {
   id?: number;

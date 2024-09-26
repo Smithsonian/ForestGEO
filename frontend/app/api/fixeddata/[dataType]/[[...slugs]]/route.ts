@@ -99,7 +99,7 @@ export async function GET(
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'measurementssummary':
-      case 'measurementssummary_draft':
+      case 'measurementssummary_staging':
       case 'measurementssummaryview':
       case 'viewfulltable':
       case 'viewfulltableview':

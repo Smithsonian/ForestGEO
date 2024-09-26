@@ -6,10 +6,10 @@ import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
-  MeasurementsSummaryDraftRDS,
-  MeasurementsSummaryDraftResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
+  MeasurementsSummaryStagingRDS,
+  MeasurementsSummaryStagingResult,
   StemTaxonomiesViewRDS,
   StemTaxonomiesViewResult,
   ViewFullTableViewRDS,
@@ -189,8 +189,8 @@ class MapperFactory {
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'measurementssummary_draft':
-        return new GenericMapper<MeasurementsSummaryDraftRDS, MeasurementsSummaryDraftResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'measurementssummary_staging':
+        return new GenericMapper<MeasurementsSummaryStagingRDS, MeasurementsSummaryStagingResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;

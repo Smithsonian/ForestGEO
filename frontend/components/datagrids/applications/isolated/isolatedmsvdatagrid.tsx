@@ -1,6 +1,6 @@
 'use client';
 
-import { MeasurementsSummaryDraftRDS } from '@/config/sqlrdsdefinitions/views';
+import { MeasurementsSummaryStagingRDS } from '@/config/sqlrdsdefinitions/views';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import React, { useState } from 'react';
 import { useSession } from 'next-auth/react';
@@ -13,7 +13,7 @@ import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagrid
 export default function IsolatedMeasurementsSummaryDraftDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const initialMeasurementsSummaryDraftRDSRow: MeasurementsSummaryDraftRDS = {
+  const initialMeasurementsSummaryStagingRDSRow: MeasurementsSummaryStagingRDS = {
     id: 0,
     coreMeasurementID: 0,
     censusID: currentCensus?.dateRanges[0].censusID,
@@ -93,11 +93,11 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
         formType={FormType.measurements}
       />
       <IsolatedDataGridCommons
-        gridType="measurementssummary_draft"
+        gridType="measurementssummary_staging"
         gridColumns={MeasurementsSummaryViewGridColumns}
         refresh={refresh}
         setRefresh={setRefresh}
-        initialRow={initialMeasurementsSummaryDraftRDSRow}
+        initialRow={initialMeasurementsSummaryStagingRDSRow}
         fieldToFocus={'quadratName'}
       />
     </>
