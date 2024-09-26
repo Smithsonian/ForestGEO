@@ -107,7 +107,7 @@
     "typescript": "^5.6.2",
     "unzipper": "^0.12.3",
     "use-count-up": "^3.0.1",
-    "vitest": "^2.0.5"
+    "vitest": "^2.1.1"
   },
   "browser": {
     "crypto": false,
@@ -115,6 +115,9 @@
   },
   "devDependencies": {
     "@monaco-editor/react": "^4.6.0",
-    "monaco-editor": "^0.51.0"
+    "@types/sinon": "^17.0.3",
+    "monaco-editor": "^0.51.0",
+    "sinon": "^19.0.2",
+    "vite": "^5.4.8"
   }
 }

@@ -1,4 +1,4 @@
-create table if not exists attributes
+create table attributes
 (
     Code        varchar(10)                                                                                                     not null
         primary key,
@@ -6,7 +6,7 @@ create table if not exists attributes
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
-create table if not exists measurementssummary
+create table measurementssummary
 (
     CoreMeasurementID int                                                          not null
         primary key,
@@ -32,39 +32,11 @@ create table if not exists measurementssummary
     HOMUnits          enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
     IsValidated       bit                                             default b'0' null,
     Description       varchar(255)                                                 null,
-    Attributes        varchar(255)                                                 null
+    Attributes        varchar(255)                                                 null,
+    UserDefinedFields json                                                         null
 );
 
-create table if not exists measurementssummary_draft (
-    CoreMeasurementID INT NOT NULL PRIMARY KEY,
-    StemID INT NULL,
-    TreeID INT NULL,
-    SpeciesID INT NULL,
-    QuadratID INT NULL,
-    PlotID INT NULL,
-    CensusID INT NULL,
-    SubmittedBy INT NOT NULL,
-    SpeciesName VARCHAR(64) NULL,
-    SubspeciesName VARCHAR(64) NULL,
-    SpeciesCode VARCHAR(25) NULL,
-    TreeTag VARCHAR(10) NULL,
-    StemTag VARCHAR(10) NULL,
-    StemLocalX DECIMAL(10, 6) NULL,
-    StemLocalY DECIMAL(10, 6) NULL,
-    StemUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NULL,
-    QuadratName VARCHAR(255) NULL,
-    MeasurementDate DATE NULL,
-    MeasuredDBH DECIMAL(10, 6) NULL,
-    DBHUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'cm' NULL,
-    MeasuredHOM DECIMAL(10, 6) NULL,
-    HOMUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NULL,
-    IsValidated BIT DEFAULT b'0' NULL,
-    Description VARCHAR(255) NULL,
-    Attributes VARCHAR(255) NULL
-);
-
-
-create table if not exists plots
+create table plots
 (
     PlotID          int auto_increment
         primary key,
@@ -84,7 +56,7 @@ create table if not exists plots
     PlotDescription varchar(255)                                                        null
 );
 
-create table if not exists census
+create table census
 (
     CensusID         int auto_increment
         primary key,
@@ -97,7 +69,19 @@ create table if not exists census
         foreign key (PlotID) references plots (PlotID)
 );
 
-create table if not exists quadrats
+create table postvalidationqueries
+(
+    QueryID         int auto_increment
+        primary key,
+    QueryName       varchar(255)                       not null,
+    QueryDefinition text                               not null,
+    Description     varchar(255)                       null,
+    IsEnabled       bit      default b'1'              not null,
+    CreatedAt       datetime default CURRENT_TIMESTAMP null,
+    LastUpdated     datetime default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP
+);
+
+create table quadrats
 (
     QuadratID       int auto_increment
         primary key,
@@ -139,7 +123,7 @@ create index idx_qid_pid_quadrats
 create index idx_quadratid_quadrats
     on quadrats (QuadratID);
 
-create table if not exists reference
+create table reference
 (
     ReferenceID       int auto_increment
         primary key,
@@ -149,7 +133,7 @@ create table if not exists reference
     Citation          varchar(50)  null
 );
 
-create table if not exists family
+create table family
 (
     FamilyID    int auto_increment
         primary key,
@@ -161,7 +145,7 @@ create table if not exists family
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-create table if not exists genus
+create table genus
 (
     GenusID        int auto_increment
         primary key,
@@ -177,7 +161,7 @@ create table if not exists genus
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-create table if not exists roles
+create table roles
 (
     RoleID          int auto_increment
         primary key,
@@ -185,7 +169,7 @@ create table if not exists roles
     RoleDescription varchar(255) null
 );
 
-create table if not exists personnel
+create table personnel
 (
     PersonnelID int auto_increment
         primary key,
@@ -201,7 +185,7 @@ create table if not exists personnel
         foreign key (RoleID) references roles (RoleID)
 );
 
-create table if not exists quadratpersonnel
+create table quadratpersonnel
 (
     QuadratPersonnelID int auto_increment
         primary key,
@@ -216,7 +200,7 @@ create table if not exists quadratpersonnel
         foreign key (CensusID) references census (CensusID)
 );
 
-create table if not exists sitespecificvalidations
+create table sitespecificvalidations
 (
     ValidationProcedureID int auto_increment
         primary key,
@@ -227,7 +211,7 @@ create table if not exists sitespecificvalidations
     IsEnabled             bit default b'0' not null
 );
 
-create table if not exists species
+create table species
 (
     SpeciesID           int auto_increment
         primary key,
@@ -252,7 +236,7 @@ create table if not exists species
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-create table if not exists specieslimits
+create table specieslimits
 (
     SpeciesLimitID int auto_increment
         primary key,
@@ -265,7 +249,7 @@ create table if not exists specieslimits
         foreign key (SpeciesID) references species (SpeciesID)
 );
 
-create table if not exists subquadrats
+create table subquadrats
 (
     SubquadratID    int auto_increment
         primary key,
@@ -284,7 +268,7 @@ create table if not exists subquadrats
         foreign key (QuadratID) references quadrats (QuadratID)
 );
 
-create table if not exists trees
+create table trees
 (
     TreeID    int auto_increment
         primary key,
@@ -296,7 +280,7 @@ create table if not exists trees
         foreign key (SpeciesID) references species (SpeciesID)
 );
 
-create table if not exists stems
+create table stems
 (
     StemID          int auto_increment
         primary key,
@@ -315,7 +299,7 @@ create table if not exists stems
         foreign key (QuadratID) references quadrats (QuadratID)
 );
 
-create table if not exists coremeasurements
+create table coremeasurements
 (
     CoreMeasurementID int auto_increment
         primary key,
@@ -328,39 +312,14 @@ create table if not exists coremeasurements
     MeasuredHOM       decimal(10, 6)                                               null,
     HOMUnit           enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
     Description       varchar(255)                                                 null,
-    UserDefinedFields text                                                         null,
+    UserDefinedFields json                                                         null,
     constraint FK_CoreMeasurements_Stems
         foreign key (StemID) references stems (StemID),
     constraint coremeasurements_census_CensusID_fk
         foreign key (CensusID) references census (CensusID)
 );
 
-create table coremeasurements_staging
-(
-    StagingMeasurementID int auto_increment
-        primary key,
-    CensusID             int                                                                       null,
-    StemID               int                                                                       null,
-    MeasuredDBH          decimal(10, 6)                                                            null,
-    DBHUnit              enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'cm'              null,
-    MeasuredHOM          decimal(10, 6)                                                            null,
-    HOMUnit              enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'               null,
-    MeasurementDate      date                                                                      null,
-    Description          varchar(255)                                                              null,
-    UserDefinedFields    text                                                                      null,
-    SubmittedBy          int                                                                       not null,
-    IsReviewed           bit                                             default b'0'              null,
-    IsSelected           bit                                             default b'0'              null,
-    SubmissionDate       datetime                                        default CURRENT_TIMESTAMP null,
-    ReviewerID           int                                                                       null,
-    ReviewedDate         datetime                                                                  null,
-    constraint FK_CoreMeasurementsStaging_CensusID
-        foreign key (CensusID) references census (CensusID),
-    constraint FK_CoreMeasurementsStaging_Stems
-        foreign key (StemID) references stems (StemID)
-);
-
-create table if not exists cmattributes
+create table cmattributes
 (
     CMAID             int auto_increment
         primary key,
@@ -372,19 +331,7 @@ create table if not exists cmattributes
         foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
 );
 
-create table cmattributes_staging
-(
-    CMAID                int auto_increment
-        primary key,
-    StagingMeasurementID int         null,
-    Code                 varchar(10) null,
-    constraint CMAttributes_Attributes_Code_fk_staging
-        foreign key (Code) references attributes (Code),
-    constraint CMAttributes_CoreMeasurements_StagingMeasurementID_fk_staging
-        foreign key (StagingMeasurementID) references coremeasurements_staging (StagingMeasurementID)
-);
-
-create table if not exists cmverrors
+create table cmverrors
 (
     CMVErrorID        int auto_increment
         primary key,
@@ -414,25 +361,7 @@ create index idx_measurementdate_coremeasurements
 create index idx_stemid_coremeasurements
     on coremeasurements (StemID);
 
-create index idx_censusid_coremeasurements_staging
-    on coremeasurements_staging (CensusID);
-
-create index idx_cmid_cid_coremeasurements_staging
-    on coremeasurements_staging (StagingMeasurementID, CensusID);
-
-create index idx_cmid_cid_sid_coremeasurements_staging
-    on coremeasurements_staging (StagingMeasurementID, CensusID, StemID);
-
-create index idx_coremeasurementid_coremeasurements_staging
-    on coremeasurements_staging (StagingMeasurementID);
-
-create index idx_measurementdate_coremeasurements_staging
-    on coremeasurements_staging (MeasurementDate);
-
-create index idx_stemid_coremeasurements_staging
-    on coremeasurements_staging (StemID);
-
-create table if not exists specimens
+create table specimens
 (
     SpecimenID     int auto_increment
         primary key,
@@ -466,7 +395,7 @@ create index idx_stemid_treeid_stems
 create index idx_treeid_stems
     on stems (TreeID);
 
-create table if not exists unifiedchangelog
+create table unifiedchangelog
 (
     ChangeID        int auto_increment,
     TableName       varchar(64)                         not null,
@@ -482,7 +411,7 @@ create table if not exists unifiedchangelog
 )
     partition by key (`TableName`) partitions 24;
 
-create table if not exists validationchangelog
+create table validationchangelog
 (
     ValidationRunID    int auto_increment
         primary key,
@@ -497,7 +426,7 @@ create table if not exists validationchangelog
     AdditionalDetails  varchar(255)                       null
 );
 
-create table if not exists viewfulltable
+create table viewfulltable
 (
     ViewFullTableID           int auto_increment
         primary key,

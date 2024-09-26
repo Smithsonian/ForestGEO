@@ -158,6 +158,7 @@ interface UpdateQueryConfig {
     [key: string]: {
       range: [number, number];
       primaryKey: string;
+      foreignKeys?: string[];
     };
   };
   fieldList: FieldList;
@@ -177,10 +178,12 @@ export async function handleUpsertForSlices<Result>(
     const { range, primaryKey } = config.slices[sliceKey];
     console.log('range: ', range);
     console.log('primaryKey: ', primaryKey);
+
+    // Extract fields relevant to the current slice
     const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
     console.log('fieldsInSlice: ', fieldsInSlice);
 
-    // Build the row data for this slice
+    // Build rowData for the current slice
     const rowData: Partial<Result> = {};
     fieldsInSlice.forEach(field => {
       console.log('field in slice: ', field);
@@ -188,21 +191,34 @@ export async function handleUpsertForSlices<Result>(
       console.log('updated rowData: ', rowData);
     });
 
-    // Check if a foreign key from the previous slice should be included
-    if (Object.keys(insertedIds).length > 0) {
-      const prevKey = Object.keys(insertedIds).pop();
-      if (prevKey && newRow[prevKey as keyof Result] === undefined) {
-        // Cast rowData to any to avoid type issues with assigning number
-        (rowData as any)[`${prevKey}ID`] = insertedIds[prevKey];
-      }
+    // Check if we need to propagate a foreign key from a prior slice
+    const prevSlice = getPreviousSlice(sliceKey, config.slices);
+    if (prevSlice && insertedIds[prevSlice]) {
+      const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
+      (rowData as any)[prevPrimaryKey] = insertedIds[prevSlice]; // Set the foreign key in the current row
+      console.log(`Propagated foreign key ${String(prevPrimaryKey)}: `, insertedIds[prevSlice]);
     }
 
-    // Perform the upsert (insert or update) and store the ID
+    // Perform the upsert and store the resulting ID
     insertedIds[sliceKey] = await handleUpsert<Result>(connection, schema, sliceKey, rowData, primaryKey as keyof Result);
   }
+
   return insertedIds;
 }
 
+// Helper function to get the immediate previous slice based on dependencies
+function getPreviousSlice(currentSlice: string, slices: { [key: string]: any }): string | null {
+  const dependencyOrder = ['family', 'genus', 'species', 'trees', 'stems']; // Order based on dependencies
+  const currentIndex = dependencyOrder.indexOf(currentSlice);
+
+  if (currentIndex > 0) {
+    return dependencyOrder[currentIndex - 1]; // Return the slice that comes immediately before the current one
+  }
+
+  return null; // No previous slice if it's the first one
+}
+
+// Helper function to get the immediate previous slice based on dependencies
 export async function handleDeleteForSlices<Result>(
   connection: PoolConnection,
   schema: string,
@@ -302,6 +318,25 @@ const stemTaxonomiesViewFields = [
   'SpeciesFieldFamily'
 ];
 
+const measurementSummaryStagingFields = [
+  'QuadratName',
+  'SpeciesName',
+  'SubspeciesName',
+  'SpeciesCode',
+  'TreeTag',
+  'StemTag',
+  'StemLocalX',
+  'StemLocalY',
+  'StemUnits',
+  'MeasurementDate',
+  'MeasuredDBH',
+  'DBHUnits',
+  'MeasuredHOM',
+  'HOMUnits',
+  'Description',
+  'Attributes'
+];
+
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
@@ -314,14 +349,14 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemID' },
     family: { range: [2, 3], primaryKey: 'FamilyID' },
     genus: { range: [3, 5], primaryKey: 'GenusID' },
     species: {
       range: [5, stemTaxonomiesViewFields.length],
       primaryKey: 'SpeciesID'
-    }
+    },
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 2], primaryKey: 'StemID' }
   }
 };
 

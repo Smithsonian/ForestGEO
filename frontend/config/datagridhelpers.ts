@@ -6,6 +6,7 @@ import { getQuadratHCs } from '@/config/sqlrdsdefinitions/zones';
 import {
   getAllTaxonomiesViewHCs,
   getAllViewFullTableViewsHCs,
+  getMeasurementsSummaryStagingViewHCs,
   getMeasurementsSummaryViewHCs,
   getStemTaxonomiesViewHCs
 } from '@/config/sqlrdsdefinitions/views';
@@ -64,9 +65,9 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getMeasurementsSummaryViewHCs()
   },
-  measurementssummary_draft: {
+  measurementssummary_staging: {
     id: false,
-    ...getMeasurementsSummaryViewHCs()
+    ...getMeasurementsSummaryStagingViewHCs()
   },
   measurementssummaryview: {
     id: false,
@@ -121,7 +122,7 @@ export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coremeasurements':
     case 'measurementssummaryview':
-    case 'measurementssummary_draft':
+    case 'measurementssummary_staging':
     case 'viewfulltableview':
     case 'measurementssummary': // materialized view --> should not be modified
     case 'viewfulltable': // materialized view --> should not be modified
