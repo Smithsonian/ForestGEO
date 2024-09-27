@@ -7,7 +7,7 @@ export class PoolMonitor {
   private totalConnectionsCreated = 0;
   private waitingForConnection = 0;
   private inactivityTimer: NodeJS.Timeout | null = null;
-  private config: PoolOptions;
+  private readonly config: PoolOptions;
   private poolClosed = false;
   private acquiredConnectionIds: Set<number> = new Set();
 
