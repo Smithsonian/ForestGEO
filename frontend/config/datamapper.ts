@@ -1,8 +1,25 @@
 import moment from 'moment';
 import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
-import { SpeciesLimitsRDS, SpeciesLimitsResult, SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
+import {
+  FamilyRDS,
+  FamilyResult,
+  GenusRDS,
+  GenusResult,
+  ReferenceRDS,
+  ReferenceResult,
+  SpeciesInventoryRDS,
+  SpeciesInventoryResult,
+  SpeciesLimitsRDS,
+  SpeciesLimitsResult,
+  SpeciesRDS,
+  SpeciesResult,
+  SpecimensRDS,
+  SpecimensResult,
+  StemRDS,
+  StemResult
+} from '@/config/sqlrdsdefinitions/taxonomies';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper, SubquadratRDS, SubquadratResult } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
@@ -211,14 +228,26 @@ class MapperFactory {
         return new GenericMapper<QuadratRDS, QuadratsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'sites':
         return new SitesMapper() as any;
+      case 'family':
+        return new GenericMapper<FamilyRDS, FamilyResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'genus':
+        return new GenericMapper<GenusRDS, GenusResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'reference':
+        return new GenericMapper<ReferenceRDS, ReferenceResult>() as unknown as IDataMapper<RDS, Result>;
       case 'species':
         return new GenericMapper<SpeciesRDS, SpeciesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'speciesinventory':
+        return new GenericMapper<SpeciesInventoryRDS, SpeciesInventoryResult>() as unknown as IDataMapper<RDS, Result>;
       case 'specieslimits':
         return new GenericMapper<SpeciesLimitsRDS, SpeciesLimitsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'specimens':
+        return new GenericMapper<SpecimensRDS, SpecimensResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stemtaxonomiesview':
         return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'subquadrats':
+        return new GenericMapper<SubquadratRDS, SubquadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationchangelog':
