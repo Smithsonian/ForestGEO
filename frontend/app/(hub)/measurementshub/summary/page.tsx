@@ -1,5 +1,5 @@
-import IsolatedMeasurementsSummaryDraftDataGrid from '@/components/datagrids/applications/isolated/isolatedmsvdatagrid';
+import MeasurementsSummaryViewDataGrid from '@/components/datagrids/applications/msvdatagrid';
 
 export default function SummaryPage() {
-  return <IsolatedMeasurementsSummaryDraftDataGrid />;
+  return <MeasurementsSummaryViewDataGrid />;
 }

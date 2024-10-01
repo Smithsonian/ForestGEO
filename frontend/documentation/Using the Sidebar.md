@@ -5,7 +5,8 @@ Let's review the logged in screen, which demonstrates what you should see immedi
 
 > [!tip]
 > The application is intended to be blank when you first sign in!  
-> As you make selections, you'll see loading screens and additional options to navigate to -- like a choose-your-own-adventure!
+> As you make selections, you'll see loading screens and additional options to navigate to -- like a
+> choose-your-own-adventure!
 
 ## Sidebar -- Core Operations
 
@@ -23,7 +24,9 @@ There are a series of core selections that you'll need to make before the app is
 
 2. Plot --> refers to the collection of censused quadrats.
 3. Census --> this is a little more complicated:  
-   Censuses have been organized by Plot Census Number (PCN), which denotes the overall census for a given plot. The CensusID (CID) value originally used is now used as a subunit of a PCN, to denote a date range where measurements were submitted for that PCN.
+   Censuses have been organized by Plot Census Number (PCN), which denotes the overall census for a given plot. The
+   CensusID (CID) value originally used is now used as a subunit of a PCN, to denote a date range where measurements
+   were submitted for that PCN.
 
 > [!warning]
 > This is an important distinction! Please make sure you keep this in mind as you use the website.
