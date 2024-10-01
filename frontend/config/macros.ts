@@ -5,7 +5,6 @@
  */
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
-import { GridColDef, GridValidRowModel } from '@mui/x-data-grid';
 
 export type ColumnStates = {
   [key: string]: boolean;
@@ -95,25 +94,11 @@ export function bitToBoolean(bitField: any): boolean {
 }
 
 export const booleanToBit = (value: boolean | undefined): number => (value ? 1 : 0);
-
-export function formatDate(isoDateString: string): string {
-  const options: Intl.DateTimeFormatOptions = {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  };
-  return new Date(isoDateString).toLocaleDateString(undefined, options);
-}
-
 export type UnitSelection = 'km' | 'hm' | 'dam' | 'm' | 'dm' | 'cm' | 'mm';
 export type AreaSelection = 'km2' | 'hm2' | 'dam2' | 'm2' | 'dm2' | 'cm2' | 'mm2';
 
 export const unitSelectionOptions: UnitSelection[] = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export const areaSelectionOptions: AreaSelection[] = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
-export type ExtendedGridColDef<R extends GridValidRowModel = any, V = any, F = V> = GridColDef<R, V, F> & {
-  required?: boolean;
-};
-
 export type UnifiedValidityFlags = {
   attributes: boolean;
   personnel: boolean;

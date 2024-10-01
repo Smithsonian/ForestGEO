@@ -4,6 +4,7 @@ import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 import { handleUpsert } from '@/config/utils';
+import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
 
 // need to try integrating this into validation system:
 
@@ -172,22 +173,30 @@ export async function handleUpsertForSlices<Result>(
   const insertedIds: { [key: string]: number } = {};
   console.log('Initial newRow data:', newRow);
 
+  // Get the correct mapper for the view you're working with
+  const mapper = MapperFactory.getMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>('alltaxonomiesview');
+
+  // Convert newRow from RDS to Result upfront
+  const mappedNewRow = mapper.demapData([newRow as any])[0];
+  console.log('Mapped newRow:', mappedNewRow);
+
   for (const sliceKey in config.slices) {
     console.log('sliceKey: ', sliceKey);
     const { range, primaryKey } = config.slices[sliceKey];
     console.log('range: ', range);
     console.log('primaryKey: ', primaryKey);
 
-    // Extract fields relevant to the current slice
-    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
-    console.log('fieldsInSlice: ', fieldsInSlice);
-
-    // Build rowData for the current slice
+    // Extract fields relevant to the current slice from the already transformed newRow
     const rowData: Partial<Result> = {};
+    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
+
     fieldsInSlice.forEach(field => {
       console.log('field in slice: ', field);
-      rowData[field as keyof Result] = newRow[field as keyof Result];
-      console.log('updated rowData: ', rowData);
+
+      // Explicitly cast field as keyof Result and check if the field exists in mappedNewRow
+      if (field in mappedNewRow) {
+        rowData[field as keyof Result] = mappedNewRow[field as keyof typeof mappedNewRow];
+      }
     });
 
     // Check if we need to propagate a foreign key from a prior slice
@@ -386,7 +395,7 @@ export async function runValidation(
     minHOM?: number | null;
     maxHOM?: number | null;
   } = {}
-) {
+): Promise<{ TotalRows: number; Message: string }> {
   const conn = await getConn();
 
   try {
@@ -495,7 +504,7 @@ export async function runValidation(
   }
 }
 
-export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
+export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const conn = await getConn();
   const setVariables = `SET @p_CensusID = ?, @p_PlotID = ?;`;
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
@@ -505,7 +514,7 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     FROM ${schema}.coremeasurements cm
     LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
     JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-    WHERE cm.IsValidated IS NULL
+    WHERE cm.IsValidated IS NULLa
     AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
     AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);`;
   const query = `
