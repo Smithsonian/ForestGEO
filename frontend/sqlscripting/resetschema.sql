@@ -7,7 +7,7 @@ truncate coremeasurements;
 truncate family;
 truncate genus;
 truncate personnel;
-truncate plots;
+# truncate plots;
 truncate quadratpersonnel;
 truncate quadrats;
 truncate reference;
