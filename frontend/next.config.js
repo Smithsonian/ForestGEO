@@ -2,8 +2,22 @@
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
+const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 
 const nextConfig = withBundleAnalyzer({
+  webpack: (config, { isServer }) => {
+    // Don't include Monaco Editor Webpack Plugin on the server
+    if (!isServer) {
+      config.plugins.push(
+        new MonacoWebpackPlugin({
+          languages: ['mysql'], // Define the languages you want to support
+          filename: 'static/[name].worker.js'
+        })
+      );
+    }
+
+    return config;
+  },
   experimental: {
     serverMinification: false,
     turbo: {
