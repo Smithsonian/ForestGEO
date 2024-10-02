@@ -29,8 +29,8 @@ import {
   MeasurementsSummaryStagingResult,
   StemTaxonomiesViewRDS,
   StemTaxonomiesViewResult,
-  ViewFullTableViewRDS,
-  ViewFullTableViewResult
+  ViewFullTableRDS,
+  ViewFullTableResult
 } from '@/config/sqlrdsdefinitions/views';
 import {
   SiteSpecificValidationsRDS,
@@ -259,7 +259,7 @@ class MapperFactory {
         return new GenericMapper<SiteSpecificValidationsRDS, SiteSpecificValidationsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'viewfulltable':
       case 'viewfulltableview':
-        return new GenericMapper<ViewFullTableViewRDS, ViewFullTableViewResult>() as unknown as IDataMapper<RDS, Result>;
+        return new GenericMapper<ViewFullTableRDS, ViewFullTableResult>() as unknown as IDataMapper<RDS, Result>;
       default:
         throw new Error('Mapper not found for type: ' + type);
     }
