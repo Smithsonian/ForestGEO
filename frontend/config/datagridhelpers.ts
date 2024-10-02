@@ -6,6 +6,7 @@ import { getQuadratHCs } from '@/config/sqlrdsdefinitions/zones';
 import {
   getAllTaxonomiesViewHCs,
   getAllViewFullTableViewsHCs,
+  getMeasurementsSummaryStagingViewHCs,
   getMeasurementsSummaryViewHCs,
   getStemTaxonomiesViewHCs
 } from '@/config/sqlrdsdefinitions/views';
@@ -51,7 +52,7 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   default: {
     id: false
   },
-  viewfulltableview: {
+  viewfulltable: {
     id: false,
     ...getAllViewFullTableViewsHCs()
   },
@@ -63,6 +64,10 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   measurementssummary: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
+  },
+  measurementssummary_staging: {
+    id: false,
+    ...getMeasurementsSummaryStagingViewHCs()
   },
   measurementssummaryview: {
     id: false,
@@ -93,7 +98,7 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
 export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
   return columnVisibilityMap[gridType] || columnVisibilityMap.default;
 };
-export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
+export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string): string => {
   return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;
 };
 export const createFetchQuery: FetchQueryFunction = (
@@ -105,11 +110,11 @@ export const createFetchQuery: FetchQueryFunction = (
   plotCensusNumber?,
   quadratID?: number,
   speciesID?: number
-) => {
+): string => {
   return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
-export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string) => {
+export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
 
@@ -117,6 +122,7 @@ export function getGridID(gridType: string): string {
   switch (gridType.trim()) {
     case 'coremeasurements':
     case 'measurementssummaryview':
+    case 'measurementssummary_staging':
     case 'viewfulltableview':
     case 'measurementssummary': // materialized view --> should not be modified
     case 'viewfulltable': // materialized view --> should not be modified
@@ -204,14 +210,6 @@ export type PendingAction = {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
 };
-
-export interface ConfirmationDialogProps {
-  isOpen: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-  message: string;
-}
-
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
@@ -241,13 +239,6 @@ export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridCo
       col.field === 'isValidated' ||
       !allValuesAreNull(rows, col.field)
   );
-}
-
-/**
- * Function to filter out columns where all entries are null, except the actions column.
- */
-export function filterMSVColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || col.field === 'subquadrats' || col.field === 'isValidated' || !allValuesAreNull(rows, col.field));
 }
 
 export interface MeasurementsCommonsProps {
@@ -312,19 +303,4 @@ export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSor
     const dateB = new Date(b.measurementDate).getTime();
     return direction === 'asc' ? dateA - dateB : dateB - dateA;
   });
-};
-export const areRowsDifferent = (row1: GridRowModel | null, row2: GridRowModel | null): boolean => {
-  if (!row1 || !row2) {
-    return true; // Consider them different if either row is null
-  }
-
-  const keys = Object.keys(row1);
-
-  for (const key of keys) {
-    if (row1[key] !== row2[key]) {
-      return true; // If any value differs, the rows are different
-    }
-  }
-
-  return false; // All values are identical
 };

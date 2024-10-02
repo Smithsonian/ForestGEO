@@ -2,11 +2,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType } from '@/config/macros/formdetails';
 import { Stack } from '@mui/joy';
 import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
+import { useSession } from 'next-auth/react';
 
 interface IDToRow {
   coreMeasurementID: number;
@@ -35,13 +36,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState<string>('');
   const hasUploaded = useRef(false);
+  const { data: session } = useSession();
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
+        const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
+        const userID = await userIDResponse.json();
         setCurrentlyRunning(`Uploading file "${fileName}" to SQL...`);
         const response = await fetch(
-          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${personnelRecording}`,
+          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${userID}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -150,7 +154,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   useEffect(() => {
     if (!loading && completedOperations === totalOperations) {
-      if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
+      if (uploadForm === FormType.measurements)
+        setReviewState(ReviewStates.UPLOAD_AZURE); // temporary shift to upload a draft
       else setReviewState(ReviewStates.UPLOAD_AZURE);
     }
   }, [loading, completedOperations, totalOperations]);

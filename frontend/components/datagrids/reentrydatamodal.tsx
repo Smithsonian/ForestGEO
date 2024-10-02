@@ -137,16 +137,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
       console.log('selectedRow: ', selectedRow);
       const normalizedData = normalizeRowData(remaining);
       console.log('normalized row: ', normalizedData);
-      if (gridType === 'alltaxonomiesview') {
-        // need to switch the speciesDescription to description:
-        const { speciesDescription, speciesIDLevel, ...rest } = normalizedData;
-        const updatedData = {
-          ...rest,
-          description: speciesDescription,
-          idLevel: speciesIDLevel
-        };
-        handleSave(updatedData);
-      } else handleSave(normalizedData);
+      handleSave(normalizedData);
     }
   };
 

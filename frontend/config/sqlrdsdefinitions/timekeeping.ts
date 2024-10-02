@@ -85,7 +85,8 @@ export class OrgCensusToCensusResultMapper {
     });
 
     const responseJSON = await response.json();
-    return responseJSON.createdID;
+    console.log('response from creation: ', responseJSON);
+    return responseJSON.createdIDs.census;
   }
 }
 

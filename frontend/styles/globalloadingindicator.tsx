@@ -24,12 +24,16 @@ const generateRandomColorOrder = (): string[] => {
 };
 
 const rotate = keyframes`
-  100% { transform: rotate(360deg); }
+    100% {
+        transform: rotate(360deg);
+    }
 `;
 
 // Restoring original swirl animation
 const swirl = keyframes`
-  100% { stroke-dashoffset: 15; }
+    100% {
+        stroke-dashoffset: 15;
+    }
 `;
 
 const segmentAnimation = (gradientId: string) => css`

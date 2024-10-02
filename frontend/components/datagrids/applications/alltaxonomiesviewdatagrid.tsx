@@ -27,11 +27,11 @@ export default function AllTaxonomiesViewDataGrid() {
     speciesCode: '',
     speciesName: '',
     subspeciesName: '',
-    speciesIDLevel: '',
+    idLevel: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
     fieldFamily: '',
-    speciesDescription: ''
+    description: ''
   };
   const [rows, setRows] = useState([initialAllTaxonomiesViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -185,17 +185,6 @@ export default function AllTaxonomiesViewDataGrid() {
       editable: true
     },
     {
-      field: 'genusAuthority',
-      headerName: 'Genus Auth',
-      renderHeader: () => formatHeader('Genus', 'Authority'),
-      headerClassName: 'header',
-      flex: 1,
-      align: 'center',
-      headerAlign: 'center',
-      type: 'string',
-      editable: true
-    },
-    {
       field: 'speciesName',
       headerName: 'Species',
       headerClassName: 'header',
@@ -208,6 +197,17 @@ export default function AllTaxonomiesViewDataGrid() {
     {
       field: 'subspeciesName',
       headerName: 'Subspecies',
+      headerClassName: 'header',
+      flex: 1,
+      align: 'center',
+      headerAlign: 'center',
+      type: 'string',
+      editable: true
+    },
+    {
+      field: 'genusAuthority',
+      headerName: 'Genus Auth',
+      renderHeader: () => formatHeader('Genus', 'Authority'),
       headerClassName: 'header',
       flex: 1,
       align: 'center',
