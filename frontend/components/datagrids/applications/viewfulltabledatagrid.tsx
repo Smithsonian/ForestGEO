@@ -9,85 +9,105 @@ import { useSession } from 'next-auth/react';
 import { useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
-import { ViewFullTableViewRDS } from '@/config/sqlrdsdefinitions/views';
+import { ViewFullTableRDS } from '@/config/sqlrdsdefinitions/views';
 
 export default function ViewFullTableDataGrid() {
-  const initialViewFullTableViewRDSRow: ViewFullTableViewRDS = {
+  const initialViewFullTable: ViewFullTableRDS = {
+    // datagrid
     id: 0,
+
+    // IDs
     coreMeasurementID: 0,
     plotID: 0,
-    PlotDimensionUnits: '',
-    attributeCode: '',
-    attributeDescription: '',
-    attributeStatus: '',
-    censusDescription: '',
-    censusEndDate: undefined,
     censusID: 0,
-    censusStartDate: undefined,
-    countryName: '',
+    quadratID: 0,
+    treeID: 0,
+    stemID: 0,
+    personnelID: 0,
+    speciesID: 0,
+    genusID: 0,
+    familyID: 0,
+
+    // coremeasurements
+    measurementDate: undefined,
+    measuredDBH: 0,
     dbhUnits: '',
+    measuredHOM: 0,
+    homUnits: '',
     description: '',
+    isValidated: false,
+
+    // plots
+    plotName: '',
+    locationName: '',
+    countryName: '',
     dimensionX: 0,
     dimensionY: 0,
-    family: '',
-    familyID: 0,
-    firstName: '',
-    genus: '',
-    genusAuthority: '',
-    genusID: 0,
-    homUnits: '',
-    idLevel: '',
-    isValidated: false,
-    lastName: '',
-    locationName: '',
-    measuredDBH: 0,
-    measuredHOM: 0,
-    measurementDate: undefined,
-    personnelID: 0,
-    personnelRoles: '',
+    plotDimensionUnits: '',
     plotArea: 0,
     plotAreaUnits: '',
-    plotCensusNumber: 0,
-    plotCoordinateUnits: '',
-    plotDescription: '',
     plotGlobalX: 0,
     plotGlobalY: 0,
     plotGlobalZ: 0,
-    plotName: '',
+    plotCoordinateUnits: '',
     plotShape: '',
-    quadratArea: 0,
-    quadratAreaUnits: '',
-    quadratCoordinateUnits: '',
-    quadratDimensionUnits: '',
+    plotDescription: '',
+
+    // census
+    censusStartDate: undefined,
+    censusEndDate: undefined,
+    censusDescription: '',
+    plotCensusNumber: 0,
+
+    // quadrats
+    quadratName: '',
     quadratDimensionX: 0,
     quadratDimensionY: 0,
-    quadratID: 0,
-    quadratName: '',
-    quadratShape: '',
+    quadratDimensionUnits: '',
+    quadratArea: 0,
+    quadratAreaUnits: '',
     quadratStartX: 0,
     quadratStartY: 0,
-    speciesCode: '',
-    speciesID: 0,
-    speciesName: '',
-    stemCoordinateUnits: '',
-    stemID: 0,
+    quadratCoordinateUnits: '',
+    quadratShape: '',
+
+    // trees
+    treeTag: '',
+
+    // stems
+    stemTag: '',
     stemLocalX: 0,
     stemLocalY: 0,
-    stemTag: '',
-    subquadratCoordinateUnits: '',
-    subquadratDimensionUnits: '',
-    subquadratDimensionX: 0,
-    subquadratDimensionY: 0,
-    subquadratID: 0,
-    subquadratName: '',
-    subquadratX: 0,
-    subquadratY: 0,
-    subspeciesAuthority: '',
+    stemCoordinateUnits: '',
+
+    // personnel
+    firstName: '',
+    lastName: '',
+
+    // roles
+    personnelRoles: '',
+
+    // species
+    speciesCode: '',
+    speciesName: '',
     subspeciesName: '',
-    treeID: 0,
-    treeTag: ''
+    subspeciesAuthority: '',
+    idLevel: '',
+
+    // genus
+    genus: '',
+    genusAuthority: '',
+
+    // family
+    family: '',
+
+    // attributes
+    attributeCode: '',
+    attributeDescription: '',
+    attributeStatus: ''
   };
-  const [rows, setRows] = useState<GridRowsProp>([initialViewFullTableViewRDSRow] as GridRowsProp);
+
+  const [rows, setRows] = useState<GridRowsProp>([initialViewFullTable] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
   const [snackbar, setSnackbar] = useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
@@ -103,7 +123,7 @@ export default function ViewFullTableDataGrid() {
   const addNewRowToGrid = () => {
     const id = randomId();
     const newRow = {
-      ...initialViewFullTableViewRDSRow,
+      ...initialViewFullTable,
       id,
       isNew: true
     };
@@ -115,6 +135,7 @@ export default function ViewFullTableDataGrid() {
     }));
     console.log('viewfulltableview addnewrowtogrid triggered');
   };
+  console.log('viewfulltable: ', ViewFullTableGridColumns);
 
   return (
     <>
