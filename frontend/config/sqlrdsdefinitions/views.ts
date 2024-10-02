@@ -25,7 +25,8 @@ export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
     familyID: false,
-    genusID: false
+    genusID: false,
+    speciesLimits: false
   };
 }
 
@@ -143,7 +144,7 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
  ON DUPLICATE KEY UPDATE flag_status = 'STARTED';
  */
 
-export type ViewFullTableViewRDS = {
+export type ViewFullTableRDS = {
   // datagrid
   id?: number;
   // IDs
@@ -151,13 +152,13 @@ export type ViewFullTableViewRDS = {
   plotID?: number;
   censusID?: number;
   quadratID?: number;
-  subquadratID?: number;
   treeID?: number;
   stemID?: number;
   personnelID?: number;
   speciesID?: number;
   genusID?: number;
   familyID?: number;
+
   // coremeasurements
   measurementDate: any;
   measuredDBH: number;
@@ -166,13 +167,14 @@ export type ViewFullTableViewRDS = {
   homUnits: string;
   description: string;
   isValidated: boolean;
+
   // plots
   plotName?: string;
   locationName?: string;
   countryName?: string;
   dimensionX?: number;
   dimensionY?: number;
-  PlotDimensionUnits?: string;
+  plotDimensionUnits?: string;
   plotArea?: number;
   plotAreaUnits?: string;
   plotGlobalX?: number;
@@ -181,11 +183,13 @@ export type ViewFullTableViewRDS = {
   plotCoordinateUnits?: string;
   plotShape?: string;
   plotDescription?: string;
+
   // census
   censusStartDate?: any;
   censusEndDate?: any;
   censusDescription?: string;
   plotCensusNumber?: number;
+
   // quadrats
   quadratName?: string;
   quadratDimensionX?: number;
@@ -197,62 +201,56 @@ export type ViewFullTableViewRDS = {
   quadratStartY?: number;
   quadratCoordinateUnits?: string;
   quadratShape?: string;
-  // subquadrats
-  subquadratName?: string;
-  subquadratDimensionX?: number;
-  subquadratDimensionY?: number;
-  subquadratDimensionUnits?: string;
-  subquadratX?: number;
-  subquadratY?: number;
-  subquadratCoordinateUnits?: string;
+
   // trees
   treeTag?: string;
+
   // stems
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
   stemCoordinateUnits?: string;
+
   // personnel
   firstName?: string;
   lastName?: string;
+
   // roles
   personnelRoles?: string;
+
   // species
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
   subspeciesAuthority?: string;
   idLevel?: string;
+
   // genus
   genus?: string;
   genusAuthority?: string;
+
   // family
   family?: string;
+
   // attributes
   attributeCode?: string;
   attributeDescription?: string;
   attributeStatus?: string;
 };
-export type ViewFullTableViewResult = ResultType<ViewFullTableViewRDS>;
+
+export type ViewFullTableResult = ResultType<ViewFullTableRDS>;
 
 export function getAllViewFullTableViewsHCs(): ColumnStates {
   return {
+    coreMeasurementID: false,
     plotID: false,
     censusID: false,
     quadratID: false,
-    subquadratID: false,
     speciesID: false,
     treeID: false,
     stemID: false,
     personnelID: false,
     familyID: false,
-    genusID: false,
-    subquadratName: false,
-    subquadratDimensionX: false,
-    subquadratDimensionY: false,
-    subquadratDimensionUnits: false,
-    subquadratX: false,
-    subquadratY: false,
-    subquadratCoordinateUnits: false
+    genusID: false
   };
 }

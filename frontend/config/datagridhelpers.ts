@@ -52,7 +52,7 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   default: {
     id: false
   },
-  viewfulltableview: {
+  viewfulltable: {
     id: false,
     ...getAllViewFullTableViewsHCs()
   },

@@ -87,7 +87,7 @@ function MenuRenderToggle(
   const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
-      disabled={plotSelectionRequired || censusSelectionRequired}
+      disabled={plotSelectionRequired || censusSelectionRequired || siteConfigProps.href === '/postvalidation'}
       color={pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
         if (setMenuOpen) {
@@ -893,7 +893,6 @@ export default function Sidebar(props: SidebarProps) {
                                   const isDataIncomplete = shouldApplyTooltip(item, link.href);
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
-
                                   return (
                                     <TransitionComponent key={link.href} in={!!toggle} style={{ transitionDelay: `${delay}ms` }} direction="down">
                                       <ListItem
@@ -910,9 +909,10 @@ export default function Sidebar(props: SidebarProps) {
                                                 sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname == item.href + link.href}
                                                 color={pathname === item.href ? 'primary' : undefined}
-                                                disabled={isLinkDisabled}
+                                                disabled={isLinkDisabled || link.href === '/postvalidation'}
+                                                // post-validation endpoint is not yet ready for production use!
                                                 onClick={() => {
-                                                  if (!isLinkDisabled) {
+                                                  if (!isLinkDisabled || link.href !== '/postvalidation') {
                                                     router.push(item.href + link.href);
                                                   }
                                                 }}
