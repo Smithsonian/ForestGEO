@@ -74,6 +74,17 @@ export default function ValidationsPage() {
     fetchValidations().catch(console.error); // Initial load
   }, []);
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Set up Monaco Editor worker path
+      window.MonacoEnvironment = {
+        getWorkerUrl: function () {
+          return '_next/static/[name].worker.js';
+        }
+      };
+    }
+  }, []);
+
   // Fetch schema details when component mounts
   useEffect(() => {
     const fetchSchema = async () => {

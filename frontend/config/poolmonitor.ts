@@ -7,7 +7,7 @@ export class PoolMonitor {
   private totalConnectionsCreated = 0;
   private waitingForConnection = 0;
   private inactivityTimer: NodeJS.Timeout | null = null;
-  private config: PoolOptions;
+  private readonly config: PoolOptions;
   private poolClosed = false;
   private acquiredConnectionIds: Set<number> = new Set();
 
@@ -52,10 +52,11 @@ export class PoolMonitor {
       this.logPoolStatus();
       this.resetInactivityTimer();
     });
-    
+
     // Initialize inactivity timer
     this.resetInactivityTimer();
   }
+
   async getConnection(): Promise<PoolConnection> {
     if (this.poolClosed) {
       throw new Error('Connection pool is closed');

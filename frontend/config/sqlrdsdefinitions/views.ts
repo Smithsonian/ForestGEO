@@ -13,19 +13,20 @@ export type AllTaxonomiesViewRDS = {
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
-  speciesIDLevel?: string;
+  idLevel?: string;
   speciesAuthority?: string;
   validCode?: string;
   subspeciesAuthority?: string;
   fieldFamily?: string;
-  speciesDescription?: string;
+  description?: string;
 };
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
     familyID: false,
-    genusID: false
+    genusID: false,
+    speciesLimits: false
   };
 }
 
@@ -56,9 +57,9 @@ export type MeasurementsSummaryRDS = {
   speciesCode?: string;
   treeTag?: string;
   stemTag?: string;
-  stemLocalX?: number;
-  stemLocalY?: number;
-  stemUnits?: string;
+  localX?: number;
+  localY?: number;
+  coordinateUnits?: string;
   measurementDate?: any;
   measuredDBH?: number;
   dbhUnits?: string;
@@ -85,11 +86,24 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
   };
 }
 
-export type MeasurementsSummaryDraftRDS = MeasurementsSummaryRDS & {
+export type MeasurementsSummaryStagingRDS = MeasurementsSummaryRDS & {
   submittedBy?: number;
+  isReviewed?: boolean;
+  isSelected?: boolean;
+  submissionDate?: Date;
 };
 
-export type MeasurementsSummaryDraftResult = ResultType<MeasurementsSummaryDraftRDS>;
+export type MeasurementsSummaryStagingResult = ResultType<MeasurementsSummaryStagingRDS>;
+
+export function getMeasurementsSummaryStagingViewHCs(): ColumnStates {
+  return {
+    ...getMeasurementsSummaryViewHCs(),
+    submittedBy: false,
+    isReviewed: false,
+    isSelected: false,
+    submissionDate: false
+  };
+}
 
 export type StemTaxonomiesViewRDS = {
   id?: number;
@@ -110,8 +124,8 @@ export type StemTaxonomiesViewRDS = {
   genusAuthority?: string;
   speciesAuthority?: string;
   subspeciesAuthority?: string;
-  speciesIDLevel?: string;
-  speciesFieldFamily?: string;
+  idLevel?: string;
+  fieldFamily?: string;
 };
 export type StemTaxonomiesViewResult = ResultType<StemTaxonomiesViewRDS>;
 
@@ -120,16 +134,7 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
     treeID: false,
     speciesID: false,
     familyID: false,
-    genusID: false,
-    quadratName: false,
-    plotName: false,
-    locationName: false,
-    countryName: false,
-    quadratDimensionX: false,
-    quadratDimensionY: false,
-    stemQuadX: false,
-    stemQuadY: false,
-    stemDescription: false
+    genusID: false
   };
 }
 
@@ -139,7 +144,7 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
  ON DUPLICATE KEY UPDATE flag_status = 'STARTED';
  */
 
-export type ViewFullTableViewRDS = {
+export type ViewFullTableRDS = {
   // datagrid
   id?: number;
   // IDs
@@ -147,13 +152,13 @@ export type ViewFullTableViewRDS = {
   plotID?: number;
   censusID?: number;
   quadratID?: number;
-  subquadratID?: number;
   treeID?: number;
   stemID?: number;
   personnelID?: number;
   speciesID?: number;
   genusID?: number;
   familyID?: number;
+
   // coremeasurements
   measurementDate: any;
   measuredDBH: number;
@@ -162,13 +167,14 @@ export type ViewFullTableViewRDS = {
   homUnits: string;
   description: string;
   isValidated: boolean;
+
   // plots
   plotName?: string;
   locationName?: string;
   countryName?: string;
   dimensionX?: number;
   dimensionY?: number;
-  PlotDimensionUnits?: string;
+  plotDimensionUnits?: string;
   plotArea?: number;
   plotAreaUnits?: string;
   plotGlobalX?: number;
@@ -177,11 +183,13 @@ export type ViewFullTableViewRDS = {
   plotCoordinateUnits?: string;
   plotShape?: string;
   plotDescription?: string;
+
   // census
   censusStartDate?: any;
   censusEndDate?: any;
   censusDescription?: string;
   plotCensusNumber?: number;
+
   // quadrats
   quadratName?: string;
   quadratDimensionX?: number;
@@ -193,62 +201,56 @@ export type ViewFullTableViewRDS = {
   quadratStartY?: number;
   quadratCoordinateUnits?: string;
   quadratShape?: string;
-  // subquadrats
-  subquadratName?: string;
-  subquadratDimensionX?: number;
-  subquadratDimensionY?: number;
-  subquadratDimensionUnits?: string;
-  subquadratX?: number;
-  subquadratY?: number;
-  subquadratCoordinateUnits?: string;
+
   // trees
   treeTag?: string;
+
   // stems
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
   stemCoordinateUnits?: string;
+
   // personnel
   firstName?: string;
   lastName?: string;
+
   // roles
   personnelRoles?: string;
+
   // species
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
   subspeciesAuthority?: string;
   idLevel?: string;
+
   // genus
   genus?: string;
   genusAuthority?: string;
+
   // family
   family?: string;
+
   // attributes
   attributeCode?: string;
   attributeDescription?: string;
   attributeStatus?: string;
 };
-export type ViewFullTableViewResult = ResultType<ViewFullTableViewRDS>;
+
+export type ViewFullTableResult = ResultType<ViewFullTableRDS>;
 
 export function getAllViewFullTableViewsHCs(): ColumnStates {
   return {
+    coreMeasurementID: false,
     plotID: false,
     censusID: false,
     quadratID: false,
-    subquadratID: false,
     speciesID: false,
     treeID: false,
     stemID: false,
     personnelID: false,
     familyID: false,
-    genusID: false,
-    subquadratName: false,
-    subquadratDimensionX: false,
-    subquadratDimensionY: false,
-    subquadratDimensionUnits: false,
-    subquadratX: false,
-    subquadratY: false,
-    subquadratCoordinateUnits: false
+    genusID: false
   };
 }
