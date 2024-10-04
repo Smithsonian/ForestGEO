@@ -12,6 +12,8 @@ import { SpeciesLimitsRDS, SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonom
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import SpeciesLimitsDataGrid from '@/components/datagrids/applications/specieslimitsdatagrid';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import MultilineSpeciesDataGrid from '@/components/datagrids/applications/multiline/multilinespeciesdatagrid';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
   const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
@@ -34,6 +36,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const { data: session } = useSession();
   const [isSpeciesLimitsDialogOpen, setIsSpeciesLimitsDialogOpen] = useState(false);
   const [selectedSpeciesRow, setSelectedSpeciesRow] = useState<SpeciesRDS | null>(null);
@@ -293,7 +296,10 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
 
           {/* Upload Button */}
           <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-            Upload
+            Upload File
+          </Button>
+          <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+            Manual Entry Form
           </Button>
         </Box>
       </Box>
@@ -305,6 +311,12 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           setRefresh(true);
         }}
         formType={FormType.species}
+      />
+
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
+        formComponent={<MultilineSpeciesDataGrid />}
       />
 
       <IsolatedDataGridCommons

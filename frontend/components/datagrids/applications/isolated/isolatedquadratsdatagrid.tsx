@@ -10,6 +10,8 @@ import { FormType } from '@/config/macros/formdetails';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import MultilineQuadratsDataGrid from '@/components/datagrids/applications/multiline/multilinequadratsdatagrid';
 
 export default function IsolatedQuadratsDataGrid() {
   const currentPlot = usePlotContext();
@@ -33,6 +35,7 @@ export default function IsolatedQuadratsDataGrid() {
   const [refresh, setRefresh] = useState(false);
   const { data: session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 
   return (
     <>
@@ -62,7 +65,6 @@ export default function IsolatedQuadratsDataGrid() {
             </Typography>
           </Box>
 
-          {/* Upload Button */}
           <Button
             onClick={() => {
               setIsUploadModalOpen(true);
@@ -70,6 +72,9 @@ export default function IsolatedQuadratsDataGrid() {
             color={'primary'}
           >
             Upload Quadrats
+          </Button>
+          <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+            Manual Entry Form
           </Button>
           {/* Link to Quadrat Personnel Data Grid */}
           <Link href="/fixeddatainput/quadratpersonnel" passHref>
@@ -86,6 +91,11 @@ export default function IsolatedQuadratsDataGrid() {
           setRefresh(true);
         }}
         formType={FormType.quadrats}
+      />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
+        formComponent={<MultilineQuadratsDataGrid />}
       />
       <IsolatedDataGridCommons
         gridType="quadrats"

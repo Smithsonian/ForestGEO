@@ -14,7 +14,7 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
              ${schema}.quadrats q ON p.PlotID = q.PlotID
         GROUP BY p.PlotID
             ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ''}`;
-  } else if (fetchType === 'roles') {
+  } else if (fetchType === 'roles' || fetchType === 'attributes') {
     return `SELECT *
                  FROM ${schema}.${fetchType}`;
   } else {

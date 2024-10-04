@@ -11,6 +11,8 @@ import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
+import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import MultilineMeasurementsDataGrid from '@/components/datagrids/applications/multiline/multilinemeasurementsdatagrid';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -44,6 +46,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
@@ -126,6 +129,7 @@ export default function MeasurementsSummaryViewDataGrid() {
           </Stack>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Button onClick={() => setIsUploadModalOpen(true)}>Upload</Button>
+            <Button onClick={() => setIsManualEntryFormOpen(true)}>Manual Entry Form</Button>
           </Box>
         </Box>
       </Box>
@@ -136,6 +140,11 @@ export default function MeasurementsSummaryViewDataGrid() {
           setRefresh(true);
         }}
         formType={FormType.measurements}
+      />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
+        formComponent={<MultilineMeasurementsDataGrid />}
       />
       <MeasurementsCommons
         locked={true}
