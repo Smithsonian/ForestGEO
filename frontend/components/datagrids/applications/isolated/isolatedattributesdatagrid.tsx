@@ -2,14 +2,13 @@
 
 // isolated attributes datagrid
 import React, { useState } from 'react';
-import { Box, Button, Typography } from '@mui/joy';
+import { Box, Button, Stack, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { AttributeGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import MultilineAttributesDataGrid from '@/components/datagrids/applications/multiline/multilineattributesdatagrid';
 
 export default function IsolatedAttributesDataGrid() {
   const initialAttributesRDSRow = {
@@ -45,13 +44,14 @@ export default function IsolatedAttributesDataGrid() {
             )}
           </Box>
 
-          {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-            Upload
-          </Button>
-          <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-            Manual Entry Form
-          </Button>
+          <Stack direction={'row'} spacing={2}>
+            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+              Manual Entry Form
+            </Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+              Upload
+            </Button>
+          </Stack>
         </Box>
       </Box>
 
@@ -67,7 +67,7 @@ export default function IsolatedAttributesDataGrid() {
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
         handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
-        formComponent={<MultilineAttributesDataGrid />}
+        formType={'attributes'}
       />
 
       <IsolatedDataGridCommons

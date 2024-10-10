@@ -149,6 +149,10 @@ export interface UploadedFileData {
   date?: Date;
 }
 
+export interface DataGridSignals {
+  setChangesSubmitted: Dispatch<SetStateAction<boolean>>;
+}
+
 // CONSTANT MACROS
 
 export const fileColumns = [

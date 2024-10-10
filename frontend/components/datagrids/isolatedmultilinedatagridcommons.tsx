@@ -1,33 +1,33 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DataGridProps, GridActionsCellItem, gridClasses, GridColDef, GridRowId, GridRowsProp, GridValidRowModel, useGridApiRef } from '@mui/x-data-grid';
-import { Button } from '@mui/material';
+import { Box, Button } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import RestoreIcon from '@mui/icons-material/Restore';
 import { randomId } from '@mui/x-data-grid-generator';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import { darken } from '@mui/system';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import { LoadingButton } from '@mui/lab';
 import { Add } from '@mui/icons-material';
 import { getColumnVisibilityModel } from '@/config/datagridhelpers';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
-import { Box } from '@mui/joy';
+import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
 export interface IsolatedDataGridCommonProps {
   gridType: string;
   gridColumns: GridColDef[];
   refresh: boolean;
   setRefresh: (refresh: boolean) => void;
+  setChangesSubmitted: Dispatch<SetStateAction<boolean>>;
   initialRow?: GridValidRowModel;
   locked?: boolean;
   clusters?: Record<string, string[]>;
 }
 
 export default function IsolatedMultilineDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, initialRow } = props;
+  const { gridColumns, gridType, refresh, setRefresh, initialRow, setChangesSubmitted } = props;
   const apiRef = useGridApiRef();
 
   const [rows, setRows] = useState<GridRowsProp>([]);
@@ -93,11 +93,14 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   const processRowUpdate = useCallback<NonNullable<DataGridProps['processRowUpdate']>>((newRow, oldRow) => {
     const rowId = newRow.id;
 
+    newRow._error = false;
     unsavedChangesRef.current.unsavedRows[rowId] = newRow;
+
     if (!unsavedChangesRef.current.rowsBeforeChange[rowId]) {
       unsavedChangesRef.current.rowsBeforeChange[rowId] = oldRow;
     }
     setHasUnsavedRows(true);
+
     return newRow;
   }, []);
 
@@ -145,14 +148,23 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     }
   }, [apiRef, setRows]);
 
-  const getRowClassName = useCallback<NonNullable<DataGridProps['getRowClassName']>>(({ id }) => {
+  const getRowClassName = useCallback<NonNullable<DataGridProps['getRowClassName']>>(({ id, row }) => {
     const unsavedRow = unsavedChangesRef.current.unsavedRows[id];
+
     if (unsavedRow) {
       if (unsavedRow._action === 'delete') {
         return 'row--removed';
       }
+      if (unsavedRow._error) {
+        return 'row--invalid';
+      }
       return 'row--edited';
     }
+
+    if (row._error) {
+      return 'row--invalid';
+    }
+
     return '';
   }, []);
 
@@ -160,7 +172,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     const newId = randomId();
 
     setRows(prevRows => {
-      // Ensure that we're not stacking multiple new rows
       return [...prevRows, { ...initialRow, id: newId, isNew: true }];
     });
   }, [initialRow]);
@@ -170,6 +181,17 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       setRefresh(false);
     }
   }, [refresh, setRefresh]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.altKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        handleAddNewRow();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleAddNewRow]);
 
   function convertRowsToFileRowSet(rows: GridRowsProp): FileRowSet {
     const fileRowSet: FileRowSet = {};
@@ -192,32 +214,58 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     return fileRowSet;
   }
 
+  const validateRow = (row: GridValidRowModel, gridType: string): boolean => {
+    switch (gridType) {
+      case 'attributes':
+        return AttributeStatusOptions.includes(row.status);
+    }
+    return true;
+  };
+
   async function submitChanges() {
     await saveChanges();
-    const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    const response = await fetch(`/api/bulkcrud/${gridType}/${currentSite?.schemaName}/${currentPlot?.id}/${currentCensus?.dateRanges[0].censusID}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(fileRowSet)
-    });
+
+    let hasErrors = false;
+
+    setRows(
+      rows.map(row => {
+        row._error = !validateRow(row, gridType);
+        hasErrors = row._error;
+        return row;
+      })
+    );
+
+    if (hasErrors) {
+      alert('Some rows have validation errors. Please fix them before submitting.');
+      return;
+    }
+
+    // const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
+    // const response = await fetch(`/api/bulkcrud/${gridType}/${currentSite?.schemaName}/${currentPlot?.id}/${currentCensus?.dateRanges[0].censusID}`, {
+    //   method: 'POST',
+    //   headers: {
+    //     'Content-Type': 'application/json'
+    //   },
+    //   body: JSON.stringify(fileRowSet)
+    // });
+    // console.log('response: ', response);
+    setChangesSubmitted(true);
   }
 
   return (
     <Box style={{ width: '100%' }}>
       <Box style={{ marginBottom: 8 }}>
-        <LoadingButton disabled={!hasUnsavedRows} loading={isSaving} onClick={saveChanges} startIcon={<SaveIcon />} loadingPosition="start">
-          <span>Save</span>
-        </LoadingButton>
-        <Button disabled={!hasUnsavedRows || isSaving} onClick={discardChanges} startIcon={<RestoreIcon />}>
+        <Button sx={{ marginX: 2 }} disabled={!hasUnsavedRows} loading={isSaving} onClick={saveChanges} startDecorator={<SaveIcon />} loadingPosition={'start'}>
+          Save
+        </Button>
+        <Button sx={{ marginX: 2 }} disabled={!hasUnsavedRows || isSaving} onClick={discardChanges} startDecorator={<RestoreIcon />}>
           Discard all changes
         </Button>
-        <Button onClick={handleAddNewRow} startIcon={<Add />}>
+        <Button sx={{ marginX: 2 }} onClick={handleAddNewRow} startDecorator={<Add />}>
           New Row
         </Button>
       </Box>
-      <Box sx={{ display: 'flex', flex: 1, height: '100%', width: '100%' }}>
+      <Box sx={{ display: 'flex', flex: 1, height: '100%', width: '100%', maxHeight: '80vh', overflowY: 'auto' }}>
         <StyledDataGrid
           rows={rows}
           columns={columns}
@@ -232,20 +280,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           }}
           sx={{
             [`& .${gridClasses.row}.row--removed`]: {
-              backgroundColor: theme => {
-                if (theme.palette.mode === 'light') {
-                  return 'rgba(255, 170, 170, 0.3)';
-                }
-                return darken('rgba(255, 170, 170, 1)', 0.7);
-              }
+              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 170, 170, 0.3)' : darken('rgba(255, 170, 170, 1)', 0.7))
             },
             [`& .${gridClasses.row}.row--edited`]: {
-              backgroundColor: theme => {
-                if (theme.palette.mode === 'light') {
-                  return 'rgba(255, 254, 176, 0.3)';
-                }
-                return darken('rgba(255, 254, 176, 1)', 0.6);
-              }
+              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 254, 176, 0.3)' : darken('rgba(255, 254, 176, 1)', 0.6))
+            },
+            [`& .${gridClasses.row}.row--invalid`]: {
+              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.6))
             }
           }}
           loading={isSaving}
@@ -253,6 +294,9 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           autoHeight
         />
       </Box>
+      <Button sx={{ marginTop: 8 }} onClick={submitChanges} color={'primary'} size={'lg'}>
+        Finalize Changes
+      </Button>
     </Box>
   );
 }

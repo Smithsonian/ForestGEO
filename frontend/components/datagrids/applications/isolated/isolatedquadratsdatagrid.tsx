@@ -1,7 +1,7 @@
 // quadrats datagrid
 'use client';
 import React, { useState } from 'react';
-import { Box, Button, Typography } from '@mui/joy';
+import { Box, Button, Stack, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import Link from 'next/link';
@@ -11,7 +11,6 @@ import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import MultilineQuadratsDataGrid from '@/components/datagrids/applications/multiline/multilinequadratsdatagrid';
 
 export default function IsolatedQuadratsDataGrid() {
   const currentPlot = usePlotContext();
@@ -65,18 +64,14 @@ export default function IsolatedQuadratsDataGrid() {
             </Typography>
           </Box>
 
-          <Button
-            onClick={() => {
-              setIsUploadModalOpen(true);
-            }}
-            color={'primary'}
-          >
-            Upload Quadrats
-          </Button>
-          <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-            Manual Entry Form
-          </Button>
-          {/* Link to Quadrat Personnel Data Grid */}
+          <Stack direction={'row'} spacing={2}>
+            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+              Manual Entry Form
+            </Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+              Upload
+            </Button>
+          </Stack>
           <Link href="/fixeddatainput/quadratpersonnel" passHref>
             <Button variant="solid" color="primary" sx={{ ml: 2 }}>
               View Quadrat Personnel
@@ -92,11 +87,7 @@ export default function IsolatedQuadratsDataGrid() {
         }}
         formType={FormType.quadrats}
       />
-      <MultilineModal
-        isManualEntryFormOpen={isManualEntryFormOpen}
-        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
-        formComponent={<MultilineQuadratsDataGrid />}
-      />
+      <MultilineModal isManualEntryFormOpen={isManualEntryFormOpen} handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)} formType={'quadrats'} />
       <IsolatedDataGridCommons
         gridType="quadrats"
         gridColumns={quadratGridColumns}

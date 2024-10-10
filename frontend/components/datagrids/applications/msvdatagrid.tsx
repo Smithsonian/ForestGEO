@@ -12,7 +12,6 @@ import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagrid
 import { FormType } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import MultilineMeasurementsDataGrid from '@/components/datagrids/applications/multiline/multilinemeasurementsdatagrid';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -127,10 +126,14 @@ export default function MeasurementsSummaryViewDataGrid() {
               </Box>
             </Box>
           </Stack>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button onClick={() => setIsUploadModalOpen(true)}>Upload</Button>
-            <Button onClick={() => setIsManualEntryFormOpen(true)}>Manual Entry Form</Button>
-          </Box>
+          <Stack direction={'row'} spacing={2}>
+            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+              Manual Entry Form
+            </Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+              Upload
+            </Button>
+          </Stack>
         </Box>
       </Box>
       <UploadParentModal
@@ -144,7 +147,7 @@ export default function MeasurementsSummaryViewDataGrid() {
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
         handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
-        formComponent={<MultilineMeasurementsDataGrid />}
+        formType={'measurements'}
       />
       <MeasurementsCommons
         locked={true}

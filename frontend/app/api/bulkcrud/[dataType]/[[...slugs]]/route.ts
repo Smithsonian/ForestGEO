@@ -14,15 +14,18 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const [schema, plotIDParam, censusIDParam] = slugs;
   const plotID = parseInt(plotIDParam);
   const censusID = parseInt(censusIDParam);
+  console.log('params: schema: ', schema, ', plotID: ', plotID, ', censusID: ', censusID);
   const rows: FileRowSet = await request.json();
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
+  console.log('rows produced: ', rows);
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
     for (const rowID in rows) {
       const rowData = rows[rowID];
+      console.log('rowData obtained: ', rowData);
       const props: InsertUpdateProcessingProps = {
         schema,
         connection: conn,
@@ -33,6 +36,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         quadratID: undefined,
         fullName: undefined
       };
+      console.log('assembled props: ', props);
       await insertOrUpdate(props);
     }
   } catch (e: any) {

@@ -2,7 +2,7 @@
 'use client';
 import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
-import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog, Typography } from '@mui/joy';
+import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog, Stack, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
@@ -13,7 +13,6 @@ import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import SpeciesLimitsDataGrid from '@/components/datagrids/applications/specieslimitsdatagrid';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import MultilineSpeciesDataGrid from '@/components/datagrids/applications/multiline/multilinespeciesdatagrid';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
   const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
@@ -294,13 +293,14 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
             )}
           </Box>
 
-          {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-            Upload File
-          </Button>
-          <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-            Manual Entry Form
-          </Button>
+          <Stack direction={'row'} spacing={2}>
+            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+              Manual Entry Form
+            </Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+              Upload File
+            </Button>
+          </Stack>
         </Box>
       </Box>
 
@@ -313,11 +313,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         formType={FormType.species}
       />
 
-      <MultilineModal
-        isManualEntryFormOpen={isManualEntryFormOpen}
-        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
-        formComponent={<MultilineSpeciesDataGrid />}
-      />
+      <MultilineModal isManualEntryFormOpen={isManualEntryFormOpen} handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)} formType={'species'} />
 
       <IsolatedDataGridCommons
         gridType="alltaxonomiesview"
