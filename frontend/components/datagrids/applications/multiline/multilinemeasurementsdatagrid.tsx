@@ -2,10 +2,10 @@
 
 // multiline measurements datagrid
 import React, { useState } from 'react';
-import { Box, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmultilinedatagridcommons';
 import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
+import { DataGridSignals } from '@/config/macros/formdetails';
 
 /**
  *   [FormType.measurements]: [
@@ -24,7 +24,8 @@ import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
  *     { label: 'codes' }
  *   ],
  */
-export default function MultilineMeasurementsDataGrid() {
+export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
+  const { setChangesSubmitted } = props;
   const initialMeasurementsFormRow = {
     id: 0,
     tag: '',
@@ -45,36 +46,13 @@ export default function MultilineMeasurementsDataGrid() {
   const { data: session } = useSession();
 
   return (
-    <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-          </Box>
-        </Box>
-      </Box>
-
-      <IsolatedMultilineDataGridCommons
-        gridType="measurements"
-        gridColumns={MeasurementsFormGridColumns}
-        refresh={refresh}
-        setRefresh={setRefresh}
-        initialRow={initialMeasurementsFormRow}
-      />
-    </>
+    <IsolatedMultilineDataGridCommons
+      gridType="measurements"
+      gridColumns={MeasurementsFormGridColumns}
+      refresh={refresh}
+      setRefresh={setRefresh}
+      initialRow={initialMeasurementsFormRow}
+      setChangesSubmitted={setChangesSubmitted}
+    />
   );
 }

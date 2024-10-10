@@ -1,5 +1,5 @@
-import MultilineMeasurementsDataGrid from '@/components/datagrids/applications/multiline/multilinemeasurementsdatagrid';
+import IsolatedAttributesDataGrid from '@/components/datagrids/applications/isolated/isolatedattributesdatagrid';
 
 export default function AttributesPage() {
-  return <MultilineMeasurementsDataGrid />;
+  return <IsolatedAttributesDataGrid />;
 }
