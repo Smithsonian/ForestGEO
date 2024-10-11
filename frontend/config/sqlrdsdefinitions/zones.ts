@@ -76,7 +76,6 @@ export type QuadratRDS = {
   id?: number;
   quadratID?: number;
   plotID?: number;
-  censusID?: number;
   quadratName?: string;
   startX?: number;
   startY?: number;
