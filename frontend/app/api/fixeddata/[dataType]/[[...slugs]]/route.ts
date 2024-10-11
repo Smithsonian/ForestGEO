@@ -74,8 +74,9 @@ export async function GET(
       case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
-            FROM ${schema}.${params.dataType} q
-                     JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
+            FROM ${schema}.quadrats q
+                     JOIN ${schema}.censusquadrat cq ON q.QuadratID = cq.QuadratID
+                     JOIN ${schema}.census c ON cq.CensusID = c.CensusID
             WHERE q.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
@@ -113,21 +114,21 @@ export async function GET(
             ORDER BY q.MeasurementDate ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      case 'subquadrats':
-        if (!quadratID || quadratID === 0) {
-          throw new Error('QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route');
-        }
-        paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS s.*
-            FROM ${schema}.subquadrats s
-                     JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-                     JOIN ${schema}.census c ON q.CensusID = c.CensusID
-            WHERE q.QuadratID = ?
-              AND q.PlotID = ?
-              AND c.PlotID = ?
-              AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
-        queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
-        break;
+      // case 'subquadrats':
+      //   if (!quadratID || quadratID === 0) {
+      //     throw new Error('QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route');
+      //   }
+      //   paginatedQuery = `
+      //       SELECT SQL_CALC_FOUND_ROWS s.*
+      //       FROM ${schema}.subquadrats s
+      //                JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+      //                JOIN ${schema}.census c ON q.CensusID = c.CensusID
+      //       WHERE q.QuadratID = ?
+      //         AND q.PlotID = ?
+      //         AND c.PlotID = ?
+      //         AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
+      //   queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
+      //   break;
       case 'census':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
@@ -222,8 +223,11 @@ export async function GET(
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   if (!params.slugs) throw new Error('slugs not provided');
-  const [schema, gridID] = params.slugs;
+  const [schema, gridID, plotIDParam, censusIDParam] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
+
+  const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
+  const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
 
   let conn: PoolConnection | null = null;
   const { newRow } = await request.json();
@@ -255,14 +259,12 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       // Use handleUpsertForSlices and retrieve the insert IDs
       insertIDs = await handleUpsertForSlices(conn, schema, newRowData, queryConfig);
     }
-
     // Handle the case for 'attributes'
     else if (params.dataType === 'attributes') {
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       const results = await runQuery(conn, insertQuery);
       insertIDs = { attributes: results.insertId }; // Standardize output with table name as key
     }
-
     // Handle all other cases
     else {
       delete newRowData[demappedGridID];
@@ -270,6 +272,13 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       const results = await runQuery(conn, insertQuery);
       insertIDs = { [params.dataType]: results.insertId }; // Standardize output with table name as key
+
+      // special handling needed for quadrats --> need to correlate incoming quadrats with current census
+      if (params.dataType === 'quadrats' && censusID) {
+        const cqQuery = format('INSERT INTO ?? SET ?', [`${schema}.censusquadrats`, { CensusID: censusID, QuadratID: insertIDs.quadrats }]);
+        const results = await runQuery(conn, cqQuery);
+        if (results.length === 0) throw new Error('Error inserting to censusquadrats');
+      }
     }
 
     // Commit the transaction and return the standardized response
@@ -388,6 +397,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
+    // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
+    if (params.dataType === 'quadrats') {
+      const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
+      await runQuery(conn, qDeleteQuery);
+    }
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);
     await conn.commit();

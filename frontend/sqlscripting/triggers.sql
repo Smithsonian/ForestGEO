@@ -224,10 +224,14 @@ CREATE TRIGGER after_insert_quadrats
     FOR EACH ROW
 BEGIN
     DECLARE new_json JSON;
+    DECLARE census_id INT;
+
+    SELECT CensusID INTO census_id
+    FROM censusquadrat WHERE QuadratID = NEW.QuadratID LIMIT 1;
+
     SET new_json = JSON_OBJECT(
             'QuadratID', NEW.QuadratID,
             'PlotID', NEW.PlotID,
-            'CensusID', NEW.CensusID,
             'QuadratName', NEW.QuadratName,
             'StartX', NEW.StartX,
             'StartY', NEW.StartY,
@@ -241,7 +245,7 @@ BEGIN
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
                                   CensusID)
-    VALUES ('quadrats', NEW.QuadratID, 'INSERT', new_json, NOW(), 'User', NEW.PlotID, NEW.CensusID);
+    VALUES ('quadrats', NEW.QuadratID, 'INSERT', new_json, NOW(), 'User', NEW.PlotID, census_id);
 END //
 
 CREATE TRIGGER after_update_quadrats
@@ -251,10 +255,14 @@ CREATE TRIGGER after_update_quadrats
 BEGIN
     DECLARE old_json JSON;
     DECLARE new_json JSON;
+    DECLARE census_id INT;
+
+    SELECT CensusID INTO census_id
+    FROM censusquadrat WHERE QuadratID = NEW.QuadratID LIMIT 1;
+
     SET old_json = JSON_OBJECT(
             'QuadratID', OLD.QuadratID,
             'PlotID', OLD.PlotID,
-            'CensusID', OLD.CensusID,
             'QuadratName', OLD.QuadratName,
             'StartX', OLD.StartX,
             'StartY', OLD.StartY,
@@ -269,7 +277,6 @@ BEGIN
     SET new_json = JSON_OBJECT(
             'QuadratID', NEW.QuadratID,
             'PlotID', NEW.PlotID,
-            'CensusID', NEW.CensusID,
             'QuadratName', NEW.QuadratName,
             'StartX', NEW.StartX,
             'StartY', NEW.StartY,
@@ -283,7 +290,7 @@ BEGIN
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
                                   PlotID, CensusID)
-    VALUES ('quadrats', NEW.QuadratID, 'UPDATE', old_json, new_json, NOW(), 'User', NEW.PlotID, NEW.CensusID);
+    VALUES ('quadrats', NEW.QuadratID, 'UPDATE', old_json, new_json, NOW(), 'User', NEW.PlotID, census_id);
 END //
 
 CREATE TRIGGER after_delete_quadrats
@@ -292,10 +299,14 @@ CREATE TRIGGER after_delete_quadrats
     FOR EACH ROW
 BEGIN
     DECLARE old_json JSON;
+    DECLARE census_id INT;
+
+    SELECT CensusID INTO census_id
+    FROM censusquadrat WHERE QuadratID = OLD.QuadratID LIMIT 1;
+
     SET old_json = JSON_OBJECT(
             'QuadratID', OLD.QuadratID,
             'PlotID', OLD.PlotID,
-            'CensusID', OLD.CensusID,
             'QuadratName', OLD.QuadratName,
             'StartX', OLD.StartX,
             'StartY', OLD.StartY,
@@ -309,7 +320,7 @@ BEGIN
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
                                   CensusID)
-    VALUES ('quadrats', OLD.QuadratID, 'DELETE', old_json, NOW(), 'User', OLD.PlotID, OLD.CensusID);
+    VALUES ('quadrats', OLD.QuadratID, 'DELETE', old_json, NOW(), 'User', OLD.PlotID, census_id);
 END //
 
 DELIMITER ;
@@ -1022,7 +1033,11 @@ BEGIN
     DECLARE census_id INT;
 
     -- Fetch PlotID and CensusID associated with the QuadratID
-    SELECT PlotID, CensusID INTO plot_id, census_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+    SELECT q.PlotID, c.CensusID INTO plot_id, census_id
+                            FROM quadrats q
+                            JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
+                            JOIN census c ON c.CensusID = cq.CensusID
+                            WHERE q.QuadratID = NEW.QuadratID;
 
     SET new_json = JSON_OBJECT(
             'StemID', NEW.StemID,
@@ -1051,7 +1066,11 @@ BEGIN
     DECLARE census_id INT;
 
     -- Fetch PlotID and CensusID associated with the QuadratID
-    SELECT PlotID, CensusID INTO plot_id, census_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+    SELECT q.PlotID, c.CensusID INTO plot_id, census_id
+                            FROM quadrats q
+                            JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
+                            JOIN census c ON c.CensusID = cq.CensusID
+                            WHERE q.QuadratID = NEW.QuadratID;
 
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
@@ -1093,7 +1112,11 @@ BEGIN
     DECLARE census_id INT;
 
     -- Fetch PlotID and CensusID associated with the QuadratID
-    SELECT PlotID, CensusID INTO plot_id, census_id FROM quadrats WHERE QuadratID = OLD.QuadratID;
+    SELECT q.PlotID, c.CensusID INTO plot_id, census_id
+                            FROM quadrats q
+                            JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
+                            JOIN census c ON c.CensusID = cq.CensusID
+                            WHERE q.QuadratID = OLD.QuadratID;
 
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,

@@ -19,7 +19,6 @@ export default function QuadratsDataGrid() {
     id: 0,
     quadratID: 0,
     plotID: 0,
-    censusID: 0,
     quadratName: '',
     startX: 0,
     startY: 0,
