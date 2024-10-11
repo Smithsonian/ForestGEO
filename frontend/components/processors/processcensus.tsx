@@ -2,7 +2,7 @@ import { runQuery, SpecialProcessingProps } from '@/components/processors/proces
 import moment from 'moment';
 import { createError, fetchPrimaryKey, handleUpsert } from '@/config/utils';
 import { SpeciesResult, StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { QuadratsResult } from '@/config/sqlrdsdefinitions/zones';
+import { QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
@@ -21,7 +21,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connection, 'SpeciesID');
 
     // Fetch quadrat
-    const quadratID = await fetchPrimaryKey<QuadratsResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connection, 'QuadratID');
+    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connection, 'QuadratID');
 
     if (tag) {
       // Handle Tree Upsert

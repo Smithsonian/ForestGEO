@@ -4,6 +4,7 @@ import { processSpecies } from '@/components/processors/processspecies';
 import { processCensus } from '@/components/processors/processcensus';
 import { PoolMonitor } from '@/config/poolmonitor';
 import { processPersonnel } from '@/components/processors/processpersonnel';
+import { processQuadrats } from '@/components/processors/processquadrats';
 
 export interface SpecialProcessingProps {
   connection: PoolConnection;
@@ -71,7 +72,8 @@ export const fileMappings: Record<string, FileMapping> = {
       dimy: 'DimensionY',
       dimensionunit: 'DimensionUnits',
       quadratshape: 'QuadratShape'
-    }
+    },
+    specialProcessing: processQuadrats
   },
   // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
   subquadrats: {
