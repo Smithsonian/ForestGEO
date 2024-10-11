@@ -19,7 +19,7 @@ import {
   StemRDS,
   StemResult
 } from '@/config/sqlrdsdefinitions/taxonomies';
-import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper, SubquadratRDS, SubquadratResult } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
@@ -226,7 +226,7 @@ class MapperFactory {
       case 'quadratpersonnel':
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':
-        return new GenericMapper<QuadratRDS, QuadratsResult>() as unknown as IDataMapper<RDS, Result>;
+        return new GenericMapper<QuadratRDS, QuadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'sites':
         return new SitesMapper() as any;
       case 'family':
@@ -247,8 +247,6 @@ class MapperFactory {
         return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'subquadrats':
-        return new GenericMapper<SubquadratRDS, SubquadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationchangelog':
