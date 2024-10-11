@@ -3,23 +3,24 @@ import { createError, handleUpsert } from '@/config/utils';
 import { CensusQuadratResult, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 
 export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
-  const { connection, rowData, schema, censusID } = props;
-  if (!censusID) throw createError('CensusID missing', { censusID });
+  const { connection, rowData, schema, plotID, censusID } = props;
+  if (!censusID || !plotID) throw createError('CensusID missing', { censusID });
 
   const { quadrat, startx, starty, coordinateunit, dimx, dimy, dimensionunit, area, areaunit, quadratshape } = rowData;
 
   try {
     await connection.beginTransaction();
-    const quadratsData = {
+    const quadratsData: Partial<QuadratResult> = {
       QuadratName: quadrat,
+      PlotID: plotID,
       StartX: startx,
       StartY: starty,
-      CoordinateUnit: coordinateunit,
+      CoordinateUnits: coordinateunit,
       DimensionX: dimx,
       DimensionY: dimy,
-      DimensionUnit: dimensionunit,
+      DimensionUnits: dimensionunit,
       Area: area,
-      AreaUnit: areaunit,
+      AreaUnits: areaunit,
       QuadratShape: quadratshape
     };
 

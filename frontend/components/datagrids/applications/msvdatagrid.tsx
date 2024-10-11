@@ -146,7 +146,10 @@ export default function MeasurementsSummaryViewDataGrid() {
       />
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
-        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
         formType={'measurements'}
       />
       <MeasurementsCommons

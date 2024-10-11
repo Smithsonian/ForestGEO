@@ -12,6 +12,7 @@ import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
+import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 
 interface MultilineModalProps {
   isManualEntryFormOpen: boolean;
@@ -27,6 +28,7 @@ export default function MultilineModal(props: MultilineModalProps) {
   const [openUpdateValidations, setOpenUpdateValidations] = useState(false);
   const [tempReviewState, setTempReviewState] = useState<ReviewStates>(ReviewStates.VALIDATE);
   const currentSite = useSiteContext();
+  const { triggerRefresh } = useDataValidityContext();
 
   function getDataGrid() {
     if (openValidations || openUpdateValidations) return null;
@@ -49,8 +51,9 @@ export default function MultilineModal(props: MultilineModalProps) {
       if (formType === 'measurements' && tempReviewState === ReviewStates.VALIDATE) {
         setOpenValidations(true);
         setOpenUpdateValidations(false);
-      }
-    } else handleCloseManualEntryForm();
+      } else handleCloseManualEntryForm();
+      triggerRefresh();
+    }
   }, [changesSubmitted]);
 
   useEffect(() => {

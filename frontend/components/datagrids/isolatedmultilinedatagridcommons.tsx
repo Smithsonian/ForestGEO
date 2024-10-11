@@ -119,9 +119,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     try {
       setIsSaving(true);
 
-      // Simulate save operation
-      await new Promise(resolve => setTimeout(resolve, 500));
-
       // After saving, process both edited and deleted rows
       const rowsToDelete = Object.values(unsavedChangesRef.current.unsavedRows).filter(row => row._action === 'delete');
       const rowsToSave = Object.values(unsavedChangesRef.current.unsavedRows).filter(row => row._action !== 'delete');
@@ -223,7 +220,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   };
 
   async function submitChanges() {
+    if (hasUnsavedRows) {
+      alert('Please save your changes before proceeding.');
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
     await saveChanges();
+    await new Promise(resolve => setTimeout(resolve, 750));
 
     let hasErrors = false;
 
@@ -240,15 +243,15 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       return;
     }
 
-    // const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    // const response = await fetch(`/api/bulkcrud/${gridType}/${currentSite?.schemaName}/${currentPlot?.id}/${currentCensus?.dateRanges[0].censusID}`, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json'
-    //   },
-    //   body: JSON.stringify(fileRowSet)
-    // });
-    // console.log('response: ', response);
+    const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
+    const response = await fetch(`/api/bulkcrud/${gridType}/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(fileRowSet)
+    });
+    console.log('response: ', response);
     setChangesSubmitted(true);
   }
 

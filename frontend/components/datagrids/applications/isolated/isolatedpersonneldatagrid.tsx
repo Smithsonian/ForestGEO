@@ -131,7 +131,14 @@ export default function IsolatedPersonnelDataGrid() {
         }}
         formType={FormType.personnel}
       />
-      <MultilineModal isManualEntryFormOpen={isManualEntryFormOpen} handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)} formType={'personnel'} />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
+        formType={'personnel'}
+      />
       <Modal
         open={isRolesModalOpen}
         onClose={() => setIsRolesModalOpen(false)}
