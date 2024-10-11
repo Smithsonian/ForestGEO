@@ -321,8 +321,8 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
       onChange={e => setValue(e.target.value)}
       onBlur={handleCommit}
       onKeyDown={e => {
-        if (e.key === 'Enter') {
-          console.log('on key down: enter');
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          console.log('on key down: enter || tab');
           handleCommit();
         }
       }}
@@ -514,7 +514,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'quadrat',
     headerName: 'Quadrat Name',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -523,7 +522,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'startx',
     headerName: 'StartX',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     type: 'number',
@@ -533,7 +531,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'starty',
     headerName: 'StartY',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     type: 'number',
@@ -543,7 +540,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'coordinateunit',
     headerName: 'Coordinate Units',
     headerClassName: 'header',
-    flex: 0.3,
     align: 'left',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
@@ -552,7 +548,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'dimx',
     headerName: 'Dimension X',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     type: 'number',
@@ -562,7 +557,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'dimy',
     headerName: 'Dimension Y',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     type: 'number',
@@ -581,7 +575,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'area',
     headerName: 'Area',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     type: 'number',
@@ -600,7 +593,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     field: 'quadratshape',
     headerName: 'Quadrat Shape',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true

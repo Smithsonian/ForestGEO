@@ -66,7 +66,10 @@ export default function IsolatedAttributesDataGrid() {
 
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
-        handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
         formType={'attributes'}
       />
 

@@ -86,7 +86,14 @@ export default function IsolatedQuadratsDataGrid() {
         }}
         formType={FormType.quadrats}
       />
-      <MultilineModal isManualEntryFormOpen={isManualEntryFormOpen} handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)} formType={'quadrats'} />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
+        formType={'quadrats'}
+      />
       <IsolatedDataGridCommons
         gridType="quadrats"
         gridColumns={quadratGridColumns}

@@ -313,7 +313,14 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         formType={FormType.species}
       />
 
-      <MultilineModal isManualEntryFormOpen={isManualEntryFormOpen} handleCloseManualEntryForm={() => setIsManualEntryFormOpen(false)} formType={'species'} />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
+        formType={'species'}
+      />
 
       <IsolatedDataGridCommons
         gridType="alltaxonomiesview"
