@@ -18,7 +18,6 @@ export default function IsolatedQuadratsDataGrid() {
     id: 0,
     quadratID: 0,
     plotID: currentPlot?.plotID,
-    censusID: currentCensus?.dateRanges[0].censusID,
     quadratName: '',
     startX: 0,
     startY: 0,

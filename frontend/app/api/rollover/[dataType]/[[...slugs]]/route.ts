@@ -32,23 +32,11 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     switch (params.dataType) {
       case 'quadrats':
         query = `
-          INSERT INTO ${schema}.quadrats (PlotID, CensusID, QuadratName, StartX, StartY, CoordinateUnits, DimensionX, DimensionY, DimensionUnits, Area, AreaUnits, QuadratShape)
-          SELECT 
-              PlotID, 
-              ?, 
-              QuadratName, 
-              StartX, 
-              StartY, 
-              CoordinateUnits, 
-              DimensionX, 
-              DimensionY, 
-              DimensionUnits, 
-              Area, 
-              AreaUnits, 
-              QuadratShape
-          FROM ${schema}.quadrats
-          WHERE CensusID = ? AND QuadratID IN (${incoming.map(() => '?').join(', ')});`;
-        queryParams = [Number(newCensusID), Number(sourceCensusID), ...incoming];
+          INSERT INTO censusquadrat (CensusID, QuadratID)
+          SELECT ?, q.QuadratID
+          FROM quadrats q
+          WHERE q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
+        queryParams = [Number(newCensusID), ...incoming];
         await runQuery(conn, query, queryParams);
         break;
       case 'personnel':

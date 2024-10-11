@@ -42,7 +42,8 @@ SELECT s.StemID               AS StemID,
 FROM stems s
          JOIN trees t ON s.TreeID = t.TreeID
          JOIN quadrats q ON s.QuadratID = q.QuadratID
-         JOIN census c ON q.CensusID = c.CensusID
+         JOIN censusquadrat cq ON q.QuadratID = cq.QuadratID
+         JOIN census c ON cq.CensusID = c.CensusID
          JOIN plots p ON c.PlotID = p.PlotID
          JOIN species sp ON t.SpeciesID = sp.SpeciesID
          JOIN genus g ON sp.GenusID = g.GenusID

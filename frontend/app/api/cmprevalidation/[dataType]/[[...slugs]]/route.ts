@@ -36,7 +36,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           });
         break;
       case 'personnel':
-        const pQuery = `SELECT 1 FROM ${schema}.${params.dataType} WHERE CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber})`; // Check if the table has any row
+        const pQuery = `SELECT 1 FROM ${schema}.personnel WHERE CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber})`; // Check if the table has any row
         const pResults = await runQuery(connection, pQuery);
         if (connection) connection.release();
         if (pResults.length === 0)
@@ -45,7 +45,10 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           });
         break;
       case 'quadrats':
-        const query = `SELECT 1 FROM ${schema}.${params.dataType} WHERE PlotID = ${plotID} AND CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber})`; // Check if the table has any row
+        const query = `SELECT 1 FROM ${schema}.quadrats q
+         JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID 
+         JOIN ${schema}.census c ON cq.CensusID = c.CensusID 
+         WHERE q.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
         const results = await runQuery(connection, query);
         if (connection) connection.release();
         if (results.length === 0)
@@ -53,25 +56,28 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
           });
         break;
-      case 'subquadrats':
-        const subquadratsQuery = `SELECT 1
-                                FROM ${schema}.${params.dataType} s
-                                JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-                                WHERE q.PlotID = ${plotID}
-                                  AND q.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
-        const subquadratsResults = await runQuery(connection, subquadratsQuery);
-        if (connection) connection.release();
-        if (subquadratsResults.length === 0)
-          return new NextResponse(null, {
-            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
-          });
-        break;
+      // case 'subquadrats':
+      //   const subquadratsQuery = `SELECT 1
+      //                           FROM ${schema}.${params.dataType} s
+      //                           JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+      //                           WHERE q.PlotID = ${plotID}
+      //                             AND q.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
+      //   const subquadratsResults = await runQuery(connection, subquadratsQuery);
+      //   if (connection) connection.release();
+      //   if (subquadratsResults.length === 0)
+      //     return new NextResponse(null, {
+      //       status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+      //     });
+      //   break;
       case 'quadratpersonnel':
         // Validation for quadrats table
         const quadratsQuery = `SELECT 1
-                             FROM ${schema}.quadrats
-                             WHERE PlotID = ${plotID}
-                               AND CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
+                             FROM ${schema}.quadrats q
+                             JOIN ${schema}.censusquadrat cq on cq.QuadratID = q.QuadratID
+                             JOIN ${schema}.census c on cq.CensusID = c.CensusID
+                             JOIN ${schema}.personnel p ON p.CensusID = c.CensusID
+                             WHERE q.PlotID = ${plotID}
+                               AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
         const quadratsResults = await runQuery(connection, quadratsQuery);
         if (connection) connection.release();
         if (quadratsResults.length === 0)
