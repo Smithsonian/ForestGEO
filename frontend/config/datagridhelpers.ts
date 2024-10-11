@@ -43,7 +43,9 @@ export type ProcessPostPatchQueryFunction = (
   // incorporated validation system into this too
   siteSchema: string,
   dataType: string,
-  gridID: string
+  gridID: string,
+  plotID?: number,
+  censusID?: number
 ) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
@@ -93,8 +95,14 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
 export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
   return columnVisibilityMap[gridType] || columnVisibilityMap.default;
 };
-export const createPostPatchQuery: ProcessPostPatchQueryFunction = (siteSchema: string, dataType: string, gridID: string) => {
-  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}`;
+export const createPostPatchQuery: ProcessPostPatchQueryFunction = (
+  siteSchema: string,
+  dataType: string,
+  gridID: string,
+  plotID?: number,
+  censusID?: number
+) => {
+  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}` + (plotID ? `/${plotID}` : '') + (censusID ? `/${censusID}` : '');
 };
 export const createFetchQuery: FetchQueryFunction = (
   siteSchema: string,

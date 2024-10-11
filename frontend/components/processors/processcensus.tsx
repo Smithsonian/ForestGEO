@@ -21,13 +21,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connection, 'SpeciesID');
 
     // Fetch quadrat
-    const quadratID = await fetchPrimaryKey<QuadratsResult>(
-      schema,
-      'quadrats',
-      { QuadratName: quadrat, PlotID: plotID, CensusID: censusID },
-      connection,
-      'QuadratID'
-    );
+    const quadratID = await fetchPrimaryKey<QuadratsResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connection, 'QuadratID');
 
     if (tag) {
       // Handle Tree Upsert

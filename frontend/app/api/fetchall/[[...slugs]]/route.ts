@@ -17,6 +17,12 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
   } else if (fetchType === 'roles') {
     return `SELECT *
                  FROM ${schema}.${fetchType}`;
+  } else if (fetchType === 'quadrats') {
+    return `
+      SELECT * FROM ${schema}.quadrats q
+        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+        JOIN ${schema}.census c ON cq.CensusID = c.CensusID
+        WHERE q.PlotID = ${plotID} AND c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber}`;
   } else {
     let query = `SELECT *
                  FROM ${schema}.${fetchType}`;

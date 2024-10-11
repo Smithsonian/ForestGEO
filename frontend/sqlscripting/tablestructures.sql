@@ -35,35 +35,6 @@ create table if not exists measurementssummary
     Attributes        varchar(255)                                                 null
 );
 
-create table if not exists measurementssummary_draft (
-    CoreMeasurementID INT NOT NULL PRIMARY KEY,
-    StemID INT NULL,
-    TreeID INT NULL,
-    SpeciesID INT NULL,
-    QuadratID INT NULL,
-    PlotID INT NULL,
-    CensusID INT NULL,
-    SubmittedBy INT NOT NULL,
-    SpeciesName VARCHAR(64) NULL,
-    SubspeciesName VARCHAR(64) NULL,
-    SpeciesCode VARCHAR(25) NULL,
-    TreeTag VARCHAR(10) NULL,
-    StemTag VARCHAR(10) NULL,
-    StemLocalX DECIMAL(10, 6) NULL,
-    StemLocalY DECIMAL(10, 6) NULL,
-    StemUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NULL,
-    QuadratName VARCHAR(255) NULL,
-    MeasurementDate DATE NULL,
-    MeasuredDBH DECIMAL(10, 6) NULL,
-    DBHUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'cm' NULL,
-    MeasuredHOM DECIMAL(10, 6) NULL,
-    HOMUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NULL,
-    IsValidated BIT DEFAULT b'0' NULL,
-    Description VARCHAR(255) NULL,
-    Attributes VARCHAR(255) NULL
-);
-
-
 create table if not exists plots
 (
     PlotID          int auto_increment
@@ -102,7 +73,6 @@ create table if not exists quadrats
     QuadratID       int auto_increment
         primary key,
     PlotID          int                                                                 null,
-    CensusID        int                                                                 null,
     QuadratName     varchar(255)                                                        null,
     StartX          decimal(10, 6)                                                      null,
     StartY          decimal(10, 6)                                                      null,
@@ -113,31 +83,32 @@ create table if not exists quadrats
     Area            decimal(10, 6)                                                      null,
     AreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' null,
     QuadratShape    varchar(255)                                                        null,
-    constraint unique_quadrat_name_per_census_plot
-        unique (CensusID, PlotID, QuadratName),
+    constraint unique_quadrat_name_per_plot
+        unique (PlotID, QuadratName),
     constraint Quadrats_Plots_FK
-        foreign key (PlotID) references plots (PlotID),
-    constraint quadrats_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID)
+        foreign key (PlotID) references plots (PlotID)
 );
 
-create index idx_censusid_quadrats
-    on quadrats (CensusID);
-
-create index idx_pid_cid_quadrats
-    on quadrats (PlotID, CensusID);
-
-create index idx_plotid_quadrats
+create index idx_pid_quadrats
     on quadrats (PlotID);
-
-create index idx_qid_pid_cid_quadrats
-    on quadrats (QuadratID, PlotID, CensusID);
 
 create index idx_qid_pid_quadrats
     on quadrats (QuadratID, PlotID);
 
 create index idx_quadratid_quadrats
     on quadrats (QuadratID);
+
+create table if not exists censusquadrat
+(
+    CQID int auto_increment primary key ,
+    CensusID int null,
+    QuadratID int null,
+    constraint cq_census_censusid_fk
+        foreign key (CensusID) references census (CensusID),
+    constraint cq_quadrats_quadratid_fk
+        foreign key (QuadratID) references quadrats (QuadratID),
+    UNIQUE (CensusID, QuadratID)
+);
 
 create table if not exists reference
 (
@@ -333,28 +304,6 @@ create table if not exists coremeasurements
         foreign key (StemID) references stems (StemID),
     constraint coremeasurements_census_CensusID_fk
         foreign key (CensusID) references census (CensusID)
-);
-
-CREATE TABLE coremeasurements_staging
-(
-    StagingMeasurementID INT AUTO_INCREMENT PRIMARY KEY,  -- Unique ID for each staging record
-    CensusID            INT NULL,
-    StemID              INT NULL,
-    MeasuredDBH         DECIMAL(10, 6) NULL,
-    DBHUnit             ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'cm' NULL,
-    MeasuredHOM         DECIMAL(10, 6) NULL,
-    HOMUnit             ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NULL,
-    Description         VARCHAR(255) NULL,
-    UserDefinedFields   TEXT NULL,  -- For additional flexibility to store any extra information
-    SubmittedBy         INT NOT NULL,  -- ID of the user who submitted this measurement (User A or User B)
-    IsReviewed          BIT DEFAULT b'0',  -- Indicates if the measurement has been reviewed by User C (0 = not reviewed, 1 = reviewed)
-    IsSelected          BIT DEFAULT b'0',  -- Indicates if this measurement was selected as the final one by User C (0 = not selected, 1 = selected),
-    SubmissionDate      DATETIME DEFAULT CURRENT_TIMESTAMP,  -- Timestamp of when this measurement was submitted
-    ReviewerID          INT NULL,  -- ID of the reviewer (User C) who selected this measurement
-    ReviewedDate        DATETIME NULL,  -- Timestamp of when the review was completed
-
-    CONSTRAINT FK_CoreMeasurementsStaging_Stems FOREIGN KEY (StemID) REFERENCES stems(StemID),
-    CONSTRAINT FK_CoreMeasurementsStaging_CensusID FOREIGN KEY (CensusID) REFERENCES census(CensusID)
 );
 
 create table if not exists cmattributes

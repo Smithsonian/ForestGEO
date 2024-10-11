@@ -64,7 +64,6 @@ export const fileMappings: Record<string, FileMapping> = {
     columnMappings: {
       quadrat: 'QuadratName',
       plotID: 'PlotID',
-      censusID: 'CensusID',
       startx: 'StartX',
       starty: 'StartY',
       coordinateunit: 'CoordinateUnits',
