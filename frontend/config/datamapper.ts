@@ -2,7 +2,7 @@ import moment from 'moment';
 import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
 import { SpeciesLimitsRDS, SpeciesLimitsResult, SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
@@ -208,7 +208,7 @@ class MapperFactory {
       case 'quadratpersonnel':
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':
-        return new GenericMapper<QuadratRDS, QuadratsResult>() as unknown as IDataMapper<RDS, Result>;
+        return new GenericMapper<QuadratRDS, QuadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'sites':
         return new SitesMapper() as any;
       case 'species':

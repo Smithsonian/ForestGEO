@@ -134,12 +134,6 @@ export function getStemTaxonomiesViewHCs(): ColumnStates {
   };
 }
 
-/**
- * materialized view --> do this before batch updates to make sure that refresh function isn't called for each row
- * INSERT INTO batchprocessingflag (flag_status) VALUES ('STARTED')
- ON DUPLICATE KEY UPDATE flag_status = 'STARTED';
- */
-
 export type ViewFullTableRDS = {
   // datagrid
   id?: number;

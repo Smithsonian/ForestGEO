@@ -30,21 +30,25 @@ export const toggleSidebar = () => {
 export type CapitalizeFirstLetter<T extends string> = T extends `${infer F}${infer R}` ? `${Uppercase<F>}${R}` : T;
 
 // Utility type to transform 'dbh' and 'hom' to uppercase
-export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}dbh${infer Suffix}`
-  ? `${Prefix}DBH${Suffix}`
-  : T extends `${infer Prefix}Dbh${infer Suffix}`
+export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}CqID${infer Suffix}`
+  ? `${Prefix}CQID${Suffix}`
+  : T extends `${infer Prefix}dbh${infer Suffix}`
     ? `${Prefix}DBH${Suffix}`
-    : T extends `${infer Prefix}hom${infer Suffix}`
-      ? `${Prefix}HOM${Suffix}`
-      : T extends `${infer Prefix}Hom${infer Suffix}`
+    : T extends `${infer Prefix}Dbh${infer Suffix}`
+      ? `${Prefix}DBH${Suffix}`
+      : T extends `${infer Prefix}hom${infer Suffix}`
         ? `${Prefix}HOM${Suffix}`
-        : T extends `${infer Prefix}Id${infer Suffix}`
-          ? `${Prefix}ID${Suffix}`
-          : T extends `${infer Prefix}cma${infer Suffix}`
-            ? `${Prefix}CMA${Suffix}`
-            : T extends `${infer Prefix}Cma${infer Suffix}`
+        : T extends `${infer Prefix}Hom${infer Suffix}`
+          ? `${Prefix}HOM${Suffix}`
+          : T extends `${infer Prefix}Id${infer Suffix}`
+            ? `${Prefix}ID${Suffix}`
+            : T extends `${infer Prefix}cma${infer Suffix}`
               ? `${Prefix}CMA${Suffix}`
-              : T;
+              : T extends `${infer Prefix}Cma${infer Suffix}`
+                ? `${Prefix}CMA${Suffix}`
+                : T extends `${infer Prefix}cqID${infer Suffix}`
+                  ? `${Prefix}CQID${Suffix}`
+                  : T;
 
 // Utility type to omit specific keys
 export type OmitKey<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;
@@ -224,6 +228,8 @@ export function transformSpecialCases(field: string): string {
     return field.replace(/hom/gi, 'HOM');
   } else if (/cma/i.test(field)) {
     return field.replace(/cma/gi, 'CMA');
+  } else if (/cq/i.test(field)) {
+    return field.replace(/cq/gi, 'CQ');
   }
 
   // General transformation for ID
