@@ -507,7 +507,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     paginationModel: { page: number }
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
-    const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
+    const fetchProcessQuery =
+      gridType !== 'quadrats'
+        ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
+        : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
 
     try {
       const response = await fetch(fetchProcessQuery, {
