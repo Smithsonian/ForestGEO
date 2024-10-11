@@ -3,30 +3,20 @@ import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
 import {
   FamilyRDS,
-  FamilyResult,
-  GenusRDS,
-  GenusResult,
-  ReferenceRDS,
-  ReferenceResult,
-  SpeciesInventoryRDS,
-  SpeciesInventoryResult,
+  FamilyResult, GenusRDS, GenusResult, ReferenceRDS, ReferenceResult, SpeciesInventoryRDS, SpeciesInventoryResult,
   SpeciesLimitsRDS,
   SpeciesLimitsResult,
   SpeciesRDS,
-  SpeciesResult,
-  SpecimensRDS,
-  SpecimensResult,
+  SpeciesResult, SpecimensRDS, SpecimensResult,
   StemRDS,
   StemResult
 } from '@/config/sqlrdsdefinitions/taxonomies';
-import { PlotRDS, PlotsResult, QuadratRDS, QuadratsResult, SitesMapper, SubquadratRDS, SubquadratResult } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
-  MeasurementsSummaryStagingRDS,
-  MeasurementsSummaryStagingResult,
   StemTaxonomiesViewRDS,
   StemTaxonomiesViewResult,
   ViewFullTableRDS,
@@ -207,8 +197,8 @@ class MapperFactory {
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'measurementssummary_staging':
-        return new GenericMapper<MeasurementsSummaryStagingRDS, MeasurementsSummaryStagingResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'measurementssummary_draft':
+        return new GenericMapper<MeasurementsSummaryDraftRDS, MeasurementsSummaryDraftResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
@@ -226,7 +216,7 @@ class MapperFactory {
       case 'quadratpersonnel':
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':
-        return new GenericMapper<QuadratRDS, QuadratsResult>() as unknown as IDataMapper<RDS, Result>;
+        return new GenericMapper<QuadratRDS, QuadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'sites':
         return new SitesMapper() as any;
       case 'family':
@@ -247,8 +237,6 @@ class MapperFactory {
         return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'subquadrats':
-        return new GenericMapper<SubquadratRDS, SubquadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationchangelog':
