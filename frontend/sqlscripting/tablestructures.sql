@@ -1,4 +1,4 @@
-create table attributes
+create table if not exists attributes
 (
     Code        varchar(10)                                                                                                     not null
         primary key,
@@ -6,7 +6,7 @@ create table attributes
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
-create table measurementssummary
+create table if not exists measurementssummary
 (
     CoreMeasurementID int                                                          not null
         primary key,
@@ -32,11 +32,10 @@ create table measurementssummary
     HOMUnits          enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
     IsValidated       bit                                             default b'0' null,
     Description       varchar(255)                                                 null,
-    Attributes        varchar(255)                                                 null,
-    UserDefinedFields json                                                         null
+    Attributes        varchar(255)                                                 null
 );
 
-create table plots
+create table if not exists plots
 (
     PlotID          int auto_increment
         primary key,
@@ -56,7 +55,7 @@ create table plots
     PlotDescription varchar(255)                                                        null
 );
 
-create table census
+create table if not exists census
 (
     CensusID         int auto_increment
         primary key,
@@ -86,7 +85,6 @@ create table quadrats
     QuadratID       int auto_increment
         primary key,
     PlotID          int                                                                 null,
-    CensusID        int                                                                 null,
     QuadratName     varchar(255)                                                        null,
     StartX          decimal(10, 6)                                                      null,
     StartY          decimal(10, 6)                                                      null,
@@ -97,25 +95,14 @@ create table quadrats
     Area            decimal(10, 6)                                                      null,
     AreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' null,
     QuadratShape    varchar(255)                                                        null,
-    constraint unique_quadrat_name_per_census_plot
-        unique (CensusID, PlotID, QuadratName),
+    constraint unique_quadrat_name_per_plot
+        unique (PlotID, QuadratName),
     constraint Quadrats_Plots_FK
-        foreign key (PlotID) references plots (PlotID),
-    constraint quadrats_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID)
+        foreign key (PlotID) references plots (PlotID)
 );
 
-create index idx_censusid_quadrats
-    on quadrats (CensusID);
-
-create index idx_pid_cid_quadrats
-    on quadrats (PlotID, CensusID);
-
-create index idx_plotid_quadrats
+create index idx_pid_quadrats
     on quadrats (PlotID);
-
-create index idx_qid_pid_cid_quadrats
-    on quadrats (QuadratID, PlotID, CensusID);
 
 create index idx_qid_pid_quadrats
     on quadrats (QuadratID, PlotID);
@@ -123,7 +110,19 @@ create index idx_qid_pid_quadrats
 create index idx_quadratid_quadrats
     on quadrats (QuadratID);
 
-create table reference
+create table if not exists censusquadrat
+(
+    CQID int auto_increment primary key ,
+    CensusID int null,
+    QuadratID int null,
+    constraint cq_census_censusid_fk
+        foreign key (CensusID) references census (CensusID),
+    constraint cq_quadrats_quadratid_fk
+        foreign key (QuadratID) references quadrats (QuadratID),
+    UNIQUE (CensusID, QuadratID)
+);
+
+create table if not exists reference
 (
     ReferenceID       int auto_increment
         primary key,
@@ -133,7 +132,7 @@ create table reference
     Citation          varchar(50)  null
 );
 
-create table family
+create table if not exists family
 (
     FamilyID    int auto_increment
         primary key,
@@ -145,7 +144,7 @@ create table family
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-create table genus
+create table if not exists genus
 (
     GenusID        int auto_increment
         primary key,
@@ -161,7 +160,7 @@ create table genus
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-create table roles
+create table if not exists roles
 (
     RoleID          int auto_increment
         primary key,
@@ -169,7 +168,7 @@ create table roles
     RoleDescription varchar(255) null
 );
 
-create table personnel
+create table if not exists personnel
 (
     PersonnelID int auto_increment
         primary key,
@@ -185,7 +184,7 @@ create table personnel
         foreign key (RoleID) references roles (RoleID)
 );
 
-create table quadratpersonnel
+create table if not exists quadratpersonnel
 (
     QuadratPersonnelID int auto_increment
         primary key,
@@ -200,7 +199,7 @@ create table quadratpersonnel
         foreign key (CensusID) references census (CensusID)
 );
 
-create table sitespecificvalidations
+create table if not exists sitespecificvalidations
 (
     ValidationProcedureID int auto_increment
         primary key,
@@ -211,7 +210,7 @@ create table sitespecificvalidations
     IsEnabled             bit default b'0' not null
 );
 
-create table species
+create table if not exists species
 (
     SpeciesID           int auto_increment
         primary key,
@@ -236,7 +235,7 @@ create table species
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-create table specieslimits
+create table if not exists specieslimits
 (
     SpeciesLimitID int auto_increment
         primary key,
@@ -249,7 +248,7 @@ create table specieslimits
         foreign key (SpeciesID) references species (SpeciesID)
 );
 
-create table subquadrats
+create table if not exists subquadrats
 (
     SubquadratID    int auto_increment
         primary key,
@@ -268,7 +267,7 @@ create table subquadrats
         foreign key (QuadratID) references quadrats (QuadratID)
 );
 
-create table trees
+create table if not exists trees
 (
     TreeID    int auto_increment
         primary key,
@@ -280,7 +279,7 @@ create table trees
         foreign key (SpeciesID) references species (SpeciesID)
 );
 
-create table stems
+create table if not exists stems
 (
     StemID          int auto_increment
         primary key,
@@ -299,7 +298,7 @@ create table stems
         foreign key (QuadratID) references quadrats (QuadratID)
 );
 
-create table coremeasurements
+create table if not exists coremeasurements
 (
     CoreMeasurementID int auto_increment
         primary key,
@@ -319,7 +318,7 @@ create table coremeasurements
         foreign key (CensusID) references census (CensusID)
 );
 
-create table cmattributes
+create table if not exists cmattributes
 (
     CMAID             int auto_increment
         primary key,
@@ -331,7 +330,7 @@ create table cmattributes
         foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
 );
 
-create table cmverrors
+create table if not exists cmverrors
 (
     CMVErrorID        int auto_increment
         primary key,
@@ -361,7 +360,7 @@ create index idx_measurementdate_coremeasurements
 create index idx_stemid_coremeasurements
     on coremeasurements (StemID);
 
-create table specimens
+create table if not exists specimens
 (
     SpecimenID     int auto_increment
         primary key,
@@ -395,7 +394,7 @@ create index idx_stemid_treeid_stems
 create index idx_treeid_stems
     on stems (TreeID);
 
-create table unifiedchangelog
+create table if not exists unifiedchangelog
 (
     ChangeID        int auto_increment,
     TableName       varchar(64)                         not null,
@@ -411,7 +410,7 @@ create table unifiedchangelog
 )
     partition by key (`TableName`) partitions 24;
 
-create table validationchangelog
+create table if not exists validationchangelog
 (
     ValidationRunID    int auto_increment
         primary key,
@@ -426,7 +425,7 @@ create table validationchangelog
     AdditionalDetails  varchar(255)                       null
 );
 
-create table viewfulltable
+create table if not exists viewfulltable
 (
     ViewFullTableID           int auto_increment
         primary key,

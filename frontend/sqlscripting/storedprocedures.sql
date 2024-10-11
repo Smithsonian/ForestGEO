@@ -1,5 +1,4 @@
 drop procedure if exists RefreshMeasurementsSummary;
-drop procedure if exists RefreshMeasurementsSummaryDraft;
 drop procedure if exists RefreshViewFullTable;
 
 create
@@ -40,51 +39,6 @@ BEGIN
              LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
              LEFT JOIN census c ON cm.CensusID = c.CensusID;
 END;
-
-create
-    definer = azureroot@`%` procedure RefreshMeasurementsSummaryDraft()
-BEGIN
-    TRUNCATE TABLE measurementssummary_draft;
-    INSERT INTO measurementssummary_draft (
-    CoreMeasurementID, StemID, TreeID, SpeciesID, QuadratID, PlotID, CensusID, SubmittedBy, SpeciesName, SubspeciesName, SpeciesCode,
-    TreeTag, StemTag, StemLocalX, StemLocalY, StemUnits, QuadratName, MeasurementDate, MeasuredDBH, DBHUnits, MeasuredHOM,
-    HOMUnits, IsValidated, Description, Attributes)
-SELECT cm.StagingMeasurementID AS CoreMeasurementID,
-       st.StemID,
-       t.TreeID,
-       s.SpeciesID,
-       q.QuadratID,
-       q.PlotID,
-       cm.CensusID,
-       cm.SubmittedBy,
-       s.SpeciesName,
-       s.SubspeciesName,
-       s.SpeciesCode,
-       t.TreeTag,
-       st.StemTag,
-       st.LocalX AS StemLocalX,
-       st.LocalY AS StemLocalY,
-       st.CoordinateUnits AS StemUnits,
-       q.QuadratName,
-       cm.MeasurementDate,
-       cm.MeasuredDBH,
-       cm.DBHUnit AS DBHUnits,
-       cm.MeasuredHOM,
-       cm.HOMUnit AS HOMUnits,
-       NULL as IsValidated,
-       cm.Description,
-       (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
-        FROM cmattributes ca
-        WHERE ca.CoreMeasurementID = cm.StagingMeasurementID) AS Attributes
-FROM coremeasurements_staging cm
-     LEFT JOIN stems st ON cm.StemID = st.StemID
-     LEFT JOIN trees t ON st.TreeID = t.TreeID
-     LEFT JOIN species s ON t.SpeciesID = s.SpeciesID
-     LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
-     LEFT JOIN census c ON cm.CensusID = c.CensusID;
-END;
-
-
 
 CREATE DEFINER = azureroot@`%` PROCEDURE RefreshViewFullTable()
 BEGIN
