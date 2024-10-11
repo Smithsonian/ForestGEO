@@ -3,11 +3,19 @@ import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
 import {
   FamilyRDS,
-  FamilyResult, GenusRDS, GenusResult, ReferenceRDS, ReferenceResult, SpeciesInventoryRDS, SpeciesInventoryResult,
+  FamilyResult,
+  GenusRDS,
+  GenusResult,
+  ReferenceRDS,
+  ReferenceResult,
+  SpeciesInventoryRDS,
+  SpeciesInventoryResult,
   SpeciesLimitsRDS,
   SpeciesLimitsResult,
   SpeciesRDS,
-  SpeciesResult, SpecimensRDS, SpecimensResult,
+  SpeciesResult,
+  SpecimensRDS,
+  SpecimensResult,
   StemRDS,
   StemResult
 } from '@/config/sqlrdsdefinitions/taxonomies';
@@ -197,8 +205,6 @@ class MapperFactory {
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'measurementssummary_draft':
-        return new GenericMapper<MeasurementsSummaryDraftRDS, MeasurementsSummaryDraftResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
