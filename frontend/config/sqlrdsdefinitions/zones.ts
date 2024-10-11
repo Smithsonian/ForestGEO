@@ -87,7 +87,7 @@ export type QuadratRDS = {
   areaUnits?: string;
   quadratShape?: string;
 };
-export type QuadratsResult = ResultType<QuadratRDS>;
+export type QuadratResult = ResultType<QuadratRDS>;
 export type Quadrat = QuadratRDS | undefined;
 export const validateQuadratsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
@@ -111,6 +111,14 @@ export function getQuadratHCs(): ColumnStates {
     censusID: false
   };
 }
+
+export type CensusQuadratRDS = {
+  id?: number;
+  cqID?: number;
+  quadratID?: number;
+  censusID?: number;
+};
+export type CensusQuadratResult = ResultType<CensusQuadratRDS>;
 
 export type SubquadratRDS = {
   id?: number;
