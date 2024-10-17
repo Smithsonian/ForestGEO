@@ -4,6 +4,7 @@ drop procedure if exists RefreshViewFullTable;
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
 BEGIN
+    SET foreign_key_checks = 0;
     TRUNCATE TABLE measurementssummary;
     INSERT INTO measurementssummary
     SELECT cm.CoreMeasurementID                                AS CoreMeasurementID,
@@ -38,14 +39,15 @@ BEGIN
              LEFT JOIN species s ON t.SpeciesID = s.SpeciesID
              LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
              LEFT JOIN census c ON cm.CensusID = c.CensusID;
+    SET foreign_key_checks = 1;
 END;
 
-CREATE DEFINER = azureroot@`%` PROCEDURE RefreshViewFullTable()
-BEGIN
-    -- Truncate the materialized table
-    TRUNCATE TABLE viewfulltable;
 
-    -- Insert data from the relevant tables into viewfulltable
+create
+    definer = azureroot@`%` procedure RefreshViewFullTable()
+BEGIN
+    SET foreign_key_checks = 0;
+    TRUNCATE TABLE viewfulltable;
     INSERT INTO viewfulltable (
         CoreMeasurementID, MeasurementDate, MeasuredDBH, DBHUnits, MeasuredHOM, HOMUnits, Description, IsValidated,
         PlotID, PlotName, LocationName, CountryName, DimensionX, DimensionY, PlotDimensionUnits, PlotArea, PlotAreaUnits,
@@ -145,5 +147,6 @@ BEGIN
     LEFT JOIN roles r ON pr.RoleID = r.RoleID
     LEFT JOIN cmattributes ca ON ca.CoreMeasurementID = cm.CoreMeasurementID
     LEFT JOIN attributes a ON a.Code = ca.Code;
+    SET foreign_key_checks = 1;
 END;
 

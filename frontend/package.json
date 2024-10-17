@@ -115,6 +115,8 @@
   },
   "devDependencies": {
     "@monaco-editor/react": "^4.6.0",
+    "@types/lodash": "^4.17.10",
+    "lodash": "^4.17.21",
     "monaco-editor": "^0.52.0",
     "monaco-editor-webpack-plugin": "^7.1.0"
   }

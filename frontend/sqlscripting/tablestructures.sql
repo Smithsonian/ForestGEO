@@ -68,18 +68,6 @@ create table if not exists census
         foreign key (PlotID) references plots (PlotID)
 );
 
-create table postvalidationqueries
-(
-    QueryID         int auto_increment
-        primary key,
-    QueryName       varchar(255)                       not null,
-    QueryDefinition text                               not null,
-    Description     varchar(255)                       null,
-    IsEnabled       bit      default b'1'              not null,
-    CreatedAt       datetime default CURRENT_TIMESTAMP null,
-    LastUpdated     datetime default CURRENT_TIMESTAMP null on update CURRENT_TIMESTAMP
-);
-
 create table quadrats
 (
     QuadratID       int auto_increment
@@ -503,3 +491,14 @@ create table if not exists viewfulltable
     AttributeStatus           enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
+create table if not exists postvalidationqueries
+(
+    QueryID int auto_increment primary key,
+    QueryName varchar(255) null,
+    QueryDefinition text null,
+    Description text null,
+    IsEnabled bit default b'0' not null,
+    LastRunAt DATETIME NULL,
+    LastRunResult LONGTEXT NULL,
+    LastRunStatus ENUM('success', 'failure') NULL
+);

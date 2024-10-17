@@ -33,6 +33,8 @@ import {
   ViewFullTableResult
 } from '@/config/sqlrdsdefinitions/views';
 import {
+  PostValidationQueriesRDS,
+  PostValidationQueriesResult,
   SiteSpecificValidationsRDS,
   SiteSpecificValidationsResult,
   ValidationChangelogRDS,
@@ -223,6 +225,8 @@ class MapperFactory {
         return new GenericMapper<RoleRDS, RoleResult>() as unknown as IDataMapper<RDS, Result>;
       case 'plots':
         return new GenericMapper<PlotRDS, PlotsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'postvalidationqueries':
+        return new GenericMapper<PostValidationQueriesRDS, PostValidationQueriesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadratpersonnel':
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':

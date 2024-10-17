@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 //                          JOIN ${schema}.stems s ON s.TreeID = t.TreeID
 //                          JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
 //                 WHERE q.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};`,
-//     countNumDeadMissingByCensus: `SELECT cm.CensusID, COUNT(s.StemID) AS DeadOrMissingStems
+//     countNumDeadMissingByCensus: `SELECT s.StemID, COUNT(s.StemID) AS DeadOrMissingStems
 //                                   FROM ${schema}.stems s
 //                                            JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
 //                                            JOIN ${schema}.attributes a ON cma.Code = a.Code
