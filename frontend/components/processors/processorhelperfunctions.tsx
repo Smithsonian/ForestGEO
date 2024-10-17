@@ -54,38 +54,6 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
 }
 
 /**
- * Verifies the email address of a user in the database.
- *
- * @param email - The email address to verify.
- * @returns An object with two properties:
- *   - `emailVerified`: a boolean indicating whether the email address exists in the database.
- *   - `userStatus`: the status of the user associated with the email address.
- * @throws An error if there is a problem connecting to the database or executing the query.
- */
-export async function verifyEmail(email: string): Promise<{ emailVerified: boolean; userStatus: string }> {
-  const connection: PoolConnection | null = await getConn();
-  try {
-    const query = `SELECT UserStatus
-                   FROM catalog.users
-                   WHERE Email = ?
-                   LIMIT 1`;
-    const results = await runQuery(connection, query, [email]);
-    console.log('results: ', results);
-
-    // emailVerified is true if there is at least one result
-    const emailVerified = results.length > 0;
-    const userStatus = results[0].UserStatus;
-
-    return { emailVerified, userStatus };
-  } catch (error: any) {
-    console.error('Error verifying email in database: ', error);
-    throw error;
-  } finally {
-    if (connection) connection.release();
-  }
-}
-
-/**
  * Retrieves all available sites from the database.
  *
  * @returns {Promise<SitesRDS[]>} An array of `SitesRDS` objects representing the available sites.

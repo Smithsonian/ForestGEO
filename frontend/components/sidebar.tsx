@@ -87,7 +87,7 @@ function MenuRenderToggle(
   const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
-      disabled={plotSelectionRequired || censusSelectionRequired || siteConfigProps.href === '/postvalidation'}
+      disabled={plotSelectionRequired || censusSelectionRequired}
       color={pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
         if (setMenuOpen) {
@@ -909,10 +909,10 @@ export default function Sidebar(props: SidebarProps) {
                                                 sx={{ flex: 1, width: '100%' }}
                                                 selected={pathname == item.href + link.href}
                                                 color={pathname === item.href ? 'primary' : undefined}
-                                                disabled={isLinkDisabled || link.href === '/postvalidation'}
+                                                disabled={isLinkDisabled}
                                                 // post-validation endpoint is not yet ready for production use!
                                                 onClick={() => {
-                                                  if (!isLinkDisabled || link.href !== '/postvalidation') {
+                                                  if (!isLinkDisabled) {
                                                     router.push(item.href + link.href);
                                                   }
                                                 }}
