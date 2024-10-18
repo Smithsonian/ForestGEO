@@ -1,7 +1,7 @@
 'use client';
 
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
-import React, { useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import React, { useEffect, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { Alert, AlertProps } from '@mui/material';
 import { randomId } from '@mui/x-data-grid-generator';
@@ -12,6 +12,7 @@ import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagrid
 import { FormType } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -42,6 +43,7 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
 };
 
 export default function MeasurementsSummaryViewDataGrid() {
+  const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -60,6 +62,18 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const { setLoading } = useLoading();
+
+  async function reloadMSV() {
+    setLoading(true, 'Refreshing Measurements View...');
+    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+    if (!response.ok) throw new Error('Measurements View Refresh failure');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  useEffect(() => {
+    reloadMSV().catch(console.error);
+  }, []);
 
   const addNewRowToGrid = () => {
     const id = randomId();

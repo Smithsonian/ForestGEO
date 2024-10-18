@@ -6,7 +6,7 @@ values
      'SELECT q.QuadratID, COUNT(cm.CoreMeasurementID) AS MeasurementCount
         FROM ${schema}.coremeasurements cm
         JOIN ${schema}.censusquadrat cq ON cq.CensusID = cm.CensusID
-        JOIN ${schema}.quadrat q ON q.QuadratID = cq.QuadratID
+        JOIN ${schema}.quadrats q ON q.QuadratID = cq.QuadratID
         WHERE cm.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
         GROUP BY QuadratID;',
      'Calculating the number of total records, organized by quadrat',
