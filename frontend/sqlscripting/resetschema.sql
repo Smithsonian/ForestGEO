@@ -1,0 +1,28 @@
+set foreign_key_checks = 0;
+drop table if exists attributes;
+drop table if exists census;
+drop table if exists censusquadrat;
+drop table if exists cmattributes;
+drop table if exists cmverrors;
+drop table if exists coremeasurements;
+drop table if exists family;
+drop table if exists genus;
+drop table if exists measurementssummary;
+drop table if exists personnel;
+drop table if exists plots;
+drop table if exists postvalidationqueries;
+drop table if exists quadratpersonnel
+drop table if exists quadrats;
+drop table if exists reference;
+drop table if exists roles;
+drop table if exists sitespecificvalidations;
+drop table if exists species;
+drop table if exists specieslimits;
+drop table if exists specimens;
+drop table if exists stems;
+drop table if exists subquadrats;
+drop table if exists trees;
+drop table if exists unifiedchangelog;
+drop table if exists validationchangelog;
+drop table if exists viewfulltable;
+set foreign_key_checks = 1;

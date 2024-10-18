@@ -56,6 +56,18 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
           });
         break;
+      case 'postvalidation':
+        const pvQuery = `SELECT 1 FROM ${schema}.coremeasurements cm
+        JOIN ${schema}.census c ON C.CensusID = cm.CensusID
+        JOIN ${schema}.plots p ON p.PlotID = c.PlotID
+        WHERE p.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
+        const pvResults = await runQuery(connection, pvQuery);
+        if (connection) connection.release();
+        if (pvResults.length === 0)
+          return new NextResponse(null, {
+            status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
+          });
+        break;
       // case 'subquadrats':
       //   const subquadratsQuery = `SELECT 1
       //                           FROM ${schema}.${params.dataType} s

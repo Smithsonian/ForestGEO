@@ -17,7 +17,6 @@ export default function UploadParentModal(props: UPMProps) {
 
   return (
     <>
-      {/* Modal for upload */}
       <Modal
         open={isUploadModalOpen}
         onClose={() => {}}

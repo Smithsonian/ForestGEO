@@ -87,7 +87,7 @@ function MenuRenderToggle(
   const currentCensus = useOrgCensusContext();
   return (
     <ListItemButton
-      disabled={plotSelectionRequired || censusSelectionRequired || siteConfigProps.href === '/postvalidation'}
+      disabled={plotSelectionRequired || censusSelectionRequired}
       color={pathname === siteConfigProps.href ? 'primary' : undefined}
       onClick={() => {
         if (setMenuOpen) {
@@ -726,7 +726,6 @@ export default function Sidebar(props: SidebarProps) {
               }}
             >
               {' '}
-              {/* Added ml: -1 to adjust the position of the navigation menu */}
               <Box
                 sx={{
                   minHeight: 0,
@@ -756,7 +755,7 @@ export default function Sidebar(props: SidebarProps) {
                       if (isDataIncomplete) {
                         switch (href) {
                           case '/summary':
-                            return 'You must resolve all supporting data warnings before adding measurements!';
+                            return 'Missing supporting data!';
                           case '/subquadrats':
                             return 'Subquadrats cannot be viewed until quadrats are valid.';
                           case '/quadratpersonnel':
@@ -907,13 +906,24 @@ export default function Sidebar(props: SidebarProps) {
                                               <ListItemButton
                                                 data-testid={`navigate-list-item-expanded-button-${item.label}-${link.label}-${link.href}`}
                                                 sx={{ flex: 1, width: '100%' }}
-                                                selected={pathname == item.href + link.href}
-                                                color={pathname === item.href ? 'primary' : undefined}
-                                                disabled={isLinkDisabled || link.href === '/postvalidation'}
-                                                // post-validation endpoint is not yet ready for production use!
-                                                onClick={() => {
-                                                  if (!isLinkDisabled || link.href !== '/postvalidation') {
+                                                selected={pathname === item.href + link.href}
+                                                color={pathname === item.href + link.href ? 'primary' : undefined}
+                                                disabled={isLinkDisabled}
+                                                onClick={async () => {
+                                                  if (link.href === '/postvalidation') {
+                                                    const response = await fetch(
+                                                      `/api/cmprevalidation/postvalidation/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}`
+                                                    );
+                                                    if (response.ok) {
+                                                      router.push(item.href + link.href);
+                                                      return;
+                                                    } else {
+                                                      alert('No measurements found!');
+                                                      return;
+                                                    }
+                                                  } else if (!isLinkDisabled) {
                                                     router.push(item.href + link.href);
+                                                    return;
                                                   }
                                                 }}
                                               >

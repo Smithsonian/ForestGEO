@@ -1,5 +1,18 @@
 import { createInitialObject, ResultType } from '@/config/utils';
 
+export type PostValidationQueriesRDS = {
+  id?: number;
+  queryID?: number;
+  queryName?: string;
+  queryDefinition?: string;
+  description?: string;
+  isEnabled?: boolean;
+  lastRunAt?: Date;
+  lastRunResult?: string;
+  lastRunStatus?: string;
+};
+export type PostValidationQueriesResult = ResultType<PostValidationQueriesRDS>;
+
 export type ValidationProceduresRDS = {
   id?: number;
   validationID?: number;

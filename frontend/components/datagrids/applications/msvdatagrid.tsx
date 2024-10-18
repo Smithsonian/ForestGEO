@@ -1,7 +1,7 @@
 'use client';
 
-import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
-import React, { useState } from 'react';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import React, { useEffect, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { Alert, AlertProps } from '@mui/material';
 import { randomId } from '@mui/x-data-grid-generator';
@@ -11,6 +11,8 @@ import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
+import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -41,9 +43,11 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
 };
 
 export default function MeasurementsSummaryViewDataGrid() {
+  const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
@@ -58,6 +62,20 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const { setLoading } = useLoading();
+
+  async function reloadMSV() {
+    setLoading(true, 'Refreshing Measurements View...');
+    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+    if (!response.ok) throw new Error('Measurements View Refresh failure');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  useEffect(() => {
+    reloadMSV()
+      .catch(console.error)
+      .then(() => setLoading(false));
+  }, []);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -124,9 +142,14 @@ export default function MeasurementsSummaryViewDataGrid() {
               </Box>
             </Box>
           </Stack>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button onClick={() => setIsUploadModalOpen(true)}>Upload</Button>
-          </Box>
+          <Stack direction={'row'} spacing={2}>
+            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+              Manual Entry Form
+            </Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+              Upload
+            </Button>
+          </Stack>
         </Box>
       </Box>
       <UploadParentModal
@@ -136,6 +159,14 @@ export default function MeasurementsSummaryViewDataGrid() {
           setRefresh(true);
         }}
         formType={FormType.measurements}
+      />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
+        formType={'measurements'}
       />
       <MeasurementsCommons
         locked={true}

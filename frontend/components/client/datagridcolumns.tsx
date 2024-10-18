@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
 export const formatHeader = (word1: string, word2: string) => (
-  <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+  <Stack direction={'column'} sx={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
     <Typography level="body-sm" fontWeight={'bold'}>
       {word1}
     </Typography>
@@ -827,3 +827,5 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
   }
   return column;
 });
+
+// FORM GRID COLUMNS

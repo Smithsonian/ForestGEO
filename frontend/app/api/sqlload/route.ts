@@ -39,7 +39,6 @@ export async function POST(request: NextRequest) {
   let connection: PoolConnection | null = null; // Use PoolConnection type
 
   try {
-    const i = 0;
     connection = await getConn();
   } catch (error) {
     if (error instanceof Error) {

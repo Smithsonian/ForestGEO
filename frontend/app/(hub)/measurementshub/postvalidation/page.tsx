@@ -1,92 +1,246 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { useEffect, useState } from 'react';
-import { Box, LinearProgress } from '@mui/joy';
-
-interface PostValidations {
-  queryID: number;
-  queryName: string;
-  queryDescription: string;
-}
-
-interface PostValidationResults {
-  count: number;
-  data: any;
-}
+import React, { useEffect, useState } from 'react';
+import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
+import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
+import PostValidationRow from '@/components/client/postvalidationrow';
+import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import { Done } from '@mui/icons-material';
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 export default function PostValidationPage() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const [postValidations, setPostValidations] = useState<PostValidations[]>([]);
-  const [validationResults, setValidationResults] = useState<Record<number, PostValidationResults | null>>({});
-  const [loadingQueries, setLoadingQueries] = useState<boolean>(false);
+  const [postValidations, setPostValidations] = useState<PostValidationQueriesRDS[]>([]);
+  const [expandedQuery, setExpandedQuery] = useState<number | null>(null);
+  const [expandedResults, setExpandedResults] = useState<number | null>(null);
+  const [selectedResults, setSelectedResults] = useState<PostValidationQueriesRDS[]>([]);
+  const replacements = {
+    schema: currentSite?.schemaName,
+    currentPlotID: currentPlot?.plotID,
+    currentCensusID: currentCensus?.dateRanges[0].censusID
+  };
+  const { setLoading } = useLoading();
 
-  // Fetch post-validation queries on first render
+  const enabledPostValidations = postValidations.filter(query => query.isEnabled);
+  const disabledPostValidations = postValidations.filter(query => !query.isEnabled);
+
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+
+  async function fetchValidationResults(postValidation: PostValidationQueriesRDS) {
+    if (!postValidation.queryID) return;
+    try {
+      await fetch(
+        `/api/postvalidationbyquery/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}/${postValidation.queryID}`,
+        { method: 'GET' }
+      );
+    } catch (error: any) {
+      console.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
+      throw new Error(error);
+    }
+  }
+
+  async function loadPostValidations() {
+    try {
+      const response = await fetch(`/api/fetchall/postvalidationqueries?schema=${currentSite?.schemaName}`, { method: 'GET' });
+      const data = await response.json();
+      setPostValidations(data);
+    } catch (error) {
+      console.error('Error loading queries:', error);
+    }
+  }
+
+  function saveResultsToFile() {
+    if (selectedResults.length === 0) {
+      alert('Please select at least one result to save.');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(selectedResults, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'results.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function printResults() {
+    if (selectedResults.length === 0) {
+      alert('Please select at least one result to print.');
+      return;
+    }
+    const printContent = selectedResults.map(result => JSON.stringify(result, null, 2)).join('\n\n');
+    const printWindow = window.open('', '', 'width=600,height=400');
+    printWindow?.document.write(`<pre>${printContent}</pre>`);
+    printWindow?.document.close();
+    printWindow?.print();
+  }
+
   useEffect(() => {
-    async function loadQueries() {
-      try {
-        setLoadingQueries(true);
-        const response = await fetch(`/api/postvalidation?schema=${currentSite?.schemaName}`, { method: 'GET' });
-        const data = await response.json();
-        setPostValidations(data);
-      } catch (error) {
-        console.error('Error loading queries:', error);
-      } finally {
-        setLoadingQueries(false);
-      }
-    }
+    setLoading(true);
+    loadPostValidations()
+      .catch(console.error)
+      .then(() => setLoading(false));
+  }, []);
 
-    if (currentSite?.schemaName) {
-      loadQueries();
-    }
-  }, [currentSite?.schemaName]);
+  const handleExpandClick = (queryID: number) => {
+    setExpandedQuery(expandedQuery === queryID ? null : queryID);
+  };
 
-  // Fetch validation results for each query
-  useEffect(() => {
-    async function fetchValidationResults(postValidation: PostValidations) {
-      try {
-        const response = await fetch(
-          `/api/postvalidationbyquery/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}/${postValidation.queryID}`,
-          { method: 'GET' }
-        );
-        const data = await response.json();
-        setValidationResults(prev => ({
-          ...prev,
-          [postValidation.queryID]: data
-        }));
-      } catch (error) {
-        console.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
-        setValidationResults(prev => ({
-          ...prev,
-          [postValidation.queryID]: null // Mark as failed if there was an error
-        }));
-      }
-    }
+  const handleExpandResultsClick = (queryID: number) => {
+    setExpandedResults(expandedResults === queryID ? null : queryID);
+  };
 
-    if (postValidations.length > 0 && currentPlot?.plotID && currentCensus?.dateRanges) {
-      postValidations.forEach(postValidation => {
-        fetchValidationResults(postValidation).then(r => console.log(r));
-      });
+  const handleSelectResult = (postVal: PostValidationQueriesRDS) => {
+    setSelectedResults(prev => (prev.includes(postVal) ? prev.filter(id => id !== postVal) : [...prev, postVal]));
+  };
+
+  const handleSelectAllChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      // Select all: add all validations to selectedResults
+      setSelectedResults([...enabledPostValidations, ...disabledPostValidations]);
+    } else {
+      // Deselect all: clear selectedResults
+      setSelectedResults([]);
     }
-  }, [postValidations, currentPlot?.plotID, currentCensus?.dateRanges, currentSite?.schemaName]);
+  };
+
+  // Check if all items are selected
+  const isAllSelected = selectedResults.length === postValidations.length && postValidations.length > 0;
 
   return (
-    <Box sx={{ flex: 1, display: 'flex', width: '100%' }}>
-      {loadingQueries ? (
-        <LinearProgress />
-      ) : postValidations.length > 0 ? (
-        <Box>
-          {postValidations.map(postValidation => (
-            <Box key={postValidation.queryID}>
-              <div>{postValidation.queryName}</div>
-              {validationResults[postValidation.queryID] ? <LinearProgress determinate value={100} /> : <LinearProgress />}
-            </Box>
-          ))}
+    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <Box sx={{ justifyContent: 'space-between', alignContent: 'space-between', flex: 1, display: 'flex', flexDirection: 'row' }}>
+        <Typography>These statistics can be used to analyze entered data. Please select and run, download, or print statistics as needed.</Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+          <Button variant={'soft'} onClick={() => saveResultsToFile()} sx={{ marginX: 1 }}>
+            Download Statistics
+          </Button>
+          <Button variant={'soft'} onClick={() => printResults()} sx={{ marginX: 1 }}>
+            Print Statistics
+          </Button>
+          <Button
+            variant={'soft'}
+            onClick={async () => {
+              if (selectedResults.length === 0) {
+                alert('Please select at least one statistic to run.');
+                return;
+              }
+              setLoading(true, 'Running validations...');
+              for (const postValidation of selectedResults) {
+                await fetchValidationResults(postValidation);
+                setSelectedResults([]);
+              }
+              await loadPostValidations();
+              setLoading(false);
+            }}
+          >
+            Run Statistics
+          </Button>
+        </Box>
+      </Box>
+
+      {postValidations.length > 0 ? (
+        <Box sx={{ width: '100%' }}>
+          <TableContainer component={Paper}>
+            <Table
+              stickyHeader
+              sx={{
+                tableLayout: 'fixed',
+                width: '100%'
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  <TableCell
+                    sx={{
+                      width: '50px',
+                      textAlign: 'center',
+                      padding: '0'
+                    }}
+                  />
+                  <TableCell
+                    sx={{
+                      flex: 0.5,
+                      display: 'flex',
+                      alignSelf: 'center',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0'
+                    }}
+                  >
+                    <Checkbox
+                      uncheckedIcon={<Done />}
+                      label={isAllSelected ? 'Deselect All' : 'Select All'}
+                      checked={isAllSelected}
+                      slotProps={{
+                        root: ({ checked, focusVisible }) => ({
+                          sx: !checked
+                            ? {
+                                '& svg': { opacity: focusVisible ? 1 : 0 },
+                                '&:hover svg': {
+                                  opacity: 1
+                                }
+                              }
+                            : undefined
+                        })
+                      }}
+                      onChange={e => handleSelectAllChange(e)}
+                    />
+                  </TableCell>
+                  <TableCell>Query Name</TableCell>
+                  <TableCell
+                    sx={{
+                      width: '45%'
+                    }}
+                  >
+                    Query Definition
+                  </TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Last Run At</TableCell>
+                  <TableCell>Last Run Result</TableCell>
+                </TableRow>
+              </TableHead>
+
+              <TableBody>
+                {enabledPostValidations.map(postValidation => (
+                  <PostValidationRow
+                    key={postValidation.queryID}
+                    postValidation={postValidation}
+                    selectedResults={selectedResults}
+                    expanded={expandedResults !== null && expandedResults === postValidation.queryID}
+                    isDarkMode={isDarkMode}
+                    expandedQuery={expandedQuery}
+                    replacements={replacements}
+                    handleExpandClick={handleExpandClick}
+                    handleExpandResultsClick={handleExpandResultsClick}
+                    handleSelectResult={handleSelectResult}
+                  />
+                ))}
+
+                {disabledPostValidations.map(postValidation => (
+                  <PostValidationRow
+                    key={postValidation.queryID}
+                    postValidation={postValidation}
+                    selectedResults={selectedResults}
+                    expanded={expandedResults !== null && expandedResults === postValidation.queryID}
+                    isDarkMode={isDarkMode}
+                    expandedQuery={expandedQuery}
+                    replacements={replacements}
+                    handleExpandClick={handleExpandClick}
+                    handleExpandResultsClick={handleExpandResultsClick}
+                    handleSelectResult={handleSelectResult}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </Box>
       ) : (
-        <div>No validations available.</div>
+        <Box>No validations available.</Box>
       )}
     </Box>
   );

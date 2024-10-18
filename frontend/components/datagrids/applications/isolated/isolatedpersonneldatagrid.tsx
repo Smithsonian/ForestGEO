@@ -13,6 +13,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import IsolatedRolesDataGrid from '@/components/datagrids/applications/isolated/isolatedrolesdatagrid';
+import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 
 export default function IsolatedPersonnelDataGrid() {
   const currentSite = useSiteContext();
@@ -27,6 +28,7 @@ export default function IsolatedPersonnelDataGrid() {
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
   const [roles, setRoles] = useState<RoleRDS[]>([]);
   const { data: session } = useSession();
@@ -100,18 +102,21 @@ export default function IsolatedPersonnelDataGrid() {
             </Typography>
           </Box>
 
-          {/* Upload Button */}
           <Stack direction="column" spacing={2}>
-            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-              Upload
-            </Button>
-            {/* Link to Quadrat Personnel Data Grid */}
+            <Stack direction={'row'} spacing={2}>
+              <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+                Manual Entry Form
+              </Button>
+              <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+                Upload
+              </Button>
+            </Stack>
             <Link href="/fixeddatainput/quadratpersonnel" passHref>
               <Button variant="solid" color="primary" sx={{ ml: 2 }}>
                 View Quadrat Personnel
               </Button>
             </Link>
-            <Button onClick={() => setIsRolesModalOpen(true)} variant={'soft'} color={'primary'}>
+            <Button onClick={() => setIsRolesModalOpen(true)} variant={'solid'} color={'primary'}>
               Edit Roles
             </Button>
           </Stack>
@@ -125,6 +130,14 @@ export default function IsolatedPersonnelDataGrid() {
           setRefresh(true);
         }}
         formType={FormType.personnel}
+      />
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
+        formType={'personnel'}
       />
       <Modal
         open={isRolesModalOpen}
