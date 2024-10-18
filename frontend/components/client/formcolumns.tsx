@@ -344,7 +344,6 @@ export const AttributesFormGridColumns: GridColDef[] = [
     field: 'code',
     headerName: 'Code',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     editable: true
   },
@@ -352,7 +351,6 @@ export const AttributesFormGridColumns: GridColDef[] = [
     field: 'description',
     headerName: 'Description',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     editable: true
   },
@@ -360,7 +358,6 @@ export const AttributesFormGridColumns: GridColDef[] = [
     field: 'status',
     headerName: 'Status',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     editable: true
     // This is temporarily being suspended -- it's a nice to have, not a need to have
@@ -382,7 +379,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'firstname',
     headerName: 'First Name',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -391,7 +387,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'lastname',
     headerName: 'Last Name',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -400,7 +395,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'role',
     headerName: 'Role',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -409,7 +403,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'roledescription',
     headerName: 'Role Description',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -430,7 +423,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'spcode',
     headerName: 'Species Code',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -439,7 +431,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'family',
     headerName: 'Family',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -448,7 +439,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'genus',
     headerName: 'Genus',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -457,7 +447,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'species',
     headerName: 'Species',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -466,7 +455,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'subspecies',
     headerName: 'Subspecies',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -475,7 +463,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'idlevel',
     headerName: 'ID Level',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -484,7 +471,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'authority',
     headerName: 'Authority',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -493,7 +479,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'subspeciesauthority',
     headerName: 'Subspecies Authority',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
