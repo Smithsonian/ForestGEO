@@ -140,6 +140,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Dashboard';
     case '/measurementshub/summary':
       return 'View Data';
+    case '/measurementshub/postvalidation':
+      return 'Post-Census Statistics';
     case '/measurementshub/validationhistory':
       return 'Validation History';
     case '/measurementshub/viewfulltable':

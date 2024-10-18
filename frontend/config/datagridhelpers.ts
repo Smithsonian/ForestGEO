@@ -62,6 +62,14 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getAllTaxonomiesViewHCs()
   },
+  species: {
+    id: false,
+    ...getAllTaxonomiesViewHCs()
+  },
+  measurements: {
+    id: false,
+    ...getMeasurementsSummaryViewHCs()
+  },
   measurementssummary: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
