@@ -80,29 +80,8 @@ export default function DashboardPage() {
     }
   }
 
-  async function reloadMSV() {
-    setLoading(true, 'Refreshing Measurements View...');
-    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-    if (!response.ok) throw new Error('Measurements View Refresh failure');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-  }
-
-  async function reloadVFT() {
-    setLoading(true, 'Refreshing Historical View...');
-    const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-    if (!response.ok) throw new Error('Historical View Refresh failure');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-  }
-
   useEffect(() => {
-    loadChangelogHistory()
-      .catch(console.error)
-      .then(() => {
-        if (currentSite && currentPlot && currentCensus)
-          reloadMSV()
-            .then(() => reloadVFT())
-            .then(() => setLoading(false));
-      });
+    loadChangelogHistory().catch(console.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   return (

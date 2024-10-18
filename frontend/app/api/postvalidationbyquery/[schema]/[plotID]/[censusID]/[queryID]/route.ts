@@ -38,13 +38,7 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
                             WHERE QueryID = ${queryID}`;
     await runQuery(conn, successUpdate, [currentTime, successResults]);
 
-    return new NextResponse(
-      JSON.stringify({
-        count: queryResults.length,
-        data: queryResults
-      }),
-      { status: HTTPResponses.OK }
-    );
+    return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
@@ -52,6 +46,7 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
                              SET LastRunAt = ?, LastRunStatus = 'failure' 
                              WHERE QueryID = ${queryID}`;
       await runQuery(conn, failureUpdate, [currentTime]);
+      return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
     return new NextResponse('Internal Server Error', { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
