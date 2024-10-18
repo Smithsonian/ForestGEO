@@ -25,8 +25,6 @@ import {
   AllTaxonomiesViewResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
-  MeasurementsSummaryStagingRDS,
-  MeasurementsSummaryStagingResult,
   StemTaxonomiesViewRDS,
   StemTaxonomiesViewResult,
   ViewFullTableRDS,
@@ -209,8 +207,6 @@ class MapperFactory {
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'measurementssummary_staging':
-        return new GenericMapper<MeasurementsSummaryStagingRDS, MeasurementsSummaryStagingResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
