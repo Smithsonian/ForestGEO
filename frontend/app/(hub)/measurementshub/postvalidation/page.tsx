@@ -2,23 +2,18 @@
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import React, { useEffect, useState } from 'react';
-import { Box, Button, Checkbox, LinearProgress, Table, Typography, useTheme } from '@mui/joy';
+import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
 import PostValidationRow from '@/components/client/postvalidationrow';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { Done } from '@mui/icons-material';
-
-interface PostValidationResults {
-  count: number;
-  data: any;
-}
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 export default function PostValidationPage() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [postValidations, setPostValidations] = useState<PostValidationQueriesRDS[]>([]);
-  const [loadingQueries, setLoadingQueries] = useState<boolean>(false);
   const [expandedQuery, setExpandedQuery] = useState<number | null>(null);
   const [expandedResults, setExpandedResults] = useState<number | null>(null);
   const [selectedResults, setSelectedResults] = useState<PostValidationQueriesRDS[]>([]);
@@ -27,6 +22,7 @@ export default function PostValidationPage() {
     currentPlotID: currentPlot?.plotID,
     currentCensusID: currentCensus?.dateRanges[0].censusID
   };
+  const { setLoading } = useLoading();
 
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);
@@ -49,15 +45,11 @@ export default function PostValidationPage() {
 
   async function loadPostValidations() {
     try {
-      setLoadingQueries(true);
-      setPostValidations([]); // reset object
       const response = await fetch(`/api/fetchall/postvalidationqueries?schema=${currentSite?.schemaName}`, { method: 'GET' });
       const data = await response.json();
       setPostValidations(data);
     } catch (error) {
       console.error('Error loading queries:', error);
-    } finally {
-      setLoadingQueries(false);
     }
   }
 
@@ -88,7 +80,10 @@ export default function PostValidationPage() {
   }
 
   useEffect(() => {
-    loadPostValidations().catch(console.error);
+    setLoading(true);
+    loadPostValidations()
+      .catch(console.error)
+      .then(() => setLoading(false));
   }, []);
 
   const handleExpandClick = (queryID: number) => {
@@ -134,24 +129,21 @@ export default function PostValidationPage() {
                 alert('Please select at least one statistic to run.');
                 return;
               }
+              setLoading(true, 'Running validations...');
               for (const postValidation of selectedResults) {
-                setLoadingQueries(true);
                 await fetchValidationResults(postValidation);
-                setLoadingQueries(false);
-                await loadPostValidations();
-                setSelectedResults([]); // clear selectedResults after running the validations
+                setSelectedResults([]);
               }
+              await loadPostValidations();
+              setLoading(false);
             }}
-            loading={loadingQueries}
           >
             Run Statistics
           </Button>
         </Box>
       </Box>
 
-      {loadingQueries ? (
-        <LinearProgress />
-      ) : postValidations.length > 0 ? (
+      {postValidations.length > 0 ? (
         <Box sx={{ width: '100%' }}>
           <TableContainer component={Paper}>
             <Table

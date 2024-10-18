@@ -37,8 +37,8 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
 }) => {
   const formattedResults = JSON.stringify(JSON.parse(postValidation.lastRunResult ?? '{}'), null, 2);
 
-  const successColor = !isDarkMode ? 'rgba(54, 163, 46, 0.3)' : darken('rgba(54,163,46,0.6)', 0.6);
-  const failureColor = !isDarkMode ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.6);
+  const successColor = !isDarkMode ? 'rgba(54, 163, 46, 0.3)' : darken('rgba(54,163,46,0.6)', 0.7);
+  const failureColor = !isDarkMode ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.7);
 
   return (
     <>
@@ -166,7 +166,15 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
         </TableCell>
         <TableCell>{postValidation.description}</TableCell>
         <TableCell>{postValidation.lastRunAt && <>{moment(postValidation.lastRunAt).toString()}</>}</TableCell>
-        <TableCell>{postValidation.lastRunResult && <>{postValidation.lastRunResult.substring(0, 100) + `...`}</>}</TableCell>
+        <TableCell
+          sx={{
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis'
+          }}
+        >
+          {postValidation.lastRunResult || 'No results'}
+        </TableCell>
       </TableRow>
 
       <Collapse in={expanded} timeout="auto" unmountOnExit>

@@ -72,7 +72,9 @@ export default function MeasurementsSummaryViewDataGrid() {
   }
 
   useEffect(() => {
-    reloadMSV().catch(console.error);
+    reloadMSV()
+      .catch(console.error)
+      .then(() => setLoading(false));
   }, []);
 
   const addNewRowToGrid = () => {

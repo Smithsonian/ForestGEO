@@ -14,7 +14,8 @@ values
     ('Number of ALL Stem Records',
      'SELECT COUNT(s.StemID) AS TotalStems
         FROM ${schema}.stems s
-        JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
+        JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID
+        JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
         JOIN ${schema}.attributes a ON cma.Code = a.Code
         JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
         JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
@@ -24,7 +25,8 @@ values
     ('Number of all LIVE stem records',
      'SELECT COUNT(s.StemID) AS LiveStems
         FROM ${schema}.stems s
-        JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
+        JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID
+        JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
         JOIN ${schema}.attributes a ON cma.Code = a.Code
         JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
         JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
@@ -40,24 +42,26 @@ values
         WHERE cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};',
      'Calculating the total number of all trees for the current site, plot, and census', true),
     ('All dead or missing stems and count by census',
-     'SELECT s.StemID, COUNT(s.StemID) AS DeadOrMissingStems
+     'SELECT cm.CensusID,
+        COUNT(s.StemID) AS DeadOrMissingStems,
+        GROUP_CONCAT(s.StemID ORDER BY s.StemID) AS DeadOrMissingStemList
         FROM ${schema}.stems s
-        JOIN ${schema}.cmattributes cma ON s.StemID = cma.CoreMeasurementID
+        JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID
+        JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
         JOIN ${schema}.attributes a ON cma.Code = a.Code
-        JOIN ${schema}.coremeasurements cm ON s.StemID = cm.StemID
         WHERE a.Status IN (''dead'', ''missing'')
         GROUP BY cm.CensusID;',
      'Finds and returns a count of, then all dead or missing stems by census', true),
     ('All trees outside plot limits',
-     'SELECT t.TreeID, s.LocalX, s.LocalY, p.DimensionX, p.DimensionY
+     'SELECT t.TreeID, (s.LocalX + q.StartX + p.GlobalX) AS LocalX, (s.LocalY + q.StartY + p.GlobalY) AS LocalY
         FROM ${schema}.trees t
         JOIN ${schema}.stems s ON t.TreeID = s.TreeID
         JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
         JOIN ${schema}.plots p ON q.PlotID = p.PlotID
             WHERE s.LocalX IS NULL
                 OR s.LocalY IS NULL
-                OR s.LocalX > p.DimensionX
-                OR s.LocalY > p.DimensionY
+                OR LocalX > (p.GlobalX + p.DimensionX)
+                OR LocalY > (p.GlobalY + p.DimensionY)
                 AND p.PlotID = ${currentPlotID};',
      'Finds and returns any trees outside plot limits', true),
     ('Highest DBH measurement and HOM measurement by species',
@@ -193,7 +197,7 @@ values
             ${schema}.trees t ON s.TreeID = t.TreeID
                 JOIN
             ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
-       WHERE cm.CensusID = @currentCensusID
+       WHERE cm.CensusID = ${currentCensusID}
          AND a.Status = ''dead''
        ORDER BY sp.SpeciesName, s.StemID;',
      'dead stems by species, organized to determine which species (if any) are struggling', true);
