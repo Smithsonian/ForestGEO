@@ -147,7 +147,9 @@ export default function ViewFullTableDataGrid() {
   }
 
   useEffect(() => {
-    reloadVFT().catch(console.error).then(setLoading(false));
+    reloadVFT()
+      .catch(console.error)
+      .then(() => setLoading(false));
   }, []);
 
   return (

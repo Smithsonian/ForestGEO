@@ -482,7 +482,7 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     FROM ${schema}.coremeasurements cm
     LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
     JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-    WHERE cm.IsValidated IS NULLa
+    WHERE cm.IsValidated IS NULL
     AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
     AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);`;
   const query = `
@@ -500,9 +500,10 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     SELECT cm.*
     FROM ${schema}.coremeasurements cm
     JOIN UpdatedRows ur ON cm.CoreMeasurementID = ur.CoreMeasurementID;`;
-  const dropTemp = `DROP TEMPORARY TABLE UpdatedRows;`;
+  const dropTemp = `DROP TEMPORARY TABLE IF EXISTS UpdatedRows;`;
   try {
     await conn.beginTransaction();
+    await runQuery(conn, dropTemp); // just in case
     await runQuery(conn, setVariables, [params.p_CensusID || null, params.p_PlotID || null]);
     await runQuery(conn, tempTable);
     await runQuery(conn, insertTemp);

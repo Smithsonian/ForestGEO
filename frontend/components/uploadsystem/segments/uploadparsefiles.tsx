@@ -82,7 +82,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             {uploadForm === 'measurements' && (
               <>
                 <Alert startDecorator={<WarningIcon fontSize="large" />} variant="soft" color="danger" sx={{ mb: 2 }}>
-                  <Typography>
+                  <Typography component={'div'}>
                     Please note: For date fields, accepted formats are
                     <List marker="decimal">
                       <ListItem>
