@@ -65,7 +65,7 @@ export async function GET(
       case 'personnel':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS p.*
-            FROM ${schema}.${params.dataType} q
+            FROM ${schema}.${params.dataType} p
                      JOIN ${schema}.census c ON p.CensusID = c.CensusID
             WHERE c.PlotID = ?
               AND c.PlotCensusNumber = ? LIMIT ?, ?;`;

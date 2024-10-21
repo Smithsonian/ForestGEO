@@ -1,6 +1,6 @@
 'use client';
 
-import { GridColDef, GridRenderEditCellParams, useGridApiContext, useGridApiRef } from '@mui/x-data-grid';
+import { GridColDef, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { formatHeader } from '@/components/client/datagridcolumns';
 import moment from 'moment/moment';
@@ -12,25 +12,44 @@ import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 
-const renderDatePicker = (params: GridRenderEditCellParams) => {
+export const renderDatePicker = (params: GridRenderEditCellParams) => {
   const convertedValue = params.row.date ? moment(params.row.date, 'YYYY-MM-DD') : null;
   if (!convertedValue) return <></>;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      <DatePicker label={'Recorded Date'} value={convertedValue} disabled />
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+        height: '100%',
+        padding: '0'
+      }}
+    >
+      <Input
+        size={'lg'}
+        value={convertedValue.format('MM-DD-YYYY')}
+        disabled
+        sx={{
+          textAlign: 'center',
+          width: '100%',
+          overflow: 'hidden'
+        }}
+      />
     </Box>
   );
 };
 
-const renderEditDatePicker = (params: GridRenderEditCellParams) => {
-  const apiRef = useGridApiRef();
+export const renderEditDatePicker = (params: GridRenderEditCellParams) => {
+  const apiRef = useGridApiContext();
   const { id, row } = params;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center', marginY: 1 }}>
       <DatePicker
         label={'Recorded Date'}
+        slotProps={{ textField: { size: 'small' } }}
         value={moment(row.date, 'YYYY-MM-DD')}
         onChange={newValue => {
           apiRef.current.setEditCellValue({ id, field: 'date', value: newValue ? newValue.format('YYYY-MM-DD') : null });
@@ -344,7 +363,6 @@ export const AttributesFormGridColumns: GridColDef[] = [
     field: 'code',
     headerName: 'Code',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     editable: true
   },
@@ -352,7 +370,6 @@ export const AttributesFormGridColumns: GridColDef[] = [
     field: 'description',
     headerName: 'Description',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     editable: true
   },
@@ -360,7 +377,6 @@ export const AttributesFormGridColumns: GridColDef[] = [
     field: 'status',
     headerName: 'Status',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     editable: true
     // This is temporarily being suspended -- it's a nice to have, not a need to have
@@ -382,7 +398,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'firstname',
     headerName: 'First Name',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -391,7 +406,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'lastname',
     headerName: 'Last Name',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -400,7 +414,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'role',
     headerName: 'Role',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -409,7 +422,6 @@ export const PersonnelFormGridColumns: GridColDef[] = [
     field: 'roledescription',
     headerName: 'Role Description',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -430,7 +442,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'spcode',
     headerName: 'Species Code',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -439,7 +450,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'family',
     headerName: 'Family',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -448,7 +458,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'genus',
     headerName: 'Genus',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -457,7 +466,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'species',
     headerName: 'Species',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -466,7 +474,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'subspecies',
     headerName: 'Subspecies',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -475,7 +482,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'idlevel',
     headerName: 'ID Level',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -484,7 +490,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'authority',
     headerName: 'Authority',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -493,7 +498,6 @@ export const SpeciesFormGridColumns: GridColDef[] = [
     field: 'subspeciesauthority',
     headerName: 'Subspecies Authority',
     headerClassName: 'header',
-    minWidth: 250,
     flex: 1,
     align: 'left',
     editable: true
@@ -681,10 +685,10 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
   },
   {
     field: 'coordinateunit',
-    headerName: 'Coordinate Units',
+    headerName: '<= Units',
     headerClassName: 'header',
-    renderHeader: () => formatHeader('Coordinate', 'Units'),
-    flex: 1.5,
+    // renderHeader: () => formatHeader('Coordinate', 'Units'),
+    flex: 0.5,
     align: 'center',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
@@ -700,10 +704,10 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
   },
   {
     field: 'dbhunit',
-    headerName: 'DBH Units',
+    headerName: '<= Units',
     headerClassName: 'header',
-    renderHeader: () => formatHeader('DBH', 'Units'),
-    flex: 1.5,
+    // renderHeader: () => formatHeader('DBH', 'Units'),
+    flex: 0.5,
     align: 'center',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'dbhunit'} isArea={false} />
@@ -719,30 +723,12 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
   },
   {
     field: 'homunit',
-    headerName: 'HOM Units',
+    headerName: '<= Units',
     headerClassName: 'header',
-    renderHeader: () => formatHeader('HOM', 'Units'),
-    flex: 1.5,
+    // renderHeader: () => formatHeader('HOM', 'Units'),
+    flex: 0.5,
     align: 'center',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'homunit'} isArea={false} />
-  },
-  {
-    field: 'date',
-    headerName: 'Date',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'center',
-    editable: true,
-    renderCell: renderDatePicker,
-    renderEditCell: renderEditDatePicker
-  },
-  {
-    field: 'codes',
-    headerName: 'Codes',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'center',
-    editable: true
   }
 ];

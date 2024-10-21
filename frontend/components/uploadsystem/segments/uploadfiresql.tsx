@@ -155,7 +155,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   useEffect(() => {
     if (!loading && completedOperations === totalOperations) {
       if (uploadForm === FormType.measurements)
-        setReviewState(ReviewStates.UPLOAD_AZURE); // temporary shift to upload a draft
+        setReviewState(ReviewStates.VALIDATE); // because 2x entry is site-dependent, default behavior should be to trigger validations
       else setReviewState(ReviewStates.UPLOAD_AZURE);
     }
   }, [loading, completedOperations, totalOperations]);

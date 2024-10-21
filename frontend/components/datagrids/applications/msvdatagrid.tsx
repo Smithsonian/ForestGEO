@@ -3,7 +3,6 @@
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import React, { useEffect, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
-import { Alert, AlertProps } from '@mui/material';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Box, Button, Snackbar, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
@@ -13,6 +12,7 @@ import { FormType } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { useLoading } from '@/app/contexts/loadingprovider';
+import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -50,6 +50,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [openAlert, setOpenAlert] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -156,7 +157,7 @@ export default function MeasurementsSummaryViewDataGrid() {
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
           setIsUploadModalOpen(false);
-          setRefresh(true);
+          setOpenAlert(true);
         }}
         formType={FormType.measurements}
       />
@@ -164,7 +165,7 @@ export default function MeasurementsSummaryViewDataGrid() {
         isManualEntryFormOpen={isManualEntryFormOpen}
         handleCloseManualEntryForm={() => {
           setIsManualEntryFormOpen(false);
-          setRefresh(true);
+          setOpenAlert(true);
         }}
         formType={'measurements'}
       />
@@ -190,6 +191,20 @@ export default function MeasurementsSummaryViewDataGrid() {
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
       />
+      <Collapse in={openAlert} sx={{ width: '100%' }}>
+        <Snackbar
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+          open={openAlert}
+          autoHideDuration={6000}
+          onClose={() => setOpenAlert(false)}
+          sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Alert variant={'outlined'} onClose={() => setOpenAlert(false)} severity="warning">
+            <AlertTitle>Changes detected!</AlertTitle>
+            Please press the refresh button to update the grid.
+          </Alert>
+        </Snackbar>
+      </Collapse>
     </>
   );
 }

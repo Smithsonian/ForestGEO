@@ -14,6 +14,7 @@ import { getColumnVisibilityModel } from '@/config/datagridhelpers';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
+import { renderDatePicker, renderEditDatePicker } from '@/components/client/formcolumns';
 
 export interface IsolatedDataGridCommonProps {
   gridType: string;
@@ -85,7 +86,24 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           ];
         }
       },
-      ...gridColumns
+      ...gridColumns,
+      {
+        field: 'date',
+        headerName: 'Date',
+        headerClassName: 'header',
+        flex: 1,
+        editable: true,
+        renderCell: renderDatePicker,
+        renderEditCell: renderEditDatePicker
+      },
+      {
+        field: 'codes',
+        headerName: 'Codes',
+        headerClassName: 'header',
+        flex: 1,
+        align: 'center',
+        editable: true
+      }
     ],
     [gridColumns, unsavedChangesRef, apiRef, setRows]
   );
@@ -119,7 +137,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     try {
       setIsSaving(true);
 
-      // After saving, process both edited and deleted rows
       const rowsToDelete = Object.values(unsavedChangesRef.current.unsavedRows).filter(row => row._action === 'delete');
       const rowsToSave = Object.values(unsavedChangesRef.current.unsavedRows).filter(row => row._action !== 'delete');
 
@@ -134,7 +151,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
         });
       });
 
-      // Clear unsaved changes
       unsavedChangesRef.current.unsavedRows = {};
       unsavedChangesRef.current.rowsBeforeChange = {};
 
@@ -294,7 +310,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           }}
           loading={isSaving}
           getRowClassName={getRowClassName}
-          autoHeight
+          getRowHeight={() => 'auto'}
         />
       </Box>
       <Button sx={{ marginTop: 8 }} onClick={submitChanges} color={'primary'} size={'lg'}>
