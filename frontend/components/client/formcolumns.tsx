@@ -80,7 +80,7 @@ const getClosestAreaUnit = (input: string): string | null => {
   return closestUnit;
 };
 
-const EditUnitsCell = (params: GridRenderEditCellParams & { fieldName: string; isArea: boolean }) => {
+export const EditUnitsCell = (params: GridRenderEditCellParams & { fieldName: string; isArea: boolean }) => {
   const apiRef = useGridApiContext();
   const { id, fieldName, hasFocus, isArea } = params;
   const [value, setValue] = useState<string>(params.row[fieldName]);
