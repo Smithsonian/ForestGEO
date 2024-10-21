@@ -234,7 +234,16 @@ export default function UploadParent(props: UploadParentProps) {
 
           for (const [index, row] of results.data.entries()) {
             const rowId = `row-${index}`;
-            updatedFileRowSet[rowId] = row;
+            const updatedRow: FileRow = { ...row };
+
+            expectedHeaders.forEach(header => {
+              const headerLabel = header.label;
+              if (!(headerLabel in row)) {
+                updatedRow[header.label] = null;
+              }
+            });
+
+            updatedFileRowSet[rowId] = updatedRow;
 
             const rowErrors: FileRow = {};
             let hasError = false;
