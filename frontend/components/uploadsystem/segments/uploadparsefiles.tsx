@@ -2,7 +2,8 @@
 import { Alert, Box, DialogActions, DialogContent, DialogTitle, List, ListItem, Modal, ModalDialog, Stack, Tooltip, Typography } from '@mui/joy';
 import { UploadParseFilesProps } from '@/config/macros/uploadsystemmacros';
 import { getTableHeaders } from '@/config/macros/formdetails';
-import { Button, Grid } from '@mui/material';
+import { Button } from '@mui/material';
+import Grid from '@mui/material/Grid2';
 import { DropzoneLogic } from '@/components/uploadsystemhelpers/dropzone';
 import { FileList } from '@/components/uploadsystemhelpers/filelist';
 import { LoadingButton } from '@mui/lab';
@@ -43,7 +44,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   return (
     <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
       <Grid container spacing={2}>
-        <Grid item xs={6}>
+        <Grid size={6}>
           <Box sx={{ display: 'flex', flexDirection: 'column', mb: 10, mr: 10 }}>
             <DropzoneLogic onChange={handleFileChange} />
             <Modal open={Boolean(fileToReplace)} onClose={() => setFileToReplace(null)}>
@@ -69,7 +70,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
             </Modal>
           </Box>
         </Grid>
-        <Grid item xs={6}>
+        <Grid size={6}>
           <Stack direction={'column'} sx={{ display: 'flex', flexDirection: 'column', mb: 10 }}>
             <Typography sx={{ mb: 2 }}>
               You have selected {uploadForm}. Please ensure that your file has the following headers before continuing: <br />
