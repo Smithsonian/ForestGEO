@@ -50,14 +50,14 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
   '& .MuiSelect-select': {
     display: 'flex',
     alignItems: 'center',
-    padding: '0 4px' // Adjust padding to reduce space
+    padding: '0 4px'
   },
   '& .MuiSelect-icon': {
-    fontSize: '12px', // Adjust icon size
-    marginLeft: '4px' // Adjust margin to reduce space between text and icon
+    fontSize: '12px',
+    marginLeft: '4px'
   },
   '& .MuiSelect-root': {
-    fontSize: '12px', // Adjust font size as needed
-    padding: '4px 0' // Adjust padding to reduce space
+    fontSize: '12px',
+    padding: '4px 0'
   }
 }));
