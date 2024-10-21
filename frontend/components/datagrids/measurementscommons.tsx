@@ -211,19 +211,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     const errorFields = error.validationErrorIDs.flatMap(id => errorMapping[id.toString()] || []);
     return errorFields.includes(colField);
   };
+
   const rowHasError = (rowId: GridRowId) => {
     if (!rows || rows.length === 0) return false;
     return gridColumns.some(column => cellHasError(column.field, rowId));
   };
+
   const fetchErrorRows = async () => {
     if (!rows || rows.length === 0) return [];
     return rows.filter(row => rowHasError(row.id));
   };
+
   const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
     const row = rows.find(row => rowId === row.id);
     const error = validationErrors[row?.coreMeasurementID];
-    console.log('error: ', error);
-    console.log('validationerrorids: ', validationErrors);
     return error.validationErrorIDs.map(id => {
       const index = error.validationErrorIDs.indexOf(id);
       return error.descriptions[index]; // Assumes that descriptions are stored in the CMError object
@@ -510,7 +511,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setRefresh(true);
     await fetchPaginatedData(paginationModel.page);
     setRefresh(false);
-  }, [fetchPaginatedData, paginationModel.page]);
+  }, [fetchPaginatedData, paginationModel.page, refresh]);
 
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
@@ -631,8 +632,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         : {};
 
       // Only update state if there is a difference
-      console.log('existing valerrors: ', validationErrors);
-      console.log('new valerrors: ', errorMap);
       if (JSON.stringify(validationErrors) !== JSON.stringify(errorMap)) {
         setValidationErrors(errorMap);
       }
@@ -683,10 +682,16 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     align: 'center',
     width: 50,
     renderCell: (params: GridCellParams) => {
-      const rowId = params.row.coremeasurementID;
+      console.log('val stat rendercell');
+      console.log('val stat params: ', params);
+      const rowId = params.row.coreMeasurementID;
+      console.log('rowId located: ', rowId);
       const validationError = validationErrors[Number(rowId)];
+      console.log('searched for val error: ', validationError);
       const isPendingValidation = rows.find(row => row.coreMeasurementID === rowId)?.isValidated && !validationError;
+      console.log('pending validation? ', isPendingValidation);
       const isValidated = params.row.isValidated;
+      console.log('is validated?', isValidated);
 
       if (validationError) {
         return (
@@ -782,7 +787,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       //   }
       // };
     });
-    console.log('common columns', commonColumns);
     if (locked) {
       return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
@@ -931,7 +935,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 handleExportErrors: handleExportErrors
               }
             }}
-            autoHeight
             getRowHeight={() => 'auto'}
             getRowClassName={getRowClassName}
             isCellEditable={() => !locked}
