@@ -1,6 +1,6 @@
 {
   "name": "forestgeo-app",
-  "version": "baobab",
+  "version": "development",
   "private": true,
   "overrides": {
     "glob": "^10.3.10",
