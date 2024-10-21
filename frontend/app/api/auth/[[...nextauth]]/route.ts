@@ -21,33 +21,26 @@ const handler = NextAuth({
   },
   callbacks: {
     async signIn({ user, profile, email: signInEmail }) {
-      console.log('callback -- signin');
       const azureProfile = profile as AzureADProfile;
       const userEmail = user.email || signInEmail || azureProfile.preferred_username;
-      console.log('user email: ', userEmail);
       if (typeof userEmail !== 'string') {
         console.error('User email is not a string:', userEmail);
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        console.log('getting connection');
         let conn, emailVerified, userStatus;
         try {
           conn = await getConn();
-          console.log('obtained');
           const query = `SELECT UserStatus FROM catalog.users WHERE Email = '${userEmail}' LIMIT 1`;
           const results = await runQuery(conn, query);
-          console.log('results: ', results);
 
           // emailVerified is true if there is at least one result
           emailVerified = results.length > 0;
-          console.log('emailVerified: ', emailVerified);
           if (!emailVerified) {
             console.error('User email not found.');
             return false;
           }
           userStatus = results[0].UserStatus;
-          console.log('userStatus: ', userStatus);
         } catch (e: any) {
           console.error('Error fetching user status:', e);
           throw new Error('Failed to fetch user status.');
@@ -66,7 +59,6 @@ const handler = NextAuth({
 
         user.sites = allowedSites;
         user.allsites = allSites;
-        // console.log('all sites: ', user.allsites);
       }
       return true;
     },

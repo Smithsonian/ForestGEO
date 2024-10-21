@@ -48,22 +48,22 @@ jobs:
           echo OWNER=${{ secrets.OWNER }} >> frontend/.env
           echo REPO=${{ secrets.REPO }} >> frontend/.env
 
-      - name: Cache node modules
-        uses: actions/cache@v2
-        with:
-          path: frontend/node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+#      - name: Cache node modules
+#        uses: actions/cache@v2
+#        with:
+#          path: frontend/node_modules
+#          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+#          restore-keys: |
+#            ${{ runner.os }}-node-
 
-      - name: Cache Next.js build
-        uses: actions/cache@v2
-        with:
-          path: frontend/build/cache
-          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/.next/cache') }}
-          restore-keys: |
-            ${{ runner.os }}-next-
-            ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}
+#      - name: Cache Next.js build
+#        uses: actions/cache@v2
+#        with:
+#          path: frontend/build/cache
+#          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/.next/cache') }}
+#          restore-keys: |
+#            ${{ runner.os }}-next-
+#            ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}
 
       - name: move into frontend --> npm install, build, and test
         run: |
