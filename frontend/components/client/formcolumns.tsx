@@ -1,6 +1,6 @@
 'use client';
 
-import { GridColDef, GridRenderEditCellParams, useGridApiContext, useGridApiRef } from '@mui/x-data-grid';
+import { GridColDef, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
 import { formatHeader } from '@/components/client/datagridcolumns';
 import moment from 'moment/moment';
@@ -12,25 +12,44 @@ import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 
-const renderDatePicker = (params: GridRenderEditCellParams) => {
+export const renderDatePicker = (params: GridRenderEditCellParams) => {
   const convertedValue = params.row.date ? moment(params.row.date, 'YYYY-MM-DD') : null;
   if (!convertedValue) return <></>;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      <DatePicker label={'Recorded Date'} value={convertedValue} disabled />
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100%',
+        height: '100%',
+        padding: '0'
+      }}
+    >
+      <Input
+        size={'lg'}
+        value={convertedValue.format('MM-DD-YYYY')}
+        disabled
+        sx={{
+          textAlign: 'center',
+          width: '100%',
+          overflow: 'hidden'
+        }}
+      />
     </Box>
   );
 };
 
-const renderEditDatePicker = (params: GridRenderEditCellParams) => {
-  const apiRef = useGridApiRef();
+export const renderEditDatePicker = (params: GridRenderEditCellParams) => {
+  const apiRef = useGridApiContext();
   const { id, row } = params;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center', marginY: 1 }}>
       <DatePicker
         label={'Recorded Date'}
+        slotProps={{ textField: { size: 'small' } }}
         value={moment(row.date, 'YYYY-MM-DD')}
         onChange={newValue => {
           apiRef.current.setEditCellValue({ id, field: 'date', value: newValue ? newValue.format('YYYY-MM-DD') : null });
@@ -666,10 +685,10 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
   },
   {
     field: 'coordinateunit',
-    headerName: 'Coordinate Units',
+    headerName: '<= Units',
     headerClassName: 'header',
-    renderHeader: () => formatHeader('Coordinate', 'Units'),
-    flex: 1.5,
+    // renderHeader: () => formatHeader('Coordinate', 'Units'),
+    flex: 0.5,
     align: 'center',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
@@ -685,10 +704,10 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
   },
   {
     field: 'dbhunit',
-    headerName: 'DBH Units',
+    headerName: '<= Units',
     headerClassName: 'header',
-    renderHeader: () => formatHeader('DBH', 'Units'),
-    flex: 1.5,
+    // renderHeader: () => formatHeader('DBH', 'Units'),
+    flex: 0.5,
     align: 'center',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'dbhunit'} isArea={false} />
@@ -704,30 +723,12 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
   },
   {
     field: 'homunit',
-    headerName: 'HOM Units',
+    headerName: '<= Units',
     headerClassName: 'header',
-    renderHeader: () => formatHeader('HOM', 'Units'),
-    flex: 1.5,
+    // renderHeader: () => formatHeader('HOM', 'Units'),
+    flex: 0.5,
     align: 'center',
     editable: true,
     renderEditCell: params => <EditUnitsCell {...params} fieldName={'homunit'} isArea={false} />
-  },
-  {
-    field: 'date',
-    headerName: 'Date',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'center',
-    editable: true,
-    renderCell: renderDatePicker,
-    renderEditCell: renderEditDatePicker
-  },
-  {
-    field: 'codes',
-    headerName: 'Codes',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'center',
-    editable: true
   }
 ];
