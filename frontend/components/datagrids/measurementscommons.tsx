@@ -71,7 +71,16 @@ function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, handleExportCSV, locked, filterModel }: EditToolbarProps) => {
+const EditToolbar = ({
+  handleAddNewRow,
+  handleRefresh,
+  handleExportAll,
+  handleExportErrors,
+  handleExportCSV,
+  handleRunValidations,
+  locked,
+  filterModel
+}: EditToolbarProps) => {
   const handleExportClick = async () => {
     if (!handleExportAll) return;
     const fullData = await handleExportAll(filterModel);
@@ -120,6 +129,9 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
       <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
         Export Form CSV
       </Button>
+      {/*<Button color={'primary'} startIcon={<Quiz />} onClick={handleRunValidations}>*/}
+      {/*  Run Validations*/}
+      {/*</Button>*/}
     </GridToolbarContainer>
   );
 };
@@ -559,7 +571,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const handleRefresh = useCallback(async () => {
     setRefresh(true);
-    await fetchPaginatedData(paginationModel.page);
+    await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName}`, { method: 'POST' });
+    setTimeout(async () => {
+      await fetchPaginatedData(paginationModel.page);
+    }, 2000);
     setRefresh(false);
   }, [fetchPaginatedData, paginationModel.page, refresh]);
 
