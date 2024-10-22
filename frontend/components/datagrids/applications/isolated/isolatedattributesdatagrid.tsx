@@ -9,6 +9,7 @@ import { AttributeGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function IsolatedAttributesDataGrid() {
   const initialAttributesRDSRow = {
@@ -21,6 +22,7 @@ export default function IsolatedAttributesDataGrid() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const { data: session } = useSession();
+  const currentSite = useSiteContext();
 
   return (
     <>
