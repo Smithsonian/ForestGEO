@@ -26,7 +26,11 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       if (columns.includes('censusID')) rowData['censusID'] = subProps.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
-      const values = columns.map(fileColumn => rowData[fileColumn]);
+      const values = columns.map(fileColumn => {
+        const value = rowData[fileColumn];
+        if (typeof value === 'string' && value === '') return null;
+        return value;
+      });
       const query = `
         INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
         VALUES (${placeholders}) ON DUPLICATE KEY

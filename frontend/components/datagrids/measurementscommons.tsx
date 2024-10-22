@@ -209,7 +209,25 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     data.forEach((row: any) => {
       const values = getTableHeaders(FormType.measurements)
         .map(rowHeader => rowHeader.label)
-        .map(header => row[header]);
+        .map(header => row[header])
+        .map(value => {
+          if (value === undefined || value === null || value === '') {
+            return null;
+          }
+          if (typeof value === 'number') {
+            return value;
+          }
+          const parsedValue = parseFloat(value);
+          if (!isNaN(parsedValue)) {
+            return parsedValue;
+          }
+          if (typeof value === 'string') {
+            value = value.replace(/"/g, '""');
+            value = `"${value}"`;
+          }
+
+          return value;
+        });
       csvRows += values.join(',') + '\n';
     });
     const blob = new Blob([csvRows], {

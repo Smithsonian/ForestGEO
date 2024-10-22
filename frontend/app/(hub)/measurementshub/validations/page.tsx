@@ -62,7 +62,6 @@ export default function ValidationsPage() {
       try {
         const response = await fetch('/api/validations/crud', { method: 'GET' });
         const data = await response.json();
-        console.log('data: ', data);
         setGlobalValidations(data);
       } catch (err) {
         console.error('Error fetching validations:', err);

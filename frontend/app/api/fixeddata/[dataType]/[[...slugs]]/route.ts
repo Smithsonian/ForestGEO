@@ -365,7 +365,6 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   let conn: PoolConnection | null = null;
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
-  console.log('newrow: ', newRow);
   try {
     conn = await getConn();
     await conn.beginTransaction();
