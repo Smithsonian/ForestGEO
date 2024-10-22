@@ -5,7 +5,6 @@ import { HTTPResponses } from '@/config/macros';
 export async function POST(request: NextRequest, { params }: { params: { validationProcedureName: string } }) {
   try {
     const { schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH, minHOM, maxHOM } = await request.json();
-    console.log('data: ', schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH, minHOM, maxHOM);
 
     // Execute the validation procedure using the provided inputs
     const validationResponse = await runValidation(validationProcedureID, params.validationProcedureName, schema, cursorQuery, {

@@ -169,10 +169,7 @@ export async function handleUpsert<Result>(
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
 
-  console.log('handleUpsert data:', data);
-
   const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
-  console.log('handleUpsert query:', query);
 
   const result = await runQuery(connection, query, Object.values(data));
 
@@ -190,9 +187,6 @@ export async function handleUpsert<Result>(
 
     const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
     const values = Object.values(data).filter(value => value !== null);
-
-    console.log('handleUpsert findExisting query:', findExistingQuery);
-    console.log('handleUpsert findExisting values:', values);
 
     const searchResult = await runQuery(connection, findExistingQuery, values);
 

@@ -24,6 +24,7 @@ export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
+    speciesID: false,
     familyID: false,
     genusID: false,
     speciesLimits: false
@@ -73,6 +74,7 @@ export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;
 
 export function getMeasurementsSummaryViewHCs(): ColumnStates {
   return {
+    coreMeasurementID: false,
     plotID: false,
     censusID: false,
     quadratID: false,
@@ -131,6 +133,7 @@ export type StemTaxonomiesViewResult = ResultType<StemTaxonomiesViewRDS>;
 
 export function getStemTaxonomiesViewHCs(): ColumnStates {
   return {
+    stemID: false,
     treeID: false,
     speciesID: false,
     familyID: false,

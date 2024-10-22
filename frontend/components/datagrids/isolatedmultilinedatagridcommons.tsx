@@ -47,8 +47,8 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     rowsBeforeChange: {}
   });
 
-  const columns = useMemo<GridColDef[]>(
-    () => [
+  const columns = useMemo<GridColDef[]>(() => {
+    let baseColumns: GridColDef[] = [
       {
         field: 'actions',
         headerName: 'Actions',
@@ -80,33 +80,40 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
                   unsavedChangesRef.current.rowsBeforeChange[id] = row;
                 }
                 setHasUnsavedRows(true);
-                apiRef.current.updateRows([row]); // to trigger row render
+                apiRef.current.updateRows([row]);
               }}
             />
           ];
         }
       },
-      ...gridColumns,
-      {
-        field: 'date',
-        headerName: 'Date',
-        headerClassName: 'header',
-        flex: 1,
-        editable: true,
-        renderCell: renderDatePicker,
-        renderEditCell: renderEditDatePicker
-      },
-      {
-        field: 'codes',
-        headerName: 'Codes',
-        headerClassName: 'header',
-        flex: 1,
-        align: 'center',
-        editable: true
-      }
-    ],
-    [gridColumns, unsavedChangesRef, apiRef, setRows]
-  );
+      ...gridColumns
+    ];
+
+    if (gridType === 'measurements') {
+      baseColumns = [
+        ...baseColumns,
+        {
+          field: 'date',
+          headerName: 'Date',
+          headerClassName: 'header',
+          flex: 1,
+          editable: true,
+          renderCell: renderDatePicker,
+          renderEditCell: renderEditDatePicker
+        },
+        {
+          field: 'codes',
+          headerName: 'Codes',
+          headerClassName: 'header',
+          flex: 1,
+          align: 'center',
+          editable: true
+        }
+      ];
+    }
+
+    return baseColumns;
+  }, [gridColumns, gridType, unsavedChangesRef, apiRef, setHasUnsavedRows]);
 
   const processRowUpdate = useCallback<NonNullable<DataGridProps['processRowUpdate']>>((newRow, oldRow) => {
     const rowId = newRow.id;

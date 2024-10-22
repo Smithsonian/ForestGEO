@@ -241,7 +241,25 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         aData.forEach((row: any) => {
           const values = getTableHeaders(FormType.attributes)
             .map(rowHeader => rowHeader.label)
-            .map(header => row[header]);
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
           aCSVRows += values.join(',') + '\n';
         });
         const aBlob = new Blob([aCSVRows], {
@@ -268,7 +286,25 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         qData.forEach((row: any) => {
           const values = getTableHeaders(FormType.quadrats)
             .map(rowHeader => rowHeader.label)
-            .map(header => row[header]);
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
           qCSVRows += values.join(',') + '\n';
         });
         const qBlob = new Blob([qCSVRows], {
@@ -295,7 +331,25 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         pData.forEach((row: any) => {
           const values = getTableHeaders(FormType.personnel)
             .map(rowHeader => rowHeader.label)
-            .map(header => row[header]);
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
           pCSVRows += values.join(',') + '\n';
         });
         const pBlob = new Blob([pCSVRows], {
@@ -323,7 +377,25 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         sData.forEach((row: any) => {
           const values = getTableHeaders(FormType.species)
             .map(rowHeader => rowHeader.label)
-            .map(header => row[header]);
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
           sCSVRows += values.join(',') + '\n';
         });
         const sBlob = new Blob([sCSVRows], {
