@@ -171,6 +171,7 @@ export interface EditToolbarCustomProps {
   handleRefresh?: () => Promise<void>;
   handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
   handleExportCSV?: () => Promise<void>;
+  handleRunValidations?: () => Promise<void>;
   filterModel?: GridFilterModel;
   locked?: boolean;
 }
