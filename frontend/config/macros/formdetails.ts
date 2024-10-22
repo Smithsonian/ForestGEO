@@ -77,7 +77,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string }[]> = {
   [FormType.arcgis_xlsx]: arcgisHeaders
 };
 
-export function getTableHeaders(formType: FormType, _usesSubquadrats: boolean): { label: string }[] {
+export function getTableHeaders(formType: FormType, _usesSubquadrats = false): { label: string }[] {
   return TableHeadersByFormType[formType];
 }
 

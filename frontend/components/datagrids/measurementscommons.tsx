@@ -27,7 +27,6 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import FileDownloadTwoToneIcon from '@mui/icons-material/FileDownloadTwoTone';
 import Box from '@mui/joy/Box';
 import { Stack, Tooltip, Typography } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
@@ -59,6 +58,8 @@ import { useSession } from 'next-auth/react';
 
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
+import { FileDownloadSharp, FileDownloadTwoTone } from '@mui/icons-material';
+import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -70,7 +71,7 @@ function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, locked, filterModel }: EditToolbarProps) => {
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, handleExportCSV, locked, filterModel }: EditToolbarProps) => {
   const handleExportClick = async () => {
     if (!handleExportAll) return;
     const fullData = await handleExportAll(filterModel);
@@ -113,8 +114,11 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
       <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
         Export Full Data
       </Button>
-      <Button color="primary" startIcon={<FileDownloadTwoToneIcon />} onClick={handleExportErrorsClick}>
+      <Button color="primary" startIcon={<FileDownloadSharp />} onClick={handleExportErrorsClick}>
         Export Errors
+      </Button>
+      <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
+        Export Form CSV
       </Button>
     </GridToolbarContainer>
   );
@@ -191,6 +195,34 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   useSession();
 
   const apiRef = useGridApiRef();
+
+  const exportAllCSV = useCallback(async () => {
+    const response = await fetch(
+      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+      { method: 'GET' }
+    );
+    const data = await response.json();
+    let csvRows =
+      getTableHeaders(FormType.measurements)
+        .map(row => row.label)
+        .join(',') + '\n';
+    data.forEach((row: any) => {
+      const values = getTableHeaders(FormType.measurements)
+        .map(rowHeader => rowHeader.label)
+        .map(header => row[header]);
+      csvRows += values.join(',') + '\n';
+    });
+    const blob = new Blob([csvRows], {
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `measurementsform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [currentPlot, currentCensus, currentSite, gridType]);
 
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
@@ -932,7 +964,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
-                handleExportErrors: handleExportErrors
+                handleExportErrors: handleExportErrors,
+                handleExportCSV: exportAllCSV
               }
             }}
             getRowHeight={() => 'auto'}

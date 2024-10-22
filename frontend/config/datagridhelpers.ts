@@ -170,6 +170,7 @@ export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
   handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
+  handleExportCSV?: () => Promise<void>;
   filterModel?: GridFilterModel;
   locked?: boolean;
 }
