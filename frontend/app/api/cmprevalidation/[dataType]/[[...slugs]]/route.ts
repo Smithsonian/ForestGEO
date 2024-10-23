@@ -94,10 +94,6 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           });
 
         break;
-      case 'measurementssummary':
-        const msQuery = `CALL ${schema}.RefreshMeasurementsSummary();`;
-        const msResults = await runQuery(connection, msQuery);
-        break;
       default:
         return new NextResponse(null, {
           status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE

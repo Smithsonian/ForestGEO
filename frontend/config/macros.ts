@@ -105,8 +105,6 @@ export type UnifiedValidityFlags = {
   species: boolean;
   quadrats: boolean;
   quadratpersonnel: boolean;
-  measurementssummary: boolean;
-  viewfulltable: boolean;
 };
 
 export type GridSelections = {

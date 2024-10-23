@@ -142,15 +142,15 @@ export default function ViewFullTableDataGrid() {
   async function reloadVFT() {
     setLoading(true, 'Refreshing Historical View...');
     const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-    if (!response.ok) throw new Error('Historical View Refresh failure');
     await new Promise(resolve => setTimeout(resolve, 1000));
+    if (!response.ok) throw new Error('Historical View Refresh failure');
   }
 
   useEffect(() => {
     reloadVFT()
       .catch(console.error)
       .then(() => setLoading(false));
-  }, []);
+  }, [refresh]);
 
   return (
     <>
