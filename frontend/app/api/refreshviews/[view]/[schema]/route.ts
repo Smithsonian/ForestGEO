@@ -11,6 +11,7 @@ export async function POST(_request: NextRequest, { params }: { params: { view: 
     connection = await getConn();
     const query = `CALL ${schema}.Refresh${view === 'viewfulltable' ? 'ViewFullTable' : view === 'measurementssummary' ? 'MeasurementsSummary' : ''}();`;
     await runQuery(connection, query);
+    connection.release();
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     console.error('Error:', e);

@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
       validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
       descriptions: row.Descriptions.split(',')
     }));
+    conn.release();
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error: any) {
+    conn?.release();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

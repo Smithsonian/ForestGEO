@@ -35,6 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: { changelo
     }
 
     const results = await runQuery(conn, query, [plotID, plotID, pcn]);
+    conn.release();
     return new NextResponse(results.length > 0 ? JSON.stringify(MapperFactory.getMapper<any, any>(params.changelogType).mapData(results)) : null, {
       status: HTTPResponses.OK
     });

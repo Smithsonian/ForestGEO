@@ -22,6 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
       LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialSpeciesCode === '' ? [] : [`%${partialSpeciesCode}%`];
     const results = await runQuery(conn, query, queryParams);
+    conn.release();
     return new NextResponse(JSON.stringify(results.map((row: any) => row.SpeciesCode)), { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error in GET Quadrats:', error.message || error);

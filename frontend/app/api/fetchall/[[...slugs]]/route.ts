@@ -64,6 +64,7 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
   try {
     conn = await getConn();
     const results = await runQuery(conn, query);
+    conn.release();
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error) {
     console.error('Error:', error);

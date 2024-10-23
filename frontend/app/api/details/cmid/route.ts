@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
         WHERE
             cm.CoreMeasurementID = ?;`;
     const results = await runQuery(conn, query, [cmID]);
+    conn.release();
     return new NextResponse(
       JSON.stringify(
         results.map((row: any) => ({

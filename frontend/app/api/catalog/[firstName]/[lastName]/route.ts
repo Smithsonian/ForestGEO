@@ -16,6 +16,7 @@ export async function GET(_request: NextRequest, { params }: { params: { firstNa
     if (results.length === 0) {
       throw new Error('User not found');
     }
+    conn.release();
     return new NextResponse(JSON.stringify(results[0].UserID), { status: HTTPResponses.OK });
   } catch (e: any) {
     console.error('Error in GET request:', e.message);

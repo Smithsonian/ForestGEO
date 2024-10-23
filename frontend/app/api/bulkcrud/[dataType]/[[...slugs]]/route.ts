@@ -38,6 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       };
       console.log('assembled props: ', props);
       await insertOrUpdate(props);
+      conn.release();
     }
   } catch (e: any) {
     return new NextResponse(

@@ -11,6 +11,7 @@ export async function GET(_request: NextRequest) {
     conn = await getConn();
     const query = `SELECT * FROM catalog.validationprocedures;`;
     const results = await runQuery(conn, query);
+    conn.release();
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('validationprocedures').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
@@ -29,9 +30,11 @@ export async function POST(request: NextRequest) {
     const insertQuery = format('INSERT INTO ?? SET ?', [`catalog.validationprocedures`, validationProcedure]);
     const results = await runQuery(conn, insertQuery);
     const insertID = results.insertId;
+    conn.release();
     return NextResponse.json({ insertID }, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
+    conn?.release();
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     if (conn) conn.release();
@@ -50,9 +53,11 @@ export async function PATCH(request: NextRequest) {
       validationProcedure.validationID
     ]);
     await runQuery(conn, updateQuery);
+    conn.release();
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
+    conn?.release();
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     if (conn) conn.release();
@@ -66,9 +71,11 @@ export async function DELETE(request: NextRequest) {
     conn = await getConn();
     const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`catalog.validationprocedures`, validationProcedure.validationID]);
     await runQuery(conn, deleteQuery);
+    conn.release();
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
+    conn?.release();
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     if (conn) conn.release();

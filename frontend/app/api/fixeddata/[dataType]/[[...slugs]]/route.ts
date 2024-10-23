@@ -3,12 +3,7 @@ import MapperFactory from '@/config/datamapper';
 import { handleError } from '@/utils/errorhandler';
 import { format, PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  AllTaxonomiesViewQueryConfig,
-  handleDeleteForSlices,
-  handleUpsertForSlices,
-  StemTaxonomiesViewQueryConfig
-} from '@/components/processors/processorhelperfunctions';
+import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros'; // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
@@ -55,7 +50,6 @@ export async function GET(
       case 'species':
       case 'stems':
       case 'alltaxonomiesview':
-      case 'stemtaxonomiesview':
       case 'quadratpersonnel':
       case 'sitespecificvalidations':
       case 'roles':
@@ -194,6 +188,7 @@ export async function GET(
       const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemID']; // Define unique keys that should match
       const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join('|'));
       const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
+      conn.release();
       return new NextResponse(
         JSON.stringify({
           output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
@@ -203,6 +198,7 @@ export async function GET(
         { status: HTTPResponses.OK }
       );
     } else {
+      conn.release();
       return new NextResponse(
         JSON.stringify({
           output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
@@ -214,6 +210,7 @@ export async function GET(
     }
   } catch (error: any) {
     if (conn) await conn.rollback();
+    conn?.release();
     throw new Error(error);
   } finally {
     if (conn) conn.release();
@@ -249,9 +246,6 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
           break;
-        case 'stemtaxonomiesview':
-          queryConfig = StemTaxonomiesViewQueryConfig;
-          break;
         default:
           throw new Error('Incorrect view call');
       }
@@ -283,6 +277,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
 
     // Commit the transaction and return the standardized response
     await conn.commit();
+    conn.release();
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
     return handleError(error, conn, newRow);
@@ -307,14 +302,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     await conn.beginTransaction();
 
     // Handle views with handleUpsertForSlices (applies to both insert and update logic)
-    if (['alltaxonomiesview', 'stemtaxonomiesview'].includes(params.dataType)) {
+    if (params.dataType === 'alltaxonomiesview') {
       let queryConfig;
       switch (params.dataType) {
         case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        case 'stemtaxonomiesview':
-          queryConfig = StemTaxonomiesViewQueryConfig;
           break;
         default:
           throw new Error('Incorrect view call');
@@ -347,6 +339,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
     // Commit the transaction
     await conn.commit();
 
+    conn.release();
     // Return a standardized response with updated IDs
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
@@ -370,7 +363,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     await conn.beginTransaction();
 
     // Handle deletion for views
-    if (['alltaxonomiesview', 'stemtaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
+    if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
       const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
 
       // Prepare query configuration based on view
@@ -378,9 +371,6 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       switch (params.dataType) {
         case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        case 'stemtaxonomiesview':
-          queryConfig = StemTaxonomiesViewQueryConfig;
           break;
         default:
           throw new Error('Incorrect view call');
@@ -404,8 +394,10 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await runQuery(conn, deleteQuery);
     await conn.commit();
+    conn.release();
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
+    conn?.release();
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
       const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';

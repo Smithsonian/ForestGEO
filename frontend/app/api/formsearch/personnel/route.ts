@@ -22,7 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
       LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialLastName === '' ? [] : [`%${partialLastName}%`];
     const results = await runQuery(conn, query, queryParams);
-
+    conn.release();
     // Properly mapping results to return an array of { label, code }
     return new NextResponse(JSON.stringify(results.map((row: any) => `${row.FirstName} ${row.LastName}`)), { status: HTTPResponses.OK });
   } catch (error: any) {

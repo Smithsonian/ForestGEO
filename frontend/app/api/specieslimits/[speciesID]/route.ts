@@ -14,8 +14,10 @@ export async function GET(request: NextRequest, { params }: { params: { speciesI
     conn = await getConn();
     const query = `SELECT * FROM ${schema}.specieslimits WHERE SpeciesID = ?`;
     const results = await runQuery(conn, query, [params.speciesID]);
+    conn.release();
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('specieslimits').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
+    conn?.release();
     throw new Error(error);
   } finally {
     if (conn) conn.release();
@@ -35,8 +37,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { specie
     const { ['SpeciesLimitID']: gridIDKey, ...remainingProperties } = newRowData;
     const query = `UPDATE ${schema}.specieslimits SET ? WHERE ?? = ?`;
     const results = await runQuery(conn, query, [remainingProperties, 'SpeciesLimitID', gridIDKey]);
+    conn.release();
   } catch (e: any) {
     await conn?.rollback();
+    conn?.release();
     throw new Error(e);
   } finally {
     if (conn) conn.release();

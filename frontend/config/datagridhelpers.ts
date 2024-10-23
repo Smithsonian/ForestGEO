@@ -3,12 +3,7 @@
  */
 // datagridhelpers.ts
 import { getQuadratHCs } from '@/config/sqlrdsdefinitions/zones';
-import {
-  getAllTaxonomiesViewHCs,
-  getAllViewFullTableViewsHCs,
-  getMeasurementsSummaryViewHCs,
-  getStemTaxonomiesViewHCs
-} from '@/config/sqlrdsdefinitions/views';
+import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
@@ -78,10 +73,6 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getMeasurementsSummaryViewHCs()
   },
-  stemtaxonomiesview: {
-    id: false,
-    ...getStemTaxonomiesViewHCs()
-  },
   coremeasurements: {
     id: false,
     ...getCoreMeasurementsHCs()
@@ -137,8 +128,6 @@ export function getGridID(gridType: string): string {
     case 'measurementssummary': // materialized view --> should not be modified
     case 'viewfulltable': // materialized view --> should not be modified
       return 'coreMeasurementID';
-    case 'stemtaxonomiesview':
-      return 'stemID';
     case 'attributes':
       return 'code';
     case 'census':

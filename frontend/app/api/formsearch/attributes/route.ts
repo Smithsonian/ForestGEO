@@ -15,7 +15,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<string[]>>
         : `SELECT DISTINCT Code FROM ${schema}.attributes WHERE Code LIKE ? ORDER BY Code LIMIT ${FORMSEARCH_LIMIT}`;
     const queryParams = partialCode === '' ? [] : [`%${partialCode}%`];
     const results = await runQuery(conn, query, queryParams);
-
+    conn.release();
     return new NextResponse(JSON.stringify(results.map((row: any) => row.Code)), { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error in GET Attributes:', error.message || error);

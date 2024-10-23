@@ -10,7 +10,9 @@ const initialValidityState: UnifiedValidityFlags = {
   personnel: false,
   species: false,
   quadrats: false,
-  quadratpersonnel: false
+  quadratpersonnel: false,
+  measurementssummary: false,
+  viewfulltable: false
 };
 
 const DataValidityContext = createContext<{

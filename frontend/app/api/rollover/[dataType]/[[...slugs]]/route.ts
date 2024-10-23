@@ -56,10 +56,12 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         throw new Error('Invalid data type');
     }
     await conn.commit(); // testing
+    conn.release();
     return new NextResponse(JSON.stringify({ message: 'Rollover successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {
     await conn?.rollback();
     console.error('Error in rollover API:', error.message);
+    conn?.release();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
