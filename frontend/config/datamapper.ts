@@ -25,8 +25,6 @@ import {
   AllTaxonomiesViewResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
-  StemTaxonomiesViewRDS,
-  StemTaxonomiesViewResult,
   ViewFullTableRDS,
   ViewFullTableResult
 } from '@/config/sqlrdsdefinitions/views';
@@ -243,8 +241,6 @@ class MapperFactory {
         return new GenericMapper<SpeciesLimitsRDS, SpeciesLimitsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'specimens':
         return new GenericMapper<SpecimensRDS, SpecimensResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'stemtaxonomiesview':
-        return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':

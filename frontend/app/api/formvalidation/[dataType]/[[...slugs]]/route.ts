@@ -22,6 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
     const query = `SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1`;
     const formatted = format(query, [`${schema}.${params.dataType}`, columnName, value]);
     const results = await runQuery(conn, formatted);
+    conn.release();
     if (results.length === 0) return new NextResponse(null, { status: 404 });
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (error: any) {

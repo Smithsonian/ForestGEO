@@ -42,13 +42,14 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
       acc[Name] = { id: ValidationProcedureID, description: Description, definition: Definition };
       return acc;
     }, {} as ValidationMessages);
-
+    conn.release();
     return new NextResponse(JSON.stringify({ coreValidations: validationMessages, siteValidations: siteValidationMessages }), {
       status: HTTPResponses.OK,
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
     console.error('Error in GET request:', error.message);
+    conn?.release();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

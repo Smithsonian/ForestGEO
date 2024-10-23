@@ -68,19 +68,6 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
           });
         break;
-      // case 'subquadrats':
-      //   const subquadratsQuery = `SELECT 1
-      //                           FROM ${schema}.${params.dataType} s
-      //                           JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-      //                           WHERE q.PlotID = ${plotID}
-      //                             AND q.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
-      //   const subquadratsResults = await runQuery(connection, subquadratsQuery);
-      //   if (connection) connection.release();
-      //   if (subquadratsResults.length === 0)
-      //     return new NextResponse(null, {
-      //       status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
-      //     });
-      //   break;
       case 'quadratpersonnel':
         // Validation for quadrats table
         const quadratsQuery = `SELECT 1
@@ -106,6 +93,10 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
           });
 
+        break;
+      case 'measurementssummary':
+        const msQuery = `CALL ${schema}.RefreshMeasurementsSummary();`;
+        const msResults = await runQuery(connection, msQuery);
         break;
       default:
         return new NextResponse(null, {

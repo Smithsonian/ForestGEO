@@ -18,7 +18,10 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
     const query = `SELECT QueryDefinition FROM ${schema}.postvalidationqueries WHERE QueryID = ${queryID}`;
     const results = await runQuery(conn, query);
 
-    if (results.length === 0) return new NextResponse('Query not found', { status: HTTPResponses.NOT_FOUND });
+    if (results.length === 0) {
+      conn.release();
+      return new NextResponse('Query not found', { status: HTTPResponses.NOT_FOUND });
+    }
 
     const replacements = {
       schema: schema,
@@ -37,7 +40,7 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
                             SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = 'success' 
                             WHERE QueryID = ${queryID}`;
     await runQuery(conn, successUpdate, [currentTime, successResults]);
-
+    conn.release();
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     if (e.message === 'failure') {
@@ -46,8 +49,10 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
                              SET LastRunAt = ?, LastRunStatus = 'failure' 
                              WHERE QueryID = ${queryID}`;
       await runQuery(conn, failureUpdate, [currentTime]);
+      conn.release();
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
+    conn.release();
     return new NextResponse('Internal Server Error', { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     if (conn) conn.release();

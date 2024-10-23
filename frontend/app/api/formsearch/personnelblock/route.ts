@@ -32,7 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<PersonnelR
       lastName: row.LastName,
       roleID: row.RoleID
     }));
-
+    conn.release();
     // Properly mapping results to return an array of { label, code }
     return new NextResponse(JSON.stringify(personnelRows), {
       status: HTTPResponses.OK
@@ -78,7 +78,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
     // Commit the transaction
     await conn.commit();
-
+    conn.release();
     return NextResponse.json({ message: 'Personnel updated successfully' }, { status: HTTPResponses.OK });
   } catch (error) {
     await conn?.rollback();

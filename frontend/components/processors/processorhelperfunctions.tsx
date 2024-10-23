@@ -73,9 +73,10 @@ export async function getAllSchemas(): Promise<SitesRDS[]> {
     `;
     const sitesParams: any[] | undefined = [];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
-
+    connection.release();
     return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
   } catch (error: any) {
+    connection?.release();
     throw new Error(error);
   } finally {
     if (connection) connection.release();
@@ -115,9 +116,10 @@ export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
     `;
     const sitesParams = [userID];
     const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
-
+    connection.release();
     return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
   } catch (error: any) {
+    connection?.release();
     throw new Error(error);
   } finally {
     if (connection) connection.release();
@@ -463,12 +465,14 @@ export async function runValidation(
     }
 
     await conn.commit();
+    conn.release();
     return {
       TotalRows: cursorResults.length,
       Message: `Validation completed successfully. Total rows processed: ${cursorResults.length}`
     };
   } catch (error: any) {
     await conn.rollback();
+    conn.release();
     console.error(`Error during ${validationProcedureName} validation:`, error.message);
     throw new Error(`${validationProcedureName} validation failed. Please check the logs for more details.`);
   } finally {
@@ -515,9 +519,11 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     const results = await runQuery(conn, getUpdatedRows);
     await runQuery(conn, dropTemp);
     await conn.commit();
+    conn.release();
     return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
     await conn.rollback();
+    conn?.release();
     console.error(`Error during updateValidatedRows:`, error.message);
     throw new Error(`updateValidatedRows failed. Please check the logs for more details.`);
   } finally {

@@ -31,6 +31,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           description: row.description,
           status: row.status
         }));
+        conn.release();
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'personnel':
         query = `SELECT p.FirstName AS FirstName, p.LastName AS LastName, r.RoleName AS RoleName, r.RoleDescription AS RoleDescription  
@@ -45,6 +46,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           role: row.RoleName,
           roledescription: row.RoleDescription
         }));
+        conn.release();
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'species':
         query = `SELECT DISTINCT s.SpeciesCode AS SpeciesCode, f.Family AS Family, 
@@ -69,6 +71,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           authority: row.SpeciesAuthority,
           subspeciesauthority: row.SubspeciesAuthority
         }));
+        conn.release();
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'quadrats':
         query = `SELECT * FROM ${schema}.quadrats q 
@@ -87,6 +90,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           areaunit: row.AreaUnits,
           quadratshape: row.QuadratShape
         }));
+        conn.release();
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
         query = `SELECT st.StemTag AS StemTag, t.TreeTag AS TreeTag, s.SpeciesCode AS SpeciesCode, q.QuadratName AS QuadratName, 
@@ -118,8 +122,10 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           date: row.MeasurementDate,
           codes: row.Codes
         }));
+        conn.release();
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:
+        conn.release();
         throw new Error('incorrect data type passed in');
     }
   } catch (e: any) {

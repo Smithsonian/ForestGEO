@@ -11,7 +11,9 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
   let conn: PoolConnection | null = null;
   try {
     conn = await getConn();
-    return new Response(JSON.stringify(await runQuery(conn, query, [schema])), { status: 200 });
+    const results = await runQuery(conn, query, [schema]);
+    conn.release();
+    return new Response(JSON.stringify(results), { status: 200 });
   } catch (e: any) {
     console.error('Error:', e);
     throw new Error('Call failed: ', e);

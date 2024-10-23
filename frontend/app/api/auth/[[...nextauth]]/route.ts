@@ -41,6 +41,7 @@ const handler = NextAuth({
             return false;
           }
           userStatus = results[0].UserStatus;
+          conn.release();
         } catch (e: any) {
           console.error('Error fetching user status:', e);
           throw new Error('Failed to fetch user status.');
