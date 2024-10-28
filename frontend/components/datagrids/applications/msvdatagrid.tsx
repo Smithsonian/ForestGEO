@@ -66,17 +66,26 @@ export default function MeasurementsSummaryViewDataGrid() {
   const { setLoading } = useLoading();
 
   async function reloadMSV() {
-    setLoading(true, 'Refreshing Measurements View...');
-    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    if (!response.ok) throw new Error('Measurements View Refresh failure');
+    try {
+      setLoading(true, 'Refreshing Measurements Summary View...');
+      const startTime = Date.now();
+      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+      if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
+      setLoading(true, 'Processing data...');
+      const data = await response.json();
+      const duration = (Date.now() - startTime) / 1000;
+      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    reloadMSV()
-      .catch(console.error)
-      .then(() => setLoading(false));
-  }, [refresh]);
+    reloadMSV();
+  }, []);
 
   const addNewRowToGrid = () => {
     const id = randomId();

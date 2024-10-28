@@ -140,16 +140,31 @@ export default function ViewFullTableDataGrid() {
   };
 
   async function reloadVFT() {
-    setLoading(true, 'Refreshing Historical View...');
-    const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    if (!response.ok) throw new Error('Historical View Refresh failure');
+    try {
+      setLoading(true, 'Refreshing Historical View...');
+      const startTime = Date.now();
+      const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+      if (!response.ok) throw new Error('Historical View Refresh failure');
+      setLoading(true, 'Processing data...');
+      const data = await response.json();
+      const duration = (Date.now() - startTime) / 1000;
+      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    reloadVFT()
-      .catch(console.error)
-      .then(() => setLoading(false));
+    let isMounted = true;
+    if (isMounted) {
+      reloadVFT();
+    }
+    return () => {
+      isMounted = false;
+    };
   }, [refresh]);
 
   return (

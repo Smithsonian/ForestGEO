@@ -32,9 +32,9 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     switch (params.dataType) {
       case 'quadrats':
         query = `
-          INSERT INTO censusquadrat (CensusID, QuadratID)
+          INSERT INTO ${schema}.censusquadrat (CensusID, QuadratID)
           SELECT ?, q.QuadratID
-          FROM quadrats q
+          FROM ${schema}.quadrats q
           WHERE q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
         queryParams = [Number(newCensusID), ...incoming];
         await runQuery(conn, query, queryParams);
