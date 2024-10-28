@@ -164,43 +164,51 @@ export async function handleUpsert<Result>(
   tableName: string,
   data: Partial<Result>,
   key: keyof Result
-): Promise<number> {
+): Promise<{ id: number; operation?: string }> {
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
+  let id: number = 0;
+  const operation: string = '';
 
-  const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+  try {
+    const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+    const result = await runQuery(connection, query, Object.values(data));
 
-  const result = await runQuery(connection, query, Object.values(data));
+    id = result.insertId;
 
-  let id = result.insertId;
+    // If insertId is 0, it means the row was updated, not inserted
+    if (id === 0) {
+      // Try to find the existing row based on the data provided
+      const whereConditions = Object.keys(data)
+        .map(field => {
+          const value = data[field as keyof Result];
+          return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
+        })
+        .join(' AND ');
 
-  // If insertId is 0, it means the row was updated, not inserted
-  if (id === 0) {
-    // Try to find the existing row based on the data provided
-    const whereConditions = Object.keys(data)
-      .map(field => {
-        const value = data[field as keyof Result];
-        return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
-      })
-      .join(' AND ');
+      const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
+      const values = Object.values(data).filter(value => value !== null);
 
-    const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
-    const values = Object.values(data).filter(value => value !== null);
+      const searchResult = await runQuery(connection, findExistingQuery, values);
 
-    const searchResult = await runQuery(connection, findExistingQuery, values);
-
-    if (searchResult.length > 0) {
-      // Return the primary key if the record is found
-      id = searchResult[0][key as keyof Result] as unknown as number;
-    } else {
-      // More detailed error information
-      console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
-      throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
+      if (searchResult.length > 0) {
+        // Return the primary key if the record is found
+        id = searchResult[0][key as keyof Result] as unknown as number;
+        return { id, operation: 'updated' };
+      } else {
+        // More detailed error information
+        console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
+        throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
+      }
     }
-  }
 
-  return id;
+    return { id, operation: 'inserted' };
+  } catch (e: any) {
+    console.log('error in handleUpsert: ', e.message);
+    createError(e.message, e);
+  }
+  return { id, operation }; // exiting return statement in case existing system does not trigger correctly
 }
 
 export function createError(message: string, context: any): Error {

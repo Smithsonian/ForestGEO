@@ -182,7 +182,7 @@ export async function handleUpsertForSlices<Result>(
     }
 
     // Perform the upsert and store the resulting ID
-    insertedIds[sliceKey] = await handleUpsert<Result>(connection, schema, sliceKey, rowData, primaryKey as keyof Result);
+    insertedIds[sliceKey] = (await handleUpsert<Result>(connection, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
   }
 
   return insertedIds;
@@ -482,7 +482,6 @@ export async function runValidation(
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const conn = await getConn();
-  const setVariables = `SET @p_CensusID = ?, @p_PlotID = ?;`;
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
   const insertTemp = `
     INSERT INTO UpdatedRows (CoreMeasurementID)
@@ -491,8 +490,8 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
     JOIN ${schema}.census c ON cm.CensusID = c.CensusID
     WHERE cm.IsValidated IS NULL
-    AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
-    AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);`;
+    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
+    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});`;
   const query = `
     UPDATE ${schema}.coremeasurements cm
     LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
@@ -503,7 +502,8 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
         ELSE cm.IsValidated  
     END
     WHERE cm.IsValidated IS NULL
-    AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);`;
+    AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows)
+    AND c.CensusID = ${params.p_CensusID} AND c.PlotID = ${params.p_PlotID};`;
   const getUpdatedRows = `
     SELECT cm.*
     FROM ${schema}.coremeasurements cm
@@ -512,7 +512,6 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
   try {
     await conn.beginTransaction();
     await runQuery(conn, dropTemp); // just in case
-    await runQuery(conn, setVariables, [params.p_CensusID || null, params.p_PlotID || null]);
     await runQuery(conn, tempTable);
     await runQuery(conn, insertTemp);
     await runQuery(conn, query);

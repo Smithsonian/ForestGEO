@@ -571,10 +571,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const handleRefresh = useCallback(async () => {
     setRefresh(true);
-    await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName}`, { method: 'POST' });
-    setTimeout(async () => {
-      await fetchPaginatedData(paginationModel.page);
-    }, 2000);
+    await fetchPaginatedData(paginationModel.page);
     setRefresh(false);
   }, [fetchPaginatedData, paginationModel.page, refresh]);
 

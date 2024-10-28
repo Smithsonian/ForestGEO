@@ -22,20 +22,44 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     if (tag) {
       // Handle Tree Upsert
-      const treeID = await handleUpsert<TreeResult>(connection, schema, 'trees', { TreeTag: tag, SpeciesID: speciesID }, 'TreeID');
+      const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(
+        connection,
+        schema,
+        'trees',
+        {
+          TreeTag: tag,
+          SpeciesID: speciesID
+        },
+        'TreeID'
+      );
+      console.log('tree tag: ', tag, ' was ', treeOperation, ' on ID # ', treeID);
 
       if (stemtag || lx || ly) {
+        let stemStatus: 'new recruit' | 'multistem' | 'old tree';
         // Handle Stem Upsert
-        const stemID = await handleUpsert<StemResult>(
+        const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(
           connection,
           schema,
           'stems',
           { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit },
           'StemID'
         );
+        console.log('stem tag: ', stemtag, ' was ', stemOperation, ' on ID # ', stemID);
+
+        if (stemOperation === 'inserted') {
+          stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
+        } else {
+          stemStatus = 'old tree';
+        }
+        console.log('stem status: ', stemStatus);
+
+        // Prepare additional fields for core measurements
+        const userDefinedFields = JSON.stringify({
+          treestemstate: { stem: stemOperation, tree: treeOperation, status: stemStatus }
+        });
 
         // Handle Core Measurement Upsert
-        const coreMeasurementID = await handleUpsert<CoreMeasurementsResult>(
+        const { id: coreMeasurementID } = await handleUpsert<CoreMeasurementsResult>(
           connection,
           schema,
           'coremeasurements',
@@ -49,7 +73,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             MeasuredHOM: hom ? parseFloat(hom) : null,
             HOMUnit: homunit,
             Description: null,
-            UserDefinedFields: null
+            UserDefinedFields: userDefinedFields // using this to track the operation on the tree and stem
           },
           'CoreMeasurementID'
         );
@@ -95,5 +119,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     await connection.rollback();
     console.error('Upsert failed:', error.message);
     throw error;
+  } finally {
+    if (connection) connection.release();
   }
 }

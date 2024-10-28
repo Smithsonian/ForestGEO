@@ -6,7 +6,7 @@ import { FileWithPath } from 'react-dropzone';
 import { Box, Button, Typography } from '@mui/material';
 import { Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
@@ -30,7 +30,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const hasUploaded = useRef(false);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const currentSite = useSiteContext();
 
   const mapCMErrorsToFileRowErrors = (fileName: string) => {
     return cmErrors
@@ -74,43 +73,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]
   );
 
-  const refreshViews = useCallback(
-    async (fileName: string) => {
-      try {
-        const errorMessages: string[] = []; // Track errors
-
-        // Refresh measurement summary view
-        setCurrentlyRunning(`Refreshing measurement summary view for "${fileName}"...`);
-        const refreshSummaryResponse = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName}`, { method: 'POST' });
-        if (!refreshSummaryResponse.ok) {
-          errorMessages.push('Failed to refresh measurement summary view.');
-        } else {
-          setCompletedOperations(prevCompleted => prevCompleted + 1);
-        }
-
-        // Refresh full table view
-        setCurrentlyRunning(`Refreshing full table view for "${fileName}"...`);
-        const refreshViewResponse = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName}`, { method: 'POST' });
-        if (!refreshViewResponse.ok) {
-          errorMessages.push('Failed to refresh full table view.');
-        } else {
-          setCompletedOperations(prevCompleted => prevCompleted + 1);
-        }
-
-        // If there are any errors, show them to the user and disable "Continue" until acknowledged
-        if (errorMessages.length > 0) {
-          setRefreshError(errorMessages.join(' '));
-          setContinueDisabled(false);
-        }
-      } catch (error) {
-        setUploadError(error);
-        setErrorComponent('UploadFireAzure');
-        setReviewState(ReviewStates.ERRORS);
-      }
-    },
-    [currentSite?.schemaName, setUploadError, setErrorComponent, setReviewState]
-  );
-
   useEffect(() => {
     const calculateTotalOperations = () => {
       let totalOps = acceptedFiles.length; // Count each file as 1 operation for uploading
@@ -129,10 +91,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       for (const file of acceptedFiles) {
         const storageResult = await uploadToStorage(file);
         uploadResults.push(`File: ${file.name}, Storage: ${storageResult}`);
-
-        if (uploadForm === 'measurements') {
-          await refreshViews(file.name);
-        }
       }
 
       setResults(uploadResults);
@@ -144,7 +102,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
       uploadFiles().catch(console.error);
       hasUploaded.current = true;
     }
-  }, [acceptedFiles, uploadToStorage, refreshViews, uploadForm, setIsDataUnsaved]);
+  }, [acceptedFiles, uploadToStorage, uploadForm, setIsDataUnsaved]);
 
   useEffect(() => {
     if (!loading && completedOperations === totalOperations && !refreshError) {

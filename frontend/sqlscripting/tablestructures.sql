@@ -8,14 +8,13 @@ create table if not exists attributes
 
 create table if not exists measurementssummary
 (
-    CoreMeasurementID int                                                          not null
-        primary key,
-    StemID            int                                                          null,
-    TreeID            int                                                          null,
-    SpeciesID         int                                                          null,
-    QuadratID         int                                                          null,
-    PlotID            int                                                          null,
-    CensusID          int                                                          null,
+    CoreMeasurementID int                                                          not null,
+    StemID            int                                                          not null,
+    TreeID            int                                                          not null,
+    SpeciesID         int                                                          not null,
+    QuadratID         int                                                          not null,
+    PlotID            int                                                          not null,
+    CensusID          int                                                          not null,
     SpeciesName       varchar(64)                                                  null,
     SubspeciesName    varchar(64)                                                  null,
     SpeciesCode       varchar(25)                                                  null,
@@ -32,7 +31,9 @@ create table if not exists measurementssummary
     HOMUnits          enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
     IsValidated       bit                                             default b'0' null,
     Description       varchar(255)                                                 null,
-    Attributes        varchar(255)                                                 null
+    Attributes        varchar(255)                                                 null,
+    UserDefinedFields json                                                         null,
+    primary key (CoreMeasurementID, StemID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
 );
 
 create table if not exists plots
@@ -126,7 +127,7 @@ create table if not exists family
         primary key,
     Family      varchar(32) null,
     ReferenceID int         null,
-    constraint Family
+    constraint unique_families
         unique (Family),
     constraint Family_Reference_ReferenceID_fk
         foreign key (ReferenceID) references reference (ReferenceID)
@@ -140,7 +141,7 @@ create table if not exists genus
     Genus          varchar(32) null,
     ReferenceID    int         null,
     GenusAuthority varchar(32) null,
-    constraint Genus
+    constraint unique_genus
         unique (Genus),
     constraint Genus_Family_FamilyID_fk
         foreign key (FamilyID) references family (FamilyID),
@@ -153,7 +154,9 @@ create table if not exists roles
     RoleID          int auto_increment
         primary key,
     RoleName        varchar(255) null,
-    RoleDescription varchar(255) null
+    RoleDescription varchar(255) null,
+    constraint unique_roles
+        unique (RoleName)
 );
 
 create table if not exists personnel
@@ -214,9 +217,7 @@ create table if not exists species
     ValidCode           varchar(255) null,
     ReferenceID         int          null,
     constraint SpeciesCode
-        unique (SpeciesCode),
-    constraint Species_SpeciesCode
-        unique (SpeciesCode),
+        unique (SpeciesCode, SpeciesName, SubspeciesName),
     constraint Species_Genus_GenusID_fk
         foreign key (GenusID) references genus (GenusID),
     constraint Species_Reference_ReferenceID_fk
@@ -283,7 +284,11 @@ create table if not exists stems
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID),
     constraint stems_quadrats_QuadratID_fk
-        foreign key (QuadratID) references quadrats (QuadratID)
+        foreign key (QuadratID) references quadrats (QuadratID),
+    constraint unique_stem_per_tree_quadrat
+        unique (StemTag, TreeID, QuadratID),
+    constraint unique_stem_coordinates
+        unique (StemTag, TreeID, QuadratID, LocalX, LocalY, CoordinateUnits)
 );
 
 create table if not exists coremeasurements
@@ -303,7 +308,9 @@ create table if not exists coremeasurements
     constraint FK_CoreMeasurements_Stems
         foreign key (StemID) references stems (StemID),
     constraint coremeasurements_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID)
+        foreign key (CensusID) references census (CensusID),
+    constraint unique_measurements
+        unique (CensusID, StemID, MeasuredDBH, DBHUnit, MeasuredHOM, HOMUnit)
 );
 
 create table if not exists cmattributes
@@ -315,7 +322,9 @@ create table if not exists cmattributes
     constraint CMAttributes_Attributes_Code_fk
         foreign key (Code) references attributes (Code),
     constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
+        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID),
+    constraint unique_cm_attribute
+        unique (CoreMeasurementID, Code)
 );
 
 create table if not exists cmverrors
@@ -327,7 +336,9 @@ create table if not exists cmverrors
     constraint cmverrors_coremeasurements_CoreMeasurementID_fk
         foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID),
     constraint cmverrors_validationprocedures_ValidationID_fk
-        foreign key (ValidationErrorID) references catalog.validationprocedures (ValidationID)
+        foreign key (ValidationErrorID) references catalog.validationprocedures (ValidationID),
+    constraint unique_cmverrors_cm_valerror
+        unique (CoreMeasurementID, ValidationErrorID)
 );
 
 create index idx_censusid_coremeasurements
@@ -415,8 +426,6 @@ create table if not exists validationchangelog
 
 create table if not exists viewfulltable
 (
-    ViewFullTableID           int auto_increment
-        primary key,
     CoreMeasurementID         int                                                                                                             not null,
     MeasurementDate           date                                                                                                            null,
     MeasuredDBH               decimal(10, 6)                                                                                                  null,
@@ -425,7 +434,7 @@ create table if not exists viewfulltable
     HOMUnits                  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
     Description               varchar(255)                                                                                                    null,
     IsValidated               bit                                                                                             default b'0'    null,
-    PlotID                    int                                                                                                             null,
+    PlotID                    int                                                                                                             not null,
     PlotName                  varchar(255)                                                                                                    null,
     LocationName              varchar(255)                                                                                                    null,
     CountryName               varchar(255)                                                                                                    null,
@@ -440,12 +449,12 @@ create table if not exists viewfulltable
     PlotCoordinateUnits       enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
     PlotShape                 varchar(255)                                                                                                    null,
     PlotDescription           varchar(255)                                                                                                    null,
-    CensusID                  int                                                                                                             null,
+    CensusID                  int                                                                                                             not null,
     CensusStartDate           date                                                                                                            null,
     CensusEndDate             date                                                                                                            null,
     CensusDescription         varchar(255)                                                                                                    null,
     PlotCensusNumber          int                                                                                                             null,
-    QuadratID                 int                                                                                                             null,
+    QuadratID                 int                                                                                                             not null,
     QuadratName               varchar(255)                                                                                                    null,
     QuadratDimensionX         int                                                                                                             null,
     QuadratDimensionY         int                                                                                                             null,
@@ -456,39 +465,25 @@ create table if not exists viewfulltable
     QuadratStartY             decimal(10, 6)                                                                                                  null,
     QuadratCoordinateUnits    enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
     QuadratShape              varchar(255)                                                                                                    null,
-    SubquadratID              int                                                                                                             null,
-    SubquadratName            varchar(255)                                                                                                    null,
-    SubquadratDimensionX      int                                                                                                             null,
-    SubquadratDimensionY      int                                                                                                             null,
-    SubquadratDimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
-    SubquadratX               int                                                                                                             null,
-    SubquadratY               int                                                                                                             null,
-    SubquadratCoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
-    TreeID                    int                                                                                                             null,
+    TreeID                    int                                                                                                             not null,
     TreeTag                   varchar(10)                                                                                                     null,
-    StemID                    int                                                                                                             null,
+    StemID                    int                                                                                                             not null,
     StemTag                   varchar(10)                                                                                                     null,
     StemLocalX                decimal(10, 6)                                                                                                  null,
     StemLocalY                decimal(10, 6)                                                                                                  null,
     StemCoordinateUnits       enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')                                                 default 'm'     null,
-    PersonnelID               int                                                                                                             null,
-    FirstName                 varchar(50)                                                                                                     null,
-    LastName                  varchar(50)                                                                                                     null,
-    PersonnelRoles            varchar(255)                                                                                                    null,
-    SpeciesID                 int                                                                                                             null,
+    SpeciesID                 int                                                                                                             not null,
     SpeciesCode               varchar(25)                                                                                                     null,
     SpeciesName               varchar(64)                                                                                                     null,
     SubspeciesName            varchar(64)                                                                                                     null,
     SubspeciesAuthority       varchar(128)                                                                                                    null,
     SpeciesIDLevel            varchar(20)                                                                                                     null,
-    GenusID                   int                                                                                                             null,
+    GenusID                   int                                                                                                             not null,
     Genus                     varchar(32)                                                                                                     null,
     GenusAuthority            varchar(32)                                                                                                     null,
-    FamilyID                  int                                                                                                             null,
+    FamilyID                  int                                                                                                             not null,
     Family                    varchar(32)                                                                                                     null,
-    AttributeCode             varchar(10)                                                                                                     null,
-    AttributeDescription      varchar(255)                                                                                                    null,
-    AttributeStatus           enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
+    Attributes                varchar(255)                                                                                                    null
 );
 
 create table if not exists postvalidationqueries

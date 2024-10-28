@@ -24,7 +24,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
       QuadratShape: quadratshape
     };
 
-    const quadratID = await handleUpsert<QuadratResult>(connection, schema, 'quadrats', quadratsData, 'QuadratID');
+    const { id: quadratID } = await handleUpsert<QuadratResult>(connection, schema, 'quadrats', quadratsData, 'QuadratID');
     if (!quadratID) throw createError('upsert failure for row: ', { quadratsData });
 
     // need to update censusquadrat
@@ -33,7 +33,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
       CensusID: censusID,
       QuadratID: quadratID
     };
-    const cqID = await handleUpsert<CensusQuadratResult>(connection, schema, 'censusquadrat', cqData, 'CQID');
+    const { id: cqID } = await handleUpsert<CensusQuadratResult>(connection, schema, 'censusquadrat', cqData, 'CQID');
     if (!cqID) throw createError('upsert failure on censusquadrat for row: ', { cqData });
 
     await connection.commit();

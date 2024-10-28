@@ -1019,9 +1019,19 @@ END //
 
 DELIMITER ;
 
-
 DELIMITER
 //
+
+CREATE TRIGGER before_stem_update
+BEFORE UPDATE ON stems
+FOR EACH ROW
+BEGIN
+    -- Check if local coordinates are changing
+    IF NEW.LocalX <> OLD.LocalX OR NEW.LocalY <> OLD.LocalY OR NEW.CoordinateUnits <> OLD.CoordinateUnits THEN
+        -- Mark the stem as moved
+        SET NEW.Moved = 1;
+    END IF;
+END //
 
 CREATE TRIGGER after_insert_stems
     AFTER INSERT
@@ -1055,6 +1065,7 @@ BEGIN
                                   CensusID)
     VALUES ('stems', NEW.StemID, 'INSERT', new_json, NOW(), 'User', plot_id, census_id);
 END //
+
 CREATE TRIGGER after_update_stems
     AFTER UPDATE
     ON stems
