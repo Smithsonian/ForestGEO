@@ -1,6 +1,5 @@
-# The ForestGEO Data Entry App
+# ForestGEO Census Management Application
 
-liquibase generate-changelog --exclude-objects="\b\w*view\w*\b"
 A cloud-native web application built to accelerate the pace of research for the Smithsonian
 Institution's Forest Global Earth Observatory (ForestGEO). ForestGEO is a global forest research
 network, unparalleled in size and scope, comprised of ecologists and research sites dedicated to
@@ -8,92 +7,54 @@ advancing long-term study of the world's forests. The ForestGEO app aims to empo
 an efficient means of recording, validating, and publishing forest health data.  
 Learn more about ForestGEO [at their website](https://www.forestgeo.si.edu/).
 
-This application was built using Next.js 13 (app directory) and NextUI (v2).
+## Setting up for Local Development
 
-### Technical documentation:
+This project uses NextJS v14(+), and server interactions and setup are handled through their interface. Please note
+that for local development, you will **not** be able to use the NextJS-provided `next start` command due to the way that
+the application is packaged for Azure deployment. Instead, please use the `next dev` command to start the local
+development server to use the application.
+> Note: the development server compiles and loads the application in real time as you interact with the website.
+> Accordingly, **load times for API endpoints and other components will be much longer than the actual site's.** Please
+> do not use these load times as an indicator of load times within the deployed application instance!
 
-Please see the
-documentation [here](https://github.com/ForestGeoHack/ForestGEO/wiki/ForestGEO-App-Specification)
+### Production vs Development Branches
 
-## Project Structure
+The `main` branch of this repository is the production branch, and the `forestgeo-app-development` is the deployed
+development branch. When adding new features or making changes to the application, please branch off of the
+`forestgeo-app-development` branch instead of `main`. The production branch should not be used as a baseline and should
+only be modified via approved PRs.
 
-- `prev_app/`: previous iteration of the ForestGEO app, which uses the  
-  Next.js v12 Pages router system. You can step into this directory to run the previous iteration of
-  the application
-- `app/`: the primary routing structure and setup for the primary application
-- `components/`: requisite react components that are used within the application and icon
-  information
-- `config/`: fonts information and general site information -- endpoint names, plot names, plot
-  interface, etc.
-- `styles/`: tailwindcss formatting files and dropzone/validation table custom formatting files
-- `types/`: additional set up for SVG formatting
+### Azure-side Setup Requirements
 
-### Running the project
+The application maintains a live connection to an Azure Storage and a Azure MySQL server instance. Before you can use
+the application, please ensure that you work with a ForestGEO administrator to:
 
-1. Before running the project, you must create an `.env.local` file in the overhead directory with
-   the following values:
-   - `AZURE_AD_CLIENT_ID`
-   - `AZURE_AD_CLIENT_SECRET`
-   - `AZURE_AD_TENANT_ID`
-   - `NEXTAUTH_SECRET`
-   - `NEXTAUTH_URL`
-   - all `AZURE_` values must be created/populated from Azure's App Registration portal
-2. Once `.env.local` is made, run `npm install` from the overhead directory to install dependencies
-3. Run `npm run build` to compile/optimize the application for running
-4. Run `npm run dev` to create a dev instance of the application locally on your machine
-5. Navigate to `http://localhost:3000` to access the application
+1. add your email address to the managing database,
+2. provide you with a role and,
+3. assign the testing schemas to your account
 
----
+> It is critical that live sites actively being used by researchers are not mistakenly modified or damaged!
 
-### Understanding Next.JS Dynamic Routing
+### Setting up the Environment
 
-Next.js's dynamic routing setup allows for built-in endpoint data processing. By using this, passing
-data from a component or root layout to a page/endpoint is simplified (rather than using useCallback
-or a React function). As a brief reminder, remember that when using Next.js 13, writing something
-like `app/example/filehandling.tsx` will generate a route pointing to `... /example` instead
-of `.../example/page`, and nesting successive folders will create a route with those
-folders: `app/example1/example2/example3/filehandling.tsx` has the
-route `... /example1/example2/example3/`.
+> **Note:** The following instructions assume that you have `NodeJS` and `npm` installed on your local machine.
 
-For a better explanation of how this works, please observe the browse
-endpoint: `app/(endpoints)/browse/[plotKey]/[plotNum]/filehandling.tsx`<br />
-In order from left to right, please note the following points of interest:
+After cloning the repository, please run `npm install` to install required dependencies.
 
-- `(endpoints)`: wrapping a folder in parentheses allows for better organization w/o using the
-  wrapped folder name in the path. For example, accessing the Browse page locally does not require
-  adding `/endpoints/` to the URL
-- `[plotKey]`: this is the first required variable when accessing this endpoint -- you will have to
-  add some string `plotKey` to the end of the URL: `.../browse/[your plot key]` in order to
-  successfully view the page.
-  - wrapping a folder in `[]` will designate that folder as a **required** dynamic parameter
-  - wrapping in `[...folderName]` designates `folderName` as a catch-all route. All following
-    values after `folderName` (i.e., `.../a/b` will return `folderName = [a, b]` )
-  - wrapping in `[[...folderName]]` designates `folderName` as an _optional_ catch-all route. As
-    expected, all values for/after `folderName` will be returned as part of the dynamic route,
-    but `undefined` will also be returned if no value is entered at all (instead of a 404 error)
-- `[plotNum]`: second required variable when accessing this endpoint - your resulting endpoint will
-  look like (example) `http://localhost:3000/browse/plotKey/plotNum`.
+The application requires a set of environmental variables stored in a `.env.local` file in order to run locally. Please
+contact a repository administrator to request access to the key-vault storage, named `forestgeo-app-key-vault`. Once you
+can access it, please retrieve all noted secrets in the repository and place them in your `.env.local` file. The name of
+the secret corresponds to the name of the environmental variable. Please use the following example as a template:
 
----
+Let's assume that the keyvault storage has a secret named `EXAMPLE-SECRET`, with a corresponding value of `1234`.
+In order to use this secret in your local environment, add it to your `.env.local` file like this:
 
-### Release Notes (v0.1.0):
+`EXAMPLE_SECRET=1234`
 
-- endpoints have been added and routed to require a plot key/number combination for access
-  - initial state has been converted to new `Plot {key: 'none', num: 0}` instead of `''`
-- MUI JoyUI has been partially implemented as a replacement for MaterialUI. However, due to time
-  limitations, MaterialUI has still been incorporated into converted sections from ForestGeoHack
-  - The current plan is to solely implement either NextUI or ChakraUI instead of either of these
-    options, and future updates will include this information.
-- `SelectPlotProps` has been removed and replaced with NextJS dynamic routing (each endpoint will
-  dynamically retrieve plot information). Endpoints have been updated to reflect dynamic param-based
-  retrieval
-  - The navigation bar has been updated to use useEffect to push live endpoint updates when the
-    plot is changed (if you are at an endpoint and the plot is changed, the page will be reloaded
-    to reflect that)
-- New components/moved-over information:
-  - `Fileuploadcomponents` --> css code has been udpated to be dark theme-friendly
-  - `FileList` --> moved over
-  - `Loginlogout` --> created component, login/logout process has been relegated to avatar icon
-    dropdown menu
-  - `Plotselection` --> partially created from SelectPlot, changed to utilize dynamic
-    routing/selection instead of requiring a new dropdown in each page
+Please note that the name of the secret in the keyvault uses **hyphens**, while the name of the environmental variable
+uses **underscores**. Please ensure you **replace all hyphens with underscores** when adding the secret to your
+`.env.local` file.
+
+Once you have successfully created your `.env.local` file, please run `npm run dev` to start the local development
+server.
+> **Ensure that you have port 3000 open and available on your local machine before starting the server!**
