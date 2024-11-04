@@ -1,83 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
-import { format, PoolConnection } from 'mysql2/promise';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(_request: NextRequest) {
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     const query = `SELECT * FROM catalog.validationprocedures;`;
-    const results = await runQuery(conn, query);
-    conn.release();
+    const results = await connectionManager.executeQuery(query);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('validationprocedures').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
 export async function POST(request: NextRequest) {
   const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     delete validationProcedure['validationID'];
     const insertQuery = format('INSERT INTO ?? SET ?', [`catalog.validationprocedures`, validationProcedure]);
-    const results = await runQuery(conn, insertQuery);
+    const results = await connectionManager.executeQuery(insertQuery);
     const insertID = results.insertId;
-    conn.release();
     return NextResponse.json({ insertID }, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
-    conn?.release();
+    await connectionManager.rollbackTransaction();
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
 export async function PATCH(request: NextRequest) {
   const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     const updatedValidationProcedure = delete validationProcedure['validationID'];
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [
       `catalog.validationprocedures`,
       updatedValidationProcedure,
       validationProcedure.validationID
     ]);
-    await runQuery(conn, updateQuery);
-    conn.release();
+    await connectionManager.executeQuery(updateQuery);
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
-    conn?.release();
+    await connectionManager.rollbackTransaction();
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
 export async function DELETE(request: NextRequest) {
   const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`catalog.validationprocedures`, validationProcedure.validationID]);
-    await runQuery(conn, deleteQuery);
-    conn.release();
+    await connectionManager.executeQuery(deleteQuery);
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
-    conn?.release();
+    await connectionManager.rollbackTransaction();
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

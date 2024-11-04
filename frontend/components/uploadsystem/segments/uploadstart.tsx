@@ -2,7 +2,7 @@
 
 import { ReviewStates, UploadStartProps } from '@/config/macros/uploadsystemmacros';
 import { Box, Button, Stack, Tooltip, Typography } from '@mui/joy';
-import AutocompleteFixedData from '@/components/forms/autocompletefixeddata';
+import AutocompleteFixedData from '@/components/autocompletefixeddata';
 import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import Select, { SelectOption } from '@mui/joy/Select';
 import Option from '@mui/joy/Option';

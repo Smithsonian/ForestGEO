@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import moment from 'moment';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(_request: NextRequest, { params }: { params: { schema: string; plotID: string; censusID: string; queryID: string } }) {
   const { schema } = params;
@@ -13,13 +13,12 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
     return new NextResponse('Missing parameters', { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const conn = await getConn();
+  const connectionManager = new ConnectionManager();
   try {
     const query = `SELECT QueryDefinition FROM ${schema}.postvalidationqueries WHERE QueryID = ${queryID}`;
-    const results = await runQuery(conn, query);
+    const results = await connectionManager.executeQuery(query);
 
     if (results.length === 0) {
-      conn.release();
       return new NextResponse('Query not found', { status: HTTPResponses.NOT_FOUND });
     }
 
@@ -29,8 +28,8 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
       currentCensusID: censusID
     };
     const formattedQuery = results[0].QueryDefinition.replace(/\${(.*?)}/g, (_match: any, p1: string) => replacements[p1 as keyof typeof replacements]);
-
-    const queryResults = await runQuery(conn, formattedQuery);
+    await connectionManager.beginTransaction();
+    const queryResults = await connectionManager.executeQuery(formattedQuery);
 
     if (queryResults.length === 0) throw new Error('failure');
 
@@ -39,22 +38,20 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
     const successUpdate = `UPDATE ${schema}.postvalidationqueries 
                             SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = 'success' 
                             WHERE QueryID = ${queryID}`;
-    await runQuery(conn, successUpdate, [currentTime, successResults]);
-    conn.release();
+    await connectionManager.executeQuery(successUpdate, [currentTime, successResults]);
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
+    await connectionManager.rollbackTransaction();
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
       const failureUpdate = `UPDATE ${schema}.postvalidationqueries 
                              SET LastRunAt = ?, LastRunStatus = 'failure' 
                              WHERE QueryID = ${queryID}`;
-      await runQuery(conn, failureUpdate, [currentTime]);
-      conn.release();
+      await connectionManager.executeQuery(failureUpdate, [currentTime]);
       return new NextResponse(null, { status: HTTPResponses.OK }); // if the query itself fails, that isn't a good enough reason to return a crash. It should just be logged.
     }
-    conn.release();
     return new NextResponse('Internal Server Error', { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

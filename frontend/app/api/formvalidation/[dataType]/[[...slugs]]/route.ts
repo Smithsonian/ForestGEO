@@ -1,7 +1,7 @@
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import { HTTPResponses } from '@/config/macros';
-import { format, PoolConnection } from 'mysql2/promise';
+import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
+import ConnectionManager from '@/config/connectionmanager';
 
 // dataType
 // slugs: schema, columnName, value ONLY
@@ -16,19 +16,17 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
 
   if (!schema || !columnName || !value) return new NextResponse(null, { status: 404 });
 
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     const query = `SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1`;
     const formatted = format(query, [`${schema}.${params.dataType}`, columnName, value]);
-    const results = await runQuery(conn, formatted);
-    conn.release();
+    const results = await connectionManager.executeQuery(formatted);
     if (results.length === 0) return new NextResponse(null, { status: 404 });
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error(error);
     throw error;
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

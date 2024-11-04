@@ -5,9 +5,10 @@ import { processCensus } from '@/components/processors/processcensus';
 import { PoolMonitor } from '@/config/poolmonitor';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processQuadrats } from '@/components/processors/processquadrats';
+import ConnectionManager from '@/config/connectionmanager';
 
 export interface SpecialProcessingProps {
-  connection: PoolConnection;
+  connectionManager: ConnectionManager;
   rowData: FileRow;
   schema: string;
   plotID?: number;
@@ -182,20 +183,11 @@ export async function runQuery(connection: PoolConnection, query: string, params
   }
 }
 
-export function getCatalogSchema() {
-  const catalogSchema = process.env.AZURE_SQL_CATALOG_SCHEMA;
-  if (!catalogSchema) throw new Error('Environmental variable extraction for catalog schema failed');
-  return catalogSchema;
-}
-
 export type ValidationResponse = {
   totalRows: number;
   failedRows: number;
   message: string;
   failedCoreMeasurementIDs?: number[];
-};
-export type UpdateValidationResponse = {
-  rowsValidated: any;
 };
 
 export interface QueryConfig {
@@ -213,66 +205,3 @@ export interface QueryConfig {
   };
   extraParams?: any[];
 }
-
-export function buildPaginatedQuery(config: QueryConfig): {
-  query: string;
-  params: any[];
-} {
-  const { schema, table, joins, conditionals, pagination, extraParams } = config;
-  const { page, pageSize } = pagination;
-  const startRow = page * pageSize;
-  const queryParams = extraParams || [];
-
-  // Establish an alias for the primary table for consistency in joins and selections
-  const tableAlias = table[0].toLowerCase(); // Simple default alias based on first letter of table name
-
-  // Build the base query with possible joins
-  let query = `SELECT SQL_CALC_FOUND_ROWS ${tableAlias}.* FROM ${schema}.${table} AS ${tableAlias}`;
-  if (joins) {
-    joins.forEach(join => {
-      query += ` LEFT JOIN ${schema}.${join.table} AS ${join.alias} ON ${join.on}`;
-    });
-  }
-
-  if (conditionals) {
-    query += ` WHERE ${conditionals}`;
-  }
-
-  // Add LIMIT clause
-  query += ` LIMIT ?, ?`;
-  queryParams.push(startRow, pageSize); // Ensure these are the last parameters added
-
-  return { query, params: queryParams };
-}
-
-// Function to close all active connections
-async function closeConnections() {
-  console.log('Closing all active connections...');
-  await poolMonitor.closeAllConnections();
-  console.log('All connections closed.');
-}
-
-// Function to handle graceful shutdown
-async function gracefulShutdown() {
-  console.log('Initiating graceful shutdown...');
-  try {
-    await closeConnections();
-    console.log('Graceful shutdown complete.');
-    process.exit(0);
-  } catch (error) {
-    console.error('Error during graceful shutdown:', error);
-    process.exit(1);
-  }
-}
-
-// Capture SIGINT signal (triggered by ctrl+c)
-process.on('SIGINT', async () => {
-  console.log('SIGINT signal received.');
-  await gracefulShutdown();
-});
-
-// Capture SIGTERM signal (triggered by process kill)
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received.');
-  await gracefulShutdown();
-});

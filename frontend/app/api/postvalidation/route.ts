@@ -1,27 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
 
-  const conn = await getConn();
-  const query = `SELECT QueryID, QueryName, Description FROM ${schema}.postvalidationqueries WHERE IsEnabled IS TRUE;`;
-  const results = await runQuery(conn, query);
-  if (results.length === 0) {
-    return new NextResponse(JSON.stringify({ message: 'No queries found' }), {
-      status: HTTPResponses.NOT_FOUND
+  const connectionManager = new ConnectionManager();
+  try {
+    const query = `SELECT QueryID, QueryName, Description FROM ${schema}.postvalidationqueries WHERE IsEnabled IS TRUE;`;
+    const results = await connectionManager.executeQuery(query);
+    if (results.length === 0) {
+      return new NextResponse(JSON.stringify({ message: 'No queries found' }), {
+        status: HTTPResponses.NOT_FOUND
+      });
+    }
+    const postValidations = results.map((row: any) => ({
+      queryID: row.QueryID,
+      queryName: row.QueryName,
+      queryDescription: row.Description
+    }));
+    return new NextResponse(JSON.stringify(postValidations), {
+      status: HTTPResponses.OK
     });
+  } catch (e: any) {
+    throw e;
+  } finally {
+    await connectionManager.closeConnection();
   }
-  const postValidations = results.map((row: any) => ({
-    queryID: row.QueryID,
-    queryName: row.QueryName,
-    queryDescription: row.Description
-  }));
-  return new NextResponse(JSON.stringify(postValidations), {
-    status: HTTPResponses.OK
-  });
 }
 
 // searchParams: schema, plot, census

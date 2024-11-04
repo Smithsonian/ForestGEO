@@ -1,10 +1,10 @@
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import MapperFactory from '@/config/datamapper';
 import { handleError } from '@/utils/errorhandler';
-import { format, PoolConnection } from 'mysql2/promise';
+import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
-import { HTTPResponses } from '@/config/macros'; // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
+import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager'; // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
@@ -25,13 +25,12 @@ export async function GET(
   const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
   const quadratID = quadratIDParam ? parseInt(quadratIDParam) : undefined;
   const speciesID = speciesIDParam ? parseInt(speciesIDParam) : undefined;
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   let updatedMeasurementsExist = false;
   let censusIDs;
   let pastCensusIDs: string | any[];
 
   try {
-    conn = await getConn();
     let paginatedQuery = ``;
     const queryParams: any[] = [];
 
@@ -108,21 +107,6 @@ export async function GET(
             ORDER BY vft.MeasurementDate ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
-      // case 'subquadrats':
-      //   if (!quadratID || quadratID === 0) {
-      //     throw new Error('QuadratID must be provided as part of slug fetch query, referenced fixeddata slug route');
-      //   }
-      //   paginatedQuery = `
-      //       SELECT SQL_CALC_FOUND_ROWS s.*
-      //       FROM ${schema}.subquadrats s
-      //                JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-      //                JOIN ${schema}.census c ON q.CensusID = c.CensusID
-      //       WHERE q.QuadratID = ?
-      //         AND q.PlotID = ?
-      //         AND c.PlotID = ?
-      //         AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
-      //   queryParams.push(quadratID, plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
-      //   break;
       case 'census':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
@@ -139,7 +123,7 @@ export async function GET(
               AND PlotCensusNumber = ?
             ORDER BY StartDate DESC LIMIT 30
         `;
-        const censusResults = await runQuery(conn, format(censusQuery, [plotID, plotCensusNumber]));
+        const censusResults = await connectionManager.executeQuery(format(censusQuery, [plotID, plotCensusNumber]));
         if (censusResults.length < 2) {
           paginatedQuery = `
               SELECT SQL_CALC_FOUND_ROWS pdt.*
@@ -174,10 +158,10 @@ export async function GET(
       throw new Error('Mismatch between query placeholders and parameters');
     }
 
-    const paginatedResults = await runQuery(conn, format(paginatedQuery, queryParams));
+    const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
 
     const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
-    const totalRowsResult = await runQuery(conn, totalRowsQuery);
+    const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
     const totalRows = totalRowsResult[0].totalRows;
 
     if (updatedMeasurementsExist) {
@@ -188,7 +172,6 @@ export async function GET(
       const uniqueKeys = ['PlotID', 'QuadratID', 'TreeID', 'StemID']; // Define unique keys that should match
       const outputKeys = paginatedResults.map((row: any) => uniqueKeys.map(key => row[key]).join('|'));
       const filteredDeprecated = deprecated.filter((row: any) => outputKeys.includes(uniqueKeys.map(key => row[key]).join('|')));
-      conn.release();
       return new NextResponse(
         JSON.stringify({
           output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
@@ -198,7 +181,6 @@ export async function GET(
         { status: HTTPResponses.OK }
       );
     } else {
-      conn.release();
       return new NextResponse(
         JSON.stringify({
           output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
@@ -209,11 +191,9 @@ export async function GET(
       );
     }
   } catch (error: any) {
-    if (conn) await conn.rollback();
-    conn?.release();
     throw new Error(error);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
@@ -226,13 +206,12 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
 
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   const { newRow } = await request.json();
   let insertIDs: { [key: string]: number } = {};
 
   try {
-    conn = await getConn();
-    await conn.beginTransaction();
+    await connectionManager.beginTransaction();
 
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
 
@@ -251,12 +230,12 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       }
 
       // Use handleUpsertForSlices and retrieve the insert IDs
-      insertIDs = await handleUpsertForSlices(conn, schema, newRowData, queryConfig);
+      insertIDs = await handleUpsertForSlices(connectionManager, schema, newRowData, queryConfig);
     }
     // Handle the case for 'attributes'
     else if (params.dataType === 'attributes') {
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      const results = await runQuery(conn, insertQuery);
+      const results = await connectionManager.executeQuery(insertQuery);
       insertIDs = { attributes: results.insertId }; // Standardize output with table name as key
     }
     // Handle all other cases
@@ -264,25 +243,22 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       delete newRowData[demappedGridID];
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
       const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-      const results = await runQuery(conn, insertQuery);
+      const results = await connectionManager.executeQuery(insertQuery);
       insertIDs = { [params.dataType]: results.insertId }; // Standardize output with table name as key
 
       // special handling needed for quadrats --> need to correlate incoming quadrats with current census
       if (params.dataType === 'quadrats' && censusID) {
         const cqQuery = format('INSERT INTO ?? SET ?', [`${schema}.censusquadrats`, { CensusID: censusID, QuadratID: insertIDs.quadrats }]);
-        const results = await runQuery(conn, cqQuery);
+        const results = await connectionManager.executeQuery(cqQuery);
         if (results.length === 0) throw new Error('Error inserting to censusquadrats');
       }
     }
 
-    // Commit the transaction and return the standardized response
-    await conn.commit();
-    conn.release();
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, conn, newRow);
+    return handleError(error, connectionManager, newRow);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
@@ -292,14 +268,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
   let updateIDs: { [key: string]: number } = {};
 
   try {
-    conn = await getConn();
-    await conn.beginTransaction();
+    await connectionManager.beginTransaction();
 
     // Handle views with handleUpsertForSlices (applies to both insert and update logic)
     if (params.dataType === 'alltaxonomiesview') {
@@ -313,7 +288,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       }
 
       // Use handleUpsertForSlices for update operations as well (updates where needed)
-      updateIDs = await handleUpsertForSlices(conn, schema, newRow, queryConfig);
+      updateIDs = await handleUpsertForSlices(connectionManager, schema, newRow, queryConfig);
     }
 
     // Handle non-view table updates
@@ -330,22 +305,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       );
 
       // Execute the UPDATE query
-      await runQuery(conn, updateQuery);
+      await connectionManager.executeQuery(updateQuery);
 
       // For non-view tables, standardize the response format
       updateIDs = { [params.dataType]: gridIDKey };
     }
 
-    // Commit the transaction
-    await conn.commit();
-
-    conn.release();
-    // Return a standardized response with updated IDs
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, conn, newRow);
+    return handleError(error, connectionManager, newRow);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
@@ -355,12 +325,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
   try {
-    conn = await getConn();
-    await conn.beginTransaction();
+    await connectionManager.beginTransaction();
 
     // Handle deletion for views
     if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
@@ -377,9 +346,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
       }
 
       // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
-      await handleDeleteForSlices(conn, schema, deleteRowData, queryConfig);
-
-      await conn.commit();
+      await handleDeleteForSlices(connectionManager, schema, deleteRowData, queryConfig);
       return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
     }
 
@@ -389,16 +356,14 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
     if (params.dataType === 'quadrats') {
       const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
-      await runQuery(conn, qDeleteQuery);
+      await connectionManager.executeQuery(qDeleteQuery);
     }
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-    await runQuery(conn, deleteQuery);
-    await conn.commit();
-    conn.release();
+    await connectionManager.executeQuery(deleteQuery);
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    conn?.release();
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+      await connectionManager.rollbackTransaction();
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
       const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
       return NextResponse.json(
@@ -408,9 +373,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
         },
         { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
       );
-    }
-    return handleError(error, conn, newRow);
+    } else return handleError(error, connectionManager, newRow);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

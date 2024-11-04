@@ -1,7 +1,6 @@
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import { HTTPResponses } from '@/config/macros';
-import { PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
+import ConnectionManager from '@/config/connectionmanager';
 
 type ValidationProcedure = {
   ValidationID: number;
@@ -22,16 +21,15 @@ type ValidationMessages = {
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse<ValidationMessages>> {
-  let conn: PoolConnection | null = null;
+  const conn = new ConnectionManager();
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('No schema variable provided!');
   try {
-    conn = await getConn();
     const query = `SELECT ValidationID, ProcedureName, Description, Definition FROM catalog.validationprocedures WHERE IsEnabled IS TRUE;`;
-    const results: ValidationProcedure[] = await runQuery(conn, query);
+    const results: ValidationProcedure[] = await conn.executeQuery(query);
 
     const customQuery = `SELECT ValidationProcedureID, Name, Description, Definition FROM ${schema}.sitespecificvalidations;`;
-    const customResults: SiteSpecificValidations[] = await runQuery(conn, customQuery);
+    const customResults: SiteSpecificValidations[] = await conn.executeQuery(customQuery);
 
     const validationMessages: ValidationMessages = results.reduce((acc, { ValidationID, ProcedureName, Description, Definition }) => {
       acc[ProcedureName] = { id: ValidationID, description: Description, definition: Definition };
@@ -42,18 +40,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
       acc[Name] = { id: ValidationProcedureID, description: Description, definition: Definition };
       return acc;
     }, {} as ValidationMessages);
-    conn.release();
     return new NextResponse(JSON.stringify({ coreValidations: validationMessages, siteValidations: siteValidationMessages }), {
       status: HTTPResponses.OK,
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
     console.error('Error in GET request:', error.message);
-    conn?.release();
+    await conn.rollbackTransaction();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
   } finally {
-    if (conn) conn.release();
+    await conn.closeConnection();
   }
 }

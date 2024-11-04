@@ -1,26 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PoolConnection } from 'mysql2/promise';
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest, { params }: { params: { speciesID: string } }) {
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('Schema not provided');
   if (params.speciesID === 'undefined') throw new Error('SpeciesID not provided');
 
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     const query = `SELECT * FROM ${schema}.specieslimits WHERE SpeciesID = ?`;
-    const results = await runQuery(conn, query, [params.speciesID]);
-    conn.release();
+    const results = await connectionManager.executeQuery(query, [params.speciesID]);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('specieslimits').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
-    conn?.release();
     throw new Error(error);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
@@ -29,20 +25,18 @@ export async function PATCH(request: NextRequest, { params }: { params: { specie
   if (!schema) throw new Error('Schema not provided');
   if (params.speciesID === 'undefined') throw new Error('SpeciesID not provided');
   const { newRow } = await request.json();
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
-    await conn.beginTransaction();
+    await connectionManager.beginTransaction();
     const newRowData = MapperFactory.getMapper<any, any>('specieslimits').demapData([newRow])[0];
     const { ['SpeciesLimitID']: gridIDKey, ...remainingProperties } = newRowData;
     const query = `UPDATE ${schema}.specieslimits SET ? WHERE ?? = ?`;
-    const results = await runQuery(conn, query, [remainingProperties, 'SpeciesLimitID', gridIDKey]);
-    conn.release();
+    await connectionManager.executeQuery(query, [remainingProperties, 'SpeciesLimitID', gridIDKey]);
+    return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
-    await conn?.rollback();
-    conn?.release();
+    await connectionManager.rollbackTransaction();
     throw new Error(e);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

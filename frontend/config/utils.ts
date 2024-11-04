@@ -1,5 +1,4 @@
-import { PoolConnection } from 'mysql2/promise';
-import { runQuery } from '@/components/processors/processormacros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -142,11 +141,11 @@ export async function fetchPrimaryKey<Result>(
   schema: string,
   table: string,
   whereClause: Partial<Result>,
-  connection: PoolConnection,
+  connectionManager: ConnectionManager,
   primaryKeyColumn: keyof Result
 ): Promise<number> {
   const query = createSelectQuery<Result>(schema, table, whereClause);
-  const rows: Result[] = await runQuery(connection, query, Object.values(whereClause));
+  const rows: Result[] = await connectionManager.executeQuery(query, Object.values(whereClause));
 
   if (rows.length === 0) {
     throw new Error(`${Object.values(whereClause).join(' ')} not found in ${table}.`);
@@ -159,7 +158,7 @@ export async function fetchPrimaryKey<Result>(
 }
 
 export async function handleUpsert<Result>(
-  connection: PoolConnection,
+  connectionManager: ConnectionManager,
   schema: string,
   tableName: string,
   data: Partial<Result>,
@@ -173,7 +172,7 @@ export async function handleUpsert<Result>(
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
-    const result = await runQuery(connection, query, Object.values(data));
+    const result = await connectionManager.executeQuery(query, Object.values(data));
 
     id = result.insertId;
 
@@ -190,7 +189,7 @@ export async function handleUpsert<Result>(
       const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
       const values = Object.values(data).filter(value => value !== null);
 
-      const searchResult = await runQuery(connection, findExistingQuery, values);
+      const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
 
       if (searchResult.length > 0) {
         // Return the primary key if the record is found

@@ -1,16 +1,15 @@
-import { PoolConnection } from 'mysql2/promise';
+import ConnectionManager from '@/config/connectionmanager';
 
 // utils/errorHandler.ts
-export function handleError(error: any, conn: PoolConnection | null, row: any) {
-  if (conn) {
-    conn.rollback().catch(() => {});
-  }
+export function handleError(error: any, conn: ConnectionManager, row: any) {
   console.error('SQL Error:', error);
-  return new Response(
-    JSON.stringify({
-      message: 'SQL Error: ' + (error.message || 'Unknown error'),
-      row
-    }),
-    { status: 500 }
-  );
+  conn.rollbackTransaction().then(_ => {
+    return new Response(
+      JSON.stringify({
+        message: 'SQL Error: ' + (error.message || 'Unknown error'),
+        row
+      }),
+      { status: 500 }
+    );
+  });
 }

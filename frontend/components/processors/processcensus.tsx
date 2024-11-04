@@ -1,4 +1,4 @@
-import { runQuery, SpecialProcessingProps } from '@/components/processors/processormacros';
+import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import moment from 'moment';
 import { createError, fetchPrimaryKey, handleUpsert } from '@/config/utils';
 import { SpeciesResult, StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
@@ -6,7 +6,7 @@ import { QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
-  const { connection, rowData, schema, plotID, censusID } = props;
+  const { connectionManager, rowData, schema, plotID, censusID } = props;
   if (!plotID || !censusID) {
     console.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
@@ -14,16 +14,15 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
   const { tag, stemtag, spcode, quadrat, lx, ly, coordinateunit, dbh, dbhunit, hom, homunit, date, codes } = rowData;
 
   try {
-    await connection.beginTransaction();
     // Fetch species
-    const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connection, 'SpeciesID');
+    const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connectionManager, 'SpeciesID');
     // Fetch quadrat
-    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connection, 'QuadratID');
+    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connectionManager, 'QuadratID');
 
     if (tag) {
       // Handle Tree Upsert
       const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(
-        connection,
+        connectionManager,
         schema,
         'trees',
         {
@@ -38,7 +37,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
         // Handle Stem Upsert
         const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(
-          connection,
+          connectionManager,
           schema,
           'stems',
           { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit },
@@ -60,7 +59,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
         // Handle Core Measurement Upsert
         const { id: coreMeasurementID } = await handleUpsert<CoreMeasurementsResult>(
-          connection,
+          connectionManager,
           schema,
           'coremeasurements',
           {
@@ -88,11 +87,11 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             console.error('No valid attribute codes found:', codes);
           } else {
             for (const code of parsedCodes) {
-              const attributeRows = await runQuery(connection, `SELECT COUNT(*) as count FROM ${schema}.attributes WHERE Code = ?`, [code]);
+              const attributeRows = await connectionManager.executeQuery(`SELECT COUNT(*) as count FROM ${schema}.attributes WHERE Code = ?`, [code]);
               if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
                 throw createError(`Attribute code ${code} not found or query failed.`, { code });
               }
-              await handleUpsert<CMAttributesResult>(connection, schema, 'cmattributes', { CoreMeasurementID: coreMeasurementID, Code: code }, 'CMAID');
+              await handleUpsert<CMAttributesResult>(connectionManager, schema, 'cmattributes', { CoreMeasurementID: coreMeasurementID, Code: code }, 'CMAID');
             }
           }
         }
@@ -109,17 +108,13 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
             WHERE c.CensusID = ${censusID};`;
 
-        await runQuery(connection, combinedQuery);
-        await connection.commit();
+        await connectionManager.executeQuery(combinedQuery);
         console.log('Upsert successful. CoreMeasurement ID generated:', coreMeasurementID);
         return coreMeasurementID;
       }
     }
   } catch (error: any) {
-    await connection.rollback();
     console.error('Upsert failed:', error.message);
     throw error;
-  } finally {
-    if (connection) connection.release();
   }
 }
