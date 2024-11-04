@@ -13,7 +13,7 @@ jobs:
   build-app-production:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: development
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,6 @@ jobs:
           echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET_PRODUCTION }} >> frontend/.env
           echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID_PRODUCTION }} >> frontend/.env
           echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID_PRODUCTION }} >> frontend/.env
-          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL_DEV }} >> frontend/.env
           echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
@@ -86,7 +85,7 @@ jobs:
   deploy-app-production:
     needs: build-app-production
     runs-on: ubuntu-latest
-    environment: development
+    environment: production
 
     steps:
       - name: Download build artifact

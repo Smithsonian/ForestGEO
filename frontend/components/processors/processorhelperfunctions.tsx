@@ -4,6 +4,7 @@ import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 import { handleUpsert } from '@/config/utils';
+import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
 
 // need to try integrating this into validation system:
 
@@ -25,7 +26,11 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       if (columns.includes('censusID')) rowData['censusID'] = subProps.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
-      const values = columns.map(fileColumn => rowData[fileColumn]);
+      const values = columns.map(fileColumn => {
+        const value = rowData[fileColumn];
+        if (typeof value === 'string' && value === '') return null;
+        return value;
+      });
       const query = `
         INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
         VALUES (${placeholders}) ON DUPLICATE KEY
@@ -49,38 +54,6 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       }
     }
     return undefined;
-  }
-}
-
-/**
- * Verifies the email address of a user in the database.
- *
- * @param email - The email address to verify.
- * @returns An object with two properties:
- *   - `emailVerified`: a boolean indicating whether the email address exists in the database.
- *   - `userStatus`: the status of the user associated with the email address.
- * @throws An error if there is a problem connecting to the database or executing the query.
- */
-export async function verifyEmail(email: string): Promise<{ emailVerified: boolean; userStatus: string }> {
-  const connection: PoolConnection | null = await getConn();
-  try {
-    const query = `SELECT UserStatus
-                   FROM catalog.users
-                   WHERE Email = ?
-                   LIMIT 1`;
-    const results = await runQuery(connection, query, [email]);
-    console.log('results: ', results);
-
-    // emailVerified is true if there is at least one result
-    const emailVerified = results.length > 0;
-    const userStatus = results[0].UserStatus;
-
-    return { emailVerified, userStatus };
-  } catch (error: any) {
-    console.error('Error verifying email in database: ', error);
-    throw error;
-  } finally {
-    if (connection) connection.release();
   }
 }
 
@@ -172,37 +145,60 @@ export async function handleUpsertForSlices<Result>(
   const insertedIds: { [key: string]: number } = {};
   console.log('Initial newRow data:', newRow);
 
+  // Get the correct mapper for the view you're working with
+  const mapper = MapperFactory.getMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>('alltaxonomiesview');
+
+  // Convert newRow from RDS to Result upfront
+  const mappedNewRow = mapper.demapData([newRow as any])[0];
+  console.log('Mapped newRow:', mappedNewRow);
+
   for (const sliceKey in config.slices) {
     console.log('sliceKey: ', sliceKey);
     const { range, primaryKey } = config.slices[sliceKey];
     console.log('range: ', range);
     console.log('primaryKey: ', primaryKey);
-    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
-    console.log('fieldsInSlice: ', fieldsInSlice);
 
-    // Build the row data for this slice
+    // Extract fields relevant to the current slice from the already transformed newRow
     const rowData: Partial<Result> = {};
+    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
+
     fieldsInSlice.forEach(field => {
       console.log('field in slice: ', field);
-      rowData[field as keyof Result] = newRow[field as keyof Result];
-      console.log('updated rowData: ', rowData);
+
+      // Explicitly cast field as keyof Result and check if the field exists in mappedNewRow
+      if (field in mappedNewRow) {
+        rowData[field as keyof Result] = mappedNewRow[field as keyof typeof mappedNewRow];
+      }
     });
 
-    // Check if a foreign key from the previous slice should be included
-    if (Object.keys(insertedIds).length > 0) {
-      const prevKey = Object.keys(insertedIds).pop();
-      if (prevKey && newRow[prevKey as keyof Result] === undefined) {
-        // Cast rowData to any to avoid type issues with assigning number
-        (rowData as any)[`${prevKey}ID`] = insertedIds[prevKey];
-      }
+    // Check if we need to propagate a foreign key from a prior slice
+    const prevSlice = getPreviousSlice(sliceKey, config.slices);
+    if (prevSlice && insertedIds[prevSlice]) {
+      const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
+      (rowData as any)[prevPrimaryKey] = insertedIds[prevSlice]; // Set the foreign key in the current row
+      console.log(`Propagated foreign key ${String(prevPrimaryKey)}: `, insertedIds[prevSlice]);
     }
 
-    // Perform the upsert (insert or update) and store the ID
+    // Perform the upsert and store the resulting ID
     insertedIds[sliceKey] = await handleUpsert<Result>(connection, schema, sliceKey, rowData, primaryKey as keyof Result);
   }
+
   return insertedIds;
 }
 
+// Helper function to get the immediate previous slice based on dependencies
+function getPreviousSlice(currentSlice: string, slices: { [key: string]: any }): string | null {
+  const dependencyOrder = ['family', 'genus', 'species', 'trees', 'stems']; // Order based on dependencies
+  const currentIndex = dependencyOrder.indexOf(currentSlice);
+
+  if (currentIndex > 0) {
+    return dependencyOrder[currentIndex - 1]; // Return the slice that comes immediately before the current one
+  }
+
+  return null; // No previous slice if it's the first one
+}
+
+// Helper function to get the immediate previous slice based on dependencies
 export async function handleDeleteForSlices<Result>(
   connection: PoolConnection,
   schema: string,
@@ -270,17 +266,16 @@ export async function handleDeleteForSlices<Result>(
 }
 
 // Field definitions and configurations
-
 export const allTaxonomiesFields = [
   'Family',
   'Genus',
   'GenusAuthority',
   'SpeciesCode',
   'SpeciesName',
-  'ValidCode',
   'SubspeciesName',
-  'SpeciesAuthority',
   'IDLevel',
+  'SpeciesAuthority',
+  'ValidCode',
   'SubspeciesAuthority',
   'FieldFamily',
   'Description'
@@ -298,9 +293,42 @@ const stemTaxonomiesViewFields = [
   'GenusAuthority',
   'SpeciesAuthority',
   'SubspeciesAuthority',
-  'SpeciesIDLevel',
-  'SpeciesFieldFamily'
+  'IDLevel',
+  'FieldFamily'
 ];
+
+const measurementSummaryViewFields = [
+  'PlotID',
+  'CensusID',
+  'QuadratName', // needs custom handling -- context values plot/census needed
+  'SpeciesName',
+  'SubspeciesName',
+  'SpeciesCode',
+  'TreeTag',
+  'StemTag',
+  'LocalX',
+  'LocalY',
+  'CoordinateUnits',
+  'MeasurementDate',
+  'MeasuredDBH',
+  'DBHUnits',
+  'MeasuredHOM',
+  'HOMUnits',
+  'Description',
+  'Attributes'
+];
+
+export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
+  fieldList: measurementSummaryViewFields,
+  slices: {
+    quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
+    species: { range: [1, 4], primaryKey: 'SpeciesID' },
+    trees: { range: [4, 5], primaryKey: 'TreeID' },
+    stems: { range: [5, 9], primaryKey: 'StemID' },
+    coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
+    cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
+  }
+};
 
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
@@ -314,14 +342,14 @@ export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
 export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: stemTaxonomiesViewFields,
   slices: {
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemID' },
     family: { range: [2, 3], primaryKey: 'FamilyID' },
     genus: { range: [3, 5], primaryKey: 'GenusID' },
     species: {
       range: [5, stemTaxonomiesViewFields.length],
       primaryKey: 'SpeciesID'
-    }
+    },
+    trees: { range: [0, 1], primaryKey: 'TreeID' },
+    stems: { range: [1, 2], primaryKey: 'StemID' }
   }
 };
 
@@ -339,7 +367,7 @@ export async function runValidation(
     minHOM?: number | null;
     maxHOM?: number | null;
   } = {}
-) {
+): Promise<{ TotalRows: number; Message: string }> {
   const conn = await getConn();
 
   try {
@@ -448,7 +476,7 @@ export async function runValidation(
   }
 }
 
-export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
+export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const conn = await getConn();
   const setVariables = `SET @p_CensusID = ?, @p_PlotID = ?;`;
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
@@ -476,9 +504,10 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     SELECT cm.*
     FROM ${schema}.coremeasurements cm
     JOIN UpdatedRows ur ON cm.CoreMeasurementID = ur.CoreMeasurementID;`;
-  const dropTemp = `DROP TEMPORARY TABLE UpdatedRows;`;
+  const dropTemp = `DROP TEMPORARY TABLE IF EXISTS UpdatedRows;`;
   try {
     await conn.beginTransaction();
+    await runQuery(conn, dropTemp); // just in case
     await runQuery(conn, setVariables, [params.p_CensusID || null, params.p_PlotID || null]);
     await runQuery(conn, tempTable);
     await runQuery(conn, insertTemp);

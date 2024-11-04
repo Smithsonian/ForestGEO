@@ -7,9 +7,10 @@ export class PoolMonitor {
   private totalConnectionsCreated = 0;
   private waitingForConnection = 0;
   private inactivityTimer: NodeJS.Timeout | null = null;
-  private config: PoolOptions;
+  private readonly config: PoolOptions;
   private poolClosed = false;
   private acquiredConnectionIds: Set<number> = new Set();
+  private reinitializing = false;
 
   constructor(config: PoolOptions) {
     this.config = config;
@@ -20,7 +21,6 @@ export class PoolMonitor {
       if (!this.acquiredConnectionIds.has(connection.threadId)) {
         this.acquiredConnectionIds.add(connection.threadId);
         ++this.activeConnections;
-        ++this.totalConnectionsCreated;
         console.log(chalk.green(`Acquired: ${connection.threadId}`));
         this.logPoolStatus();
         this.resetInactivityTimer();
@@ -50,26 +50,33 @@ export class PoolMonitor {
       ++this.waitingForConnection;
       console.log(chalk.magenta('Enqueued.'));
       this.logPoolStatus();
-      this.resetInactivityTimer();
     });
-    
+
     // Initialize inactivity timer
     this.resetInactivityTimer();
   }
+
   async getConnection(): Promise<PoolConnection> {
     if (this.poolClosed) {
       throw new Error('Connection pool is closed');
     }
 
+    let connection: PoolConnection | null = null;
     try {
       console.log(chalk.cyan('Requesting new connection...'));
-      const connection = await this.pool.getConnection();
+      connection = await this.pool.getConnection();
       console.log(chalk.green('Connection acquired'));
+      --this.waitingForConnection;
       this.resetInactivityTimer();
       return connection;
     } catch (error) {
       console.error(chalk.red('Error getting connection from pool:', error));
       throw error;
+    } finally {
+      if (connection) {
+        connection.release();
+        console.log(chalk.blue('Connection released in finally block'));
+      }
     }
   }
 
@@ -83,6 +90,10 @@ export class PoolMonitor {
 
   async closeAllConnections(): Promise<void> {
     try {
+      if (this.poolClosed) {
+        console.log(chalk.yellow('Pool already closed.'));
+        return;
+      }
       console.log(chalk.yellow('Ending pool connections...'));
       await this.pool.end();
       this.poolClosed = true;
@@ -93,12 +104,22 @@ export class PoolMonitor {
     }
   }
 
-  public reinitializePool() {
-    console.log(chalk.cyan('Reinitializing connection pool...'));
-    this.pool = createPool(this.config);
-    this.poolClosed = false;
-    this.acquiredConnectionIds.clear();
-    console.log(chalk.cyan('Connection pool reinitialized.'));
+  async reinitializePool(): Promise<void> {
+    if (this.reinitializing) return; // Prevent concurrent reinitialization
+    this.reinitializing = true;
+
+    try {
+      console.log(chalk.cyan('Reinitializing connection pool...'));
+      await this.closeAllConnections(); // Ensure old pool is closed
+      this.pool = createPool(this.config);
+      this.poolClosed = false;
+      this.acquiredConnectionIds.clear();
+      console.log(chalk.cyan('Connection pool reinitialized.'));
+    } catch (error) {
+      console.error(chalk.red('Error during reinitialization:', error));
+    } finally {
+      this.reinitializing = false;
+    }
   }
 
   public isPoolClosed(): boolean {

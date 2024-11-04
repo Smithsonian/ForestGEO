@@ -1,6 +1,7 @@
 'use client';
 
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Grid, Pagination } from '@mui/material';
+import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Pagination } from '@mui/material';
+import Grid from '@mui/material/Grid2';
 import { Box, Checkbox, Modal, ModalClose, Typography } from '@mui/joy';
 import { DisplayParsedDataGridInline } from '@/components/uploadsystemhelpers/displayparseddatagrid';
 import Divider from '@mui/joy/Divider';
@@ -145,8 +146,8 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               Back
             </Button>
             <Grid container spacing={2}>
-              <Grid item xs={4} />
-              <Grid item xs={4}>
+              <Grid size={4} />
+              <Grid size={4}>
                 <Box
                   sx={{
                     display: 'flex',
@@ -165,8 +166,8 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                   <FileList acceptedFiles={acceptedFiles} dataViewActive={dataViewActive} setDataViewActive={setDataViewActive} />
                 </Box>
               </Grid>
-              <Grid item xs={4} />
-              <Grid item xs={12}>
+              <Grid size={4} />
+              <Grid size={12}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', mr: 10 }}>
                   {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && currentFileHeaders.length > 0 && uploadForm !== undefined ? (
                     <>
@@ -200,8 +201,8 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                   Re-upload Corrected File
                 </Button>
               </Grid>
-              <Grid item xs={4} />
-              <Grid item xs={4}>
+              <Grid size={4} />
+              <Grid size={4}>
                 <Box
                   sx={{
                     display: 'flex',
@@ -215,7 +216,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                   </Button>
                 </Box>
               </Grid>
-              <Grid item xs={4} />
+              <Grid size={4} />
             </Grid>
           </>
         )}

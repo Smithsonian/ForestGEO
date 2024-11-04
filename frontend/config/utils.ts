@@ -169,31 +169,41 @@ export async function handleUpsert<Result>(
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
 
-  console.log('handleUpsert data:', data);
-
   const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
-  console.log('handleUpsert query:', query);
 
   const result = await runQuery(connection, query, Object.values(data));
 
   let id = result.insertId;
 
+  // If insertId is 0, it means the row was updated, not inserted
   if (id === 0) {
-    const findExisting = createSelectQuery<Result>(schema, tableName, data);
-    console.log('handleUpsert findExisting query:', findExisting);
-    const searchResult = await runQuery(connection, findExisting, Object.values(data));
+    // Try to find the existing row based on the data provided
+    const whereConditions = Object.keys(data)
+      .map(field => {
+        const value = data[field as keyof Result];
+        return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
+      })
+      .join(' AND ');
+
+    const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
+    const values = Object.values(data).filter(value => value !== null);
+
+    const searchResult = await runQuery(connection, findExistingQuery, values);
 
     if (searchResult.length > 0) {
+      // Return the primary key if the record is found
       id = searchResult[0][key as keyof Result] as unknown as number;
     } else {
-      throw new Error(`Unknown error. InsertId was 0, but manually searching for ${tableName} by ${String(key)} also failed.`);
+      // More detailed error information
+      console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
+      throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
     }
   }
 
   return id;
 }
 
-export function createError(message: string, context: any) {
+export function createError(message: string, context: any): Error {
   const error = new Error(message);
   error.name = 'ProcessingError';
   console.error(message, context);

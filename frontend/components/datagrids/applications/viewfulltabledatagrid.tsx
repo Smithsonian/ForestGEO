@@ -6,10 +6,12 @@ import { AlertProps } from '@mui/material';
 import { GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { useSession } from 'next-auth/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { ViewFullTableRDS } from '@/config/sqlrdsdefinitions/views';
+import { useLoading } from '@/app/contexts/loadingprovider';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function ViewFullTableDataGrid() {
   const initialViewFullTable: ViewFullTableRDS = {
@@ -119,6 +121,8 @@ export default function ViewFullTableDataGrid() {
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const { data: session } = useSession();
+  const { setLoading } = useLoading();
+  const currentSite = useSiteContext();
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -133,9 +137,20 @@ export default function ViewFullTableDataGrid() {
       ...oldModel,
       [id]: { mode: 'edit', fieldToFocus: 'speciesCode' }
     }));
-    console.log('viewfulltableview addnewrowtogrid triggered');
   };
-  console.log('viewfulltable: ', ViewFullTableGridColumns);
+
+  async function reloadVFT() {
+    setLoading(true, 'Refreshing Historical View...');
+    const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+    if (!response.ok) throw new Error('Historical View Refresh failure');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  useEffect(() => {
+    reloadVFT()
+      .catch(console.error)
+      .then(() => setLoading(false));
+  }, []);
 
   return (
     <>

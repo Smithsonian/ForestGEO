@@ -58,10 +58,10 @@ module.exports = {
         },
         'fade-blur-in': {
           '0%': { filter: 'blur(0)', opacity: '1' },
-          '100%': { filter: 'blur(5px)', opacity: '0.3' }
+          '100%': { filter: 'blur(1px)', opacity: '0.75' }
         },
         'fade-blur-out': {
-          '0%': { filter: 'blur(5px)', opacity: '0.3' },
+          '0%': { filter: 'blur(1px)', opacity: '0.75' },
           '100%': { filter: 'blur(0)', opacity: '1' }
         },
         expand: {

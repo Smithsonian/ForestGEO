@@ -1,6 +1,6 @@
-import { BlobServiceClient, ContainerClient } from '@azure/storage-blob';
+import { BlobServiceClient, BlobUploadCommonResponse, ContainerClient } from '@azure/storage-blob';
 
-export async function getContainerClient(containerName: string) {
+export async function getContainerClient(containerName: string): Promise<ContainerClient | undefined> {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
   console.log('Connection String:', storageAccountConnectionString);
   console.log(`container name: ${containerName.toLowerCase()}`);
@@ -45,7 +45,7 @@ export async function uploadValidFileAsBuffer(
   user: string,
   formType: string,
   fileRowErrors: FileRowErrors[] = []
-) {
+): Promise<BlobUploadCommonResponse | undefined> {
   const buffer = Buffer.from(await file.arrayBuffer());
   // New function to generate the filename with an incremented suffix
   const generateNewFileName = async (fileName: string) => {

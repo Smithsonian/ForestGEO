@@ -27,7 +27,6 @@ import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import FileDownloadTwoToneIcon from '@mui/icons-material/FileDownloadTwoTone';
 import Box from '@mui/joy/Box';
 import { Stack, Tooltip, Typography } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
@@ -59,6 +58,8 @@ import { useSession } from 'next-auth/react';
 
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
+import { FileDownloadSharp, FileDownloadTwoTone } from '@mui/icons-material';
+import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -70,7 +71,16 @@ function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportErrors, locked, filterModel }: EditToolbarProps) => {
+const EditToolbar = ({
+  handleAddNewRow,
+  handleRefresh,
+  handleExportAll,
+  handleExportErrors,
+  handleExportCSV,
+  handleRunValidations,
+  locked,
+  filterModel
+}: EditToolbarProps) => {
   const handleExportClick = async () => {
     if (!handleExportAll) return;
     const fullData = await handleExportAll(filterModel);
@@ -113,9 +123,15 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
       <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
         Export Full Data
       </Button>
-      <Button color="primary" startIcon={<FileDownloadTwoToneIcon />} onClick={handleExportErrorsClick}>
+      <Button color="primary" startIcon={<FileDownloadSharp />} onClick={handleExportErrorsClick}>
         Export Errors
       </Button>
+      <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
+        Export Form CSV
+      </Button>
+      {/*<Button color={'primary'} startIcon={<Quiz />} onClick={handleRunValidations}>*/}
+      {/*  Run Validations*/}
+      {/*</Button>*/}
     </GridToolbarContainer>
   );
 };
@@ -192,6 +208,52 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const apiRef = useGridApiRef();
 
+  const exportAllCSV = useCallback(async () => {
+    const response = await fetch(
+      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+      { method: 'GET' }
+    );
+    const data = await response.json();
+    let csvRows =
+      getTableHeaders(FormType.measurements)
+        .map(row => row.label)
+        .join(',') + '\n';
+    data.forEach((row: any) => {
+      const values = getTableHeaders(FormType.measurements)
+        .map(rowHeader => rowHeader.label)
+        .map(header => row[header])
+        .map(value => {
+          if (value === undefined || value === null || value === '') {
+            return null;
+          }
+          if (typeof value === 'number') {
+            return value;
+          }
+          const parsedValue = parseFloat(value);
+          if (!isNaN(parsedValue)) {
+            return parsedValue;
+          }
+          if (typeof value === 'string') {
+            value = value.replace(/"/g, '""');
+            value = `"${value}"`;
+          }
+
+          return value;
+        });
+      csvRows += values.join(',') + '\n';
+    });
+    const blob = new Blob([csvRows], {
+      type: 'text/csv;charset=utf-8;'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `measurementsform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [currentPlot, currentCensus, currentSite, gridType]);
+
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
     setSortModel(newModel);
@@ -211,19 +273,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     const errorFields = error.validationErrorIDs.flatMap(id => errorMapping[id.toString()] || []);
     return errorFields.includes(colField);
   };
+
   const rowHasError = (rowId: GridRowId) => {
     if (!rows || rows.length === 0) return false;
     return gridColumns.some(column => cellHasError(column.field, rowId));
   };
+
   const fetchErrorRows = async () => {
     if (!rows || rows.length === 0) return [];
     return rows.filter(row => rowHasError(row.id));
   };
+
   const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
     const row = rows.find(row => rowId === row.id);
     const error = validationErrors[row?.coreMeasurementID];
-    console.log('error: ', error);
-    console.log('validationerrorids: ', validationErrors);
     return error.validationErrorIDs.map(id => {
       const index = error.validationErrorIDs.indexOf(id);
       return error.descriptions[index]; // Assumes that descriptions are stored in the CMError object
@@ -508,9 +571,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const handleRefresh = useCallback(async () => {
     setRefresh(true);
-    await fetchPaginatedData(paginationModel.page);
+    await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName}`, { method: 'POST' });
+    setTimeout(async () => {
+      await fetchPaginatedData(paginationModel.page);
+    }, 2000);
     setRefresh(false);
-  }, [fetchPaginatedData, paginationModel.page]);
+  }, [fetchPaginatedData, paginationModel.page, refresh]);
 
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
@@ -631,8 +697,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         : {};
 
       // Only update state if there is a difference
-      console.log('existing valerrors: ', validationErrors);
-      console.log('new valerrors: ', errorMap);
       if (JSON.stringify(validationErrors) !== JSON.stringify(errorMap)) {
         setValidationErrors(errorMap);
       }
@@ -683,10 +747,16 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     align: 'center',
     width: 50,
     renderCell: (params: GridCellParams) => {
-      const rowId = params.row.coremeasurementID;
+      console.log('val stat rendercell');
+      console.log('val stat params: ', params);
+      const rowId = params.row.coreMeasurementID;
+      console.log('rowId located: ', rowId);
       const validationError = validationErrors[Number(rowId)];
+      console.log('searched for val error: ', validationError);
       const isPendingValidation = rows.find(row => row.coreMeasurementID === rowId)?.isValidated && !validationError;
+      console.log('pending validation? ', isPendingValidation);
       const isValidated = params.row.isValidated;
+      console.log('is validated?', isValidated);
 
       if (validationError) {
         return (
@@ -782,7 +852,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       //   }
       // };
     });
-    console.log('common columns', commonColumns);
     if (locked) {
       return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
@@ -928,10 +997,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
-                handleExportErrors: handleExportErrors
+                handleExportErrors: handleExportErrors,
+                handleExportCSV: exportAllCSV
               }
             }}
-            autoHeight
             getRowHeight={() => 'auto'}
             getRowClassName={getRowClassName}
             isCellEditable={() => !locked}

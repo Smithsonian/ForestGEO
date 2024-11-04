@@ -2,7 +2,7 @@
 'use client';
 import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
-import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog, Typography } from '@mui/joy';
+import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog, Stack, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
@@ -12,6 +12,7 @@ import { SpeciesLimitsRDS, SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonom
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import SpeciesLimitsDataGrid from '@/components/datagrids/applications/specieslimitsdatagrid';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
   const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
@@ -25,15 +26,16 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     speciesCode: '',
     speciesName: '',
     subspeciesName: '',
-    speciesIDLevel: '',
+    idLevel: '',
     speciesAuthority: '',
     subspeciesAuthority: '',
     validCode: '',
     fieldFamily: '',
-    speciesDescription: ''
+    description: ''
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const { data: session } = useSession();
   const [isSpeciesLimitsDialogOpen, setIsSpeciesLimitsDialogOpen] = useState(false);
   const [selectedSpeciesRow, setSelectedSpeciesRow] = useState<SpeciesRDS | null>(null);
@@ -291,10 +293,14 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
             )}
           </Box>
 
-          {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-            Upload
-          </Button>
+          <Stack direction={'row'} spacing={2}>
+            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
+              Manual Entry Form
+            </Button>
+            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
+              Upload File
+            </Button>
+          </Stack>
         </Box>
       </Box>
 
@@ -305,6 +311,15 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           setRefresh(true);
         }}
         formType={FormType.species}
+      />
+
+      <MultilineModal
+        isManualEntryFormOpen={isManualEntryFormOpen}
+        handleCloseManualEntryForm={() => {
+          setIsManualEntryFormOpen(false);
+          setRefresh(true);
+        }}
+        formType={'species'}
       />
 
       <IsolatedDataGridCommons

@@ -62,6 +62,14 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getAllTaxonomiesViewHCs()
   },
+  species: {
+    id: false,
+    ...getAllTaxonomiesViewHCs()
+  },
+  measurements: {
+    id: false,
+    ...getMeasurementsSummaryViewHCs()
+  },
   measurementssummary: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
@@ -113,11 +121,11 @@ export const createFetchQuery: FetchQueryFunction = (
   plotCensusNumber?,
   quadratID?: number,
   speciesID?: number
-) => {
+): string => {
   return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
-export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string) => {
+export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
 
@@ -162,6 +170,8 @@ export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
   handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
+  handleExportCSV?: () => Promise<void>;
+  handleRunValidations?: () => Promise<void>;
   filterModel?: GridFilterModel;
   locked?: boolean;
 }
@@ -212,14 +222,6 @@ export type PendingAction = {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
 };
-
-export interface ConfirmationDialogProps {
-  isOpen: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-  message: string;
-}
-
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
@@ -249,13 +251,6 @@ export function filterColumns(rows: GridRowsProp, columns: GridColDef[]): GridCo
       col.field === 'isValidated' ||
       !allValuesAreNull(rows, col.field)
   );
-}
-
-/**
- * Function to filter out columns where all entries are null, except the actions column.
- */
-export function filterMSVColumns(rows: GridRowsProp, columns: GridColDef[]): GridColDef[] {
-  return columns.filter(col => col.field === 'actions' || col.field === 'subquadrats' || col.field === 'isValidated' || !allValuesAreNull(rows, col.field));
 }
 
 export interface MeasurementsCommonsProps {
@@ -320,19 +315,4 @@ export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSor
     const dateB = new Date(b.measurementDate).getTime();
     return direction === 'asc' ? dateA - dateB : dateB - dateA;
   });
-};
-export const areRowsDifferent = (row1: GridRowModel | null, row2: GridRowModel | null): boolean => {
-  if (!row1 || !row2) {
-    return true; // Consider them different if either row is null
-  }
-
-  const keys = Object.keys(row1);
-
-  for (const key of keys) {
-    if (row1[key] !== row2[key]) {
-      return true; // If any value differs, the rows are different
-    }
-  }
-
-  return false; // All values are identical
 };

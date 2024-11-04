@@ -107,6 +107,7 @@ export const validateQuadratsRow: ValidationFunction = row => {
 
 export function getQuadratHCs(): ColumnStates {
   return {
+    quadratID: false,
     plotID: false,
     censusID: false
   };

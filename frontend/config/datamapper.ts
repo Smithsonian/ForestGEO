@@ -1,13 +1,28 @@
 import moment from 'moment';
 import { bitToBoolean, booleanToBit } from './macros';
 import { Common, ResultType, Unique } from '@/config/utils';
-import { SpeciesLimitsRDS, SpeciesLimitsResult, SpeciesRDS, SpeciesResult, StemRDS, StemResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import {
+  FamilyRDS,
+  FamilyResult,
+  GenusRDS,
+  GenusResult,
+  ReferenceRDS,
+  ReferenceResult,
+  SpeciesInventoryRDS,
+  SpeciesInventoryResult,
+  SpeciesLimitsRDS,
+  SpeciesLimitsResult,
+  SpeciesRDS,
+  SpeciesResult,
+  SpecimensRDS,
+  SpecimensResult,
+  StemRDS,
+  StemResult
+} from '@/config/sqlrdsdefinitions/taxonomies';
 import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
-  MeasurementsSummaryDraftRDS,
-  MeasurementsSummaryDraftResult,
   MeasurementsSummaryRDS,
   MeasurementsSummaryResult,
   StemTaxonomiesViewRDS,
@@ -16,6 +31,8 @@ import {
   ViewFullTableResult
 } from '@/config/sqlrdsdefinitions/views';
 import {
+  PostValidationQueriesRDS,
+  PostValidationQueriesResult,
   SiteSpecificValidationsRDS,
   SiteSpecificValidationsResult,
   ValidationChangelogRDS,
@@ -117,6 +134,7 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
     return (
       key
         // Add reverse transformation for ValidCode
+        .replace(/IDLevel/gi, 'idLevel')
         .replace(/ValidCode/gi, 'validCode')
         .replace(/DBHUnits/gi, 'dbhUnits')
         .replace(/HOMUnits/gi, 'homUnits')
@@ -189,8 +207,6 @@ class MapperFactory {
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'measurementssummary_draft':
-        return new GenericMapper<MeasurementsSummaryDraftRDS, MeasurementsSummaryDraftResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
@@ -205,16 +221,28 @@ class MapperFactory {
         return new GenericMapper<RoleRDS, RoleResult>() as unknown as IDataMapper<RDS, Result>;
       case 'plots':
         return new GenericMapper<PlotRDS, PlotsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'postvalidationqueries':
+        return new GenericMapper<PostValidationQueriesRDS, PostValidationQueriesResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadratpersonnel':
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':
         return new GenericMapper<QuadratRDS, QuadratResult>() as unknown as IDataMapper<RDS, Result>;
       case 'sites':
         return new SitesMapper() as any;
+      case 'family':
+        return new GenericMapper<FamilyRDS, FamilyResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'genus':
+        return new GenericMapper<GenusRDS, GenusResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'reference':
+        return new GenericMapper<ReferenceRDS, ReferenceResult>() as unknown as IDataMapper<RDS, Result>;
       case 'species':
         return new GenericMapper<SpeciesRDS, SpeciesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'speciesinventory':
+        return new GenericMapper<SpeciesInventoryRDS, SpeciesInventoryResult>() as unknown as IDataMapper<RDS, Result>;
       case 'specieslimits':
         return new GenericMapper<SpeciesLimitsRDS, SpeciesLimitsResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'specimens':
+        return new GenericMapper<SpecimensRDS, SpecimensResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stemtaxonomiesview':
         return new GenericMapper<StemTaxonomiesViewRDS, StemTaxonomiesViewResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':

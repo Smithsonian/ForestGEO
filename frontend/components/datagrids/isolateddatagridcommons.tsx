@@ -50,10 +50,12 @@ import { StyledDataGrid } from '@/config/styleddatagrid';
 import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
+import { FileDownloadTwoTone } from '@mui/icons-material';
+import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, filterModel }: EditToolbarProps) => {
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportCSV, locked, filterModel }: EditToolbarProps) => {
   if (!handleAddNewRow || !handleRefresh) return <></>;
   const handleExportClick = async () => {
     if (!handleExportAll) return;
@@ -81,6 +83,9 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, 
       </Button>
       <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
         Export Full Data
+      </Button>
+      <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
+        Export as Form CSV
       </Button>
     </GridToolbarContainer>
   );
@@ -220,6 +225,192 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setLoading(false);
     }
   }, [filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
+
+  const exportAllCSV = useCallback(async () => {
+    switch (gridType) {
+      case 'attributes':
+        const aResponse = await fetch(
+          `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+          { method: 'GET' }
+        );
+        const aData = await aResponse.json();
+        let aCSVRows =
+          getTableHeaders(FormType.attributes)
+            .map(row => row.label)
+            .join(',') + '\n';
+        aData.forEach((row: any) => {
+          const values = getTableHeaders(FormType.attributes)
+            .map(rowHeader => rowHeader.label)
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
+          aCSVRows += values.join(',') + '\n';
+        });
+        const aBlob = new Blob([aCSVRows], {
+          type: 'text/csv;charset=utf-8;'
+        });
+        const aURL = URL.createObjectURL(aBlob);
+        const aLink = document.createElement('a');
+        aLink.href = aURL;
+        aLink.download = `attributesform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+        document.body.appendChild(aLink);
+        aLink.click();
+        document.body.removeChild(aLink);
+        break;
+      case 'quadrats':
+        const qResponse = await fetch(
+          `/api/formdownload/quadrats/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+          { method: 'GET' }
+        );
+        const qData = await qResponse.json();
+        let qCSVRows =
+          getTableHeaders(FormType.quadrats)
+            .map(row => row.label)
+            .join(',') + '\n';
+        qData.forEach((row: any) => {
+          const values = getTableHeaders(FormType.quadrats)
+            .map(rowHeader => rowHeader.label)
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
+          qCSVRows += values.join(',') + '\n';
+        });
+        const qBlob = new Blob([qCSVRows], {
+          type: 'text/csv;charset=utf-8;'
+        });
+        const qURL = URL.createObjectURL(qBlob);
+        const qLink = document.createElement('a');
+        qLink.href = qURL;
+        qLink.download = `quadratsform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+        document.body.appendChild(qLink);
+        qLink.click();
+        document.body.removeChild(qLink);
+        break;
+      case 'personnel':
+        const pResponse = await fetch(
+          `/api/formdownload/personnel/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+          { method: 'GET' }
+        );
+        const pData = await pResponse.json();
+        let pCSVRows =
+          getTableHeaders(FormType.personnel)
+            .map(row => row.label)
+            .join(',') + '\n';
+        pData.forEach((row: any) => {
+          const values = getTableHeaders(FormType.personnel)
+            .map(rowHeader => rowHeader.label)
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
+          pCSVRows += values.join(',') + '\n';
+        });
+        const pBlob = new Blob([pCSVRows], {
+          type: 'text/csv;charset=utf-8;'
+        });
+        const pURL = URL.createObjectURL(pBlob);
+        const pLink = document.createElement('a');
+        pLink.href = pURL;
+        pLink.download = `personnelform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+        document.body.appendChild(pLink);
+        pLink.click();
+        document.body.removeChild(pLink);
+        break;
+      case 'species':
+      case 'alltaxonomiesview':
+        const sResponse = await fetch(
+          `/api/formdownload/species/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+          { method: 'GET' }
+        );
+        const sData = await sResponse.json();
+        let sCSVRows =
+          getTableHeaders(FormType.species)
+            .map(row => row.label)
+            .join(',') + '\n';
+        sData.forEach((row: any) => {
+          const values = getTableHeaders(FormType.species)
+            .map(rowHeader => rowHeader.label)
+            .map(header => row[header])
+            .map(value => {
+              if (value === undefined || value === null || value === '') {
+                return null;
+              }
+              if (typeof value === 'number') {
+                return value;
+              }
+              const parsedValue = parseFloat(value);
+              if (!isNaN(parsedValue)) {
+                return parsedValue;
+              }
+              if (typeof value === 'string') {
+                value = value.replace(/"/g, '""');
+                value = `"${value}"`;
+              }
+
+              return value;
+            });
+          sCSVRows += values.join(',') + '\n';
+        });
+        const sBlob = new Blob([sCSVRows], {
+          type: 'text/csv;charset=utf-8;'
+        });
+        const sURL = URL.createObjectURL(sBlob);
+        const sLink = document.createElement('a');
+        sLink.href = sURL;
+        sLink.download = `speciesform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
+        document.body.appendChild(sLink);
+        sLink.click();
+        document.body.removeChild(sLink);
+        break;
+    }
+  }, [currentPlot, currentCensus, currentSite, gridType]);
 
   const openConfirmationDialog = useCallback(
     (actionType: 'save' | 'delete', actionId: GridRowId) => {
@@ -864,10 +1055,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
+                handleExportCSV: exportAllCSV,
                 filterModel: filterModel
               }
             }}
-            autoHeight
             getRowHeight={() => 'auto'}
           />
         </Box>
@@ -876,19 +1067,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
-        {/*{isDialogOpen && promiseArguments && (*/}
-        {/*  <ReEnterDataModal*/}
-        {/*    gridType={gridType}*/}
-        {/*    row={promiseArguments.oldRow} // Pass oldRow*/}
-        {/*    reEnterData={promiseArguments.newRow} // Pass newRow*/}
-        {/*    handleClose={handleCancelAction}*/}
-        {/*    handleSave={handleConfirmAction}*/}
-        {/*    columns={gridColumns}*/}
-        {/*    selectionOptions={selectionOptions}*/}
-        {/*    clusters={clusters}*/}
-        {/*    hiddenColumns={getColumnVisibilityModel(gridType)}*/}
-        {/*  />*/}
-        {/*)}*/}
         {isDialogOpen && promiseArguments && (
           <SkipReEnterDataModal
             gridType={gridType}

@@ -12,7 +12,6 @@ import {
   Divider,
   FormControl,
   FormLabel,
-  Grid,
   Input,
   LinearProgress,
   List,
@@ -36,6 +35,7 @@ import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import Grid from '@mui/material/Grid2';
 
 // this has been shelved -- it's a little too complicated for a first iteration.
 // saving it for a later version.
@@ -185,7 +185,7 @@ ${pathname}
               <DialogContent sx={{ display: 'flex', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                 <Divider orientation="horizontal" sx={{ my: 1 }} />
                 <Grid container spacing={1}>
-                  <Grid xs={4}>
+                  <Grid size={4}>
                     {currentSite ? (
                       <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                         <Typography level="body-sm" fontWeight={'xl'}>
@@ -197,7 +197,7 @@ ${pathname}
                       <Typography level="body-sm">No site selected.</Typography>
                     )}
                   </Grid>
-                  <Grid xs={4}>
+                  <Grid size={4}>
                     {currentPlot ? (
                       <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                         <Typography level="body-sm">Selected Plot: {currentPlot.plotName}</Typography>
@@ -207,7 +207,7 @@ ${pathname}
                       <Typography level="body-sm">No plot selected.</Typography>
                     )}
                   </Grid>
-                  <Grid xs={4}>
+                  <Grid size={4}>
                     {currentCensus ? (
                       <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                         <Typography level="body-sm">Selected Census: {currentCensus.plotCensusNumber}</Typography>

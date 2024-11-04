@@ -25,7 +25,11 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
     display: 'none'
   },
   '& .MuiDataGrid-columnHeader, & .MuiDataGrid-cell': {
-    borderRight: `1px solid ${theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'}`
+    borderRight: `1px solid ${theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center'
   },
   '& .MuiDataGrid-columnsContainer, & .MuiDataGrid-cell': {
     borderBottom: `1px solid ${theme.palette.mode === 'light' ? '#f0f0f0' : '#303030'}`
@@ -34,7 +38,11 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
     color: theme.palette.mode === 'light' ? 'rgba(0,0,0,.85)' : 'rgba(255,255,255,0.65)',
     whiteSpace: 'normal',
     wordWrap: 'break-word',
-    lineHeight: '1.2'
+    lineHeight: '1.2',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center'
   },
   '& .MuiPaginationItem-root': {
     borderRadius: 0
@@ -42,14 +50,14 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
   '& .MuiSelect-select': {
     display: 'flex',
     alignItems: 'center',
-    padding: '0 4px' // Adjust padding to reduce space
+    padding: '0 4px'
   },
   '& .MuiSelect-icon': {
-    fontSize: '12px', // Adjust icon size
-    marginLeft: '4px' // Adjust margin to reduce space between text and icon
+    fontSize: '12px',
+    marginLeft: '4px'
   },
   '& .MuiSelect-root': {
-    fontSize: '12px', // Adjust font size as needed
-    padding: '4px 0' // Adjust padding to reduce space
+    fontSize: '12px',
+    padding: '4px 0'
   }
 }));

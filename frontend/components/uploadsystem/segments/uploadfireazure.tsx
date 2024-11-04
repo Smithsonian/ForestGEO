@@ -52,8 +52,9 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         const formData = new FormData();
         formData.append(file.name, file);
         if (uploadForm === 'measurements') {
-          const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
-          formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
+          // this is causing massive slowdown. removing for now
+          // const fileRowErrors = mapCMErrorsToFileRowErrors(file.name);
+          // formData.append('fileRowErrors', JSON.stringify(fileRowErrors)); // Append validation errors to formData
         }
         const response = await fetch(
           `/api/filehandlers/storageload?fileName=${file.name}&plot=${currentPlot?.plotName?.trim().toLowerCase()}&census=${currentCensus?.dateRanges[0].censusID ? currentCensus?.dateRanges[0].censusID.toString().trim() : 0}&user=${user}&formType=${uploadForm}`,

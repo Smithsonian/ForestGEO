@@ -2,11 +2,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType } from '@/config/macros/formdetails';
 import { Stack } from '@mui/joy';
-import { DetailedCMIDRow } from '@/components/uploadsystem/uploadparent';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
+import { useSession } from 'next-auth/react';
 
 interface IDToRow {
   coreMeasurementID: number;
@@ -35,13 +35,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const [currentlyRunning, setCurrentlyRunning] = useState<string>('');
   const hasUploaded = useRef(false);
+  const { data: session } = useSession();
 
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
+        const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
+        const userID = await userIDResponse.json();
         setCurrentlyRunning(`Uploading file "${fileName}" to SQL...`);
         const response = await fetch(
-          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${personnelRecording}`,
+          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${userID}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -52,54 +55,54 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         setCompletedOperations(prevCompleted => prevCompleted + 1);
 
-        const result = await response.json();
-
-        if (result.idToRows) {
-          setCurrentlyRunning(`Fetching CMID details for file "${fileName}"...`);
-          if (uploadForm === 'measurements') {
-            Promise.all(
-              result.idToRows.map(({ coreMeasurementID }: IDToRow) =>
-                fetch(`/api/details/cmid?schema=${schema}&cmid=${coreMeasurementID}`).then(response => response.json())
-              )
-            )
-              .then(details => {
-                const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow, index: number) => {
-                  const detailArray = details[index];
-                  if (Array.isArray(detailArray) && detailArray.length > 0) {
-                    const detail = detailArray[0];
-                    if ('plotName' in detail && 'quadratName' in detail && 'plotCensusNumber' in detail && 'speciesName' in detail) {
-                      return {
-                        coreMeasurementID,
-                        fileName,
-                        row: fileRow,
-                        plotName: detail.plotName,
-                        quadratName: detail.quadratName,
-                        plotCensusNumber: detail.plotCensusNumber,
-                        speciesName: detail.speciesName
-                      };
-                    } else {
-                      throw new Error('Detail object missing required properties');
-                    }
-                  } else {
-                    throw new Error('Invalid detail array structure');
-                  }
-                });
-                setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
-              })
-              .catch(error => {
-                console.error('Error fetching CMID details:', error);
-                setUploadError(error);
-                setReviewState(ReviewStates.ERRORS);
-              });
-          } else {
-            const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow) => ({
-              coreMeasurementID,
-              fileName,
-              row: fileRow
-            }));
-            setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
-          }
-        }
+        // const result = await response.json();
+        //
+        // if (result.idToRows) {
+        //   setCurrentlyRunning(`Fetching CMID details for file "${fileName}"...`);
+        //   if (uploadForm === 'measurements') {
+        //     Promise.all(
+        //       result.idToRows.map(({ coreMeasurementID }: IDToRow) =>
+        //         fetch(`/api/details/cmid?schema=${schema}&cmid=${coreMeasurementID}`).then(response => response.json())
+        //       )
+        //     )
+        //       .then(details => {
+        //         const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow, index: number) => {
+        //           const detailArray = details[index];
+        //           if (Array.isArray(detailArray) && detailArray.length > 0) {
+        //             const detail = detailArray[0];
+        //             if ('plotName' in detail && 'quadratName' in detail && 'plotCensusNumber' in detail && 'speciesName' in detail) {
+        //               return {
+        //                 coreMeasurementID,
+        //                 fileName,
+        //                 row: fileRow,
+        //                 plotName: detail.plotName,
+        //                 quadratName: detail.quadratName,
+        //                 plotCensusNumber: detail.plotCensusNumber,
+        //                 speciesName: detail.speciesName
+        //               };
+        //             } else {
+        //               throw new Error('Detail object missing required properties');
+        //             }
+        //           } else {
+        //             throw new Error('Invalid detail array structure');
+        //           }
+        //         });
+        //         setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
+        //       })
+        //       .catch(error => {
+        //         console.error('Error fetching CMID details:', error);
+        //         setUploadError(error);
+        //         setReviewState(ReviewStates.ERRORS);
+        //       });
+        //   } else {
+        //     const newRowToCMID: DetailedCMIDRow[] = result.idToRows.map(({ coreMeasurementID, fileRow }: IDToRow) => ({
+        //       coreMeasurementID,
+        //       fileName,
+        //       row: fileRow
+        //     }));
+        //     setAllRowToCMID(prevState => [...prevState, ...newRowToCMID]);
+        //   }
+        // }
 
         return response.ok ? 'SQL load successful' : 'SQL load failed';
       } catch (error) {
@@ -150,7 +153,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   useEffect(() => {
     if (!loading && completedOperations === totalOperations) {
-      if (uploadForm === 'measurements') setReviewState(ReviewStates.VALIDATE);
+      if (uploadForm === FormType.measurements)
+        setReviewState(ReviewStates.VALIDATE); // because 2x entry is site-dependent, default behavior should be to trigger validations
       else setReviewState(ReviewStates.UPLOAD_AZURE);
     }
   }, [loading, completedOperations, totalOperations]);

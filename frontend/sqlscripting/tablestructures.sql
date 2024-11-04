@@ -68,7 +68,7 @@ create table if not exists census
         foreign key (PlotID) references plots (PlotID)
 );
 
-create table if not exists quadrats
+create table quadrats
 (
     QuadratID       int auto_increment
         primary key,
@@ -299,7 +299,7 @@ create table if not exists coremeasurements
     MeasuredHOM       decimal(10, 6)                                               null,
     HOMUnit           enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') default 'm'  null,
     Description       varchar(255)                                                 null,
-    UserDefinedFields text                                                         null,
+    UserDefinedFields json                                                         null,
     constraint FK_CoreMeasurements_Stems
         foreign key (StemID) references stems (StemID),
     constraint coremeasurements_census_CensusID_fk
@@ -491,3 +491,14 @@ create table if not exists viewfulltable
     AttributeStatus           enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
+create table if not exists postvalidationqueries
+(
+    QueryID int auto_increment primary key,
+    QueryName varchar(255) null,
+    QueryDefinition text null,
+    Description text null,
+    IsEnabled bit default b'0' not null,
+    LastRunAt DATETIME NULL,
+    LastRunResult LONGTEXT NULL,
+    LastRunStatus ENUM('success', 'failure') NULL
+);

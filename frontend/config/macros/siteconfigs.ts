@@ -10,6 +10,7 @@ import SchemaIcon from '@mui/icons-material/Schema';
 import FilterIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
+import AssessmentIcon from '@mui/icons-material/Assessment';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
@@ -70,7 +71,7 @@ export const siteConfigNav: SiteConfigProps[] = [
         label: 'Post-Census Statistics',
         href: '/postvalidation',
         tip: '',
-        icon: VisibilityIcon
+        icon: AssessmentIcon
       },
       {
         label: 'Uploaded Files',
@@ -133,12 +134,14 @@ export const siteConfigNav: SiteConfigProps[] = [
   }
 ];
 
-export function getEndpointHeaderName(endpoint: string) {
+export function getEndpointHeaderName(endpoint: string): string {
   switch (endpoint) {
     case '/dashboard':
       return 'Dashboard';
     case '/measurementshub/summary':
       return 'View Data';
+    case '/measurementshub/postvalidation':
+      return 'Post-Census Statistics';
     case '/measurementshub/validationhistory':
       return 'Validation History';
     case '/measurementshub/viewfulltable':
@@ -159,5 +162,7 @@ export function getEndpointHeaderName(endpoint: string) {
       return 'Quadrat-Assigned Personnel';
     case '/fixeddatainput/alltaxonomies':
       return 'Species List';
+    default:
+      return '';
   }
 }

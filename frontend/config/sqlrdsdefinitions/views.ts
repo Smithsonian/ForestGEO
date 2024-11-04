@@ -13,17 +13,18 @@ export type AllTaxonomiesViewRDS = {
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
-  speciesIDLevel?: string;
+  idLevel?: string;
   speciesAuthority?: string;
   validCode?: string;
   subspeciesAuthority?: string;
   fieldFamily?: string;
-  speciesDescription?: string;
+  description?: string;
 };
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
+    speciesID: false,
     familyID: false,
     genusID: false,
     speciesLimits: false
@@ -57,9 +58,9 @@ export type MeasurementsSummaryRDS = {
   speciesCode?: string;
   treeTag?: string;
   stemTag?: string;
-  stemLocalX?: number;
-  stemLocalY?: number;
-  stemUnits?: string;
+  localX?: number;
+  localY?: number;
+  coordinateUnits?: string;
   measurementDate?: any;
   measuredDBH?: number;
   dbhUnits?: string;
@@ -73,6 +74,7 @@ export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;
 
 export function getMeasurementsSummaryViewHCs(): ColumnStates {
   return {
+    coreMeasurementID: false,
     plotID: false,
     censusID: false,
     quadratID: false,
@@ -86,11 +88,24 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
   };
 }
 
-export type MeasurementsSummaryDraftRDS = MeasurementsSummaryRDS & {
+export type MeasurementsSummaryStagingRDS = MeasurementsSummaryRDS & {
   submittedBy?: number;
+  isReviewed?: boolean;
+  isSelected?: boolean;
+  submissionDate?: Date;
 };
 
-export type MeasurementsSummaryDraftResult = ResultType<MeasurementsSummaryDraftRDS>;
+export type MeasurementsSummaryStagingResult = ResultType<MeasurementsSummaryStagingRDS>;
+
+export function getMeasurementsSummaryStagingViewHCs(): ColumnStates {
+  return {
+    ...getMeasurementsSummaryViewHCs(),
+    submittedBy: false,
+    isReviewed: false,
+    isSelected: false,
+    submissionDate: false
+  };
+}
 
 export type StemTaxonomiesViewRDS = {
   id?: number;
@@ -111,26 +126,18 @@ export type StemTaxonomiesViewRDS = {
   genusAuthority?: string;
   speciesAuthority?: string;
   subspeciesAuthority?: string;
-  speciesIDLevel?: string;
-  speciesFieldFamily?: string;
+  idLevel?: string;
+  fieldFamily?: string;
 };
 export type StemTaxonomiesViewResult = ResultType<StemTaxonomiesViewRDS>;
 
 export function getStemTaxonomiesViewHCs(): ColumnStates {
   return {
+    stemID: false,
     treeID: false,
     speciesID: false,
     familyID: false,
-    genusID: false,
-    quadratName: false,
-    plotName: false,
-    locationName: false,
-    countryName: false,
-    quadratDimensionX: false,
-    quadratDimensionY: false,
-    stemQuadX: false,
-    stemQuadY: false,
-    stemDescription: false
+    genusID: false
   };
 }
 

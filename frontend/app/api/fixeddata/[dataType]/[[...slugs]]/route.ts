@@ -64,9 +64,9 @@ export async function GET(
         break;
       case 'personnel':
         paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS q.*
-            FROM ${schema}.${params.dataType} q
-                     JOIN ${schema}.census c ON q.CensusID = c.CensusID
+            SELECT SQL_CALC_FOUND_ROWS p.*
+            FROM ${schema}.${params.dataType} p
+                     JOIN ${schema}.census c ON p.CensusID = c.CensusID
             WHERE c.PlotID = ?
               AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
@@ -100,17 +100,18 @@ export async function GET(
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'measurementssummary':
+      case 'measurementssummary_staging':
       case 'measurementssummaryview':
       case 'viewfulltable':
       case 'viewfulltableview':
         paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS q.*
-            FROM ${schema}.${params.dataType} q
-                     JOIN ${schema}.census c ON q.PlotID = c.PlotID AND q.CensusID = c.CensusID
-            WHERE q.PlotID = ?
+            SELECT SQL_CALC_FOUND_ROWS vft.*
+            FROM ${schema}.${params.dataType} vft
+                     JOIN ${schema}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
+            WHERE vft.PlotID = ?
               AND c.PlotID = ?
               AND c.PlotCensusNumber = ?
-            ORDER BY q.MeasurementDate ASC LIMIT ?, ?;`;
+            ORDER BY vft.MeasurementDate ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       // case 'subquadrats':
@@ -364,7 +365,6 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   let conn: PoolConnection | null = null;
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
-  console.log('newrow: ', newRow);
   try {
     conn = await getConn();
     await conn.beginTransaction();

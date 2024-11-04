@@ -77,7 +77,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string }[]> = {
   [FormType.arcgis_xlsx]: arcgisHeaders
 };
 
-export function getTableHeaders(formType: FormType, _usesSubquadrats: boolean): { label: string }[] {
+export function getTableHeaders(formType: FormType, _usesSubquadrats = false): { label: string }[] {
   return TableHeadersByFormType[formType];
 }
 
@@ -147,6 +147,10 @@ export interface UploadedFileData {
   formType?: string;
   fileErrors?: any;
   date?: Date;
+}
+
+export interface DataGridSignals {
+  setChangesSubmitted: Dispatch<SetStateAction<boolean>>;
 }
 
 // CONSTANT MACROS
