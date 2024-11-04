@@ -1,7 +1,6 @@
-import { getConn, runQuery } from '@/components/processors/processormacros';
-import { PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 // datatype: table name
 // expecting 1) schema 2) plotID 3) plotCensusNumber
@@ -20,16 +19,13 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
   )
     throw new Error('incorrect slugs provided');
 
-  let connection: PoolConnection | null = null;
+  const connection = new ConnectionManager();
   try {
-    connection = await getConn();
-
     switch (params.dataType) {
       case 'attributes':
       case 'species':
         const baseQuery = `SELECT 1 FROM ${schema}.${params.dataType} LIMIT 1`; // Check if the table has any row
-        const baseResults = await runQuery(connection, baseQuery);
-        if (connection) connection.release();
+        const baseResults = await connection.executeQuery(baseQuery);
         if (baseResults.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
@@ -37,8 +33,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         break;
       case 'personnel':
         const pQuery = `SELECT 1 FROM ${schema}.personnel WHERE CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber})`; // Check if the table has any row
-        const pResults = await runQuery(connection, pQuery);
-        if (connection) connection.release();
+        const pResults = await connection.executeQuery(pQuery);
         if (pResults.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
@@ -49,8 +44,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
          JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID 
          JOIN ${schema}.census c ON cq.CensusID = c.CensusID 
          WHERE q.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
-        const results = await runQuery(connection, query);
-        if (connection) connection.release();
+        const results = await connection.executeQuery(query);
         if (results.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
@@ -61,8 +55,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         JOIN ${schema}.census c ON C.CensusID = cm.CensusID
         JOIN ${schema}.plots p ON p.PlotID = c.PlotID
         WHERE p.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
-        const pvResults = await runQuery(connection, pvQuery);
-        if (connection) connection.release();
+        const pvResults = await connection.executeQuery(pvQuery);
         if (pvResults.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
@@ -77,8 +70,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
                              JOIN ${schema}.personnel p ON p.CensusID = c.CensusID
                              WHERE q.PlotID = ${plotID}
                                AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
-        const quadratsResults = await runQuery(connection, quadratsQuery);
-        if (connection) connection.release();
+        const quadratsResults = await connection.executeQuery(quadratsQuery);
         if (quadratsResults.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
@@ -86,8 +78,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
 
         // Validation for personnel table
         const personnelQuery = `SELECT 1 FROM ${schema}.personnel LIMIT 1`;
-        const personnelResults = await runQuery(connection, personnelQuery);
-        if (connection) connection.release();
+        const personnelResults = await connection.executeQuery(personnelQuery);
         if (personnelResults.length === 0)
           return new NextResponse(null, {
             status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
@@ -100,7 +91,6 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         });
     }
     // If all conditions are satisfied
-    connection.release();
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     console.error(e);
@@ -108,6 +98,6 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
       status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
     });
   } finally {
-    if (connection) connection.release();
+    await connection.closeConnection();
   }
 }

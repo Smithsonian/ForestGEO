@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getConn, runQuery } from '@/components/processors/processormacros';
-import { PoolConnection } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest) {
   const cmID = parseInt(request.nextUrl.searchParams.get('cmid')!);
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     const query = `
         SELECT
             cm.CoreMeasurementID,
@@ -35,8 +33,7 @@ export async function GET(request: NextRequest) {
             ${schema}.census c ON cm.CensusID = c.CensusID
         WHERE
             cm.CoreMeasurementID = ?;`;
-    const results = await runQuery(conn, query, [cmID]);
-    conn.release();
+    const results = await connectionManager.executeQuery(query, [cmID]);
     return new NextResponse(
       JSON.stringify(
         results.map((row: any) => ({
@@ -52,6 +49,6 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     throw new Error('SQL query failed: ' + error.message);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

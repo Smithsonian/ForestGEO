@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getConn, runQuery } from '@/components/processors/processormacros';
-import { PoolConnection } from 'mysql2/promise';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest) {
-  let conn: PoolConnection | null = null;
+  const conn = new ConnectionManager();
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('No schema variable provided!');
 
   try {
-    conn = await getConn();
-
+    await conn.beginTransaction();
     // Query to fetch existing validation errors
     const validationErrorsQuery = `
       SELECT 
@@ -27,14 +25,13 @@ export async function GET(request: NextRequest) {
       GROUP BY 
           cm.CoreMeasurementID;
     `;
-    const validationErrorsRows = await runQuery(conn, validationErrorsQuery);
+    const validationErrorsRows = await conn.executeQuery(validationErrorsQuery);
 
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
       coreMeasurementID: row.CoreMeasurementID,
       validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
       descriptions: row.Descriptions.split(',')
     }));
-    conn.release();
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors
@@ -47,11 +44,11 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error: any) {
-    conn?.release();
+    await conn.rollbackTransaction();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
   } finally {
-    if (conn) conn.release();
+    await conn.closeConnection();
   }
 }
