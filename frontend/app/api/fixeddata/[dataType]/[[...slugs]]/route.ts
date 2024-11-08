@@ -14,7 +14,7 @@ export async function GET(
   }: {
     params: { dataType: string; slugs?: string[] };
   }
-): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number }>> {
+): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number; finishedQuery: string }>> {
   if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam, speciesIDParam] = params.slugs;
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
@@ -157,7 +157,6 @@ export async function GET(
     if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
       throw new Error('Mismatch between query placeholders and parameters');
     }
-
     const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
 
     const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
@@ -176,7 +175,8 @@ export async function GET(
         JSON.stringify({
           output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
           deprecated: MapperFactory.getMapper<any, any>(params.dataType).mapData(filteredDeprecated),
-          totalCount: totalRows
+          totalCount: totalRows,
+          finishedQuery: format(paginatedQuery, queryParams)
         }),
         { status: HTTPResponses.OK }
       );
@@ -185,7 +185,8 @@ export async function GET(
         JSON.stringify({
           output: MapperFactory.getMapper<any, any>(params.dataType).mapData(paginatedResults),
           deprecated: undefined,
-          totalCount: totalRows
+          totalCount: totalRows,
+          finishedQuery: format(paginatedQuery, queryParams)
         }),
         { status: HTTPResponses.OK }
       );
