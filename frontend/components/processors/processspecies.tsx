@@ -1,6 +1,6 @@
-import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
+import { SpecialProcessingProps } from '@/config/macros';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};

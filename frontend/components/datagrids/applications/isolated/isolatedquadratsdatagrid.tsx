@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { Box, Button, Stack, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
-import Link from 'next/link';
 import { quadratGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
@@ -71,11 +70,11 @@ export default function IsolatedQuadratsDataGrid() {
               Upload
             </Button>
           </Stack>
-          <Link href="/fixeddatainput/quadratpersonnel" passHref>
-            <Button variant="solid" color="primary" sx={{ ml: 2 }}>
-              View Quadrat Personnel
-            </Button>
-          </Link>
+          {/*<Link href="/fixeddatainput/quadratpersonnel" passHref>*/}
+          {/*  <Button variant="solid" color="primary" sx={{ ml: 2 }}>*/}
+          {/*    View Quadrat Personnel*/}
+          {/*  </Button>*/}
+          {/*</Link>*/}
         </Box>
       </Box>
       <UploadParentModal

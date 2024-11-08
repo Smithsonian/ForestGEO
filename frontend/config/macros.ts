@@ -5,6 +5,12 @@
  */
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
+import ConnectionManager from '@/config/connectionmanager';
+import { FileRow } from '@/config/macros/formdetails';
+import { processPersonnel } from '@/components/processors/processpersonnel';
+import { processSpecies } from '@/components/processors/processspecies';
+import { processQuadrats } from '@/components/processors/processquadrats';
+import { processCensus } from '@/components/processors/processcensus';
 
 export type ColumnStates = {
   [key: string]: boolean;
@@ -113,3 +119,100 @@ export type GridSelections = {
 };
 
 export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field crew';
+
+export interface SpecialProcessingProps {
+  connectionManager: ConnectionManager;
+  rowData: FileRow;
+  schema: string;
+  plotID?: number;
+  censusID?: number;
+  quadratID?: number;
+  fullName?: string;
+}
+
+export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
+  formType: string;
+}
+
+export type FileMapping = {
+  tableName: string;
+  columnMappings: { [fileColumn: string]: string };
+  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | undefined>;
+};
+// Define the mappings for each file type
+export const fileMappings: Record<string, FileMapping> = {
+  attributes: {
+    tableName: 'Attributes',
+    columnMappings: {
+      code: 'Code',
+      description: 'Description',
+      status: 'Status'
+    }
+  },
+  personnel: {
+    tableName: 'Personnel',
+    columnMappings: {
+      firstname: 'FirstName',
+      lastname: 'LastName',
+      role: 'Role'
+    },
+    specialProcessing: processPersonnel
+  },
+  species: {
+    tableName: '',
+    columnMappings: {
+      spcode: 'Species.SpeciesCode',
+      family: 'Family.Family',
+      genus: 'Genus.GenusName',
+      species: 'Species.SpeciesName',
+      subspecies: 'Species.SubspeciesName', // optional
+      IDLevel: 'Species.IDLevel',
+      authority: 'Species.Authority',
+      subauthority: 'Species.SubspeciesAuthority' // optional
+    },
+    specialProcessing: processSpecies
+  },
+  quadrats: {
+    tableName: 'quadrats',
+    // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
+    columnMappings: {
+      quadrat: 'QuadratName',
+      plotID: 'PlotID',
+      startx: 'StartX',
+      starty: 'StartY',
+      coordinateunit: 'CoordinateUnits',
+      dimx: 'DimensionX',
+      dimy: 'DimensionY',
+      dimensionunit: 'DimensionUnits',
+      quadratshape: 'QuadratShape'
+    },
+    specialProcessing: processQuadrats
+  },
+  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
+  subquadrats: {
+    tableName: 'subquadrats',
+    columnMappings: {
+      subquadrat: 'SubquadratName',
+      quadrat: 'QuadratID',
+      plotID: 'PlotID',
+      censusID: 'CensusID',
+      dimx: 'DimensionX',
+      dimy: 'DimensionY',
+      xindex: 'X',
+      yindex: 'Y',
+      unit: 'Unit',
+      orderindex: 'Ordering'
+    }
+  },
+  measurements: {
+    tableName: '', // Multiple tables involved
+    columnMappings: {},
+    specialProcessing: processCensus
+  }
+};
+export type ValidationResponse = {
+  totalRows: number;
+  failedRows: number;
+  message: string;
+  failedCoreMeasurementIDs?: number[];
+};

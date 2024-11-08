@@ -744,16 +744,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     align: 'center',
     width: 50,
     renderCell: (params: GridCellParams) => {
-      console.log('val stat rendercell');
-      console.log('val stat params: ', params);
       const rowId = params.row.coreMeasurementID;
-      console.log('rowId located: ', rowId);
       const validationError = validationErrors[Number(rowId)];
-      console.log('searched for val error: ', validationError);
-      const isPendingValidation = rows.find(row => row.coreMeasurementID === rowId)?.isValidated && !validationError;
-      console.log('pending validation? ', isPendingValidation);
+      const isPendingValidation = rows.find(row => row.coreMeasurementID === rowId)?.isValidated === null && !validationError;
       const isValidated = params.row.isValidated;
-      console.log('is validated?', isValidated);
 
       if (validationError) {
         return (
@@ -764,7 +758,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       } else if (isPendingValidation) {
         return (
           <Tooltip title="Pending" size="md">
-            <HourglassEmptyIcon color="disabled" />
+            <HourglassEmptyIcon color="primary" />
           </Tooltip>
         );
       } else if (isValidated) {

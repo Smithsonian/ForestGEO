@@ -5,6 +5,7 @@ import {
   createDeleteQuery,
   createFetchQuery,
   createPostPatchQuery,
+  createQFFetchQuery,
   EditToolbarCustomProps,
   filterColumns,
   getColumnVisibilityModel,
@@ -23,19 +24,18 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbar,
   GridToolbarContainer,
   GridToolbarProps,
+  GridToolbarQuickFilter,
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertProps, Button, Snackbar } from '@mui/material';
+import { Alert, AlertProps, Button, IconButton, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { useLoading } from '@/app/contexts/loadingprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
@@ -52,11 +52,13 @@ import { randomId } from '@mui/x-data-grid-generator';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { FileDownloadTwoTone } from '@mui/icons-material';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
+import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
+import { ClearIcon } from '@mui/x-date-pickers';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportCSV, locked, filterModel }: EditToolbarProps) => {
-  if (!handleAddNewRow || !handleRefresh) return <></>;
+const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportCSV, handleQuickFilterChange, locked, filterModel }: EditToolbarProps) => {
+  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange) return <></>;
   const handleExportClick = async () => {
     if (!handleExportAll) return;
     const fullData = await handleExportAll(filterModel);
@@ -71,17 +73,59 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleEx
     link.click();
     document.body.removeChild(link);
   };
+  const [inputValue, setInputValue] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(event.target.value);
+    setIsTyping(true); // Show tooltip when user starts typing
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      handleQuickFilterChange(inputValue);
+      setIsTyping(false); // Hide tooltip when Enter is pressed
+    }
+  };
+
+  const handleClearInput = () => {
+    setInputValue('');
+    handleQuickFilterChange(''); // Clear the filter
+    setIsTyping(false); // Hide tooltip when input is cleared
+  };
+
+  useEffect(() => {
+    if (isTyping) {
+      const timeout = setTimeout(() => setIsTyping(false), 2000);
+      return () => clearTimeout(timeout); // Clear timeout if user resumes typing
+    }
+  }, [isTyping, inputValue]);
 
   return (
     <GridToolbarContainer>
-      <GridToolbar />
-      <Button color="primary" startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
+      <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
+        <Box display={'flex'} alignItems={'center'}>
+          <GridToolbarQuickFilter
+            variant={'outlined'}
+            value={inputValue}
+            onKeyDown={handleKeyDown}
+            onChange={handleInputChange}
+            placeholder={'Search All Fields...'}
+          />
+          <Tooltip title={'Clear filter'} placement={'right'}>
+            <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'small'} edge={'end'} sx={{ marginLeft: 1 }}>
+              <ClearIcon fontSize={'small'} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      </Tooltip>
+      <Button color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
         Add Row
       </Button>
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+      <Button color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
         Refresh
       </Button>
-      <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
+      <Button color={'primary'} startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
         Export Full Data
       </Button>
       <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
@@ -102,6 +146,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     page: 0,
     pageSize: 10
   });
+  const [loading, setLoading] = useState(false);
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
@@ -120,79 +165,43 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const [filterModel, setFilterModel] = useState<GridFilterModel>({
     items: []
   });
-  const [rowsUpdated, setRowsUpdated] = useState(false);
-  const [rowModesModelUpdated, setRowModesModelUpdated] = useState(false);
+  const [quickFilter, setQuickFilter] = useState('');
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
   const currentSite = useSiteContext();
 
-  const { setLoading } = useLoading();
   const { triggerRefresh } = useDataValidityContext();
 
   useSession();
 
   const apiRef = useGridApiRef();
 
-  // Track when rows and rowModesModel are updated using useEffect
   useEffect(() => {
-    if (rows.length > 0) {
-      setRowsUpdated(true);
-    }
-  }, [rows]);
-
-  useEffect(() => {
-    if (Object.keys(rowModesModel).length > 0) {
-      setRowModesModelUpdated(true);
-    }
-  }, [rowModesModel]);
-
-  // Function to wait for rows and rowModesModel to update
-  const waitForStateUpdates = async () => {
-    return new Promise<void>(resolve => {
-      const checkUpdates = () => {
-        if (rowsUpdated && rowModesModelUpdated) {
-          resolve();
-        } else {
-          setTimeout(checkUpdates, 50); // Check every 50ms until both are updated
-        }
-      };
-      checkUpdates();
-    });
-  };
-
-  useEffect(() => {
-    if (!isNewRowAdded) {
+    if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
-  }, [paginationModel.page]);
-
-  useEffect(() => {
-    if (currentPlot?.plotID || currentCensus?.plotCensusNumber) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
-    }
-  }, [currentPlot, currentCensus, paginationModel.page]);
+  }, [currentPlot, currentCensus, paginationModel.page, quickFilter]);
 
   useEffect(() => {
     if (refresh && currentSite) {
       handleRefresh().then(() => {
         if (refresh) {
-          setRefresh(false); // Only update state if it hasn't already been reset
+          setRefresh(false);
         }
       });
     }
-  }, [refresh, currentSite]); // No need for setRefresh in dependencies
+  }, [refresh, currentSite]);
 
   useEffect(() => {
     const updatedRowModesModel = rows.reduce((acc, row) => {
       if (row.id) {
-        acc[row.id] = rowModesModel[row.id] || { mode: GridRowModes.View }; // Ensure valid row ID is used
+        acc[row.id] = rowModesModel[row.id] || { mode: GridRowModes.View };
       }
       return acc;
     }, {} as GridRowModesModel);
 
-    // Clean invalid rowModesModel entries like '0'
     const cleanedRowModesModel = Object.fromEntries(Object.entries(updatedRowModesModel).filter(([key]) => key !== '0'));
 
     if (JSON.stringify(cleanedRowModesModel) !== JSON.stringify(rowModesModel)) {
@@ -201,7 +210,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   }, [rows]);
 
   const fetchFullData = useCallback(async () => {
-    setLoading(true, 'Fetching full dataset...');
+    setLoading(true);
     let partialQuery = ``;
     if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
     if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
@@ -227,6 +236,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   }, [filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
 
   const exportAllCSV = useCallback(async () => {
+    setLoading(true);
     switch (gridType) {
       case 'attributes':
         const aResponse = await fetch(
@@ -410,6 +420,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         document.body.removeChild(sLink);
         break;
     }
+    setLoading(false);
   }, [currentPlot, currentCensus, currentSite, gridType]);
 
   const openConfirmationDialog = useCallback(
@@ -421,7 +432,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         if (actionType === 'delete') {
           setIsDeleteDialogOpen(true);
         } else {
-          // Open the reentry modal after setting promiseArguments
           setIsDialogOpen(true);
         }
       }
@@ -435,7 +445,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setIsDeleteDialogOpen(false);
 
       if (pendingAction.actionType === 'delete' && pendingAction.actionId !== null) {
-        // Call performDeleteAction if the confirmed action is delete
         await performDeleteAction(pendingAction.actionId);
       } else if (promiseArguments) {
         try {
@@ -443,7 +452,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           console.log('handleconfirmaction: promiseArguments.newRow: ', promiseArguments.newRow);
           const resolvedRow = confirmedRow || promiseArguments.newRow;
           console.log('handleconfirmaction: resolvedRow: ', resolvedRow);
-          // Proceed with saving the row after confirmation
           await performSaveAction(promiseArguments.newRow.id, resolvedRow);
           setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
         } catch (error: any) {
@@ -452,7 +460,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       }
 
       setPendingAction({ actionType: '', actionId: null });
-      setPromiseArguments(null); // Clear promise arguments after handling
+      setPromiseArguments(null);
     },
     [pendingAction, promiseArguments]
   );
@@ -464,16 +472,15 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       promiseArguments.reject(new Error('Action cancelled by user'));
     }
     setPendingAction({ actionType: '', actionId: null });
-    setPromiseArguments(null); // Clear promise arguments after handling
+    setPromiseArguments(null);
   }, [promiseArguments]);
 
   const performSaveAction = useCallback(
     async (id: GridRowId, confirmedRow: GridRowModel) => {
       if (locked || !promiseArguments) return;
 
-      setLoading(true, 'Saving changes...');
+      setLoading(true);
       try {
-        // Set the row to view mode after confirmation
         setRowModesModel(prevModel => ({
           ...prevModel,
           [id]: { mode: GridRowModes.View }
@@ -493,12 +500,13 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
         promiseArguments.resolve(updatedRow);
 
-        // Trigger onDataUpdate after successfully saving
         if (props.onDataUpdate) {
           props.onDataUpdate();
         }
       } catch (error) {
         promiseArguments.reject(error);
+      } finally {
+        setLoading(false);
       }
 
       triggerRefresh();
@@ -524,10 +532,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     async (id: GridRowId) => {
       if (locked) return;
 
-      setLoading(true, 'Deleting...');
+      setLoading(true);
 
       const rowToDelete = rows.find(row => String(row.id) === String(id));
-      if (!rowToDelete) return; // Ensure row exists
+      if (!rowToDelete) return;
 
       const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
 
@@ -554,7 +562,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             });
           }
         } else {
-          setRows(prevRows => prevRows.filter(row => row.id !== id)); // Update rows by removing the deleted row
+          setRows(prevRows => prevRows.filter(row => row.id !== id));
           setSnackbar({
             children: 'Row successfully deleted',
             severity: 'success'
@@ -575,33 +583,28 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   );
 
   const handleSaveClick = useCallback(
-    (id: GridRowId) => async () => {
+    (id: GridRowId) => () => {
       if (locked) return;
 
       const updatedRowModesModel = { ...rowModesModel };
       if (!updatedRowModesModel[id] || updatedRowModesModel[id].mode === undefined) {
-        updatedRowModesModel[id] = { mode: GridRowModes.View }; // Set default mode if it doesn't exist
+        updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      // Stop edit mode and apply changes locally without committing to the server yet
       apiRef.current.stopRowEditMode({ id, ignoreModifications: true });
 
-      // Get the original row data (before edits)
       const oldRow = rows.find(row => String(row.id) === String(id));
 
-      // Use getRowWithUpdatedValues to fetch all updated field values (the field is ignored in row editing mode)
-      const updatedRow = apiRef.current.getRowWithUpdatedValues(id, 'anyField'); // 'anyField' is a dummy value, ignored in row editing
+      const updatedRow = apiRef.current.getRowWithUpdatedValues(id, 'anyField');
 
       if (oldRow && updatedRow) {
-        // Set promise arguments before opening the modal
         setPromiseArguments({
-          resolve: (value: GridRowModel) => {}, // Define resolve
-          reject: (reason?: any) => {}, // Define reject
-          oldRow, // Pass the old (original) row
-          newRow: updatedRow // Pass the updated (edited) row
+          resolve: (value: GridRowModel) => {},
+          reject: (reason?: any) => {},
+          oldRow,
+          newRow: updatedRow
         });
 
-        // Open the confirmation dialog for reentry data
         openConfirmationDialog('save', id);
       }
     },
@@ -623,9 +626,9 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     [locked, gridType, currentCensus, rows, openConfirmationDialog]
   );
 
-  const handleAddNewRow = useCallback(async () => {
+  const handleAddNewRow = useCallback(() => {
     if (locked) return;
-    if (isNewRowAdded) return; // Debounce double adds
+    if (isNewRowAdded) return;
     const newRowCount = rowCount + 1;
     const calculatedNewLastPage = Math.ceil(newRowCount / paginationModel.pageSize) - 1;
     const existingLastPage = Math.ceil(rowCount / paginationModel.pageSize) - 1;
@@ -635,7 +638,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     } else {
       setPaginationModel({ ...paginationModel, page: existingLastPage });
     }
-    const id = randomId(); // Generate a unique string ID
+    const id = randomId();
     const newRow = { ...initialRow, id, isNew: true };
     setRows(prevRows => {
       return [...prevRows, newRow];
@@ -643,7 +646,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     setRowModesModel(prevModel => {
       return {
         ...prevModel,
-        [id]: { mode: GridRowModes.Edit, fieldToFocus } // Add the new row with 'Edit' mode
+        [id]: { mode: GridRowModes.Edit, fieldToFocus }
       };
     });
 
@@ -657,18 +660,33 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   }, [paginationModel.page]);
 
   const fetchPaginatedData = async (pageToFetch: number) => {
-    setLoading(true, 'Loading data...');
-    const paginatedQuery = createFetchQuery(
-      currentSite?.schemaName ?? '',
-      gridType,
-      pageToFetch,
-      paginationModel.pageSize,
-      currentPlot?.plotID,
-      currentCensus?.plotCensusNumber,
-      currentQuadrat?.quadratID
-    );
+    setLoading(true);
+    const paginatedQuery =
+      quickFilter === ''
+        ? createFetchQuery(
+            currentSite?.schemaName ?? '',
+            gridType,
+            pageToFetch,
+            paginationModel.pageSize,
+            currentPlot?.plotID,
+            currentCensus?.plotCensusNumber,
+            currentQuadrat?.quadratID
+          )
+        : createQFFetchQuery(
+            currentSite?.schemaName ?? '',
+            gridType,
+            pageToFetch,
+            paginationModel.pageSize,
+            currentPlot?.plotID,
+            currentCensus?.plotCensusNumber,
+            currentQuadrat?.quadratID
+          );
     try {
-      const response = await fetch(paginatedQuery, { method: 'GET' });
+      const response = await fetch(paginatedQuery, {
+        method: quickFilter === '' ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: quickFilter === '' ? undefined : JSON.stringify({ quickFilter: quickFilter })
+      });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
       console.log('rows: ', data.output);
@@ -676,7 +694,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setRowCount(data.totalCount);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
-        await handleAddNewRow();
+        handleAddNewRow();
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -704,8 +722,9 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
 
     try {
+      setLoading(true);
       const response = await fetch(fetchProcessQuery, {
-        method: oldRow.isNew ? 'POST' : 'PATCH', // Ensure POST for new row, PATCH for existing
+        method: oldRow.isNew ? 'POST' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
       });
@@ -713,7 +732,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       const responseJSON = await response.json();
 
       if (!response.ok) {
-        // If the response isn't okay, throw an error to be caught
         throw new Error(responseJSON.message || 'An unknown error occurred');
       }
 
@@ -730,22 +748,21 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
       return newRow;
     } catch (error: any) {
-      // Handle error, display the error in snackbar
       setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
-      return Promise.reject(newRow); // Ensure the promise is rejected so processRowUpdate can handle it
+      return Promise.reject(newRow);
+    } finally {
+      setLoading(false);
     }
   };
 
   const processRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
-      // If the row is newly added and is being canceled, skip the update
       if (newRow?.isNew && !newRow?.id) {
-        return oldRow; // Return the old row without making changes
+        return oldRow;
       }
 
-      setLoading(true, 'Processing changes...');
+      setLoading(true);
 
-      // Handle new rows by confirming the save action with the user
       if (newRow.isNew || !newRow.id) {
         setPromiseArguments({
           resolve: async (confirmedRow: GridRowModel) => {
@@ -781,7 +798,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         return Promise.reject(new Error('Row update interrupted for new row, awaiting confirmation'));
       }
 
-      // Proceed with updating existing rows
       try {
         const updatedRow = await updateRow(
           gridType,
@@ -816,7 +832,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             mode: newRowModesModel[id]?.mode || updatedModel[id]?.mode || GridRowModes.View
           };
         } else {
-          // Prevent setting mode for rows that don't exist in the model
           console.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
         }
       });
@@ -839,7 +854,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         ...prevModel,
         [id]: { mode: GridRowModes.Edit }
       }));
-      // Auto-focus on the first editable cell when entering edit mode
       setTimeout(() => {
         const firstEditableColumn = filteredColumns.find(col => col.editable);
         if (firstEditableColumn) {
@@ -858,19 +872,16 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       const row = rows.find(row => String(row.id) === String(id));
 
       if (row?.isNew) {
-        // Remove the new row from the rows state
         setRows(oldRows => oldRows.filter(row => row.id !== id));
 
-        // Safely remove the row from rowModesModel
         setRowModesModel(prevModel => {
           const updatedModel = { ...prevModel };
-          delete updatedModel[id]; // Remove the newly added row from rowModesModel
+          delete updatedModel[id];
           return updatedModel;
         });
 
-        setIsNewRowAdded(false); // Reset the flag indicating a new row was added
+        setIsNewRowAdded(false);
       } else {
-        // Revert the row to view mode if it's an existing row
         setRowModesModel(prevModel => ({
           ...prevModel,
           [id]: { mode: GridRowModes.View, ignoreModifications: true }
@@ -879,6 +890,12 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     },
     [locked, rows]
   );
+
+  function onQuickFilterChange(value: string) {
+    setQuickFilter(value);
+  }
+
+  function runQuickFilter() {}
 
   const getEnhancedCellAction = useCallback(
     (type: string, icon: any, onClick: any) => (
@@ -931,16 +948,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   );
 
   const columns = useMemo(() => {
-    return [...gridColumns, getGridActionsColumn()];
+    return [...applyFilterToColumns(gridColumns), getGridActionsColumn()];
   }, [gridColumns, rowModesModel, getGridActionsColumn]);
 
-  const filteredColumns = useMemo(() => {
-    console.log('columns unfiltered: ', columns);
-    console.log('rows: ', rows);
-    console.log('filtered: ', filterColumns(rows, columns));
-    if (gridType !== 'quadratpersonnel') return filterColumns(rows, columns);
-    else return columns;
-  }, [rows, columns]);
+  const filteredColumns = useMemo(() => (gridType !== 'quadratpersonnel' ? filterColumns(rows, columns) : columns), [rows, columns]);
 
   const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
     if (locked) return;
@@ -953,20 +964,9 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const handleCellKeyDown: GridEventListener<'cellKeyDown'> = (params, event) => {
     if (event.key === 'Enter' && !locked) {
       event.defaultMuiPrevented = true;
-      // console.log('params: ', params);
-      // setRowModesModel(prevModel => ({
-      //   ...prevModel,
-      //   [params.id]: { mode: GridRowModes.Edit }
-      // }));
     }
     if (event.key === 'Escape') {
       event.defaultMuiPrevented = true;
-      // console.log('params: ', params);
-      // setRowModesModel(prevModel => ({
-      //   ...prevModel,
-      //   [params.id]: { mode: GridRowModes.View, ignoreModifications: true }
-      // }));
-      // handleCancelClick(params.id, event);
     }
   };
 
@@ -991,7 +991,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             apiRef={apiRef}
             sx={{ width: '100%' }}
             rows={rows}
-            columns={filteredColumns}
+            columns={columns}
             editMode="row"
             rowModesModel={rowModesModel}
             disableColumnSelector
@@ -1033,7 +1033,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 severity: 'error'
               });
             }}
-            loading={refresh}
+            loading={refresh || loading}
             paginationMode="server"
             onPaginationModelChange={setPaginationModel}
             paginationModel={paginationModel}
@@ -1056,6 +1056,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
+                handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel
               }
             }}

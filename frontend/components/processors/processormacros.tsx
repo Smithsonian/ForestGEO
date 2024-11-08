@@ -1,103 +1,6 @@
 import { PoolConnection, PoolOptions } from 'mysql2/promise';
-import { FileRow } from '@/config/macros/formdetails';
-import { processSpecies } from '@/components/processors/processspecies';
-import { processCensus } from '@/components/processors/processcensus';
 import { PoolMonitor } from '@/config/poolmonitor';
-import { processPersonnel } from '@/components/processors/processpersonnel';
-import { processQuadrats } from '@/components/processors/processquadrats';
-import ConnectionManager from '@/config/connectionmanager';
 
-export interface SpecialProcessingProps {
-  connectionManager: ConnectionManager;
-  rowData: FileRow;
-  schema: string;
-  plotID?: number;
-  censusID?: number;
-  quadratID?: number;
-  fullName?: string;
-}
-
-export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
-  formType: string;
-}
-
-export type FileMapping = {
-  tableName: string;
-  columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | undefined>;
-};
-
-// Define the mappings for each file type
-export const fileMappings: Record<string, FileMapping> = {
-  attributes: {
-    tableName: 'Attributes',
-    columnMappings: {
-      code: 'Code',
-      description: 'Description',
-      status: 'Status'
-    }
-  },
-  personnel: {
-    tableName: 'Personnel',
-    columnMappings: {
-      firstname: 'FirstName',
-      lastname: 'LastName',
-      role: 'Role'
-    },
-    specialProcessing: processPersonnel
-  },
-  species: {
-    tableName: '',
-    columnMappings: {
-      spcode: 'Species.SpeciesCode',
-      family: 'Family.Family',
-      genus: 'Genus.GenusName',
-      species: 'Species.SpeciesName',
-      subspecies: 'Species.SubspeciesName', // optional
-      IDLevel: 'Species.IDLevel',
-      authority: 'Species.Authority',
-      subauthority: 'Species.SubspeciesAuthority' // optional
-    },
-    specialProcessing: processSpecies
-  },
-  quadrats: {
-    tableName: 'quadrats',
-    // "quadrats": [{label: "quadrat"}, {label: "startx"}, {label: "starty"}, {label: "dimx"}, {label: "dimy"}, {label: "unit"}, {label: "quadratshape"}],
-    columnMappings: {
-      quadrat: 'QuadratName',
-      plotID: 'PlotID',
-      startx: 'StartX',
-      starty: 'StartY',
-      coordinateunit: 'CoordinateUnits',
-      dimx: 'DimensionX',
-      dimy: 'DimensionY',
-      dimensionunit: 'DimensionUnits',
-      quadratshape: 'QuadratShape'
-    },
-    specialProcessing: processQuadrats
-  },
-  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
-  subquadrats: {
-    tableName: 'subquadrats',
-    columnMappings: {
-      subquadrat: 'SubquadratName',
-      quadrat: 'QuadratID',
-      plotID: 'PlotID',
-      censusID: 'CensusID',
-      dimx: 'DimensionX',
-      dimy: 'DimensionY',
-      xindex: 'X',
-      yindex: 'Y',
-      unit: 'Unit',
-      orderindex: 'Ordering'
-    }
-  },
-  measurements: {
-    tableName: '', // Multiple tables involved
-    columnMappings: {},
-    specialProcessing: processCensus
-  }
-};
 const sqlConfig: PoolOptions = {
   user: process.env.AZURE_SQL_USER,
   password: process.env.AZURE_SQL_PASSWORD,
@@ -120,7 +23,7 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
     // Check if the pool is closed and reinitialize if necessary
     if (poolMonitor.isPoolClosed()) {
       console.log('Connection pool is closed. Reinitializing...');
-      poolMonitor.reinitializePool();
+      await poolMonitor.reinitializePool();
     }
 
     const connection = await poolMonitor.getConnection();
@@ -181,27 +84,4 @@ export async function runQuery(connection: PoolConnection, query: string, params
     console.error('Error executing query:', error.message);
     throw error;
   }
-}
-
-export type ValidationResponse = {
-  totalRows: number;
-  failedRows: number;
-  message: string;
-  failedCoreMeasurementIDs?: number[];
-};
-
-export interface QueryConfig {
-  schema: string;
-  table: string;
-  joins?: {
-    table: string;
-    alias: string;
-    on: string;
-  }[];
-  conditionals?: string;
-  pagination: {
-    page: number;
-    pageSize: number;
-  };
-  extraParams?: any[];
 }

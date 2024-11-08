@@ -262,3 +262,10 @@ export function capitalizeAndTransformField(field: string): string {
   const capitalized = capitalizeFirstLetter(field);
   return transformSpecialCases(capitalized);
 }
+
+export type TransformedKeys<T> = keyof ResultType<T>;
+
+export function getTransformedKeys<T>(): string[] {
+  const exampleObject: ResultType<T> = {} as ResultType<T>;
+  return Object.keys(exampleObject) as string[];
+}

@@ -3,8 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { ValidationResponse } from '@/components/processors/processormacros';
 import { updateValidatedRows } from '@/components/processors/processorhelperfunctions';
+import { ValidationResponse } from '@/config/macros';
 
 type ValidationMessages = {
   [key: string]: { description: string; definition: string };
