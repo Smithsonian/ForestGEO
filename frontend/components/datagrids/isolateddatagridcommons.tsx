@@ -152,6 +152,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [usingQuery, setUsingQuery] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
@@ -689,9 +690,9 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
-      console.log('rows: ', data.output);
       setRows(data.output);
       setRowCount(data.totalCount);
+      setUsingQuery(data.finishedQuery);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
         handleAddNewRow();
