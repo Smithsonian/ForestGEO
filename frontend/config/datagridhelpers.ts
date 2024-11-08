@@ -116,6 +116,19 @@ export const createFetchQuery: FetchQueryFunction = (
   return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
+export const createQFFetchQuery: FetchQueryFunction = (
+  siteSchema: string,
+  gridType,
+  page,
+  pageSize,
+  plotID?,
+  plotCensusNumber?,
+  quadratID?: number,
+  speciesID?: number
+): string => {
+  return `/api/fixeddataquickfilter/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+};
+
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
@@ -161,6 +174,7 @@ export interface EditToolbarCustomProps {
   handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
   handleExportCSV?: () => Promise<void>;
   handleRunValidations?: () => Promise<void>;
+  handleQuickFilterChange?: (value: string) => void;
   filterModel?: GridFilterModel;
   locked?: boolean;
 }

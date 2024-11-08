@@ -13,6 +13,7 @@ This project uses NextJS v14(+), and server interactions and setup are handled t
 that for local development, you will **not** be able to use the NextJS-provided `next start` command due to the way that
 the application is packaged for Azure deployment. Instead, please use the `next dev` command to start the local
 development server to use the application.
+
 > Note: the development server compiles and loads the application in real time as you interact with the website.
 > Accordingly, **load times for API endpoints and other components will be much longer than the actual site's.** Please
 > do not use these load times as an indicator of load times within the deployed application instance!
@@ -57,4 +58,5 @@ uses **underscores**. Please ensure you **replace all hyphens with underscores**
 
 Once you have successfully created your `.env.local` file, please run `npm run dev` to start the local development
 server.
+
 > **Ensure that you have port 3000 open and available on your local machine before starting the server!**

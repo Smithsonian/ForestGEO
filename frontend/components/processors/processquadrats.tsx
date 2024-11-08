@@ -1,6 +1,6 @@
-import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import { createError, handleUpsert } from '@/config/utils';
 import { CensusQuadratResult, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
+import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, plotID, censusID } = props;

@@ -1,9 +1,8 @@
 // bulk data CRUD flow API endpoint -- intended to allow multiline interactions and bulk updates via datagrid
 import { NextRequest, NextResponse } from 'next/server';
 import { FileRowSet } from '@/config/macros/formdetails';
-import { InsertUpdateProcessingProps } from '@/components/processors/processormacros';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import { HTTPResponses } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {

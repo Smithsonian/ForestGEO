@@ -2,10 +2,10 @@
 import React, { useEffect, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
 import { ReviewStates, UploadValidationProps } from '@/config/macros/uploadsystemmacros';
-import { ValidationResponse } from '@/components/processors/processormacros';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import { ValidationResponse } from '@/config/macros';
 
 type ValidationMessages = {
   [key: string]: { id: number; description: string; definition: string };

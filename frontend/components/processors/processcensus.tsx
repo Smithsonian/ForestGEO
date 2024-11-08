@@ -1,9 +1,9 @@
-import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import moment from 'moment';
 import { createError, fetchPrimaryKey, handleUpsert } from '@/config/utils';
 import { SpeciesResult, StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
+import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
   const { connectionManager, rowData, schema, plotID, censusID } = props;

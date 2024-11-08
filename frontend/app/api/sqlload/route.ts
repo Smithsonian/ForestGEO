@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { InsertUpdateProcessingProps } from '@/components/processors/processormacros';
-import { HTTPResponses } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import ConnectionManager from '@/config/connectionmanager';

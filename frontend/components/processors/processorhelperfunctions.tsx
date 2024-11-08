@@ -1,9 +1,9 @@
-import { fileMappings, InsertUpdateProcessingProps } from '@/components/processors/processormacros';
 import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
 import { handleUpsert } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
 import ConnectionManager from '@/config/connectionmanager';
+import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 
 // need to try integrating this into validation system:
 
