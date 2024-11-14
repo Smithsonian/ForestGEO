@@ -54,7 +54,7 @@ type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarProps
 const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, filterModel }: EditToolbarProps) => {
   const handleExportClick = async () => {
     if (!handleExportAll) return;
-    const fullData = await handleExportAll(filterModel);
+    const fullData = await handleExportAll();
     const blob = new Blob([JSON.stringify(fullData, null, 2)], {
       type: 'application/json'
     });

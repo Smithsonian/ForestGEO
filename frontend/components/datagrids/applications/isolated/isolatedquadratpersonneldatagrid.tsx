@@ -121,6 +121,7 @@ export default function IsolatedQuadratPersonnelDataGrid() {
         setRefresh={setRefresh}
         initialRow={initialQuadratPersonnelRDSRow}
         fieldToFocus={'quadratID'}
+        dynamicButtons={[]}
       />
     </>
   );

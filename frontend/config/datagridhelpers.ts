@@ -7,10 +7,11 @@ import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSu
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
+import { GridApiCommunity } from '@mui/x-data-grid/internals';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -126,7 +127,7 @@ export const createQFFetchQuery: FetchQueryFunction = (
   quadratID?: number,
   speciesID?: number
 ): string => {
-  return `/api/fixeddataquickfilter/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+  return `/api/fixeddatafilter/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
@@ -171,11 +172,13 @@ export function getGridID(gridType: string): string {
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
-  handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
+  handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
   handleRunValidations?: () => Promise<void>;
-  handleQuickFilterChange?: (value: string) => void;
+  handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: GridFilterModel;
+  apiRef?: MutableRefObject<GridApiCommunity>;
+  dynamicButtons?: any;
   locked?: boolean;
 }
 
@@ -184,6 +187,7 @@ export interface IsolatedDataGridCommonProps {
   gridColumns: GridColDef[];
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
+  dynamicButtons: any[];
   initialRow?: GridRowModel;
   fieldToFocus?: string;
   locked?: boolean;
@@ -278,6 +282,7 @@ export interface MeasurementsCommonsProps {
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
+  dynamicButtons: any[];
 }
 
 export interface IsolatedMeasurementsCommonsProps {

@@ -17,9 +17,9 @@ export async function POST(
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam, speciesIDParam] = params.slugs;
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
     throw new Error('core slugs schema/page/pageSize not correctly received');
-  console.log('params: ', params);
-  const { quickFilter } = await request.json();
-  console.log('quickFilter', quickFilter);
+  const { filterModel } = await request.json();
+  console.log('route filter model: ', filterModel);
+  if (!filterModel.items || !filterModel.quickFilterValues) throw new Error('filterModel is empty. filter API should not have triggered.');
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
@@ -31,8 +31,8 @@ export async function POST(
   let censusIDs;
   let pastCensusIDs: string | any[];
 
-  const buildSearchStub = (columns: any[], alias?: string) =>
-    columns.map((column: any) => `\`${alias ? `${alias}.` : ''}${column}\` LIKE ${escape(`%${quickFilter}%`)}`).join(' OR ');
+  const buildSearchStub = (columns: any[], quickFilter: string[], alias?: string) =>
+    columns.map((column: any) => quickFilter.map(word => `\`${alias ? `${alias}.` : ''}${column}\` LIKE ${escape(`%${word}%`)}`).join(' OR ')).join(' OR ');
 
   try {
     let paginatedQuery = ``;
@@ -47,7 +47,7 @@ export async function POST(
       console.log('error: ', e);
       throw new Error(e);
     }
-    const searchStub = buildSearchStub(columns);
+    const searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
     switch (params.dataType) {
       case 'validationprocedures':
         paginatedQuery = `

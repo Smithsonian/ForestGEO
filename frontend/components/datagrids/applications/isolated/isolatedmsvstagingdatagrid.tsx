@@ -3,8 +3,6 @@
 import { MeasurementsSummaryStagingRDS } from '@/config/sqlrdsdefinitions/views';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import React, { useState } from 'react';
-import { useSession } from 'next-auth/react';
-import { Box, Button, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
@@ -42,48 +40,10 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
     attributes: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-            <Typography level={'title-md'} sx={{ color: '#ffa726' }}>
-              Note: This is a locked view and will not allow modification.
-            </Typography>
-            <Typography level={'body-md'} sx={{ color: '#ffa726' }}>
-              Please use this view as a way to confirm changes made to measurements.
-            </Typography>
-          </Box>
-
-          {/* Upload Button */}
-          <Button
-            onClick={() => {
-              setIsUploadModalOpen(true);
-            }}
-            color={'primary'}
-          >
-            Upload Measurements
-          </Button>
-        </Box>
-      </Box>
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -99,6 +59,7 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
         setRefresh={setRefresh}
         initialRow={initialMeasurementsSummaryStagingRDSRow}
         fieldToFocus={'quadratName'}
+        dynamicButtons={[{ label: 'Upload', onClick: () => setIsUploadModalOpen(true) }]}
       />
     </>
   );

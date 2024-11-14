@@ -2,7 +2,7 @@
 'use client';
 import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
-import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog, Stack, Typography } from '@mui/joy';
+import { Box, Button, DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
@@ -273,37 +273,6 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-          </Box>
-
-          <Stack direction={'row'} spacing={2}>
-            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-              Manual Entry Form
-            </Button>
-            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-              Upload File
-            </Button>
-          </Stack>
-        </Box>
-      </Box>
-
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -335,6 +304,10 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           Species: ['speciesCode', 'speciesName', 'speciesIDLevel', 'speciesAuthority', 'fieldFamily', 'validCode', 'speciesDescription'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) }
+        ]}
       />
 
       <Modal open={isSpeciesLimitsDialogOpen} onClose={() => {}} sx={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' }}>

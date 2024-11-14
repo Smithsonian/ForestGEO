@@ -33,13 +33,12 @@ import {
 import { Alert, AlertProps, Button, IconButton, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
-import { Tooltip, Typography } from '@mui/joy';
+import { Dropdown, Menu, MenuButton, MenuItem, Stack, Tooltip } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -50,93 +49,155 @@ import { StyledDataGrid } from '@/config/styleddatagrid';
 import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
-import { FileDownloadTwoTone } from '@mui/icons-material';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, handleExportCSV, handleQuickFilterChange, locked, filterModel }: EditToolbarProps) => {
-  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange) return <></>;
-  const handleExportClick = async () => {
-    if (!handleExportAll) return;
-    const fullData = await handleExportAll(filterModel);
-    const blob = new Blob([JSON.stringify(fullData, null, 2)], {
-      type: 'application/json'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'data.json';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+const EditToolbar = (props: EditToolbarProps) => {
+  const { handleAddNewRow, handleRefresh, handleExportAll, handleExportCSV, handleQuickFilterChange, locked, filterModel, dynamicButtons = [] } = props;
+  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll) return <></>;
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(event.target.value);
-    setIsTyping(true); // Show tooltip when user starts typing
+    setIsTyping(true);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
-      handleQuickFilterChange(inputValue);
-      setIsTyping(false); // Hide tooltip when Enter is pressed
+      handleQuickFilterChange({
+        ...filterModel,
+        items: filterModel?.items || [],
+        quickFilterValues: inputValue.split(' ') || []
+      });
+      setIsTyping(false);
     }
   };
 
   const handleClearInput = () => {
     setInputValue('');
-    handleQuickFilterChange(''); // Clear the filter
-    setIsTyping(false); // Hide tooltip when input is cleared
+    handleQuickFilterChange({
+      ...filterModel,
+      items: filterModel?.items || [],
+      quickFilterValues: []
+    });
+    setIsTyping(false);
   };
 
   useEffect(() => {
     if (isTyping) {
       const timeout = setTimeout(() => setIsTyping(false), 2000);
-      return () => clearTimeout(timeout); // Clear timeout if user resumes typing
+      return () => clearTimeout(timeout);
     }
   }, [isTyping, inputValue]);
 
+  function exportFilterModel() {
+    const jsonData = JSON.stringify(filterModel, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'results.json';
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <GridToolbarContainer>
-      <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-        <Box display={'flex'} alignItems={'center'}>
-          <GridToolbarQuickFilter
-            variant={'outlined'}
-            value={inputValue}
-            onKeyDown={handleKeyDown}
-            onChange={handleInputChange}
-            placeholder={'Search All Fields...'}
-          />
-          <Tooltip title={'Clear filter'} placement={'right'}>
-            <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'small'} edge={'end'} sx={{ marginLeft: 1 }}>
-              <ClearIcon fontSize={'small'} />
-            </IconButton>
+      <Box
+        sx={{
+          display: 'flex',
+          flex: 1,
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: 'warning.main',
+          borderRadius: '4px',
+          p: 2
+        }}
+      >
+        <Box sx={{ display: 'flex', flex: 1 }}>
+          <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
+            <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarQuickFilter
+                variant={'outlined'}
+                value={inputValue}
+                onKeyDown={handleKeyDown}
+                onChange={handleInputChange}
+                placeholder={'Search All Fields...'}
+                slotProps={{
+                  input: {
+                    endAdornment: null
+                  }
+                }}
+              />
+              <Tooltip title={'Clear filter'} placement={'right'}>
+                <IconButton
+                  aria-label={'clear filter'}
+                  disabled={inputValue === ''}
+                  onClick={handleClearInput}
+                  size={'small'}
+                  edge={'end'}
+                  sx={{ marginLeft: 1 }}
+                >
+                  <ClearIcon fontSize={'small'} />
+                </IconButton>
+              </Tooltip>
+            </Box>
           </Tooltip>
+          <Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
+            Add Row
+          </Button>
+          <Button variant={'text'} color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+            Refresh
+          </Button>
+          <Dropdown>
+            <MenuButton
+              variant={'plain'}
+              color={'primary'}
+              endDecorator={
+                <CloudDownloadIcon
+                  sx={{
+                    fontSize: '1.5rem',
+                    verticalAlign: 'middle'
+                  }}
+                />
+              }
+            >
+              Export...
+            </MenuButton>
+            <Menu variant={'soft'} color={'primary'} placement={'bottom-start'}>
+              <MenuItem variant={'soft'} color={'primary'} onClick={async () => await handleExportAll()}>
+                All data as JSON
+              </MenuItem>
+              <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
+                All Data as Form
+              </MenuItem>
+              <MenuItem variant={'soft'} color={'primary'} onClick={exportFilterModel}>
+                Filter Settings
+              </MenuItem>
+            </Menu>
+          </Dropdown>
         </Box>
-      </Tooltip>
-      <Button color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
-        Add Row
-      </Button>
-      <Button color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
-        Refresh
-      </Button>
-      <Button color={'primary'} startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
-        Export Full Data
-      </Button>
-      <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
-        Export as Form CSV
-      </Button>
+      </Box>
+      <Stack direction={'row'} spacing={2}>
+        {dynamicButtons.map((button: any, index: number) => (
+          <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+            {button.label}
+          </Button>
+        ))}
+      </Stack>
     </GridToolbarContainer>
   );
 };
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, locked = false, selectionOptions, initialRow, fieldToFocus, clusters } = props;
+  const { gridColumns, gridType, refresh, setRefresh, locked = false, selectionOptions, initialRow, fieldToFocus, clusters, dynamicButtons = [] } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -164,9 +225,9 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     oldRow: GridRowModel;
   } | null>(null);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({
-    items: []
+    items: [],
+    quickFilterValues: []
   });
-  const [quickFilter, setQuickFilter] = useState('');
 
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -183,7 +244,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
       fetchPaginatedData(paginationModel.page).catch(console.error);
     }
-  }, [currentPlot, currentCensus, paginationModel.page, quickFilter]);
+  }, [currentPlot, currentCensus, paginationModel.page, filterModel]);
 
   useEffect(() => {
     if (refresh && currentSite) {
@@ -212,29 +273,37 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   const fetchFullData = useCallback(async () => {
     setLoading(true);
-    let partialQuery = ``;
-    if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
-    if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
-    if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
-    const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
-
     try {
-      const response = await fetch(fullDataQuery, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(filterModel)
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Error fetching full data');
-      return data.output;
+      const reworkedQuery = usingQuery
+        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+        .trim();
+
+      const results = await (
+        await fetch(`/api/runquery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reworkedQuery)
+        })
+      ).json();
+
+      const jsonData = JSON.stringify(results, null, 2);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'results.json';
+      link.click();
+
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error fetching full data:', error);
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
-      return [];
     } finally {
       setLoading(false);
     }
-  }, [filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
+  }, [usingQuery, filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
 
   const exportAllCSV = useCallback(async () => {
     setLoading(true);
@@ -449,10 +518,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         await performDeleteAction(pendingAction.actionId);
       } else if (promiseArguments) {
         try {
-          console.log('handleconfirmaction: confirmedRow: ', confirmedRow);
-          console.log('handleconfirmaction: promiseArguments.newRow: ', promiseArguments.newRow);
           const resolvedRow = confirmedRow || promiseArguments.newRow;
-          console.log('handleconfirmaction: resolvedRow: ', resolvedRow);
           await performSaveAction(promiseArguments.newRow.id, resolvedRow);
           setSnackbar({ children: 'Row successfully updated!', severity: 'success' });
         } catch (error: any) {
@@ -663,8 +729,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const fetchPaginatedData = async (pageToFetch: number) => {
     setLoading(true);
     const paginatedQuery =
-      quickFilter === ''
-        ? createFetchQuery(
+      (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
+        ? createQFFetchQuery(
             currentSite?.schemaName ?? '',
             gridType,
             pageToFetch,
@@ -673,7 +739,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             currentCensus?.plotCensusNumber,
             currentQuadrat?.quadratID
           )
-        : createQFFetchQuery(
+        : createFetchQuery(
             currentSite?.schemaName ?? '',
             gridType,
             pageToFetch,
@@ -684,9 +750,13 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           );
     try {
       const response = await fetch(paginatedQuery, {
-        method: quickFilter === '' ? 'GET' : 'POST',
+        method:
+          (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0) ? 'POST' : 'GET',
         headers: { 'Content-Type': 'application/json' },
-        body: quickFilter === '' ? undefined : JSON.stringify({ quickFilter: quickFilter })
+        body:
+          (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
+            ? JSON.stringify({ filterModel })
+            : undefined
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Error fetching data');
@@ -892,11 +962,13 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     [locked, rows]
   );
 
-  function onQuickFilterChange(value: string) {
-    setQuickFilter(value);
+  function onQuickFilterChange(incomingValues: GridFilterModel) {
+    setFilterModel(prevFilterModel => ({
+      ...prevFilterModel,
+      items: [...(incomingValues.items || [])],
+      quickFilterValues: [...(incomingValues.quickFilterValues || [])]
+    }));
   }
-
-  function runQuickFilter() {}
 
   const getEnhancedCellAction = useCallback(
     (type: string, icon: any, onClick: any) => (
@@ -962,7 +1034,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     }));
   };
 
-  const handleCellKeyDown: GridEventListener<'cellKeyDown'> = (params, event) => {
+  const handleCellKeyDown: GridEventListener<'cellKeyDown'> = (_params, event) => {
     if (event.key === 'Enter' && !locked) {
       event.defaultMuiPrevented = true;
     }
@@ -987,7 +1059,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         }}
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
-          <Typography level={'title-lg'}>Note: The Grid is filtered by your selected Plot and Plot ID</Typography>
           <StyledDataGrid
             apiRef={apiRef}
             sx={{ width: '100%' }}
@@ -1001,30 +1072,25 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             onCellDoubleClick={handleCellDoubleClick}
             onCellKeyDown={handleCellKeyDown}
             processRowUpdate={async (newRow, oldRow) => {
-              // Create a promise to wait for state updates
               const waitForStateUpdates = async () => {
                 return new Promise<void>(resolve => {
                   const checkUpdates = () => {
                     if (rows.length > 0 && Object.keys(rowModesModel).length > 0) {
-                      resolve(); // Resolve when states are updated
+                      resolve();
                     } else {
-                      setTimeout(checkUpdates, 50); // Retry every 50ms
+                      setTimeout(checkUpdates, 50);
                     }
                   };
                   checkUpdates();
                 });
               };
-
-              // Wait for rows and rowModesModel to update
               await waitForStateUpdates();
-
-              // Now call the actual processRowUpdate logic after the state has settled
               try {
                 return await processRowUpdate(newRow, oldRow);
               } catch (error) {
                 console.error('Error processing row update:', error);
                 setSnackbar({ children: 'Error updating row', severity: 'error' });
-                return Promise.reject(error); // Handle error if needed
+                return Promise.reject(error);
               }
             }}
             onProcessRowUpdateError={error => {
@@ -1042,6 +1108,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             pageSizeOptions={[paginationModel.pageSize]}
             filterModel={filterModel}
             onFilterModelChange={newFilterModel => setFilterModel(newFilterModel)}
+            ignoreDiacritics
             initialState={{
               columns: {
                 columnVisibilityModel: getColumnVisibilityModel(gridType)
@@ -1058,7 +1125,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
                 handleQuickFilterChange: onQuickFilterChange,
-                filterModel: filterModel
+                filterModel: filterModel,
+                dynamicButtons: dynamicButtons
               }
             }}
             getRowHeight={() => 'auto'}
@@ -1070,12 +1138,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           </Snackbar>
         )}
         {isDialogOpen && promiseArguments && (
-          <SkipReEnterDataModal
-            gridType={gridType}
-            row={promiseArguments.newRow} // Pass the newRow directly
-            handleClose={handleCancelAction}
-            handleSave={handleConfirmAction}
-          />
+          <SkipReEnterDataModal gridType={gridType} row={promiseArguments.newRow} handleClose={handleCancelAction} handleSave={handleConfirmAction} />
         )}
         {isDeleteDialogOpen && (
           <ConfirmationDialog

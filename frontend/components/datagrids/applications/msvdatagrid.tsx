@@ -4,7 +4,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import React, { useEffect, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
-import { Box, Button, Snackbar, Stack, Typography } from '@mui/joy';
+import { Snackbar } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
@@ -72,7 +72,6 @@ export default function MeasurementsSummaryViewDataGrid() {
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
       setLoading(true, 'Processing data...');
-      const data = await response.json();
       const duration = (Date.now() - startTime) / 1000;
       setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -122,46 +121,6 @@ export default function MeasurementsSummaryViewDataGrid() {
           </Alert>
         </Snackbar>
       )}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Stack direction="column">
-            <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
-              <Box
-                sx={{
-                  flex: 1,
-                  display: 'flex',
-                  justifyContent: 'left',
-                  flexDirection: 'column',
-                  marginTop: 2
-                }}
-              >
-                <Typography level={'title-md'} sx={{ color: '#ffa726' }}>
-                  Note: This plot does not accept subquadrats. <br />
-                  Please ensure that you use quadrat names when submitting new measurements instead of subquadrat names
-                </Typography>
-              </Box>
-            </Box>
-          </Stack>
-          <Stack direction={'row'} spacing={2}>
-            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-              Manual Entry Form
-            </Button>
-            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-              Upload
-            </Button>
-          </Stack>
-        </Box>
-      </Box>
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -199,6 +158,10 @@ export default function MeasurementsSummaryViewDataGrid() {
         shouldAddRowAfterFetch={shouldAddRowAfterFetch}
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) }
+        ]}
       />
       <Collapse in={openAlert} sx={{ width: '100%' }}>
         <Snackbar
