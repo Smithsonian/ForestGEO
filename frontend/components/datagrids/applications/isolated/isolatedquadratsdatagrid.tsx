@@ -1,7 +1,6 @@
 // quadrats datagrid
 'use client';
 import React, { useState } from 'react';
-import { Box, Button, Stack, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { quadratGridColumns } from '@/components/client/datagridcolumns';
@@ -36,47 +35,6 @@ export default function IsolatedQuadratsDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-            <Typography level={'title-md'} sx={{ color: '#ffa726' }}>
-              Note: This is a locked view and will not allow modification.
-            </Typography>
-            <Typography level={'body-md'} sx={{ color: '#ffa726' }}>
-              Please use this view as a way to confirm changes made to measurements.
-            </Typography>
-          </Box>
-
-          <Stack direction={'row'} spacing={2}>
-            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-              Manual Entry Form
-            </Button>
-            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-              Upload
-            </Button>
-          </Stack>
-          {/*<Link href="/fixeddatainput/quadratpersonnel" passHref>*/}
-          {/*  <Button variant="solid" color="primary" sx={{ ml: 2 }}>*/}
-          {/*    View Quadrat Personnel*/}
-          {/*  </Button>*/}
-          {/*</Link>*/}
-        </Box>
-      </Box>
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -107,6 +65,10 @@ export default function IsolatedQuadratsDataGrid() {
           Area: ['area', 'areaUnits'],
           Misc: ['quadratShape']
         }}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) }
+        ]}
       />
     </>
   );

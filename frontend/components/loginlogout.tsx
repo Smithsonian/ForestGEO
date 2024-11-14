@@ -8,11 +8,9 @@ import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import LoginRoundedIcon from '@mui/icons-material/LoginRounded';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { Skeleton } from '@mui/joy';
-import { useRouter } from 'next/navigation';
 
 export const LoginLogout = () => {
   const { data: session, status } = useSession();
-  const router = useRouter();
 
   const handleRetryLogin = () => {
     signIn('azure-ad', { callbackUrl: '/dashboard' }, { prompt: 'login' }).catch((error: any) => {

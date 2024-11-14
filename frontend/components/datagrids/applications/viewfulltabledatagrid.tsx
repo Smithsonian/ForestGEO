@@ -1,11 +1,9 @@
 // viewfulltable view datagrid
 'use client';
 
-import { Box, Typography } from '@mui/joy';
 import { AlertProps } from '@mui/material';
 import { GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
-import { useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
@@ -120,7 +118,6 @@ export default function ViewFullTableDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const { data: session } = useSession();
   const { setLoading } = useLoading();
   const currentSite = useSiteContext();
 
@@ -146,7 +143,7 @@ export default function ViewFullTableDataGrid() {
       const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Historical View Refresh failure');
       setLoading(true, 'Processing data...');
-      const data = await response.json();
+      await response.json();
       const duration = (Date.now() - startTime) / 1000;
       setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -160,7 +157,7 @@ export default function ViewFullTableDataGrid() {
   useEffect(() => {
     let isMounted = true;
     if (isMounted) {
-      reloadVFT();
+      reloadVFT().catch(console.error);
     }
     return () => {
       isMounted = false;
@@ -169,57 +166,28 @@ export default function ViewFullTableDataGrid() {
 
   return (
     <>
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          mb: 3,
-          width: '100%',
-          flexDirection: 'column'
-        }}
-      >
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level="title-lg" sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-          </Box>
-        </Box>
-
-        <MeasurementsCommons
-          gridType="viewfulltable"
-          gridColumns={ViewFullTableGridColumns}
-          rows={rows}
-          setRows={setRows}
-          rowCount={rowCount}
-          setRowCount={setRowCount}
-          rowModesModel={rowModesModel}
-          setRowModesModel={setRowModesModel}
-          snackbar={snackbar}
-          setSnackbar={setSnackbar}
-          refresh={refresh}
-          setRefresh={setRefresh}
-          paginationModel={paginationModel}
-          setPaginationModel={setPaginationModel}
-          isNewRowAdded={isNewRowAdded}
-          setIsNewRowAdded={setIsNewRowAdded}
-          shouldAddRowAfterFetch={shouldAddRowAfterFetch}
-          setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
-          addNewRowToGrid={addNewRowToGrid}
-        />
-      </Box>
+      <MeasurementsCommons
+        gridType="viewfulltable"
+        gridColumns={ViewFullTableGridColumns}
+        rows={rows}
+        setRows={setRows}
+        rowCount={rowCount}
+        setRowCount={setRowCount}
+        rowModesModel={rowModesModel}
+        setRowModesModel={setRowModesModel}
+        snackbar={snackbar}
+        setSnackbar={setSnackbar}
+        refresh={refresh}
+        setRefresh={setRefresh}
+        paginationModel={paginationModel}
+        setPaginationModel={setPaginationModel}
+        isNewRowAdded={isNewRowAdded}
+        setIsNewRowAdded={setIsNewRowAdded}
+        shouldAddRowAfterFetch={shouldAddRowAfterFetch}
+        setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
+        addNewRowToGrid={addNewRowToGrid}
+        dynamicButtons={[]}
+      />
     </>
   );
 }

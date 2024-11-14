@@ -13,28 +13,28 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridSortModel,
-  GridToolbar,
   GridToolbarContainer,
   GridToolbarProps,
+  GridToolbarQuickFilter,
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, Button, Checkbox, Snackbar } from '@mui/material';
+import { Alert, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import Box from '@mui/joy/Box';
-import { Stack, Tooltip, Typography } from '@mui/joy';
+import { Dropdown, Menu, MenuButton, MenuItem, Stack, Tooltip, Typography } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
   CellItemContainer,
   createDeleteQuery,
   createFetchQuery,
   createPostPatchQuery,
+  createQFFetchQuery,
   EditToolbarCustomProps,
   errorMapping,
   filterColumns,
@@ -48,7 +48,6 @@ import { CMError } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { redirect } from 'next/navigation';
 import moment from 'moment';
-import { useLockAnimation } from '@/app/contexts/lockanimationcontext';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
@@ -58,8 +57,10 @@ import { useSession } from 'next-auth/react';
 
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
-import { FileDownloadSharp, FileDownloadTwoTone } from '@mui/icons-material';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
+import { applyFilterToColumns, betweenOperator } from '@/components/datagrids/filtrationsystem';
+import { ClearIcon } from '@mui/x-date-pickers';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -71,30 +72,67 @@ function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
 
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
-const EditToolbar = ({
-  handleAddNewRow,
-  handleRefresh,
-  handleExportAll,
-  handleExportErrors,
-  handleExportCSV,
-  handleRunValidations,
-  locked,
-  filterModel
-}: EditToolbarProps) => {
-  const handleExportClick = async () => {
-    if (!handleExportAll) return;
-    const fullData = await handleExportAll(filterModel);
-    const blob = new Blob([JSON.stringify(fullData, null, 2)], {
-      type: 'application/json'
+const EditToolbar = (props: EditToolbarProps) => {
+  const {
+    handleAddNewRow,
+    handleExportErrors,
+    handleRefresh,
+    handleExportAll,
+    handleExportCSV,
+    handleQuickFilterChange,
+    locked,
+    filterModel,
+    dynamicButtons = []
+  } = props;
+  if (!handleAddNewRow || !handleExportErrors || !handleRefresh || !handleQuickFilterChange || !handleExportAll) return <></>;
+  const [inputValue, setInputValue] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(event.target.value);
+    setIsTyping(true);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      handleQuickFilterChange({
+        ...filterModel,
+        items: filterModel?.items || [],
+        quickFilterValues: inputValue.split(' ') || []
+      });
+      setIsTyping(false);
+    }
+  };
+
+  const handleClearInput = () => {
+    setInputValue('');
+    handleQuickFilterChange({
+      ...filterModel,
+      items: filterModel?.items || [],
+      quickFilterValues: []
     });
+    setIsTyping(false);
+  };
+
+  useEffect(() => {
+    if (isTyping) {
+      const timeout = setTimeout(() => setIsTyping(false), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [isTyping, inputValue]);
+
+  function exportFilterModel() {
+    const jsonData = JSON.stringify(filterModel, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
+
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'data.json';
-    document.body.appendChild(link);
+    link.download = 'results.json';
     link.click();
-    document.body.removeChild(link);
-  };
+
+    URL.revokeObjectURL(url);
+  }
 
   const handleExportErrorsClick = async () => {
     if (!handleExportErrors) return;
@@ -113,35 +151,95 @@ const EditToolbar = ({
 
   return (
     <GridToolbarContainer>
-      <GridToolbar />
-      <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
-        Add Row
-      </Button>
-      <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
-        Refresh
-      </Button>
-      <Button color="primary" startIcon={<FileDownloadIcon />} onClick={handleExportClick}>
-        Export Full Data
-      </Button>
-      <Button color="primary" startIcon={<FileDownloadSharp />} onClick={handleExportErrorsClick}>
-        Export Errors
-      </Button>
-      <Button color={'primary'} startIcon={<FileDownloadTwoTone />} onClick={handleExportCSV}>
-        Export Form CSV
-      </Button>
-      {/*<Button color={'primary'} startIcon={<Quiz />} onClick={handleRunValidations}>*/}
-      {/*  Run Validations*/}
-      {/*</Button>*/}
+      <Box
+        sx={{
+          display: 'flex',
+          flex: 1,
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: 'warning.main',
+          borderRadius: '4px',
+          p: 2
+        }}
+      >
+        <Box sx={{ display: 'flex', flex: 1 }}>
+          <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
+            <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarQuickFilter
+                variant={'outlined'}
+                value={inputValue}
+                onKeyDown={handleKeyDown}
+                onChange={handleInputChange}
+                placeholder={'Search All Fields...'}
+                slotProps={{
+                  input: {
+                    endAdornment: null
+                  }
+                }}
+              />
+              <Tooltip title={'Clear filter'} placement={'right'}>
+                <IconButton
+                  aria-label={'clear filter'}
+                  disabled={inputValue === ''}
+                  onClick={handleClearInput}
+                  size={'small'}
+                  edge={'end'}
+                  sx={{ marginLeft: 1 }}
+                >
+                  <ClearIcon fontSize={'small'} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Tooltip>
+          <Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
+            Add Row
+          </Button>
+          <Button variant={'text'} color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+            Refresh
+          </Button>
+          <Dropdown>
+            <MenuButton
+              variant={'plain'}
+              color={'primary'}
+              endDecorator={
+                <CloudDownloadIcon
+                  sx={{
+                    fontSize: '1.5rem',
+                    verticalAlign: 'middle'
+                  }}
+                />
+              }
+            >
+              Export...
+            </MenuButton>
+            <Menu variant={'soft'} color={'primary'} placement={'bottom-start'}>
+              <MenuItem variant={'soft'} color={'primary'} onClick={async () => await handleExportAll()}>
+                All data as JSON
+              </MenuItem>
+              <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
+                All Data as Form
+              </MenuItem>
+              <MenuItem variant={'soft'} color={'primary'} onClick={handleExportErrorsClick}>
+                All errors as JSON
+              </MenuItem>
+              <MenuItem variant={'soft'} color={'primary'} onClick={exportFilterModel}>
+                Filter Settings
+              </MenuItem>
+            </Menu>
+          </Dropdown>
+        </Box>
+      </Box>
+      <Stack direction={'row'} spacing={2}>
+        {dynamicButtons.map((button: any, index: number) => (
+          <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+            {button.label}
+          </Button>
+        ))}
+      </Stack>
     </GridToolbarContainer>
   );
 };
 
-/**
- * Renders custom UI components for measurement summary view.
- *
- * Handles state and logic for editing, saving, deleting rows, pagination,
- * validation errors, printing, exporting, and more.
- */
 export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
   const {
     addNewRowToGrid,
@@ -161,10 +259,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setPaginationModel,
     isNewRowAdded,
     setIsNewRowAdded,
-    shouldAddRowAfterFetch,
     setShouldAddRowAfterFetch,
     handleSelectQuadrat,
-    locked = false
+    locked = false,
+    dynamicButtons
   } = props;
 
   // states from datagridcommons:
@@ -182,8 +280,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     oldRow: GridRowModel;
   } | null>(null);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({
-    items: []
+    items: [],
+    quickFilterValues: []
   });
+  const [usingQuery, setUsingQuery] = useState('');
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
 
   // custom states -- msvdatagrid
@@ -192,7 +292,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
-  const [errorRowsForExport, setErrorRowsForExport] = useState<GridRowModel[]>([]);
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
 
   // context pulls and definitions
@@ -201,7 +300,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
   const { setLoading } = useLoading();
-  const { triggerPulse } = useLockAnimation();
 
   // use the session
   useSession();
@@ -494,11 +592,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
 
-  const handleError = (error: any, message: string) => {
-    console.error(message, error);
-    setSnackbar({ children: `Error: ${message}`, severity: 'error' });
-  };
-
   const fetchPaginatedData = useCallback(
     debounce(async (pageToFetch: number) => {
       if (!currentSite || !currentPlot || !currentCensus) {
@@ -506,38 +599,51 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         return;
       }
 
-      setRefresh(true);
-      const paginatedQuery = createFetchQuery(
-        currentSite?.schemaName ?? '',
-        gridType,
-        pageToFetch,
-        paginationModel.pageSize,
-        currentPlot?.plotID,
-        currentCensus?.plotCensusNumber,
-        currentQuadrat?.quadratID
-      );
+      setLoading(true);
+      const paginatedQuery =
+        (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
+          ? createQFFetchQuery(
+              currentSite?.schemaName ?? '',
+              gridType,
+              pageToFetch,
+              paginationModel.pageSize,
+              currentPlot?.plotID,
+              currentCensus?.plotCensusNumber,
+              currentQuadrat?.quadratID
+            )
+          : createFetchQuery(
+              currentSite?.schemaName ?? '',
+              gridType,
+              pageToFetch,
+              paginationModel.pageSize,
+              currentPlot?.plotID,
+              currentCensus?.plotCensusNumber,
+              currentQuadrat?.quadratID
+            );
       try {
-        const response = await fetch(paginatedQuery, { method: 'GET' });
-        if (!response.ok) throw new Error(response.statusText || 'Error fetching data');
+        const response = await fetch(paginatedQuery, {
+          method:
+            (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0) ? 'POST' : 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          body:
+            (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
+              ? JSON.stringify({ filterModel })
+              : undefined
+        });
         const data = await response.json();
-        console.log('data: ', data);
+        if (!response.ok) throw new Error(data.message || 'Error fetching data');
         setRows(data.output);
         setRowCount(data.totalCount);
+        setUsingQuery(data.finishedQuery);
 
         if (isNewRowAdded && pageToFetch === newLastPage) {
-          addNewRowToGrid();
-          setIsNewRowAdded(false);
+          await handleAddNewRow();
         }
       } catch (error) {
-        handleError(error, 'Error fetching data');
+        console.error('Error fetching data:', error);
+        setSnackbar({ children: 'Error fetching data', severity: 'error' });
       } finally {
-        try {
-          await fetchValidationErrors();
-        } catch (error: any) {
-          handleError(error, 'Error fetching validation errors');
-        } finally {
-          setRefresh(false);
-        }
+        setLoading(false);
       }
     }, 500),
     [
@@ -558,7 +664,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       fetchPaginatedData(paginationModel.page);
     }
-  }, [currentPlot, currentCensus, paginationModel.page, sortModel, isNewRowAdded, fetchPaginatedData]);
+  }, [currentPlot, currentCensus, paginationModel.page, sortModel, isNewRowAdded, filterModel]);
 
   useEffect(() => {
     if (errorRowCount > 0) {
@@ -703,30 +809,39 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   }, [currentSite?.schemaName, fetchPaginatedData]);
 
-  const fetchFullData = async () => {
-    setLoading(true, 'Fetching full dataset...');
-    let partialQuery = ``;
-    if (currentPlot?.plotID) partialQuery += `/${currentPlot.plotID}`;
-    if (currentCensus?.plotCensusNumber) partialQuery += `/${currentCensus.plotCensusNumber}`;
-    if (currentQuadrat?.quadratID) partialQuery += `/${currentQuadrat.quadratID}`;
-    const fullDataQuery = `/api/fetchall/${gridType}` + partialQuery + `?schema=${currentSite?.schemaName}`;
-
+  const fetchFullData = useCallback(async () => {
+    setLoading(true);
     try {
-      const response = await fetch(fullDataQuery, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-        // body: JSON.stringify(filterModel)
-      });
-      if (!response.ok) throw new Error(response.statusText || 'Error fetching full data');
-      return await response.json();
+      const reworkedQuery = usingQuery
+        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+        .trim();
+
+      const results = await (
+        await fetch(`/api/runquery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reworkedQuery)
+        })
+      ).json();
+
+      const jsonData = JSON.stringify(results, null, 2);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'results.json';
+      link.click();
+
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error fetching full data:', error);
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
-      return [];
     } finally {
       setLoading(false);
     }
-  };
+  }, [usingQuery, filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
 
   const handleExportErrors = async () => {
     const errorRows = await fetchErrorRows();
@@ -796,19 +911,15 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
   const columns = useMemo(() => {
-    console.log('test: ');
     const commonColumns = gridColumns.map(column => {
-      Object.keys(validationErrors).forEach(validationError => {
-        console.log('validationerror: ', validationError);
-      });
-      return column;
+      if (column.field === 'measuredDBH' || column.field === 'measuredHOM') {
+        return { ...column, filterOperators: [betweenOperator] } as GridColDef;
+      } else return column;
       // return {
       //   ...column,
       //   renderCell: (params: GridCellParams) => {
       //     const cellValue = params.value !== undefined ? params.value?.toString() : '';
-      //     console.log('cellValue', cellValue);
       //     const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, params.id) : '';
-      //     console.log('cellERror', cellError);
       //     return (
       //       <Box
       //         sx={{
@@ -846,7 +957,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (locked) {
       return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
-    return [validationStatusColumn, measurementDateColumn, ...commonColumns, getGridActionsColumn()];
+    return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
   }, [gridColumns, locked]);
 
   const filteredColumns = useMemo(() => filterColumns(rows, columns), [rows, columns]);
@@ -914,6 +1025,14 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   };
 
+  function onQuickFilterChange(incomingValues: GridFilterModel) {
+    setFilterModel(prevFilterModel => ({
+      ...prevFilterModel,
+      items: [...(incomingValues.items || [])],
+      quickFilterValues: [...(incomingValues.quickFilterValues || [])]
+    }));
+  }
+
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
   } else {
@@ -964,9 +1083,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
-                handleEnterKeyNavigation(params, event).then(r => {
-                  console.log(r);
-                });
+                handleEnterKeyNavigation(params, event).then(r => {});
               }
             }}
             paginationModel={paginationModel}
@@ -974,6 +1091,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             pageSizeOptions={[paginationModel.pageSize]}
             sortModel={sortModel}
             onSortModelChange={handleSortModelChange}
+            filterModel={filterModel}
+            onFilterModelChange={newFilterModel => setFilterModel(newFilterModel)}
+            ignoreDiacritics
             initialState={{
               columns: {
                 columnVisibilityModel: getColumnVisibilityModel(gridType)
@@ -988,8 +1108,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
+                handleExportCSV: exportAllCSV,
                 handleExportErrors: handleExportErrors,
-                handleExportCSV: exportAllCSV
+                handleQuickFilterChange: onQuickFilterChange,
+                filterModel: filterModel,
+                dynamicButtons: dynamicButtons
               }
             }}
             getRowHeight={() => 'auto'}

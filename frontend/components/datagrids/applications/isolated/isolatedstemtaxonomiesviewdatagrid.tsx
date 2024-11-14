@@ -1,7 +1,6 @@
 // stemtaxonomiesview datagrid
 'use client';
 import React, { useState } from 'react';
-import { Box, Button, Typography } from '@mui/joy';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { StemTaxonomiesViewGridColumns } from '@/components/client/datagridcolumns';
@@ -38,33 +37,6 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-          </Box>
-
-          {/* Upload Button */}
-          <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-            Upload
-          </Button>
-        </Box>
-      </Box>
-
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -90,6 +62,7 @@ export default function IsolatedStemTaxonomiesViewDataGrid() {
           Species: ['speciesCode', 'speciesName', 'validCode', 'speciesAuthority', 'speciesIDLevel', 'speciesFieldFamily'],
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
+        dynamicButtons={[{ label: 'Upload', onClick: () => setIsUploadModalOpen(true) }]}
       />
     </>
   );
