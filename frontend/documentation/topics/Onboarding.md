@@ -1,6 +1,7 @@
 # Onboarding for New Users
 
-Thank you for using this application! This document will help you get started.
+Thank you for using this application! 
+This document will provide you with an understanding of how the application works.
 
 ## Preparing Your Account
 
