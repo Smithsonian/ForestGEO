@@ -13,8 +13,8 @@ permissions:
   pages: write
 
 env:
-  INSTANCE: 'Writerside/fad' # Use the Writerside instance ID as specified in your writerside.cfg
-  ARTIFACT: 'webHelpFAD-all.zip' # Update artifact name if needed
+  INSTANCE: 'documentation/fad'
+  ARTIFACT: 'webHelpFAD-all.zip'
   DOCKER_VERSION: '243.21565' # Writerside's recommended Docker version
 
 jobs:
