@@ -3,6 +3,7 @@
 Thank you for using this application! 
 This document will provide you with an understanding of how the application works.
 
+
 ## Preparing Your Account
 
 Before you can log into the application, you must complete the following steps:
