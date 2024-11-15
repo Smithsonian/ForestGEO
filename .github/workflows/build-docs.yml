@@ -14,7 +14,7 @@ permissions:
 
 env:
   INSTANCE: 'documentation/fad'
-  ARTIFACT: 'webHelpFAD-all.zip'
+  ARTIFACT: 'webHelpFAD2-all.zip'
   DOCKER_VERSION: '243.21565' # Writerside's recommended Docker version
 
 jobs:
