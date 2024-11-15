@@ -55,6 +55,38 @@ export const siteConfigNav: SiteConfigProps[] = [
     expanded: []
   },
   {
+    label: 'Stem & Plot Details',
+    href: '/fixeddatainput',
+    tip: 'View Modifiable Properties',
+    icon: SettingsSuggestIcon,
+    expanded: [
+      {
+        label: 'Stem Codes',
+        href: '/attributes',
+        tip: '',
+        icon: DescriptionIcon
+      },
+      {
+        label: 'Personnel',
+        href: '/personnel',
+        tip: '',
+        icon: AccountCircleIcon
+      },
+      {
+        label: 'Quadrats',
+        href: '/quadrats',
+        tip: '',
+        icon: WidgetsIcon
+      },
+      {
+        label: 'Species List',
+        href: '/alltaxonomies',
+        tip: '',
+        icon: SchemaIcon
+      }
+    ]
+  },
+  {
     label: 'Census Hub',
     href: '/measurementshub',
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
@@ -89,39 +121,6 @@ export const siteConfigNav: SiteConfigProps[] = [
         href: '/validations',
         tip: 'data validations hub',
         icon: FactCheckIcon
-      }
-    ]
-  },
-
-  {
-    label: 'Stem & Plot Details',
-    href: '/fixeddatainput',
-    tip: 'View Modifiable Properties',
-    icon: SettingsSuggestIcon,
-    expanded: [
-      {
-        label: 'Stem Codes',
-        href: '/attributes',
-        tip: '',
-        icon: DescriptionIcon
-      },
-      {
-        label: 'Personnel',
-        href: '/personnel',
-        tip: '',
-        icon: AccountCircleIcon
-      },
-      {
-        label: 'Quadrats',
-        href: '/quadrats',
-        tip: '',
-        icon: WidgetsIcon
-      },
-      {
-        label: 'Species List',
-        href: '/alltaxonomies',
-        tip: '',
-        icon: SchemaIcon
       }
     ]
   }
