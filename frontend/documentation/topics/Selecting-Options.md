@@ -6,7 +6,6 @@ select:
 2. A plot
 3. A census (if you need to start a new census, click on the Add New Census button!)
 
-
 Once you select all of these, you will be redirected to the dashboard page, and a new interface 
 will appear.
 
