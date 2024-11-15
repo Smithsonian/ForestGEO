@@ -17,10 +17,8 @@ will appear.
 A site describes an overall collection of plots in the same geographic location, and further sets 
 a series of default parameters for the plots in that site:
 
-- Subquadrat dimensions—sites are subdivided as follows: a site is a collection of plots, a 
-  plot is a collection of **quadrats**, and a quadrat is a collection of **subquadrats**.
-> **Subquadrats are not recorded as part of data collection, but are used to calculate
-coordinates and other statistical data**
+- Subquadrat dimensions—sites are subdivided as follows: a site is a collection of plots, and a 
+  plot is a collection of **quadrats**
 - Double data entry—sites can be set to require double data entry. When this is enabled, 
   measurements must be recorded **twice** for each **quadrat**, and will be held in temporary 
   storage until an administrator reviews both sets of data and approves a single merged set. 
