@@ -31,7 +31,6 @@ import { useEffect, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
-import { useLoading } from '@/app/contexts/loadingprovider';
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();
@@ -44,8 +43,6 @@ export default function DashboardPage() {
   const userRole = session?.user?.userStatus;
   const allowedSites = session?.user?.sites;
 
-  const { setLoading } = useLoading();
-
   const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
   const [isLoading, setIsLoading] = useState(false);
 
@@ -53,7 +50,6 @@ export default function DashboardPage() {
     try {
       setIsLoading(true);
 
-      // Check if the required data is available, otherwise return a padded array
       if (!currentSite || !currentPlot || !currentCensus) {
         setChangelogHistory(Array(5).fill({}));
         return;
@@ -158,14 +154,6 @@ export default function DashboardPage() {
                     <ListItemContent>
                       <Typography level="body-md">
                         <strong>Species List</strong> - Submit species and taxonomy information for stems here. <strong>Does not require a census.</strong>
-                      </Typography>
-                    </ListItemContent>
-                  </ListItem>
-                  <ListItem>
-                    <ListItemContent>
-                      <Typography level="body-md">
-                        <strong>Plot-Species List</strong> - See existing taxonomy information for stems in your plot and census here.{' '}
-                        <strong>Requires a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>

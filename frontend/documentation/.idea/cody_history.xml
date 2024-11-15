@@ -13,14 +13,6 @@
                   <llm>
                     <model value="openai/gpt-4o" />
                     <provider value="OpenAI" />
-                    <tags>
-                      <list>
-                        <option value="gateway" />
-                        <option value="pro" />
-                        <option value="recommended" />
-                        <option value="accuracy" />
-                      </list>
-                    </tags>
                     <title value="GPT-4o" />
                     <usage>
                       <list>
@@ -88,21 +80,20 @@
           </chats>
           <defaultLlm>
             <llm>
-              <model value="openai/gpt-4o" />
-              <provider value="OpenAI" />
+              <model value="openai::2024-02-01::gpt-4o" />
+              <provider value="openai" />
               <tags>
                 <list>
-                  <option value="gateway" />
                   <option value="pro" />
-                  <option value="recommended" />
-                  <option value="accuracy" />
+                  <option value="vision" />
+                  <option value="power" />
                 </list>
               </tags>
               <title value="GPT-4o" />
               <usage>
                 <list>
-                  <option value="chat" />
                   <option value="edit" />
+                  <option value="chat" />
                 </list>
               </usage>
             </llm>

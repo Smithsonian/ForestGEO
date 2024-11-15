@@ -12,4 +12,13 @@
         </description>
         <accepts>starter-topic.html</accepts>
     </rule>
+    <rule id="73c25379">
+        <description>
+            <![CDATA[Created after removal of "<What-is-the-Dashboard.md>" from ForestGEO Application Documentation]]></description>
+        <accepts>What-is-the-Dashboard.html</accepts>
+    </rule>
+    <rule id="284f7a2e">
+        <description>Created after removal of "Stem Codes" from ForestGEO Application Documentation</description>
+        <accepts>Stem-Codes.html</accepts>
+    </rule>
 </rules>

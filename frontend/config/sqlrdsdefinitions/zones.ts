@@ -1,7 +1,7 @@
 import { IDataMapper } from '@/config/datamapper';
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
-import { AreaSelection, areaSelectionOptions, ColumnStates, UnitSelection, unitSelectionOptions } from '@/config/macros';
+import { AreaSelection, areaSelectionOptions, bitToBoolean, booleanToBit, ColumnStates, UnitSelection, unitSelectionOptions } from '@/config/macros';
 
 export type SitesRDS = {
   siteID?: number;
@@ -11,6 +11,7 @@ export type SitesRDS = {
   subquadratDimY?: number;
   dbhUnits?: string;
   homUnits?: string;
+  doubleDataEntry?: boolean;
 };
 export type Site = SitesRDS | undefined;
 
@@ -22,6 +23,7 @@ export interface SitesResult {
   SQDimY: any;
   DefaultUOMDBH: any;
   DefaultUOMHOM: any;
+  DoubleDataEntry: any;
 }
 
 export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
@@ -33,7 +35,8 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
       SQDimX: item.subquadratDimX != undefined ? String(item.subquadratDimX) : null,
       SQDimY: item.subquadratDimY != undefined ? String(item.subquadratDimY) : null,
       DefaultUOMDBH: item.dbhUnits != undefined ? String(item.dbhUnits) : null,
-      DefaultUOMHOM: item.homUnits != undefined ? String(item.homUnits) : null
+      DefaultUOMHOM: item.homUnits != undefined ? String(item.homUnits) : null,
+      DoubleDataEntry: item.doubleDataEntry != undefined ? booleanToBit(item.doubleDataEntry) : null
     }));
   }
 
@@ -45,7 +48,8 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
       subquadratDimX: item.SQDimX != null ? Number(item.SQDimX) : undefined,
       subquadratDimY: item.SQDimY != null ? Number(item.SQDimY) : undefined,
       dbhUnits: item.DefaultUOMDBH != null ? String(item.DefaultUOMDBH) : undefined,
-      homUnits: item.DefaultUOMHOM != null ? String(item.DefaultUOMHOM) : undefined
+      homUnits: item.DefaultUOMHOM != null ? String(item.DefaultUOMHOM) : undefined,
+      doubleDataEntry: item.DoubleDataEntry != null ? bitToBoolean(item.DoubleDataEntry) : undefined
     }));
   }
 }
