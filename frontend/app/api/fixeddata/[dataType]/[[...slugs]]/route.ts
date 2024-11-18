@@ -8,7 +8,7 @@ import ConnectionManager from '@/config/connectionmanager'; // slugs SHOULD CONT
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   {
     params
   }: {

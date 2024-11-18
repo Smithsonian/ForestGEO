@@ -4,6 +4,14 @@ import { escape } from 'mysql2';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
+import { capitalizeAndTransformField } from '@/config/utils';
+import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
+
+interface FilterItem {
+  field: string;
+  operator: string;
+  value: string | number | null;
+}
 
 export async function POST(
   request: NextRequest,
@@ -17,8 +25,9 @@ export async function POST(
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, quadratIDParam, speciesIDParam] = params.slugs;
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
     throw new Error('core slugs schema/page/pageSize not correctly received');
-  const { filterModel } = await request.json();
-  if (!filterModel.items || !filterModel.quickFilterValues) throw new Error('filterModel is empty. filter API should not have triggered.');
+  const body = await request.json();
+  const filterModel: GridFilterModel = body.filterModel;
+  if (!filterModel.items && !filterModel.quickFilterValues) throw new Error('filterModel is empty. filter API should not have triggered.');
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
@@ -29,6 +38,15 @@ export async function POST(
   let updatedMeasurementsExist = false;
   let censusIDs;
   let pastCensusIDs: string | any[];
+
+  const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) =>
+    // the `field` here automatically references the column in the table. don't need to do other processing with it.
+    filterModel.items
+      .map((item: GridFilterItem) => {
+        const { field: field = capitalizeAndTransformField(item.field), operator, value } = item;
+        return `\`${alias ? `${alias}.` : ''}${field}\` ${operator} ${escape(`%${value}%`)}`;
+      })
+      .join(` ${filterModel?.logicOperator?.toUpperCase()} `);
 
   const buildSearchStub = (columns: any[], quickFilter: string[], alias?: string) =>
     columns.map((column: any) => quickFilter.map(word => `\`${alias ? `${alias}.` : ''}${column}\` LIKE ${escape(`%${word}%`)}`).join(' OR ')).join(' OR ');
@@ -46,12 +64,13 @@ export async function POST(
       console.log('error: ', e);
       throw new Error(e);
     }
-    const searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+    const searchStub = filterModel.quickFilterValues ? buildSearchStub(columns, filterModel.quickFilterValues) : '';
+    const filterStub = filterModel.items ? buildFilterModelStub(filterModel) : ``;
     switch (params.dataType) {
       case 'validationprocedures':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
-          FROM catalog.${params.dataType} WHERE ${searchStub}`;
+          FROM catalog.${params.dataType} WHERE ${searchStub} OR ${filterStub}`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'specieslimits':
@@ -65,7 +84,7 @@ export async function POST(
       case 'quadratpersonnel':
       case 'sitespecificvalidations':
       case 'roles':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE ${searchStub}`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE (${searchStub} OR ${filterStub})`;
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'personnel':
@@ -74,7 +93,7 @@ export async function POST(
             FROM ${schema}.${params.dataType} p
                      JOIN ${schema}.census c ON p.CensusID = c.CensusID
             WHERE c.PlotID = ?
-              AND c.PlotCensusNumber = ? AND ${searchStub}`;
+              AND c.PlotCensusNumber = ? AND (${searchStub} OR ${filterStub})`;
         console.log('paginated query: ', paginatedQuery);
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
@@ -86,7 +105,7 @@ export async function POST(
                      JOIN ${schema}.census c ON cq.CensusID = c.CensusID
             WHERE q.PlotID = ?
               AND c.PlotID = ?
-              AND c.PlotCensusNumber = ? AND ${searchStub}`;
+              AND c.PlotCensusNumber = ? AND (${searchStub} OR ${filterStub})`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'personnelrole':
@@ -103,7 +122,7 @@ export async function POST(
         LEFT JOIN 
             roles r ON p.RoleID = r.RoleID
             census c ON p.CensusID = c.CensusID
-        WHERE c.PlotID = ? AND c.PlotCensusNumber = ? AND ${searchStub}`;
+        WHERE c.PlotID = ? AND c.PlotCensusNumber = ? AND (${searchStub} OR ${filterStub})`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'measurementssummary':
@@ -117,7 +136,7 @@ export async function POST(
                      JOIN ${schema}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
             WHERE vft.PlotID = ?
               AND c.PlotID = ?
-              AND c.PlotCensusNumber = ? AND ${searchStub}
+              AND c.PlotCensusNumber = ? AND (${searchStub} OR ${filterStub})
             ORDER BY vft.MeasurementDate ASC`;
         queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
@@ -125,7 +144,7 @@ export async function POST(
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
             FROM ${schema}.census
-            WHERE PlotID = ? AND ${searchStub}`;
+            WHERE PlotID = ? AND (${searchStub} OR ${filterStub})`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
       case 'coremeasurements':
@@ -143,7 +162,7 @@ export async function POST(
               FROM ${schema}.${params.dataType} pdt
                        JOIN ${schema}.census c ON pdt.CensusID = c.CensusID
               WHERE c.PlotID = ?
-                AND c.PlotCensusNumber = ? AND ${searchStub}
+                AND c.PlotCensusNumber = ? AND (${searchStub} OR ${filterStub})
               ORDER BY pdt.MeasurementDate`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
@@ -156,7 +175,7 @@ export async function POST(
               FROM ${schema}.${params.dataType} pdt
                        JOIN ${schema}.census c ON sp.CensusID = c.CensusID
               WHERE c.PlotID = ?
-                AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')}) AND ${searchStub}
+                AND c.CensusID IN (${censusIDs.map(() => '?').join(', ')}) AND (${searchStub} OR ${filterStub})
               ORDER BY pdt.MeasurementDate ASC`;
           queryParams.push(plotID, ...censusIDs, page * pageSize, pageSize);
           break;
