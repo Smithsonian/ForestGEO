@@ -18,7 +18,6 @@ export async function POST(
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
     throw new Error('core slugs schema/page/pageSize not correctly received');
   const { filterModel } = await request.json();
-  console.log('route filter model: ', filterModel);
   if (!filterModel.items || !filterModel.quickFilterValues) throw new Error('filterModel is empty. filter API should not have triggered.');
   const page = parseInt(pageParam);
   const pageSize = parseInt(pageSizeParam);
