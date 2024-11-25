@@ -4,7 +4,7 @@
 import { AlertProps } from '@mui/material';
 import { GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ViewFullTableGridColumns } from '@/components/client/datagridcolumns';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { ViewFullTableRDS } from '@/config/sqlrdsdefinitions/views';
@@ -110,7 +110,7 @@ export default function ViewFullTableDataGrid() {
   const [rows, setRows] = useState<GridRowsProp>([initialViewFullTable] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = useState({});
-  const [snackbar, setSnackbar] = useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
+  const [snackbar, setSnackbar] = React.useState<Array<Pick<AlertProps, 'children' | 'severity'>>>([]);
   const [refresh, setRefresh] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,

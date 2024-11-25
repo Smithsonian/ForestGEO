@@ -1,6 +1,6 @@
 // measurementcommons datagrid
 'use client';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   GridActionsCellItem,
   GridCellParams,
@@ -19,7 +19,7 @@ import {
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
+import { Alert, AlertProps, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -434,7 +434,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     schemaName: string | undefined,
     newRow: GridRowModel,
     oldRow: GridRowModel,
-    setSnackbar: (value: { children: string; severity: 'error' | 'success' }) => void,
+    setSnackbar: Dispatch<SetStateAction<Array<Pick<AlertProps, 'children' | 'severity'>>>>,
     setIsNewRowAdded: (value: boolean) => void,
     setShouldAddRowAfterFetch: (value: boolean) => void,
     fetchPaginatedData: (page: number) => Promise<void>,
@@ -453,17 +453,27 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       const responseJSON = await response.json();
 
       if (!response.ok) {
-        setSnackbar({
-          children: `Error: ${responseJSON.message}`,
-          severity: 'error'
-        });
+        setSnackbar(prev => [
+          ...prev,
+          {
+            children: `Error: ${responseJSON.message}`,
+            severity: 'error'
+          },
+          {
+            children: oldRow.isNew ? 'New row added!' : 'Row updated!',
+            severity: 'success'
+          }
+        ]);
         return Promise.reject(responseJSON.row);
+      } else {
+        setSnackbar(prev => [
+          ...prev,
+          {
+            children: oldRow.isNew ? 'New row added!' : 'Row updated!',
+            severity: 'success'
+          }
+        ]);
       }
-
-      setSnackbar({
-        children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-        severity: 'success'
-      });
 
       if (oldRow.isNew) {
         setIsNewRowAdded(false);
@@ -474,7 +484,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
       return newRow;
     } catch (error: any) {
-      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
+      setSnackbar(prev => [...prev, { children: `Error: ${error.message}`, severity: 'error' }]);
       return Promise.reject(newRow);
     }
   };
@@ -580,22 +590,31 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (!response.ok) {
       const error = await response.json();
       if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
-        setSnackbar({
-          children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
-          severity: 'error'
-        });
+        setSnackbar(prev => [
+          ...prev,
+          {
+            children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
+            severity: 'error'
+          }
+        ]);
       } else {
-        setSnackbar({
-          children: `Error: ${error.message || 'Deletion failed'}`,
-          severity: 'error'
-        });
+        setSnackbar(prev => [
+          ...prev,
+          {
+            children: `Error: ${error.message || 'Deletion failed'}`,
+            severity: 'error'
+          }
+        ]);
       }
     } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
-      setSnackbar({
-        children: 'Row successfully deleted',
-        severity: 'success'
-      });
+      setSnackbar(prev => [
+        ...prev,
+        {
+          children: 'Row successfully deleted',
+          severity: 'success'
+        }
+      ]);
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
         setLoading(true, 'Refreshing Measurements Summary View...');
@@ -685,7 +704,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       } catch (error) {
         console.error('Error fetching data:', error);
-        setSnackbar({ children: 'Error fetching data', severity: 'error' });
+        setSnackbar(prev => [...prev, { children: 'Error fetching data', severity: 'error' }]);
       } finally {
         setLoading(false);
       }
@@ -729,10 +748,22 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setValidCount(data.CountValid);
       setErrorCount(data.CountErrors);
       setPendingCount(data.CountPending);
-      setSnackbar({
-        children: `${data.CountErrors} row(s) with validation errors detected.`,
-        severity: 'warning'
-      });
+      if (data.CountErrors > 0)
+        setSnackbar(prev => [
+          ...prev,
+          {
+            children: `${data.CountPending} row(s) pending validation.`,
+            severity: 'info'
+          },
+          {
+            children: `${data.CountValid} row(s) passed validation.`,
+            severity: 'success'
+          },
+          {
+            children: `${data.CountErrors} row(s) with validation errors detected.`,
+            severity: 'error'
+          }
+        ]);
     });
   }, [fetchPaginatedData]);
 
@@ -775,7 +806,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setRowModesModel(newRowModesModel);
   };
 
-  const handleCloseSnackbar = () => setSnackbar(null);
+  const handleCloseSnackbar = () => setSnackbar([]);
 
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
@@ -912,7 +943,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error fetching full data:', error);
-      setSnackbar({ children: 'Error fetching full data', severity: 'error' });
+      setSnackbar(prev => [...prev, { children: 'Error fetching full data', severity: 'error' }]);
     } finally {
       setLoading(false);
     }
@@ -1230,10 +1261,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             onProcessRowUpdateError={error => {
               console.error('Row update error:', error);
-              setSnackbar({
-                children: 'Error updating row',
-                severity: 'error'
-              });
+              setSnackbar(prev => [
+                ...prev,
+                {
+                  children: 'Error updating row',
+                  severity: 'error'
+                }
+              ]);
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
@@ -1280,9 +1314,21 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           />
         </Box>
         {!!snackbar && (
-          <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
-            <Alert {...snackbar} onClose={handleCloseSnackbar} />
-          </Snackbar>
+          <>
+            {snackbar.map((snack, index) => (
+              <Snackbar
+                key={index}
+                open
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                onClose={() => {
+                  setSnackbar(prev => prev.filter((_, i) => i !== index)); // Remove the snackbar on close
+                }}
+                autoHideDuration={6000}
+              >
+                <Alert severity={snack.severity}>{snack.children}</Alert>
+              </Snackbar>
+            ))}
+          </>
         )}
         {isDialogOpen && promiseArguments && (
           <ReEnterDataModal

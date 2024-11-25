@@ -53,7 +53,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
   const [rowModesModel, setRowModesModel] = React.useState<GridRowModesModel>({});
-  const [snackbar, setSnackbar] = React.useState<Pick<AlertProps, 'children' | 'severity'> | null>(null);
+  const [snackbar, setSnackbar] = React.useState<Array<Pick<AlertProps, 'children' | 'severity'>>>([]);
   const [refresh, setRefresh] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,

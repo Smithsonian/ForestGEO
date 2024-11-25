@@ -150,18 +150,98 @@ export async function POST(
       let searchStub = '';
       let filterStub = '';
       switch (params.dataType) {
+        case 'validationprocedures':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+
+          paginatedQuery = `
+          SELECT SQL_CALC_FOUND_ROWS * FROM catalog.${params.dataType} 
+          ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`; // validation procedures is special
+          queryParams.push(page * pageSize, pageSize);
+          break;
+        case 'attributes':
+        case 'species':
+        case 'stems':
+        case 'alltaxonomiesview':
+        case 'quadratpersonnel':
+        case 'sitespecificvalidations':
+        case 'roles':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+
+          paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} 
+          ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(page * pageSize, pageSize);
+          break;
+        case 'personnel':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'p');
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
+
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS p.*
+            FROM ${schema}.${params.dataType} p
+                     JOIN ${schema}.census c ON p.CensusID = c.CensusID
+            WHERE c.PlotID = ?
+              AND c.PlotCensusNumber = ? 
+              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
+        case 'quadrats':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'q');
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'q');
+
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS q.*
+            FROM ${schema}.quadrats q
+                     JOIN ${schema}.censusquadrat cq ON q.QuadratID = cq.QuadratID
+                     JOIN ${schema}.census c ON cq.CensusID = c.CensusID
+            WHERE q.PlotID = ?
+              AND c.PlotID = ?
+              AND c.PlotCensusNumber = ? 
+              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
+        case 'personnelrole':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'p');
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
+
+          paginatedQuery = `
+        SELECT SQL_CALC_FOUND_ROWS 
+            p.PersonnelID,
+            p.CensusID,
+            p.FirstName,
+            p.LastName,
+            r.RoleName,
+            r.RoleDescription
+        FROM 
+            personnel p
+        LEFT JOIN 
+            roles r ON p.RoleID = r.RoleID
+            census c ON p.CensusID = c.CensusID
+        WHERE c.PlotID = ? 
+        AND c.PlotCensusNumber = ? 
+        ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
+        case 'census':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS *
+            FROM ${schema}.census
+            WHERE PlotID = ? 
+            ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, page * pageSize, pageSize);
+          break;
         case 'measurementssummary':
         case 'measurementssummary_staging':
         case 'measurementssummaryview':
         case 'viewfulltable':
         case 'viewfulltableview':
-          if (filterModel.quickFilterValues) {
-            searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
-          }
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
 
-          if (filterModel.items) {
-            filterStub = buildFilterModelStub(filterModel, 'vft');
-          }
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS vft.*
             FROM ${schema}.${params.dataType} vft
@@ -193,13 +273,9 @@ export async function POST(
           queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'coremeasurements':
-          if (filterModel.quickFilterValues) {
-            searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
-          }
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'pdt');
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'pdt');
 
-          if (filterModel.items) {
-            filterStub = buildFilterModelStub(filterModel, 'vft');
-          }
           const censusQuery = `
             SELECT CensusID
             FROM ${schema}.census
@@ -239,7 +315,9 @@ export async function POST(
       paginatedQuery += ` LIMIT ?, ?;`;
 
       if (paginatedQuery.match(/\?/g)?.length !== queryParams.length) {
-        throw new Error('Mismatch between query placeholders and parameters');
+        throw new Error(
+          `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
+        );
       }
       console.log('completed query: ', format(paginatedQuery, queryParams));
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
