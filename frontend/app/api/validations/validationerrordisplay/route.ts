@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
       validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
       descriptions: row.Descriptions.split(',')
     }));
+    console.log('parsedValidationErrors: ', parsedValidationErrors);
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors

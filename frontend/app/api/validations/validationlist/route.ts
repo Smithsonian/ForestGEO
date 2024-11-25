@@ -28,7 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
     const query = `SELECT ValidationID, ProcedureName, Description, Definition FROM catalog.validationprocedures WHERE IsEnabled IS TRUE;`;
     const results: ValidationProcedure[] = await conn.executeQuery(query);
 
-    const customQuery = `SELECT ValidationProcedureID, Name, Description, Definition FROM ${schema}.sitespecificvalidations;`;
+    const customQuery = `SELECT ValidationProcedureID, Name, Description, Definition FROM ${schema}.sitespecificvalidations WHERE IsEnabled IS TRUE;`;
     const customResults: SiteSpecificValidations[] = await conn.executeQuery(customQuery);
 
     const validationMessages: ValidationMessages = results.reduce((acc, { ValidationID, ProcedureName, Description, Definition }) => {
