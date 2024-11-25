@@ -269,8 +269,8 @@ export interface MeasurementsCommonsProps {
   setRowCount: Dispatch<SetStateAction<number>>;
   rowModesModel: GridRowModesModel;
   setRowModesModel: Dispatch<SetStateAction<GridRowModesModel>>;
-  snackbar: Pick<AlertProps, 'children' | 'severity'> | null;
-  setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, 'children' | 'severity'> | null>>;
+  snackbar: Array<Pick<AlertProps, 'children' | 'severity'>>;
+  setSnackbar: Dispatch<SetStateAction<Array<Pick<AlertProps, 'children' | 'severity'>>>>;
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
   paginationModel: { pageSize: number; page: number };
