@@ -296,7 +296,7 @@ export async function runValidation(
     minHOM?: number | null;
     maxHOM?: number | null;
   } = {}
-): Promise<{ TotalRows: number; Message: string }> {
+): Promise<boolean> {
   const connectionManager = new ConnectionManager();
 
   try {
@@ -310,8 +310,9 @@ export async function runValidation(
       .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
       .replace(/@minHOM/g, params.minHOM !== null && params.minHOM !== undefined ? params.minHOM.toString() : 'NULL')
       .replace(/@maxHOM/g, params.maxHOM !== null && params.maxHOM !== undefined ? params.maxHOM.toString() : 'NULL')
+      .replace(/@validationProcedureID/g, validationProcedureID.toString())
       .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-      .replace(/coremeasurements/g, `${schema}.coremeasurements`) // Fully qualify table names
+      .replace(/coremeasurements/g, `${schema}.coremeasurements`)
       .replace(/stems/g, `${schema}.stems`)
       .replace(/trees/g, `${schema}.trees`)
       .replace(/quadrats/g, `${schema}.quadrats`)
@@ -371,34 +372,14 @@ export async function runValidation(
       .replace(/@maxHOM/g, params.maxHOM !== null && params.maxHOM !== undefined ? params.maxHOM.toString() : 'NULL');
 
     // Execute the cursor query to get the rows that need validation
-    const cursorResults = await connectionManager.executeQuery(reformattedCursorQuery);
-
-    if (cursorResults.length > 0) {
-      const insertErrorQuery = `
-        INSERT INTO ${schema}.cmverrors (CoreMeasurementID, ValidationErrorID)
-        SELECT ?, ?
-        FROM DUAL
-        WHERE NOT EXISTS (
-          SELECT 1 
-          FROM ${schema}.cmverrors 
-          WHERE CoreMeasurementID = ? AND ValidationErrorID = ?
-        );
-      `;
-
-      // Insert errors for all rows that matched the validation condition
-      for (const row of cursorResults) {
-        await connectionManager.executeQuery(insertErrorQuery, [row.CoreMeasurementID, validationProcedureID, row.CoreMeasurementID, validationProcedureID]);
-      }
-    }
-
-    return {
-      TotalRows: cursorResults.length,
-      Message: `Validation completed successfully. Total rows processed: ${cursorResults.length}`
-    };
+    console.log('running validation: ', validationProcedureName);
+    console.log('running query: ', reformattedCursorQuery);
+    await connectionManager.executeQuery(reformattedCursorQuery);
+    return true;
   } catch (error: any) {
     await connectionManager.rollbackTransaction();
-    console.error(`Error during ${validationProcedureName} validation:`, error.message);
-    throw new Error(`${validationProcedureName} validation failed. Please check the logs for more details.`);
+    console.error(`Error during ${validationProcedureName} or ${validationProcedureID} validation:`, error.message);
+    return false;
   } finally {
     await connectionManager.closeConnection();
   }
@@ -407,46 +388,69 @@ export async function runValidation(
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const connectionManager = new ConnectionManager();
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
+
   const insertTemp = `
     INSERT INTO UpdatedRows (CoreMeasurementID)
     SELECT cm.CoreMeasurementID
     FROM ${schema}.coremeasurements cm
-    LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
     JOIN ${schema}.census c ON cm.CensusID = c.CensusID
     WHERE cm.IsValidated IS NULL
-    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
-    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});`;
-  const query = `
+      AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
+      AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+  `;
+
+  const updateValidation = `
     UPDATE ${schema}.coremeasurements cm
-    LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
-    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-    SET cm.IsValidated = CASE 
-        WHEN cme.CMVErrorID IS NULL THEN TRUE
-        WHEN cme.CMVErrorID IS NOT NULL THEN FALSE
-        ELSE cm.IsValidated  
-    END
+    SET cm.IsValidated = (
+      CASE
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM ${schema}.cmverrors cme
+          WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
+        ) THEN TRUE  -- No validation errors exist
+        ELSE FALSE   -- Validation errors exist
+      END
+    )
     WHERE cm.IsValidated IS NULL
-    AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows)
-    AND c.CensusID = ${params.p_CensusID} AND c.PlotID = ${params.p_PlotID};`;
+      AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
+  `;
+
   const getUpdatedRows = `
     SELECT cm.*
     FROM ${schema}.coremeasurements cm
-    JOIN UpdatedRows ur ON cm.CoreMeasurementID = ur.CoreMeasurementID;`;
+    WHERE cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
+  `;
+
   const dropTemp = `DROP TEMPORARY TABLE IF EXISTS UpdatedRows;`;
+
   try {
+    // Begin transaction
     await connectionManager.beginTransaction();
-    await connectionManager.executeQuery(dropTemp); // just in case
+
+    // Ensure any leftover temporary table is cleared
+    await connectionManager.executeQuery(dropTemp);
+
+    // Create temporary table and populate it
     await connectionManager.executeQuery(tempTable);
     await connectionManager.executeQuery(insertTemp);
-    await connectionManager.executeQuery(query);
+
+    // Update validation states
+    await connectionManager.executeQuery(updateValidation);
+
+    // Fetch and return the updated rows
     const results = await connectionManager.executeQuery(getUpdatedRows);
+
+    // Clean up temporary table
     await connectionManager.executeQuery(dropTemp);
+
     return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
+    // Roll back on error
     await connectionManager.rollbackTransaction();
     console.error(`Error during updateValidatedRows:`, error.message);
-    throw new Error(`updateValidatedRows failed. Please check the logs for more details.`);
+    throw new Error(`updateValidatedRows failed for validation: Please check the logs for more details.`);
   } finally {
+    // Close the connection
     await connectionManager.closeConnection();
   }
 }

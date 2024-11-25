@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runValidation } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 
-export async function POST(request: NextRequest, { params }: { params: { validationProcedureName: string } }) {
+export async function POST(request: NextRequest, { params }: { params: { validationType: string } }) {
   try {
-    const { schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH, minHOM, maxHOM } = await request.json();
+    if (!params.validationType) throw new Error('validationProcedureName not provided');
+    const body = await request.json();
+    const { schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH, minHOM, maxHOM } = body;
+    console.log('body received from request: ', body);
 
     // Execute the validation procedure using the provided inputs
-    const validationResponse = await runValidation(validationProcedureID, params.validationProcedureName, schema, cursorQuery, {
+    const validationResponse = await runValidation(validationProcedureID, params.validationType, schema, cursorQuery, {
       p_CensusID,
       p_PlotID,
       minDBH,
