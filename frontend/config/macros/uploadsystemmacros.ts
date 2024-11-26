@@ -181,4 +181,22 @@ export interface CMError {
   coreMeasurementID: number;
   validationErrorIDs: number[];
   descriptions: string[];
+  criteria: string[];
 }
+
+export type ValidationPair = {
+  description: string;
+  criterion: string;
+};
+
+export type ErrorDetail = {
+  id: number;
+  validationPairs: ValidationPair[];
+};
+
+export type CoreMeasurementError = {
+  coreMeasurementID: number;
+  errors: ErrorDetail[];
+};
+
+export type ErrorMap = Record<number, CoreMeasurementError>;

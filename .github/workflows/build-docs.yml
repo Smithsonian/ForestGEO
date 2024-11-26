@@ -13,8 +13,8 @@ permissions:
   pages: write
 
 env:
-  INSTANCE: 'Writerside/fad' # Use the Writerside instance ID as specified in your writerside.cfg
-  ARTIFACT: 'webHelpFAD-all.zip' # Update artifact name if needed
+  INSTANCE: 'documentation/fad'
+  ARTIFACT: 'webHelpFAD2-all.zip'
   DOCKER_VERSION: '243.21565' # Writerside's recommended Docker version
 
 jobs:
@@ -34,8 +34,13 @@ jobs:
           instance: ${{ env.INSTANCE }}
           artifact: ${{ env.ARTIFACT }}
           docker-version: ${{ env.DOCKER_VERSION }}
+          args: --verbose
 
-      # Step 3: Save build results
+      # Debug: List artifacts directory
+      - name: List artifacts directory
+        run: ls -la artifacts/
+
+      # Step 3: Save artifact with build results
       - name: Save artifact with build results
         uses: actions/upload-artifact@v4
         with:

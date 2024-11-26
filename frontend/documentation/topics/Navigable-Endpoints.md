@@ -14,5 +14,5 @@ This a brief overview of the pages you can access in the app and their function!
   - Uploaded Files (review uploaded files here)
   - View All Historical Data (view all data, irrespective of census, here)
   - Validations (review validations, what they are examining, and toggle them on/off here)
-  > Toggling validations is an admin-only feature!
-{style='warning'}
+    > Toggling validations is an admin-only feature!
+    > {style='warning'}
