@@ -19,7 +19,7 @@ import {
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertProps, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
+import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
@@ -42,7 +42,7 @@ import {
   PendingAction,
   sortRowsByMeasurementDate
 } from '@/config/datagridhelpers';
-import { CMError } from '@/config/macros/uploadsystemmacros';
+import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { redirect } from 'next/navigation';
 import moment from 'moment';
@@ -60,8 +60,8 @@ import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ValidationModal from '@/components/client/validationmodal';
-import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { OverridableStringUnion } from '@mui/types';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -289,13 +289,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [usingQuery, setUsingQuery] = useState('');
   const [isSaveHighlighted, setIsSaveHighlighted] = useState(false);
 
-  const [validationErrors, setValidationErrors] = useState<{
-    [key: number]: CMError;
-  }>({});
-  const [validationProcedures, setValidationProcedures] = useState<ValidationProceduresRDS[]>([]);
+  const [validationErrors, setValidationErrors] = useState<ErrorMap>({});
   const [showErrorRows, setShowErrorRows] = useState<boolean>(true);
   const [showValidRows, setShowValidRows] = useState<boolean>(true);
   const [showPendingRows, setShowPendingRows] = useState<boolean>(true);
+  const [hidingEmpty, setHidingEmpty] = useState(true);
   const [filterModel, setFilterModel] = useState<ExtendedGridFilterModel>({
     items: [],
     quickFilterValues: [],
@@ -307,7 +305,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   });
 
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
-  const [clickedRow, setClickedRow] = useState<GridRowId | null>(null);
   const [errorCount, setErrorCount] = useState<number | null>(null);
   const [validCount, setValidCount] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
@@ -333,10 +330,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ]
     }));
   }, [showErrorRows, showValidRows, showPendingRows]);
-
-  const handleRowClick = (rowId: GridRowId) => {
-    setClickedRow(prev => (prev === rowId ? null : rowId));
-  };
 
   const exportAllCSV = useCallback(async () => {
     const response = await fetch(
@@ -399,34 +392,23 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const cellHasError = (colField: string, rowId: GridRowId) => {
     const row = rows.find(row => rowId === row.id);
-    const error = validationErrors[Number(row?.coreMeasurementID)];
-    if (error === undefined) return false;
-    const errorFields = error.validationErrorIDs.flatMap(
-      id =>
-        validationProcedures
-          .find(vp => vp.validationID === id) // Compare id with validationID
-          ?.criteria?.split(';') || []
-    );
-    return errorFields.includes(colField);
+    if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
+      return false;
+    }
+    return validationErrors[Number(row.coreMeasurementID)].errors.find(error => error.validationPairs.find(vp => vp.criterion === colField));
   };
 
   const rowHasError = (rowId: GridRowId) => {
-    if (!rows || rows.length === 0) return false;
+    const row = rows.find(row => rowId === row.id);
+    if (!row || !row.coreMeasurementID || !validationErrors[row.coreMeasurementID]) {
+      return false; // No errors for this row
+    }
     return gridColumns.some(column => cellHasError(column.field, rowId));
   };
 
   const fetchErrorRows = async () => {
-    if (!rows || rows.length === 0) return [];
+    if (!rows || rows.length === 0 || !validationErrors) return [];
     return rows.filter(row => rowHasError(row.id));
-  };
-
-  const getRowErrorDescriptions = (rowId: GridRowId): string[] => {
-    const row = rows.find(row => rowId === row.id);
-    const error = validationErrors[row?.coreMeasurementID];
-    return error.validationErrorIDs.map(id => {
-      const index = error.validationErrorIDs.indexOf(id);
-      return error.descriptions[index]; // Assumes that descriptions are stored in the CMError object
-    });
   };
 
   const updateRow = async (
@@ -434,7 +416,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     schemaName: string | undefined,
     newRow: GridRowModel,
     oldRow: GridRowModel,
-    setSnackbar: Dispatch<SetStateAction<Array<Pick<AlertProps, 'children' | 'severity'>>>>,
+    setSnackbar: Dispatch<SetStateAction<Pick<AlertProps, 'children' | 'severity'> | null>>,
     setIsNewRowAdded: (value: boolean) => void,
     setShouldAddRowAfterFetch: (value: boolean) => void,
     fetchPaginatedData: (page: number) => Promise<void>,
@@ -453,27 +435,17 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       const responseJSON = await response.json();
 
       if (!response.ok) {
-        setSnackbar(prev => [
-          ...prev,
-          {
-            children: `Error: ${responseJSON.message}`,
-            severity: 'error'
-          },
-          {
-            children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-            severity: 'success'
-          }
-        ]);
+        setSnackbar({
+          children: `Error: ${responseJSON.message}`,
+          severity: 'error'
+        });
         return Promise.reject(responseJSON.row);
-      } else {
-        setSnackbar(prev => [
-          ...prev,
-          {
-            children: oldRow.isNew ? 'New row added!' : 'Row updated!',
-            severity: 'success'
-          }
-        ]);
       }
+
+      setSnackbar({
+        children: oldRow.isNew ? 'New row added!' : 'Row updated!',
+        severity: 'success'
+      });
 
       if (oldRow.isNew) {
         setIsNewRowAdded(false);
@@ -484,7 +456,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
       return newRow;
     } catch (error: any) {
-      setSnackbar(prev => [...prev, { children: `Error: ${error.message}`, severity: 'error' }]);
+      setSnackbar({ children: `Error: ${error.message}`, severity: 'error' });
       return Promise.reject(newRow);
     }
   };
@@ -590,31 +562,22 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (!response.ok) {
       const error = await response.json();
       if (response.status === HTTPResponses.FOREIGN_KEY_CONFLICT) {
-        setSnackbar(prev => [
-          ...prev,
-          {
-            children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
-            severity: 'error'
-          }
-        ]);
+        setSnackbar({
+          children: `Error: Cannot delete row due to foreign key constraint in table ${error.referencingTable}`,
+          severity: 'error'
+        });
       } else {
-        setSnackbar(prev => [
-          ...prev,
-          {
-            children: `Error: ${error.message || 'Deletion failed'}`,
-            severity: 'error'
-          }
-        ]);
+        setSnackbar({
+          children: `Error: ${error.message || 'Deletion failed'}`,
+          severity: 'error'
+        });
       }
     } else {
       if (handleSelectQuadrat) handleSelectQuadrat(null);
-      setSnackbar(prev => [
-        ...prev,
-        {
-          children: 'Row successfully deleted',
-          severity: 'success'
-        }
-      ]);
+      setSnackbar({
+        children: 'Row successfully deleted',
+        severity: 'success'
+      });
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
         setLoading(true, 'Refreshing Measurements Summary View...');
@@ -695,6 +658,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Error fetching data');
 
+        console.log('fetched data: ', data);
+
         setRows(data.output);
         setRowCount(data.totalCount);
         setUsingQuery(data.finishedQuery);
@@ -704,12 +669,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       } catch (error) {
         console.error('Error fetching data:', error);
-        setSnackbar(prev => [...prev, { children: 'Error fetching data', severity: 'error' }]);
+        setSnackbar({ children: 'Error fetching data', severity: 'error' });
       } finally {
         setLoading(false);
       }
-    }, 500),
-    [filterModel, currentSite, currentPlot, currentCensus, paginationModel.pageSize, isNewRowAdded, newLastPage]
+    }, 250),
+    [filterModel, currentSite, currentPlot, currentCensus, paginationModel, isNewRowAdded, newLastPage]
   );
 
   async function runFetchPaginated() {
@@ -722,6 +687,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       runFetchPaginated().catch(console.error);
     }
   }, [currentPlot, currentCensus, paginationModel, sortModel, isNewRowAdded, filterModel]);
+
+  useEffect(() => {
+    console.log('updated rows object: ', rows);
+  }, [rows]);
 
   useEffect(() => {
     async function getCounts() {
@@ -748,44 +717,18 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setValidCount(data.CountValid);
       setErrorCount(data.CountErrors);
       setPendingCount(data.CountPending);
-      if (data.CountErrors > 0)
-        setSnackbar(prev => [
-          ...prev,
-          {
-            children: `${data.CountPending} row(s) pending validation.`,
-            severity: 'info'
-          },
-          {
-            children: `${data.CountValid} row(s) passed validation.`,
-            severity: 'success'
-          },
-          {
-            children: `${data.CountErrors} row(s) with validation errors detected.`,
-            severity: 'error'
-          }
-        ]);
+      const counts = [
+        { count: data.CountErrors, message: `${data.CountErrors} row(s) with validation errors detected.`, severity: 'warning' },
+        { count: data.CountPending, message: `${data.CountPending} row(s) pending validation.`, severity: 'info' },
+        { count: data.CountValid, message: `${data.CountValid} row(s) passed validation.`, severity: 'success' }
+      ];
+      const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
+      setSnackbar({
+        children: highestCount.message,
+        severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
+      });
     });
-  }, [fetchPaginatedData]);
-
-  async function getValidations() {
-    try {
-      const response = await fetch(`/api/validations/crud`, { method: 'GET' });
-      const inbound = await response.json();
-      if (JSON.stringify(validationProcedures) !== JSON.stringify(inbound)) setValidationProcedures(inbound);
-    } catch (e: any) {
-      console.error(`validation list pull failed with error: ${e}`);
-    }
-  }
-
-  useEffect(() => {
-    if (validationProcedures.length === 0) getValidations().catch(console.error);
-  }, []);
-
-  const handleRefresh = useCallback(async () => {
-    setRefresh(true);
-    await runFetchPaginated();
-    setRefresh(false);
-  }, [paginationModel, refresh]);
+  }, [rows, paginationModel]);
 
   const processRowUpdate = useCallback(
     (newRow: GridRowModel, oldRow: GridRowModel) =>
@@ -806,7 +749,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setRowModesModel(newRowModesModel);
   };
 
-  const handleCloseSnackbar = () => setSnackbar([]);
+  const handleCloseSnackbar = () => setSnackbar(null);
 
   const handleRowEditStop: GridEventListener<'rowEditStop'> = (params, event) => {
     if (params.reason === GridRowEditStopReasons.rowFocusOut) {
@@ -890,26 +833,50 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const fetchValidationErrors = useCallback(async () => {
     try {
-      const response = await fetch(`/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}`);
+      const response = await fetch(
+        `/api/validations/validationerrordisplay?schema=${currentSite?.schemaName ?? ''}&plotIDParam=${currentPlot?.plotID ?? ''}&censusPCNParam=${currentCensus?.plotCensusNumber ?? ''}`
+      );
 
       if (!response.ok) {
         throw new Error('Failed to fetch validation errors');
       }
 
       const data = await response.json();
-      const errors: CMError[] = data?.failed ?? [];
-      const errorMap = Array.isArray(errors)
-        ? errors.reduce<Record<number, CMError>>((acc, error) => {
-            acc[error?.coreMeasurementID] = error;
+      const errorMap: ErrorMap = Array.isArray(data?.failed as CMError[])
+        ? (data.failed as CMError[]).reduce<Record<number, CoreMeasurementError>>((acc, error) => {
+            if (error.coreMeasurementID) {
+              const errorDetailsMap = new Map<number, ValidationPair[]>();
+
+              (error.validationErrorIDs || []).forEach((id, index) => {
+                const descriptions = error.descriptions?.[index]?.split(';') || [];
+                const criteria = error.criteria?.[index]?.split(';') || [];
+
+                // Ensure descriptions and criteria are paired correctly
+                const validationPairs = descriptions.map((description, i) => ({
+                  description,
+                  criterion: criteria[i] ?? '' // Default to empty if criteria is missing
+                }));
+
+                if (!errorDetailsMap.has(id)) {
+                  errorDetailsMap.set(id, []);
+                }
+
+                // Append validation pairs to the corresponding ID
+                errorDetailsMap.get(id)!.push(...validationPairs);
+              });
+
+              acc[error.coreMeasurementID] = {
+                coreMeasurementID: error.coreMeasurementID,
+                errors: Array.from(errorDetailsMap.entries()).map(([id, validationPairs]) => ({
+                  id,
+                  validationPairs
+                }))
+              };
+            }
             return acc;
           }, {})
         : {};
-
-      // Only update state if there is a difference
-      if (JSON.stringify(validationErrors) !== JSON.stringify(errorMap)) {
-        setValidationErrors(errorMap);
-      }
-      return errorMap; // Return the errorMap if you need to log it outside
+      setValidationErrors(errorMap);
     } catch (error) {
       console.error('Error fetching validation errors:', error);
     }
@@ -943,7 +910,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error fetching full data:', error);
-      setSnackbar(prev => [...prev, { children: 'Error fetching full data', severity: 'error' }]);
+      setSnackbar({ children: 'Error fetching full data', severity: 'error' });
     } finally {
       setLoading(false);
     }
@@ -952,8 +919,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const handleExportErrors = async () => {
     const errorRows = await fetchErrorRows();
     return errorRows.map(row => {
-      const errors = getRowErrorDescriptions(row.id);
-      return { ...row, errors };
+      return { ...row, errors: validationErrors[Number(row.coreMeasurementID)].errors ?? [] };
     });
   };
 
@@ -966,9 +932,24 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       align: 'center',
       width: 50,
       renderCell: (params: GridCellParams) => {
+        console.log('validation errors full: ', validationErrors);
+        console.log('row: ', params.row);
+        console.log(
+          'row in rows: ',
+          rows.find(row => row.coreMeasurementID === params.row.coreMeasurementID)
+        );
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
+          console.log('val error: ', validationErrors[Number(params.row.coreMeasurementID)]);
+          const validationStrings =
+            validationErrors[Number(params.row.coreMeasurementID)]?.errors.map(errorDetail => {
+              const pairsString = errorDetail.validationPairs
+                .map(pair => `(${pair.description} <--> ${pair.criterion})`) // Format each validation pair
+                .join(', '); // Combine all pairs for the errorDetail
+
+              return `ID ${errorDetail.id}: ${pairsString}`; // Format the string for the ID
+            }) || [];
           return (
-            <Tooltip title={`Failed Validation: ${validationErrors[Number(params.row.coreMeasurementID)].descriptions.join(', ')}`} size="md">
+            <Tooltip title={`Failing: ${validationStrings.join(',')}`} size="md">
               <ErrorIcon color="error" />
             </Tooltip>
           );
@@ -1007,31 +988,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       </Box>
     ),
     valueFormatter: value => {
-      // Check if the date is present and valid
       if (!value || !moment(value).utc().isValid()) {
         return '';
       }
-      // Format the date as a dash-separated set of numbers
       return moment(value).utc().format('YYYY-MM-DD');
     }
   };
 
   const getCellErrorMessages = (colField: string, coreMeasurementID: number) => {
-    const error = validationErrors[Number(coreMeasurementID)];
-    if (!error || !validationProcedures) return '';
-
-    return error.validationErrorIDs
-      .filter(id =>
-        validationProcedures
-          .find(valID => valID.validationID === id)
-          ?.criteria?.split(';')
-          .includes(colField)
-      )
-      .map(id => {
-        const index = error.validationErrorIDs.indexOf(id);
-        return error.descriptions[index];
-      })
-      .join('; ');
+    const error = validationErrors[coreMeasurementID].errors;
+    if (!error || !Array.isArray(error)) {
+      return '';
+    }
+    return error.flatMap(errorDetail => errorDetail.validationPairs).find(vp => vp.criterion === colField)?.description || null;
   };
 
   const columns = useMemo(() => {
@@ -1040,14 +1009,30 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         ...column,
         renderCell: (params: GridCellParams) => {
           const value = typeof params.value === 'string' ? params.value : (params.value?.toString() ?? '');
-
           const formattedValue = !isNaN(Number(value)) && value.includes('.') && value.split('.')[1].length > 2 ? Number(value).toFixed(2) : value;
           const rowError = rowHasError(params.id);
-          const targetColumnName = validationProcedures
-            .find(vp => validationErrors[Number(params.row.coreMeasurementID)]?.validationErrorIDs.includes(vp.validationID ?? -1))
-            ?.criteria?.split(';')[0];
           const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, Number(params.row.coreMeasurementID)) : '';
-          if (rowError) console.log('targetColumn for row error: ', targetColumnName, ' cellError: ', cellError);
+
+          const isMeasurementField = column.field === 'measuredDBH' || column.field === 'measuredHOM';
+
+          const renderMeasurementDetails = () => (
+            <>
+              <Typography level="body-sm">
+                {column.field === 'measuredDBH'
+                  ? params.row.measuredDBH
+                    ? Number(params.row.measuredDBH).toFixed(2)
+                    : 'null'
+                  : params.row.measuredHOM
+                    ? Number(params.row.measuredHOM).toFixed(2)
+                    : 'null'}
+              </Typography>
+              <Typography level="body-sm">
+                {column.field === 'measuredDBH' && params.row.dbhUnits && params.row.measuredDBH !== null && params.row.dbhUnits}
+                {column.field === 'measuredHOM' && params.row.homUnits && params.row.measuredHOM !== null && params.row.homUnits}
+              </Typography>
+            </>
+          );
+
           return (
             <Box
               sx={{
@@ -1059,53 +1044,25 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 bgcolor: rowError ? 'warning.main' : undefined
               }}
             >
-              {column.field === targetColumnName ? (
-                <>
-                  {column.field === 'measuredDBH' || column.field === 'measuredHOM' ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-                      <Typography level="body-sm">
-                        {column.field === 'measuredDBH' && <>{params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null'}</>}
-                        {column.field === 'measuredHOM' && <>{params.row.measuredHOM ? Number(params.row.measuredHOM).toFixed(2) : 'null'}</>}
-                      </Typography>
-                      <Typography level="body-sm">
-                        {column.field === 'measuredDBH' && <>{params.row.dbhUnits ? (params.row.measuredDBH !== null ? params.row.dbhUnits : '') : ''}</>}
-                        {column.field === 'measuredHOM' && <>{params.row.homUnits ? (params.row.measuredHOM !== null ? params.row.homUnits : '') : ''}</>}
-                      </Typography>
-                    </Box>
-                  ) : (
-                    <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedValue}</Typography>
-                  )}
-                  <Typography
-                    color={'danger'}
-                    variant={'solid'}
-                    sx={{
-                      color: 'error.main',
-                      fontSize: '0.75rem',
-                      mt: 1,
-                      whiteSpace: 'normal',
-                      lineHeight: 'normal'
-                    }}
-                  >
-                    {cellError}
-                  </Typography>
-                </>
+              {isMeasurementField ? (
+                <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderMeasurementDetails()}</Box>
               ) : (
-                <>
-                  {column.field === 'measuredDBH' || column.field === 'measuredHOM' ? (
-                    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-                      <Typography level="body-sm">
-                        {column.field === 'measuredDBH' && <>{params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null'}</>}
-                        {column.field === 'measuredHOM' && <>{params.row.measuredHOM ? Number(params.row.measuredHOM).toFixed(2) : 'null'}</>}
-                      </Typography>
-                      <Typography level="body-sm">
-                        {column.field === 'measuredDBH' && <>{params.row.dbhUnits ? (params.row.measuredDBH !== null ? params.row.dbhUnits : '') : ''}</>}
-                        {column.field === 'measuredHOM' && <>{params.row.homUnits ? (params.row.measuredHOM !== null ? params.row.homUnits : '') : ''}</>}
-                      </Typography>
-                    </Box>
-                  ) : (
-                    <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedValue}</Typography>
-                  )}
-                </>
+                <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedValue}</Typography>
+              )}
+              {cellError !== '' && (
+                <Typography
+                  color="danger"
+                  variant="solid"
+                  sx={{
+                    color: 'error.main',
+                    fontSize: '0.75rem',
+                    mt: 1,
+                    whiteSpace: 'normal',
+                    lineHeight: 'normal'
+                  }}
+                >
+                  {cellError}
+                </Typography>
               )}
             </Box>
           );
@@ -1116,20 +1073,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
     return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
-  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationProcedures, validationErrors]);
+  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors]);
 
-  const visibleRows = useMemo(() => {
-    let filteredRows = rows;
-    if (!showValidRows) {
-      filteredRows = filteredRows.filter(row => rowHasError(row.id));
-    }
-    if (!showErrorRows) {
-      filteredRows = filteredRows.filter(row => !rowHasError(row.id));
-    }
-    return filteredRows;
-  }, [rows, showErrorRows, showValidRows]);
-
-  const filteredColumns = useMemo(() => filterColumns(visibleRows, columns), [visibleRows, columns]);
+  const filteredColumns = useMemo(() => {
+    if (hidingEmpty) return filterColumns(rows, columns);
+    return columns;
+  }, [rows, columns, hidingEmpty]);
 
   const getRowClassName = (params: any) => {
     const rowId = params.id;
@@ -1211,6 +1160,17 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     await runFetchPaginated();
   }
 
+  const testRows = [
+    {
+      id: 1,
+      coreMeasurementID: 2770850,
+      measurementDate: '2016-02-25T05:00:00.000Z',
+      measuredDBH: null,
+      isValidated: false,
+      measuredHOM: '1.300000'
+    }
+  ];
+
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
   } else {
@@ -1241,15 +1201,18 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 <Checkbox checked={showPendingRows} onChange={event => setShowPendingRows(event.target.checked)} />
                 Show rows pending validation: ({pendingCount})
               </Typography>
+              <Typography>
+                <Checkbox checked={hidingEmpty} onChange={event => setHidingEmpty(event.target.checked)} />
+                <strong>{hidingEmpty ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>
+              </Typography>
             </Stack>
           </Stack>
           <StyledDataGrid
             sx={{ width: '100%' }}
-            rows={visibleRows}
+            rows={rows}
             columns={filteredColumns}
             editMode="row"
             rowModesModel={rowModesModel}
-            onRowClick={params => handleRowClick(params.id)}
             disableColumnSelector
             onRowModesModelChange={handleRowModesModelChange}
             onRowEditStop={handleRowEditStop}
@@ -1261,13 +1224,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             onProcessRowUpdateError={error => {
               console.error('Row update error:', error);
-              setSnackbar(prev => [
-                ...prev,
-                {
-                  children: 'Error updating row',
-                  severity: 'error'
-                }
-              ]);
+              setSnackbar({
+                children: 'Error updating row',
+                severity: 'error'
+              });
             }}
             onCellKeyDown={(params, event) => {
               if (event.key === 'Enter') {
@@ -1299,7 +1259,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               toolbar: {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
-                handleRefresh: handleRefresh,
+                handleRefresh: runFetchPaginated,
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
                 handleExportErrors: handleExportErrors,
@@ -1314,21 +1274,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           />
         </Box>
         {!!snackbar && (
-          <>
-            {snackbar.map((snack, index) => (
-              <Snackbar
-                key={index}
-                open
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                onClose={() => {
-                  setSnackbar(prev => prev.filter((_, i) => i !== index)); // Remove the snackbar on close
-                }}
-                autoHideDuration={6000}
-              >
-                <Alert severity={snack.severity}>{snack.children}</Alert>
-              </Snackbar>
-            ))}
-          </>
+          <Snackbar open anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} onClose={handleCloseSnackbar} autoHideDuration={6000}>
+            <Alert {...snackbar} onClose={handleCloseSnackbar} />
+          </Snackbar>
         )}
         {isDialogOpen && promiseArguments && (
           <ReEnterDataModal
