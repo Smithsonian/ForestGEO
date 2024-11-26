@@ -1,7 +1,7 @@
 'use client';
 
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import React, { useEffect, useState } from 'react';
+import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import React, { useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar } from '@mui/joy';
@@ -11,7 +11,6 @@ import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagrid
 import { FormType } from '@/config/macros/formdetails';
 import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import { useLoading } from '@/app/contexts/loadingprovider';
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
@@ -29,8 +28,8 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   speciesCode: '',
   treeTag: '',
   stemTag: '',
-  localX: 0,
-  localY: 0,
+  stemLocalX: 0,
+  stemLocalY: 0,
   coordinateUnits: '',
   measurementDate: null,
   measuredDBH: 0,
@@ -43,7 +42,6 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
 };
 
 export default function MeasurementsSummaryViewDataGrid() {
-  const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -63,32 +61,9 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const { setLoading } = useLoading();
-
-  async function reloadMSV() {
-    try {
-      setLoading(true, 'Refreshing Measurements Summary View...');
-      const startTime = Date.now();
-      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-      if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      setLoading(true, 'Processing data...');
-      const duration = (Date.now() - startTime) / 1000;
-      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (e: any) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    reloadMSV().catch(console.error);
-  }, []);
 
   const addNewRowToGrid = () => {
     const id = randomId();
-    // Define new row structure based on MeasurementsSummaryRDS type
     const newRow = {
       ...initialMeasurementsSummaryViewRDSRow,
       id: id,

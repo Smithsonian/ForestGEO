@@ -241,7 +241,7 @@ export const CellItemContainer = styled('div')({
  * Function to determine if all entries in a column are null
  */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === undefined);
+  return rows.length > 0 && rows.every(row => row[field] === undefined || row[field] === null || row[field] === '');
 }
 
 /**
@@ -285,37 +285,20 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: any[];
 }
 
-export interface IsolatedMeasurementsCommonsProps {
-  gridType: string;
-  gridColumns: GridColDef[];
-  refresh: boolean;
-  setRefresh: Dispatch<SetStateAction<boolean>>;
-  initialRow?: GridRowModel;
-  fieldToFocus?: string;
-  locked?: boolean;
-  selectionOptions?: { value: string | number; label: string }[];
-  onDataUpdate?: () => void;
-  clusters?: Record<string, string[]>;
-  handleExportErrors?: () => Promise<GridRowModel[]>;
-}
-
 export const errorMapping: { [key: string]: string[] } = {
   '1': ['attributes'],
   '2': ['measuredDBH'],
   '3': ['measuredHOM'],
   '4': ['treeTag', 'stemTag'],
   '5': ['treeTag', 'stemTag', 'quadratName'],
-  '6': ['stemQuadX', 'stemQuadY'],
-  '7': ['speciesName'],
+  '6': ['stemLocalX', 'stemLocalY'],
+  '7': ['speciesCode'],
   '8': ['measurementDate'],
   '9': ['treeTag', 'stemTag', 'plotCensusNumber'],
   '10': ['treeTag', 'stemTag', 'plotCensusNumber'],
   '11': ['quadratName'],
-  '12': ['speciesName'],
-  '13': ['measuredDBH'],
-  '14': ['measuredDBH'],
-  '15': ['treeTag'],
-  '16': ['quadratName']
+  '12': ['speciesCode'],
+  '13': ['measuredDBH', 'measuredHOM']
 };
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
   return rows.slice().sort((a, b) => {
