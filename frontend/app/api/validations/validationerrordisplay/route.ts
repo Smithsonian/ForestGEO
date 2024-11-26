@@ -8,8 +8,6 @@ export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
   const plotIDParam = request.nextUrl.searchParams.get('plotIDParam');
   const censusPCNParam = request.nextUrl.searchParams.get('censusPCNParam');
-  const plotID = plotIDParam ? parseInt(plotIDParam) : null;
-  const censusPCN = censusPCNParam ? parseInt(censusPCNParam) : null;
   if (!schema) throw new Error('No schema variable provided!');
 
   try {
