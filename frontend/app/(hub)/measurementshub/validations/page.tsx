@@ -1,133 +1,98 @@
 'use client';
-
-import { Box, Card, CardContent, Typography } from '@mui/joy';
-import React, { useEffect, useState } from 'react';
-import ValidationCard from '@/components/validationcard';
+import React, { useEffect, useState, useMemo } from 'react';
+import useSWR from 'swr';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
+import { useTheme } from '@mui/joy';
+import dynamic from 'next/dynamic';
+import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+
+const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export default function ValidationsPage() {
-  const [globalValidations, setGlobalValidations] = React.useState<ValidationProceduresRDS[]>([]);
-  const [loading, setLoading] = useState<boolean>(true); // Use a loading state instead of refresh
-  const [schemaDetails, setSchemaDetails] = useState<{ table_name: string; column_name: string }[]>([]);
   const { data: session } = useSession();
-
   const currentSite = useSiteContext();
+  const currentPlot = usePlotContext();
+  const currentCensus = useOrgCensusContext();
+  const theme = useTheme();
+  const isDarkMode = theme.palette.mode === 'dark';
+
+  const { data: globalValidations, mutate: updateValidations } = useSWR<ValidationProceduresRDS[]>('/api/validations/crud', fetcher);
+
+  const { data: schemaData } = useSWR<{ schema: { table_name: string; column_name: string }[] }>(
+    currentSite?.schemaName ? `/api/structure/${currentSite.schemaName}` : null,
+    fetcher
+  );
+
+  const replacements = useMemo(
+    () => ({
+      schema: currentSite?.schemaName,
+      currentPlotID: currentPlot?.plotID,
+      currentCensusID: currentCensus?.dateRanges[0].censusID
+    }),
+    [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
+  );
+
+  const ValidationRow = dynamic(() => import('@/components/validationrow'), { ssr: false });
+
+  const [expandedValidationID, setExpandedValidationID] = useState<number | null>(null);
 
   useEffect(() => {
-    if (session !== null && !['db admin', 'global'].includes(session.user.userStatus)) {
+    if (session && !['db admin', 'global'].includes(session.user.userStatus)) {
       throw new Error('access-denied');
     }
-  }, []);
+  }, [session]);
 
   const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
     try {
-      // Make the API call to toggle the validation
       const response = await fetch(`/api/validations/crud`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedValidation) // Pass the entire updated validation object
+        body: JSON.stringify(updatedValidation)
       });
       if (response.ok) {
-        // Update the globalValidations state directly
-        setGlobalValidations(prev => prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)));
+        updateValidations(prev => (prev ? prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)) : []));
       } else {
-        console.error('Failed to toggle validation');
+        console.error('Failed to update validation');
       }
     } catch (error) {
-      console.error('Error toggling validation:', error);
+      console.error('Error updating validation:', error);
     }
   };
 
-  const handleDelete = async (validationID?: number) => {
-    try {
-      // Make the API call to delete the validation
-      const response = await fetch(`/api/validations/delete/${validationID}`, {
-        method: 'DELETE'
-      });
-      if (response.ok) {
-        // Remove the deleted validation from the globalValidations state
-        setGlobalValidations(prev => prev.filter(validation => validation.validationID !== validationID));
-      } else {
-        console.error('Failed to delete validation');
-      }
-    } catch (error) {
-      console.error('Error deleting validation:', error);
-    }
-  };
-
-  useEffect(() => {
-    async function fetchValidations() {
-      try {
-        const response = await fetch('/api/validations/crud', { method: 'GET' });
-        const data = await response.json();
-        setGlobalValidations(data);
-      } catch (err) {
-        console.error('Error fetching validations:', err);
-      } finally {
-        setLoading(false); // Loading is complete
-      }
-    }
-
-    fetchValidations().catch(console.error); // Initial load
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // Set up Monaco Editor worker path
-      window.MonacoEnvironment = {
-        getWorkerUrl: function () {
-          return '_next/static/[name].worker.js';
-        }
-      };
-    }
-  }, []);
-
-  // Fetch schema details when component mounts
-  useEffect(() => {
-    const fetchSchema = async () => {
-      try {
-        const response = await fetch(`/api/structure/${currentSite?.schemaName ?? ''}`);
-        const data = await response.json();
-        if (data.schema) {
-          setSchemaDetails(data.schema);
-        }
-      } catch (error) {
-        console.error('Error fetching schema:', error);
-      }
-    };
-
-    if (currentSite?.schemaName) {
-      fetchSchema().then(r => console.log(r));
-    }
-  }, [currentSite?.schemaName]);
+  function handleToggleClick(incomingValidationID: number) {
+    setExpandedValidationID(prev => (prev === incomingValidationID ? null : incomingValidationID));
+  }
 
   return (
-    <Box sx={{ width: '100%' }}>
-      <Card variant={'plain'} sx={{ width: '100%' }}>
-        <CardContent>
-          <Typography level={'title-lg'} fontWeight={'bold'}>
-            Review Global Validations
-          </Typography>
-          {globalValidations.map(validation => (
-            <ValidationCard
-              onDelete={handleDelete}
-              onSaveChanges={handleSaveChanges}
+    <TableContainer component={Paper}>
+      <Table stickyHeader sx={{ tableLayout: 'fixed', width: '100%' }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ width: '5%' }}>Enabled?</TableCell>
+            <TableCell sx={{ width: '10%' }}>Validation</TableCell>
+            <TableCell sx={{ width: '15%' }}>Description</TableCell>
+            <TableCell sx={{ width: '10%' }}>Affecting Criteria</TableCell>
+            <TableCell sx={{ flexGrow: 1, flexShrink: 0, flexBasis: '35%' }}>Query</TableCell>
+            <TableCell sx={{ width: '10%' }}>Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {globalValidations?.map((validation, index) => (
+            <ValidationRow
+              key={index}
               validation={validation}
-              key={validation.validationID}
-              schemaDetails={schemaDetails}
+              onSaveChanges={handleSaveChanges}
+              schemaDetails={schemaData?.schema || []}
+              expandedValidationID={expandedValidationID}
+              handleExpandClick={() => handleToggleClick(validation.validationID!)}
+              isDarkMode={isDarkMode}
+              replacements={replacements}
             />
           ))}
-        </CardContent>
-      </Card>
-      <Card variant={'plain'} sx={{ width: '100%' }}>
-        <CardContent>
-          <Typography level={'title-lg'} fontWeight={'bold'}>
-            Review Site-Specific Validations
-          </Typography>
-        </CardContent>
-      </Card>
-    </Box>
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
