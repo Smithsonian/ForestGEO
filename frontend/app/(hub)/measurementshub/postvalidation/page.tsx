@@ -4,10 +4,10 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import React, { useEffect, useState } from 'react';
 import { Box, Button, Checkbox, Table, Typography, useTheme } from '@mui/joy';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
-import PostValidationRow from '@/components/client/postvalidationrow';
 import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import { Done } from '@mui/icons-material';
 import { useLoading } from '@/app/contexts/loadingprovider';
+import dynamic from 'next/dynamic';
 
 export default function PostValidationPage() {
   const currentSite = useSiteContext();
@@ -17,12 +17,15 @@ export default function PostValidationPage() {
   const [expandedQuery, setExpandedQuery] = useState<number | null>(null);
   const [expandedResults, setExpandedResults] = useState<number | null>(null);
   const [selectedResults, setSelectedResults] = useState<PostValidationQueriesRDS[]>([]);
+  const [schemaDetails, setSchemaDetails] = useState<{ table_name: string; column_name: string }[]>([]);
   const replacements = {
     schema: currentSite?.schemaName,
     currentPlotID: currentPlot?.plotID,
     currentCensusID: currentCensus?.dateRanges[0].censusID
   };
   const { setLoading } = useLoading();
+
+  const PostValidationRow = dynamic(() => import('@/components/client/postvalidationrow'), { ssr: false });
 
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);
@@ -85,6 +88,24 @@ export default function PostValidationPage() {
       .catch(console.error)
       .then(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    const fetchSchema = async () => {
+      try {
+        const response = await fetch(`/api/structure/${currentSite?.schemaName ?? ''}`);
+        const data = await response.json();
+        if (data.schema) {
+          setSchemaDetails(data.schema);
+        }
+      } catch (error) {
+        console.error('Error fetching schema:', error);
+      }
+    };
+
+    if (postValidations.length > 0) {
+      fetchSchema().then(r => console.log(r));
+    }
+  }, [postValidations]);
 
   const handleExpandClick = (queryID: number) => {
     setExpandedQuery(expandedQuery === queryID ? null : queryID);
@@ -218,6 +239,7 @@ export default function PostValidationPage() {
                     handleExpandClick={handleExpandClick}
                     handleExpandResultsClick={handleExpandResultsClick}
                     handleSelectResult={handleSelectResult}
+                    schemaDetails={schemaDetails}
                   />
                 ))}
 
@@ -233,6 +255,7 @@ export default function PostValidationPage() {
                     handleExpandClick={handleExpandClick}
                     handleExpandResultsClick={handleExpandResultsClick}
                     handleSelectResult={handleSelectResult}
+                    schemaDetails={schemaDetails}
                   />
                 ))}
               </TableBody>

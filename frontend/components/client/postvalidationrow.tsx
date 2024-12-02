@@ -6,13 +6,14 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { PostValidationQueriesRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Checkbox, IconButton, Textarea, Tooltip } from '@mui/joy';
 import { Done } from '@mui/icons-material';
-import dynamic from 'next/dynamic';
 import moment from 'moment/moment';
 import { darken } from '@mui/system';
+import dynamic from 'next/dynamic';
 
 interface PostValidationRowProps {
   postValidation: PostValidationQueriesRDS;
   selectedResults: PostValidationQueriesRDS[];
+  schemaDetails: { table_name: string; column_name: string }[];
   expanded: boolean;
   isDarkMode: boolean;
   expandedQuery: number | null;
@@ -21,8 +22,6 @@ interface PostValidationRowProps {
   handleExpandResultsClick: (queryID: number) => void;
   handleSelectResult: (postValidation: PostValidationQueriesRDS) => void;
 }
-
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 const PostValidationRow: React.FC<PostValidationRowProps> = ({
   expandedQuery,
@@ -33,9 +32,11 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
   handleExpandClick,
   handleExpandResultsClick,
   handleSelectResult,
-  selectedResults
+  selectedResults,
+  schemaDetails
 }) => {
   const formattedResults = JSON.stringify(JSON.parse(postValidation.lastRunResult ?? '{}'), null, 2);
+  const CustomMonacoEditor = dynamic(() => import('@/components/client/custommonacoeditor'), { ssr: false });
 
   const successColor = !isDarkMode ? 'rgba(54, 163, 46, 0.3)' : darken('rgba(54,163,46,0.6)', 0.7);
   const failureColor = !isDarkMode ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.7);
@@ -119,12 +120,14 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
             }}
           >
             {expandedQuery === postValidation.queryID ? (
-              <Editor
-                height={`${Math.min(300, 20 * (postValidation?.queryDefinition ?? '').split('\n').length)}px`}
-                language="mysql"
-                value={postValidation.queryDefinition!.replace(/\${(.*?)}/g, (_match: any, p1: string) =>
+              <CustomMonacoEditor
+                schemaDetails={schemaDetails}
+                content={postValidation.queryDefinition!.replace(/\${(.*?)}/g, (_match: any, p1: string) =>
                   String(replacements[p1 as keyof typeof replacements] ?? '')
                 )}
+                setContent={undefined}
+                height={`${Math.min(300, 20 * (postValidation?.queryDefinition ?? '').split('\n').length)}px`}
+                isDarkMode={isDarkMode}
                 options={{
                   readOnly: true,
                   minimap: { enabled: false },
@@ -132,7 +135,6 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
                   wordWrap: 'off',
                   lineNumbers: 'off'
                 }}
-                theme={isDarkMode ? 'vs-dark' : 'light'}
               />
             ) : (
               <Textarea
@@ -194,18 +196,20 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
               <Typography variant="h6" gutterBottom>
                 Last Run Results
               </Typography>
-              <Editor
+              <CustomMonacoEditor
+                schemaDetails={schemaDetails}
+                content={formattedResults}
+                setContent={undefined}
                 height={formattedResults ? `${Math.min(300, 20 * formattedResults.split('\n').length)}px` : undefined}
-                defaultLanguage="json"
-                value={formattedResults}
+                isDarkMode={isDarkMode}
                 options={{
                   readOnly: true,
                   minimap: { enabled: false },
                   scrollBeyondLastLine: false,
                   wordWrap: 'on'
                 }}
-                theme={isDarkMode ? 'vs-dark' : 'light'}
                 width={'75vw'}
+                defaultLanguage={'json'}
               />
             </Box>
           </TableCell>
