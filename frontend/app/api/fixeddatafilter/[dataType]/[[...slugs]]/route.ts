@@ -25,7 +25,6 @@ export async function POST(
   // trying to ensure that system correctly retains edit/add functionality -- not necessarily needed currently but better safe than sorry
   const body = await request.json();
   if (body.newRow) {
-    console.log('newRow path');
     // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
     if (!params.slugs) throw new Error('slugs not provided');
     const [schema, gridID, plotIDParam, censusIDParam] = params.slugs;
@@ -89,9 +88,7 @@ export async function POST(
       await connectionManager.closeConnection();
     }
   } else {
-    console.log('non new row path');
     const filterModel: ExtendedGridFilterModel = body.filterModel;
-    console.log('filter model: ', filterModel);
     if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
     const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam] = params.slugs;
     if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
@@ -144,7 +141,7 @@ export async function POST(
         const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
         columns = results.map((row: any) => row.COLUMN_NAME);
       } catch (e: any) {
-        console.log('error: ', e);
+        console.error('error: ', e);
         throw new Error(e);
       }
       let searchStub = '';
@@ -319,7 +316,6 @@ export async function POST(
           `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
         );
       }
-      console.log('completed query: ', format(paginatedQuery, queryParams));
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
 
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';

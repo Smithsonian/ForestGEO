@@ -15,24 +15,17 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
       .toLowerCase()
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .trim();
-    console.log('normalizedRole: ', normalizedRole);
 
     // Handle Role insertion/updation
     const roleQuery = createSelectQuery<RoleResult>(schema, 'roles', { RoleName: normalizedRole });
-    console.log('role query: ', roleQuery);
     const existingRoles = await connectionManager.executeQuery(roleQuery, [normalizedRole]);
-    console.log('existing roles: ', existingRoles);
 
     let roleID;
     if (existingRoles.length > 0) {
-      console.log('role exists');
       // If the role exists, update the description
       roleID = existingRoles[0].RoleID;
-      console.log('existing role id: ', roleID);
       const updateRoleQuery = `UPDATE \`${schema}\`.\`roles\` SET RoleDescription = ? WHERE RoleID = ?`;
-      console.log('update role query: ', updateRoleQuery);
       await connectionManager.executeQuery(updateRoleQuery, [roledescription, roleID]);
-      console.log('Role updated with description:', roledescription);
     } else {
       // If the role does not exist, insert a new role
       const insertRoleQuery = createInsertOrUpdateQuery<RoleResult>(schema, 'roles', {
@@ -41,7 +34,6 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
       });
       const insertResult = await connectionManager.executeQuery(insertRoleQuery, [normalizedRole, roledescription]);
       roleID = insertResult.insertId;
-      console.log('New role inserted with RoleID:', roleID);
     }
 
     // Handle Personnel insertion/updation
@@ -61,15 +53,12 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
       personnelID = existingPersonnel[0].PersonnelID;
       const updatePersonnelQuery = createInsertOrUpdateQuery<PersonnelResult>(schema, 'personnel', personnelData);
       await connectionManager.executeQuery(updatePersonnelQuery, Object.values(personnelData));
-      console.log('Personnel updated:', personnelID);
     } else {
       // Insert new personnel record
       const insertPersonnelQuery = createInsertOrUpdateQuery<PersonnelResult>(schema, 'personnel', personnelData);
       const insertResult = await connectionManager.executeQuery(insertPersonnelQuery, Object.values(personnelData));
       personnelID = insertResult.insertId;
-      console.log('New personnel inserted with PersonnelID:', personnelID);
     }
-    console.log('Upsert successful. Personnel ID:', personnelID);
     return personnelID;
   } catch (error: any) {
     console.error('Upsert failed:', error.message);

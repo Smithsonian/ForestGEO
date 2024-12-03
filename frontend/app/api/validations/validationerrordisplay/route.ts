@@ -36,7 +36,6 @@ export async function GET(request: NextRequest) {
       descriptions: row.Descriptions.split(','),
       criteria: row.Criteria.split(',')
     }));
-    console.log('parsedValidationErrors: ', parsedValidationErrors);
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors

@@ -6,7 +6,6 @@ import ConnectionManager from '@/config/connectionmanager';
 
 export async function POST(request: NextRequest) {
   const fileRowSet: FileRowSet = await request.json();
-  console.log(`file row set: ${Object.keys(fileRowSet)}`);
   // request parameter handling:
   // schema
   let schema = request.nextUrl.searchParams.get('schema');
@@ -38,11 +37,9 @@ export async function POST(request: NextRequest) {
   const connectionManager = new ConnectionManager();
 
   const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
+  await connectionManager.beginTransaction();
   for (const rowId in fileRowSet) {
-    await connectionManager.beginTransaction();
-    console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
-    console.log('row for row ID: ', row);
     try {
       const props: InsertUpdateProcessingProps = {
         schema,
@@ -60,9 +57,9 @@ export async function POST(request: NextRequest) {
       } else if (formType === 'measurements' && coreMeasurementID === undefined) {
         throw new Error('CoreMeasurement insertion failure at row: ' + row);
       }
-      await connectionManager.commitTransaction();
     } catch (error) {
       await connectionManager.rollbackTransaction();
+      await connectionManager.closeConnection();
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);
         return new NextResponse(
@@ -83,6 +80,7 @@ export async function POST(request: NextRequest) {
       }
     }
   }
+  await connectionManager.commitTransaction();
   await connectionManager.closeConnection();
   return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
 }

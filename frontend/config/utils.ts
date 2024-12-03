@@ -151,8 +151,6 @@ export async function fetchPrimaryKey<Result>(
     throw new Error(`${Object.values(whereClause).join(' ')} not found in ${table}.`);
   }
 
-  console.log(`${Object.values(whereClause).join(' ')} found in ${table}.`);
-
   // Retrieve and return the primary key value from the result
   return rows[0][primaryKeyColumn] as unknown as number;
 }
@@ -204,7 +202,7 @@ export async function handleUpsert<Result>(
 
     return { id, operation: 'inserted' };
   } catch (e: any) {
-    console.log('error in handleUpsert: ', e.message);
+    console.error('error in handleUpsert: ', e.message);
     createError(e.message, e);
   }
   return { id, operation }; // exiting return statement in case existing system does not trigger correctly

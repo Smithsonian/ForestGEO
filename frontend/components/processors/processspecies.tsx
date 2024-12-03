@@ -14,7 +14,6 @@ function cleanInputData(data: any) {
 
 export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
   const { connectionManager, rowData, schema } = props;
-  console.log('rowData: ', rowData);
 
   try {
     let familyID: number | undefined;
@@ -40,12 +39,10 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);
-      console.log('Cleaned species data: ', cleanedSpeciesData);
 
       speciesID = (await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID')).id;
     }
 
-    console.log('Upsert successful');
     return speciesID;
   } catch (error: any) {
     console.error('Upsert failed:', error.message);

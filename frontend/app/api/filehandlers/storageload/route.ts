@@ -61,7 +61,6 @@ export async function POST(request: NextRequest) {
 
   try {
     const uploadResponse = await uploadValidFileAsBuffer(containerClient, file, user, formType, fileRowErrors);
-    console.log(`upload complete: ${uploadResponse?.requestId}`);
     if (uploadResponse && (uploadResponse._response.status < 200 || uploadResponse._response.status >= 300)) {
       throw new Error('Failure: Response status not between 200 & 299');
     }

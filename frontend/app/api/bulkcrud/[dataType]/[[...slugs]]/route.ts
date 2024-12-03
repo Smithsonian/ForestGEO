@@ -13,18 +13,15 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const [schema, plotIDParam, censusIDParam] = slugs;
   const plotID = parseInt(plotIDParam);
   const censusID = parseInt(censusIDParam);
-  console.log('params: schema: ', schema, ', plotID: ', plotID, ', censusID: ', censusID);
   const rows: FileRowSet = await request.json();
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
-  console.log('rows produced: ', rows);
   const connectionManager = new ConnectionManager();
   try {
     for (const rowID in rows) {
       await connectionManager.beginTransaction();
       const rowData = rows[rowID];
-      console.log('rowData obtained: ', rowData);
       const props: InsertUpdateProcessingProps = {
         schema,
         connectionManager: connectionManager,
@@ -35,7 +32,6 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         quadratID: undefined,
         fullName: undefined
       };
-      console.log('assembled props: ', props);
       await insertOrUpdate(props);
       await connectionManager.commitTransaction();
     }

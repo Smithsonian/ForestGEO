@@ -8,6 +8,7 @@ import { Chip, IconButton, List, ListItem, Switch, Textarea, Tooltip } from '@mu
 import dynamic from 'next/dynamic';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 function useDebouncedCallback(callback: (...args: any[]) => void, delay: number) {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -42,6 +43,7 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
   const debouncedSetScriptContent = useDebouncedCallback(value => setScriptContent(value ?? ''), 300);
   const [isEditing, setIsEditing] = useState(false);
   const originalScriptContent = useRef<string>(validation.definition ?? '');
+  const currentSite = useSiteContext();
 
   const CustomMonacoEditor = dynamic(() => import('@/components/client/custommonacoeditor'), { ssr: false });
 
