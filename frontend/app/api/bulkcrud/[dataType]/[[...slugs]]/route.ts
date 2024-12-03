@@ -1,10 +1,9 @@
 // bulk data CRUD flow API endpoint -- intended to allow multiline interactions and bulk updates via datagrid
 import { NextRequest, NextResponse } from 'next/server';
 import { FileRowSet } from '@/config/macros/formdetails';
-import { PoolConnection } from 'mysql2/promise';
-import { getConn, InsertUpdateProcessingProps } from '@/components/processors/processormacros';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
-import { HTTPResponses } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   const { dataType, slugs } = params;
@@ -20,15 +19,15 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     return new NextResponse('No rows provided', { status: 400 });
   }
   console.log('rows produced: ', rows);
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     for (const rowID in rows) {
+      await connectionManager.beginTransaction();
       const rowData = rows[rowID];
       console.log('rowData obtained: ', rowData);
       const props: InsertUpdateProcessingProps = {
         schema,
-        connection: conn,
+        connectionManager: connectionManager,
         formType: dataType,
         rowData,
         plotID,
@@ -38,8 +37,11 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       };
       console.log('assembled props: ', props);
       await insertOrUpdate(props);
+      await connectionManager.commitTransaction();
     }
+    return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (e: any) {
+    await connectionManager.rollbackTransaction();
     return new NextResponse(
       JSON.stringify({
         responseMessage: `Failure in connecting to SQL with ${e.message}`,
@@ -48,7 +50,6 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       { status: HTTPResponses.INTERNAL_SERVER_ERROR }
     );
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
-  return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
 }

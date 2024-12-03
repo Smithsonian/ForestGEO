@@ -1,16 +1,15 @@
-import { PoolConnection } from 'mysql2/promise';
-import { fileMappings, getConn, InsertUpdateProcessingProps, runQuery } from '@/components/processors/processormacros';
 import { processCensus } from '@/components/processors/processcensus';
 import MapperFactory from '@/config/datamapper';
-import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 import { handleUpsert } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
+import ConnectionManager from '@/config/connectionmanager';
+import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 
 // need to try integrating this into validation system:
 
 export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | undefined> {
   const { formType, schema, ...subProps } = props;
-  const { connection, rowData } = subProps;
+  const { connectionManager, rowData } = subProps;
   const mapping = fileMappings[formType];
   if (!mapping) {
     throw new Error(`Mapping not found for file type: ${formType}`);
@@ -43,84 +42,14 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
 
       try {
         // Execute the query using the provided connection
-        await connection.beginTransaction();
-        await connection.query(query, values);
-        await connection.commit();
+        await connectionManager.executeQuery(query, values);
       } catch (error) {
         // Rollback the transaction in case of an error
         console.log(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
-        await connection.rollback();
         throw error; // Re-throw the error after rollback
       }
     }
     return undefined;
-  }
-}
-
-/**
- * Retrieves all available sites from the database.
- *
- * @returns {Promise<SitesRDS[]>} An array of `SitesRDS` objects representing the available sites.
- * @throws {Error} If there is an error connecting to the database or executing the query.
- */
-export async function getAllSchemas(): Promise<SitesRDS[]> {
-  const connection: PoolConnection | null = await getConn();
-  try {
-    // Query to get sites
-    const sitesQuery = `
-      SELECT *
-      FROM catalog.sites
-    `;
-    const sitesParams: any[] | undefined = [];
-    const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
-
-    return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
-  } catch (error: any) {
-    throw new Error(error);
-  } finally {
-    if (connection) connection.release();
-  }
-}
-
-/**
- * Retrieves the list of sites that the user with the given email address is allowed to access.
- *
- * @param email - The email address of the user.
- * @returns {Promise<SitesRDS[]>} An array of `SitesRDS` objects representing the sites the user is allowed to access.
- * @throws {Error} If there is an error connecting to the database or executing the query, or if the user is not found.
- */
-export async function getAllowedSchemas(email: string): Promise<SitesRDS[]> {
-  const connection: PoolConnection | null = await getConn();
-  try {
-    // Query to get user ID
-    const userQuery = `
-      SELECT UserID
-      FROM catalog.users
-      WHERE Email = ?
-    `;
-    const userParams = [email];
-    const userResults = await runQuery(connection, userQuery, userParams);
-
-    if (userResults.length === 0) {
-      throw new Error('User not found');
-    }
-    const userID = userResults[0].UserID;
-
-    // Query to get sites
-    const sitesQuery = `
-      SELECT s.*
-      FROM catalog.sites AS s
-             JOIN catalog.usersiterelations AS usr ON s.SiteID = usr.SiteID
-      WHERE usr.UserID = ?
-    `;
-    const sitesParams = [userID];
-    const sitesResults = await runQuery(connection, sitesQuery, sitesParams);
-
-    return MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(sitesResults);
-  } catch (error: any) {
-    throw new Error(error);
-  } finally {
-    if (connection) connection.release();
   }
 }
 
@@ -137,7 +66,7 @@ interface UpdateQueryConfig {
 }
 
 export async function handleUpsertForSlices<Result>(
-  connection: PoolConnection,
+  connectionManager: ConnectionManager,
   schema: string,
   newRow: Partial<Result>,
   config: UpdateQueryConfig
@@ -180,7 +109,7 @@ export async function handleUpsertForSlices<Result>(
     }
 
     // Perform the upsert and store the resulting ID
-    insertedIds[sliceKey] = await handleUpsert<Result>(connection, schema, sliceKey, rowData, primaryKey as keyof Result);
+    insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
   }
 
   return insertedIds;
@@ -200,7 +129,7 @@ function getPreviousSlice(currentSlice: string, slices: { [key: string]: any }):
 
 // Helper function to get the immediate previous slice based on dependencies
 export async function handleDeleteForSlices<Result>(
-  connection: PoolConnection,
+  connectionManager: ConnectionManager,
   schema: string,
   rowData: Partial<Result>,
   config: UpdateQueryConfig
@@ -238,7 +167,7 @@ export async function handleDeleteForSlices<Result>(
       `;
       try {
         console.log('Deleting related rows from trees for SpeciesID:', primaryKeyValue);
-        await runQuery(connection, deleteFromRelatedTableQuery, [primaryKeyValue]);
+        await connectionManager.executeQuery(deleteFromRelatedTableQuery, [primaryKeyValue]);
       } catch (error) {
         console.error(`Error deleting related rows from trees for SpeciesID ${primaryKeyValue}:`, error);
         throw new Error(`Failed to delete related rows from trees for SpeciesID ${primaryKeyValue}.`);
@@ -256,7 +185,7 @@ export async function handleDeleteForSlices<Result>(
       console.log('Delete query:', deleteQuery);
 
       // Use runQuery helper for executing the delete query
-      await runQuery(connection, deleteQuery, [primaryKeyValue]);
+      await connectionManager.executeQuery(deleteQuery, [primaryKeyValue]);
     } catch (error) {
       console.error(`Error during deletion in ${sliceKey}:`, error);
       throw new Error(`Failed to delete from ${sliceKey}. Please check the logs for details.`);
@@ -367,11 +296,11 @@ export async function runValidation(
     minHOM?: number | null;
     maxHOM?: number | null;
   } = {}
-): Promise<{ TotalRows: number; Message: string }> {
-  const conn = await getConn();
+): Promise<boolean> {
+  const connectionManager = new ConnectionManager();
 
   try {
-    await conn.beginTransaction();
+    await connectionManager.beginTransaction();
 
     // Dynamically replace SQL variables with actual TypeScript input values
     const formattedCursorQuery = cursorQuery
@@ -381,8 +310,9 @@ export async function runValidation(
       .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
       .replace(/@minHOM/g, params.minHOM !== null && params.minHOM !== undefined ? params.minHOM.toString() : 'NULL')
       .replace(/@maxHOM/g, params.maxHOM !== null && params.maxHOM !== undefined ? params.maxHOM.toString() : 'NULL')
+      .replace(/@validationProcedureID/g, validationProcedureID.toString())
       .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-      .replace(/coremeasurements/g, `${schema}.coremeasurements`) // Fully qualify table names
+      .replace(/coremeasurements/g, `${schema}.coremeasurements`)
       .replace(/stems/g, `${schema}.stems`)
       .replace(/trees/g, `${schema}.trees`)
       .replace(/quadrats/g, `${schema}.quadrats`)
@@ -423,7 +353,7 @@ export async function runValidation(
           AND (${params.p_PlotID !== null ? `q.PlotID = ${params.p_PlotID}` : 'TRUE'})
         LIMIT 1;
       `;
-      const speciesLimits = await runQuery(conn, speciesLimitsQuery);
+      const speciesLimits = await connectionManager.executeQuery(speciesLimitsQuery);
 
       if (speciesLimits.length > 0) {
         // If any species-specific limits were fetched, update the variables
@@ -442,85 +372,85 @@ export async function runValidation(
       .replace(/@maxHOM/g, params.maxHOM !== null && params.maxHOM !== undefined ? params.maxHOM.toString() : 'NULL');
 
     // Execute the cursor query to get the rows that need validation
-    const cursorResults = await runQuery(conn, reformattedCursorQuery);
-
-    if (cursorResults.length > 0) {
-      const insertErrorQuery = `
-        INSERT INTO ${schema}.cmverrors (CoreMeasurementID, ValidationErrorID)
-        SELECT ?, ?
-        FROM DUAL
-        WHERE NOT EXISTS (
-          SELECT 1 
-          FROM ${schema}.cmverrors 
-          WHERE CoreMeasurementID = ? AND ValidationErrorID = ?
-        );
-      `;
-
-      // Insert errors for all rows that matched the validation condition
-      for (const row of cursorResults) {
-        await runQuery(conn, insertErrorQuery, [row.CoreMeasurementID, validationProcedureID, row.CoreMeasurementID, validationProcedureID]);
-      }
-    }
-
-    await conn.commit();
-    return {
-      TotalRows: cursorResults.length,
-      Message: `Validation completed successfully. Total rows processed: ${cursorResults.length}`
-    };
+    console.log('running validation: ', validationProcedureName);
+    console.log('running query: ', reformattedCursorQuery);
+    await connectionManager.executeQuery(reformattedCursorQuery);
+    return true;
   } catch (error: any) {
-    await conn.rollback();
-    console.error(`Error during ${validationProcedureName} validation:`, error.message);
-    throw new Error(`${validationProcedureName} validation failed. Please check the logs for more details.`);
+    await connectionManager.rollbackTransaction();
+    console.error(`Error during ${validationProcedureName} or ${validationProcedureID} validation:`, error.message);
+    return false;
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
-  const conn = await getConn();
-  const setVariables = `SET @p_CensusID = ?, @p_PlotID = ?;`;
+  const connectionManager = new ConnectionManager();
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
+
   const insertTemp = `
     INSERT INTO UpdatedRows (CoreMeasurementID)
     SELECT cm.CoreMeasurementID
     FROM ${schema}.coremeasurements cm
-    LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
     JOIN ${schema}.census c ON cm.CensusID = c.CensusID
     WHERE cm.IsValidated IS NULL
-    AND (@p_CensusID IS NULL OR c.CensusID = @p_CensusID)
-    AND (@p_PlotID IS NULL OR c.PlotID = @p_PlotID);`;
-  const query = `
+      AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
+      AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+  `;
+
+  const updateValidation = `
     UPDATE ${schema}.coremeasurements cm
-    LEFT JOIN ${schema}.cmverrors cme ON cm.CoreMeasurementID = cme.CoreMeasurementID
-    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-    SET cm.IsValidated = CASE 
-        WHEN cme.CMVErrorID IS NULL THEN TRUE
-        WHEN cme.CMVErrorID IS NOT NULL THEN FALSE
-        ELSE cm.IsValidated  
-    END
+    SET cm.IsValidated = (
+      CASE
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM ${schema}.cmverrors cme
+          WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
+        ) THEN TRUE  -- No validation errors exist
+        ELSE FALSE   -- Validation errors exist
+      END
+    )
     WHERE cm.IsValidated IS NULL
-    AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);`;
+      AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
+  `;
+
   const getUpdatedRows = `
     SELECT cm.*
     FROM ${schema}.coremeasurements cm
-    JOIN UpdatedRows ur ON cm.CoreMeasurementID = ur.CoreMeasurementID;`;
+    WHERE cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
+  `;
+
   const dropTemp = `DROP TEMPORARY TABLE IF EXISTS UpdatedRows;`;
+
   try {
-    await conn.beginTransaction();
-    await runQuery(conn, dropTemp); // just in case
-    await runQuery(conn, setVariables, [params.p_CensusID || null, params.p_PlotID || null]);
-    await runQuery(conn, tempTable);
-    await runQuery(conn, insertTemp);
-    await runQuery(conn, query);
-    const results = await runQuery(conn, getUpdatedRows);
-    await runQuery(conn, dropTemp);
-    await conn.commit();
+    // Begin transaction
+    await connectionManager.beginTransaction();
+
+    // Ensure any leftover temporary table is cleared
+    await connectionManager.executeQuery(dropTemp);
+
+    // Create temporary table and populate it
+    await connectionManager.executeQuery(tempTable);
+    await connectionManager.executeQuery(insertTemp);
+
+    // Update validation states
+    await connectionManager.executeQuery(updateValidation);
+
+    // Fetch and return the updated rows
+    const results = await connectionManager.executeQuery(getUpdatedRows);
+
+    // Clean up temporary table
+    await connectionManager.executeQuery(dropTemp);
+
     return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
-    await conn.rollback();
+    // Roll back on error
+    await connectionManager.rollbackTransaction();
     console.error(`Error during updateValidatedRows:`, error.message);
-    throw new Error(`updateValidatedRows failed. Please check the logs for more details.`);
+    throw new Error(`updateValidatedRows failed for validation: Please check the logs for more details.`);
   } finally {
-    if (conn) conn.release();
+    // Close the connection
+    await connectionManager.closeConnection();
   }
 }

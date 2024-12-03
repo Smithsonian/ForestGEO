@@ -1,5 +1,4 @@
-import { PoolConnection } from 'mysql2/promise';
-import { runQuery } from '@/components/processors/processormacros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -142,11 +141,11 @@ export async function fetchPrimaryKey<Result>(
   schema: string,
   table: string,
   whereClause: Partial<Result>,
-  connection: PoolConnection,
+  connectionManager: ConnectionManager,
   primaryKeyColumn: keyof Result
 ): Promise<number> {
   const query = createSelectQuery<Result>(schema, table, whereClause);
-  const rows: Result[] = await runQuery(connection, query, Object.values(whereClause));
+  const rows: Result[] = await connectionManager.executeQuery(query, Object.values(whereClause));
 
   if (rows.length === 0) {
     throw new Error(`${Object.values(whereClause).join(' ')} not found in ${table}.`);
@@ -159,48 +158,56 @@ export async function fetchPrimaryKey<Result>(
 }
 
 export async function handleUpsert<Result>(
-  connection: PoolConnection,
+  connectionManager: ConnectionManager,
   schema: string,
   tableName: string,
   data: Partial<Result>,
   key: keyof Result
-): Promise<number> {
+): Promise<{ id: number; operation?: string }> {
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
+  let id: number = 0;
+  const operation: string = '';
 
-  const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+  try {
+    const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+    const result = await connectionManager.executeQuery(query, Object.values(data));
 
-  const result = await runQuery(connection, query, Object.values(data));
+    id = result.insertId;
 
-  let id = result.insertId;
+    // If insertId is 0, it means the row was updated, not inserted
+    if (id === 0) {
+      // Try to find the existing row based on the data provided
+      const whereConditions = Object.keys(data)
+        .map(field => {
+          const value = data[field as keyof Result];
+          return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
+        })
+        .join(' AND ');
 
-  // If insertId is 0, it means the row was updated, not inserted
-  if (id === 0) {
-    // Try to find the existing row based on the data provided
-    const whereConditions = Object.keys(data)
-      .map(field => {
-        const value = data[field as keyof Result];
-        return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
-      })
-      .join(' AND ');
+      const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
+      const values = Object.values(data).filter(value => value !== null);
 
-    const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
-    const values = Object.values(data).filter(value => value !== null);
+      const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
 
-    const searchResult = await runQuery(connection, findExistingQuery, values);
-
-    if (searchResult.length > 0) {
-      // Return the primary key if the record is found
-      id = searchResult[0][key as keyof Result] as unknown as number;
-    } else {
-      // More detailed error information
-      console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
-      throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
+      if (searchResult.length > 0) {
+        // Return the primary key if the record is found
+        id = searchResult[0][key as keyof Result] as unknown as number;
+        return { id, operation: 'updated' };
+      } else {
+        // More detailed error information
+        console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
+        throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
+      }
     }
-  }
 
-  return id;
+    return { id, operation: 'inserted' };
+  } catch (e: any) {
+    console.log('error in handleUpsert: ', e.message);
+    createError(e.message, e);
+  }
+  return { id, operation }; // exiting return statement in case existing system does not trigger correctly
 }
 
 export function createError(message: string, context: any): Error {
@@ -250,8 +257,63 @@ export function transformSpecialCases(field: string): string {
   return field;
 }
 
-// Combined function that first capitalizes and then applies the special cases
 export function capitalizeAndTransformField(field: string): string {
   const capitalized = capitalizeFirstLetter(field);
   return transformSpecialCases(capitalized);
+}
+
+export type TransformedKeys<T> = keyof ResultType<T>;
+
+export function getTransformedKeys<T>(): string[] {
+  const exampleObject: ResultType<T> = {} as ResultType<T>;
+  return Object.keys(exampleObject) as string[];
+}
+
+type FilterItem = {
+  field: string;
+  operator: string;
+  value: any;
+};
+
+type FilterModel = {
+  items: FilterItem[];
+  logicOperator: 'and' | 'or';
+};
+
+function buildWhereClause(filterModel: FilterModel): string {
+  const operatorMap: { [key: string]: string } = {
+    contains: 'LIKE',
+    equals: '=',
+    startsWith: 'LIKE',
+    endsWith: 'LIKE',
+    '>': '>',
+    '<': '<',
+    '>=': '>=',
+    '<=': '<='
+  };
+
+  const conditions = filterModel.items.map(item => {
+    const sqlOperator = operatorMap[item.operator];
+    const field = capitalizeAndTransformField(item.field);
+    let condition = '';
+
+    switch (item.operator) {
+      case 'contains':
+        condition = `${field} ${sqlOperator} '%${item.value}%'`;
+        break;
+      case 'startsWith':
+        condition = `${field} ${sqlOperator} '${item.value}%'`;
+        break;
+      case 'endsWith':
+        condition = `${field} ${sqlOperator} '%${item.value}'`;
+        break;
+      default:
+        condition = `${field} ${sqlOperator} '${item.value}'`;
+    }
+
+    return condition;
+  });
+
+  const combinedConditions = conditions.join(` ${filterModel.logicOperator.toUpperCase()} `);
+  return combinedConditions ? `WHERE ${combinedConditions}` : '';
 }

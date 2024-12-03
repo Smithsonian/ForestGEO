@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getConn, InsertUpdateProcessingProps } from '@/components/processors/processormacros';
-import { PoolConnection } from 'mysql2/promise';
-import { HTTPResponses } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function POST(request: NextRequest) {
   const fileRowSet: FileRowSet = await request.json();
@@ -36,50 +35,18 @@ export async function POST(request: NextRequest) {
   // full name
   const fullName = request.nextUrl.searchParams.get('user') ?? undefined;
 
-  let connection: PoolConnection | null = null; // Use PoolConnection type
-
-  try {
-    connection = await getConn();
-  } catch (error) {
-    if (error instanceof Error) {
-      console.error('Error processing files:', error.message);
-      return new NextResponse(
-        JSON.stringify({
-          responseMessage: `Failure in connecting to SQL with ${error.message}`,
-          error: error.message
-        }),
-        { status: HTTPResponses.SQL_CONNECTION_FAILURE }
-      );
-    } else {
-      console.error('Unknown error in connecting to SQL:', error);
-      return new NextResponse(
-        JSON.stringify({
-          responseMessage: `Unknown SQL connection error with error: ${error}`
-        }),
-        { status: HTTPResponses.SQL_CONNECTION_FAILURE }
-      );
-    }
-  }
-
-  if (!connection) {
-    console.error('Container client or SQL connection is undefined.');
-    return new NextResponse(
-      JSON.stringify({
-        responseMessage: 'Container client or SQL connection is undefined'
-      }),
-      { status: HTTPResponses.SERVICE_UNAVAILABLE }
-    );
-  }
+  const connectionManager = new ConnectionManager();
 
   const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
   for (const rowId in fileRowSet) {
+    await connectionManager.beginTransaction();
     console.log(`rowID: ${rowId}`);
     const row = fileRowSet[rowId];
     console.log('row for row ID: ', row);
     try {
       const props: InsertUpdateProcessingProps = {
         schema,
-        connection,
+        connectionManager: connectionManager,
         formType,
         rowData: row,
         plotID,
@@ -93,7 +60,9 @@ export async function POST(request: NextRequest) {
       } else if (formType === 'measurements' && coreMeasurementID === undefined) {
         throw new Error('CoreMeasurement insertion failure at row: ' + row);
       }
+      await connectionManager.commitTransaction();
     } catch (error) {
+      await connectionManager.rollbackTransaction();
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);
         return new NextResponse(
@@ -112,9 +81,8 @@ export async function POST(request: NextRequest) {
           { status: HTTPResponses.SERVICE_UNAVAILABLE }
         );
       }
-    } finally {
-      if (connection) connection.release();
     }
   }
+  await connectionManager.closeConnection();
   return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
 }

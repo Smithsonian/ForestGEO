@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Box, Button, Chip, IconButton, Modal, ModalDialog, Stack, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
-import Link from 'next/link';
 import { FormType } from '@/config/macros/formdetails';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { useOrgCensusContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -89,17 +88,11 @@ export default function IsolatedPersonnelDataGrid() {
           }}
         >
           <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
+            {session && (
               <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
+                Role: {session.user.userStatus}
               </Typography>
             )}
-            <Typography level={'title-md'} sx={{ color: '#ffa726' }}>
-              Note: This is a locked view and will not allow modification.
-            </Typography>
-            <Typography level={'body-md'} sx={{ color: '#ffa726' }}>
-              Please use this view as a way to confirm changes made to measurements.
-            </Typography>
           </Box>
 
           <Stack direction="column" spacing={2}>
@@ -111,11 +104,6 @@ export default function IsolatedPersonnelDataGrid() {
                 Upload
               </Button>
             </Stack>
-            <Link href="/fixeddatainput/quadratpersonnel" passHref>
-              <Button variant="solid" color="primary" sx={{ ml: 2 }}>
-                View Quadrat Personnel
-              </Button>
-            </Link>
             <Button onClick={() => setIsRolesModalOpen(true)} variant={'solid'} color={'primary'}>
               Edit Roles
             </Button>
@@ -174,6 +162,12 @@ export default function IsolatedPersonnelDataGrid() {
           Name: ['firstName', 'lastName'],
           Role: ['roleID']
         }}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) },
+          { label: 'View Quadrat Personnel', onClick: () => console.log('View Quadrat Personnel clicked') },
+          { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true) }
+        ]}
       />
     </>
   );

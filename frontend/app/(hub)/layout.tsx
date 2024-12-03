@@ -7,7 +7,6 @@ import dynamic from 'next/dynamic';
 import { Box, IconButton, Stack, Typography } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { getAllSchemas } from '@/components/processors/processorhelperfunctions';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
@@ -96,7 +95,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e: any) {
-      const allsites = await getAllSchemas();
+      const allsites = await (await fetch(`/api/fetchall/sites?schema=${currentSite?.schemaName ?? ''}`)).json();
       if (siteListDispatch) await siteListDispatch({ siteList: allsites });
     } finally {
       setLoading(false);

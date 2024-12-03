@@ -311,9 +311,9 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
 
 // note --> originally attempted to use GridValueFormatterParams, but this isn't exported by MUI X DataGrid anymore. replaced with <any> for now.
 
-const renderDBHCell = (params: GridRenderEditCellParams) => {
+export const renderDBHCell = (params: GridRenderEditCellParams) => {
   const value = params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null';
-  const units = params.row.dbhUnits || '';
+  const units = params.row.dbhUnits ? (params.row.measuredDBH !== null ? params.row.dbhUnits : '') : '';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
@@ -323,7 +323,7 @@ const renderDBHCell = (params: GridRenderEditCellParams) => {
   );
 };
 
-const renderEditDBHCell = (params: GridRenderEditCellParams) => {
+export const renderEditDBHCell = (params: GridRenderEditCellParams) => {
   const apiRef = useGridApiRef();
   const { id, row } = params;
   const [error, setError] = useState(false);
@@ -388,12 +388,12 @@ const renderEditDBHCell = (params: GridRenderEditCellParams) => {
 
 const renderHOMCell = (params: GridRenderEditCellParams) => {
   const value = params.row.measuredHOM ? Number(params.row.measuredHOM).toFixed(2) : 'null';
-  const units = params.row.homUnits || '';
+  const units = params.row.homUnits ? (params.row.measuredHOM !== null ? params.row.homUnits : '') : '';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      <Typography level="body-sm">{value}</Typography>
-      <Typography level="body-sm">{units}</Typography>
+      {value && <Typography level="body-sm">{value}</Typography>}
+      {units && <Typography level="body-sm">{units}</Typography>}
     </Box>
   );
 };
@@ -586,7 +586,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     field: 'measuredDBH',
     headerName: 'DBH',
     headerClassName: 'header',
-    flex: 0.8,
+    flex: 0.5,
     align: 'right',
     editable: true,
     renderCell: renderDBHCell,
@@ -607,7 +607,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     field: 'description',
     headerName: 'Description',
     headerClassName: 'header',
-    flex: 1,
+    flex: 0.6,
     align: 'left',
     editable: true
   },

@@ -508,12 +508,12 @@ export default function Sidebar(props: SidebarProps) {
       size={'md'}
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
-      onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
+      onChange={async (event: React.SyntheticEvent | null, newValue: string | null) => {
+        event?.preventDefault();
         const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
         await handlePlotSelection(selectedPlot);
       }}
     >
-      <Option value={''}>None</Option>
       {plotListContext?.map(item => (
         <Option value={item?.plotName} key={item?.plotName} data-testid={'plot-selection-option'}>
           <Box

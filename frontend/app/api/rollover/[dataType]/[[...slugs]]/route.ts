@@ -1,7 +1,6 @@
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import { HTTPResponses } from '@/config/macros';
-import { PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
+import ConnectionManager from '@/config/connectionmanager';
 
 /**
  * Handles the POST request for the rollover API endpoint, which allows users to roll over quadrat or personnel data from one census to another within a specified schema.
@@ -15,29 +14,28 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const [schema, plotID, sourceCensusID, newCensusID] = params.slugs;
   if (!schema || !plotID || !sourceCensusID || !newCensusID) throw new Error('no schema or plotID or censusID provided');
 
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
     const { incoming } = await request.json();
     if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No quadrat or personnel IDs provided');
 
-    conn = await getConn();
-    if (conn) console.log('connection created.');
+    if (connectionManager) console.log('connection created.');
 
     let query = ``;
     let queryParams = [];
 
-    await conn.beginTransaction();
+    await connectionManager.beginTransaction();
     console.log('transaction started.');
 
     switch (params.dataType) {
       case 'quadrats':
         query = `
-          INSERT INTO censusquadrat (CensusID, QuadratID)
+          INSERT INTO ${schema}.censusquadrat (CensusID, QuadratID)
           SELECT ?, q.QuadratID
-          FROM quadrats q
+          FROM ${schema}.quadrats q
           WHERE q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
         queryParams = [Number(newCensusID), ...incoming];
-        await runQuery(conn, query, queryParams);
+        await connectionManager.executeQuery(query, queryParams);
         break;
       case 'personnel':
         query = `
@@ -50,30 +48,19 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
           FROM ${schema}.personnel
           WHERE CensusID = ? AND PersonnelID IN (${incoming.map(() => '?').join(', ')});`;
         queryParams = [Number(newCensusID), Number(sourceCensusID), ...incoming];
-        await runQuery(conn, query, queryParams);
+        await connectionManager.executeQuery(query, queryParams);
         break;
       default:
         throw new Error('Invalid data type');
     }
-    await conn.commit(); // testing
     return new NextResponse(JSON.stringify({ message: 'Rollover successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {
-    await conn?.rollback();
+    await connectionManager.rollbackTransaction();
     console.error('Error in rollover API:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }
-
-/**
- * Handles the POST request for the rollover API endpoint, which allows users to rollover quadrat or personnel data from one census to another within a given schema.
- *
- * The slugs provided in the URL MUST include (in order): a schema, plotID, source censusID, and new censusID to target.
- *
- * @param request - The NextRequest object containing the request data.
- * @param params - The URL parameters, including the dataType, schema, plotID, source censusID, and new censusID.
- * @returns A NextResponse with a success message or an error message.
- */

@@ -1,8 +1,7 @@
-import { PoolConnection } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCensusNumber?: string, quadratID?: string): string => {
   if (fetchType === 'plots') {
@@ -59,16 +58,15 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
 
   console.log('fetchall --> slugs provided: fetchType: ', dataType, 'plotID: ', plotID, 'plotcensusnumber: ', plotCensusNumber, 'quadratID: ', quadratID);
   const query = buildQuery(schema, dataType, plotID, plotCensusNumber, quadratID);
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
 
   try {
-    conn = await getConn();
-    const results = await runQuery(conn, query);
+    const results = await connectionManager.executeQuery(query);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error) {
     console.error('Error:', error);
     throw new Error('Call failed');
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

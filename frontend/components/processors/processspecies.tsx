@@ -1,6 +1,6 @@
-import { SpecialProcessingProps } from '@/components/processors/processormacros';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
+import { SpecialProcessingProps } from '@/config/macros';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};
@@ -13,35 +13,20 @@ function cleanInputData(data: any) {
 }
 
 export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
-  const { connection, rowData, schema } = props;
+  const { connectionManager, rowData, schema } = props;
   console.log('rowData: ', rowData);
 
   try {
-    await connection.beginTransaction();
-
-    // Handle Family insertion/updation
     let familyID: number | undefined;
     if (rowData.family) {
-      try {
-        familyID = await handleUpsert<FamilyResult>(connection, schema, 'family', { Family: rowData.family }, 'FamilyID');
-      } catch (error: any) {
-        console.error('Family upsert failed:', error.message);
-        throw createError('Family upsert failed', { error });
-      }
+      familyID = (await handleUpsert<FamilyResult>(connectionManager, schema, 'family', { Family: rowData.family }, 'FamilyID')).id;
     }
 
-    // Handle Genus insertion/updation
     let genusID: number | undefined;
     if (rowData.genus) {
-      try {
-        genusID = await handleUpsert<GenusResult>(connection, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID');
-      } catch (error: any) {
-        console.error('Genus upsert failed:', error.message);
-        throw createError('Genus upsert failed', { error });
-      }
+      genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID')).id;
     }
 
-    // Handle Species insertion/updation
     let speciesID: number | undefined;
     if (rowData.spcode) {
       const speciesData = {
@@ -57,19 +42,12 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       const cleanedSpeciesData = cleanInputData(speciesData);
       console.log('Cleaned species data: ', cleanedSpeciesData);
 
-      try {
-        speciesID = await handleUpsert<SpeciesResult>(connection, schema, 'species', cleanedSpeciesData, 'SpeciesID');
-      } catch (error: any) {
-        console.error('Species upsert failed:', error.message);
-        throw createError('Species upsert failed', { error });
-      }
+      speciesID = (await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID')).id;
     }
 
-    await connection.commit();
     console.log('Upsert successful');
     return speciesID;
   } catch (error: any) {
-    await connection.rollback();
     console.error('Upsert failed:', error.message);
     throw createError('Upsert failed', { error });
   }

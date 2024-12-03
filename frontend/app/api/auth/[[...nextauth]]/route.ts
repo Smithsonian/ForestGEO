@@ -1,9 +1,9 @@
 import NextAuth, { AzureADProfile } from 'next-auth';
 import AzureADProvider from 'next-auth/providers/azure-ad';
-import { getAllowedSchemas, getAllSchemas } from '@/components/processors/processorhelperfunctions';
 import { UserAuthRoles } from '@/config/macros';
-import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import ConnectionManager from '@/config/connectionmanager';
+import MapperFactory from '@/config/datamapper';
 
 const handler = NextAuth({
   secret: process.env.NEXTAUTH_SECRET!,
@@ -28,11 +28,11 @@ const handler = NextAuth({
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        let conn, emailVerified, userStatus;
+        const connectionManager = new ConnectionManager();
+        let emailVerified, userStatus, userID;
         try {
-          conn = await getConn();
-          const query = `SELECT UserStatus FROM catalog.users WHERE Email = '${userEmail}' LIMIT 1`;
-          const results = await runQuery(conn, query);
+          const query = `SELECT UserID, UserStatus FROM catalog.users WHERE Email = '${userEmail}' LIMIT 1`;
+          const results = await connectionManager.executeQuery(query);
 
           // emailVerified is true if there is at least one result
           emailVerified = results.length > 0;
@@ -41,17 +41,21 @@ const handler = NextAuth({
             return false;
           }
           userStatus = results[0].UserStatus;
+          userID = results[0].UserID;
         } catch (e: any) {
           console.error('Error fetching user status:', e);
           throw new Error('Failed to fetch user status.');
-        } finally {
-          if (conn) conn.release();
         }
         user.userStatus = userStatus as UserAuthRoles;
         user.email = userEmail;
         // console.log('getting all sites: ');
-        const allSites = await getAllSchemas();
-        const allowedSites = await getAllowedSchemas(userEmail);
+        const allSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(await connectionManager.executeQuery(`SELECT * FROM catalog.sites`));
+        const allowedSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(
+          await connectionManager.executeQuery(
+            `SELECT s.* FROM catalog.sites AS s JOIN catalog.usersiterelations AS usr ON s.SiteID = usr.SiteID WHERE usr.UserID = ?`,
+            [userID]
+          )
+        );
         if (!allowedSites || !allSites) {
           console.error('User does not have any allowed sites.');
           return false;

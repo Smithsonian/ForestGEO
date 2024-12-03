@@ -58,8 +58,8 @@ export type MeasurementsSummaryRDS = {
   speciesCode?: string;
   treeTag?: string;
   stemTag?: string;
-  localX?: number;
-  localY?: number;
+  stemLocalX?: number;
+  stemLocalY?: number;
   coordinateUnits?: string;
   measurementDate?: any;
   measuredDBH?: number;

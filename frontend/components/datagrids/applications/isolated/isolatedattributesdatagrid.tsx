@@ -2,14 +2,11 @@
 
 // isolated attributes datagrid
 import React, { useState } from 'react';
-import { Box, Button, Stack, Typography } from '@mui/joy';
-import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { AttributeGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import { useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function IsolatedAttributesDataGrid() {
   const initialAttributesRDSRow = {
@@ -21,42 +18,9 @@ export default function IsolatedAttributesDataGrid() {
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
-  const { data: session } = useSession();
-  const currentSite = useSiteContext();
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-          </Box>
-
-          <Stack direction={'row'} spacing={2}>
-            <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-              Manual Entry Form
-            </Button>
-            <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-              Upload
-            </Button>
-          </Stack>
-        </Box>
-      </Box>
-
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -87,6 +51,10 @@ export default function IsolatedAttributesDataGrid() {
           Description: ['description'],
           Status: ['status']
         }}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) }
+        ]}
       />
     </>
   );

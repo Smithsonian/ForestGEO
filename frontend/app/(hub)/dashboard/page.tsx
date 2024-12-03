@@ -53,7 +53,6 @@ export default function DashboardPage() {
     try {
       setIsLoading(true);
 
-      // Check if the required data is available, otherwise return a padded array
       if (!currentSite || !currentPlot || !currentCensus) {
         setChangelogHistory(Array(5).fill({}));
         return;
@@ -158,14 +157,6 @@ export default function DashboardPage() {
                     <ListItemContent>
                       <Typography level="body-md">
                         <strong>Species List</strong> - Submit species and taxonomy information for stems here. <strong>Does not require a census.</strong>
-                      </Typography>
-                    </ListItemContent>
-                  </ListItem>
-                  <ListItem>
-                    <ListItemContent>
-                      <Typography level="body-md">
-                        <strong>Plot-Species List</strong> - See existing taxonomy information for stems in your plot and census here.{' '}
-                        <strong>Requires a census.</strong>
                       </Typography>
                     </ListItemContent>
                   </ListItem>

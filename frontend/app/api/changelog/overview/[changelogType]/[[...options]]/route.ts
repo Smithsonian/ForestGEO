@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PoolConnection } from 'mysql2/promise';
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest, { params }: { params: { changelogType: string; options?: string[] } }) {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -13,9 +12,8 @@ export async function GET(request: NextRequest, { params }: { params: { changelo
   const [plotIDParam, pcnParam] = params.options;
   const plotID = parseInt(plotIDParam);
   const pcn = parseInt(pcnParam);
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   try {
-    conn = await getConn();
     let query = ``;
     switch (params.changelogType) {
       case 'unifiedchangelog':
@@ -34,13 +32,13 @@ export async function GET(request: NextRequest, { params }: { params: { changelo
         break;
     }
 
-    const results = await runQuery(conn, query, [plotID, plotID, pcn]);
+    const results = await connectionManager.executeQuery(query, [plotID, plotID, pcn]);
     return new NextResponse(results.length > 0 ? JSON.stringify(MapperFactory.getMapper<any, any>(params.changelogType).mapData(results)) : null, {
       status: HTTPResponses.OK
     });
   } catch (e: any) {
     throw new Error('SQL query failed: ' + e.message);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

@@ -3,19 +3,15 @@
  */
 // datagridhelpers.ts
 import { getQuadratHCs } from '@/config/sqlrdsdefinitions/zones';
-import {
-  getAllTaxonomiesViewHCs,
-  getAllViewFullTableViewsHCs,
-  getMeasurementsSummaryViewHCs,
-  getStemTaxonomiesViewHCs
-} from '@/config/sqlrdsdefinitions/views';
+import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, SetStateAction } from 'react';
+import { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
+import { GridApiCommunity } from '@mui/x-data-grid/internals';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -78,10 +74,6 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
     id: false,
     ...getMeasurementsSummaryViewHCs()
   },
-  stemtaxonomiesview: {
-    id: false,
-    ...getStemTaxonomiesViewHCs()
-  },
   coremeasurements: {
     id: false,
     ...getCoreMeasurementsHCs()
@@ -125,6 +117,19 @@ export const createFetchQuery: FetchQueryFunction = (
   return `/api/fixeddata/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
 };
 
+export const createQFFetchQuery: FetchQueryFunction = (
+  siteSchema: string,
+  gridType,
+  page,
+  pageSize,
+  plotID?,
+  plotCensusNumber?,
+  quadratID?: number,
+  speciesID?: number
+): string => {
+  return `/api/fixeddatafilter/${gridType.toLowerCase()}/${siteSchema}/${page}/${pageSize}/${plotID ?? ``}/${plotCensusNumber ?? ``}/${quadratID ?? ``}/${speciesID ?? ``}`;
+};
+
 export const createDeleteQuery: ProcessDeletionQueryFunction = (siteSchema: string, gridType: string, deletionID: number | string): string => {
   return `/api/fixeddata/${gridType}/${siteSchema}/${deletionID}`;
 };
@@ -137,8 +142,6 @@ export function getGridID(gridType: string): string {
     case 'measurementssummary': // materialized view --> should not be modified
     case 'viewfulltable': // materialized view --> should not be modified
       return 'coreMeasurementID';
-    case 'stemtaxonomiesview':
-      return 'stemID';
     case 'attributes':
       return 'code';
     case 'census':
@@ -169,10 +172,13 @@ export function getGridID(gridType: string): string {
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
-  handleExportAll?: (filterModel?: GridFilterModel) => Promise<void>;
+  handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
   handleRunValidations?: () => Promise<void>;
+  handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: GridFilterModel;
+  apiRef?: MutableRefObject<GridApiCommunity>;
+  dynamicButtons?: any;
   locked?: boolean;
 }
 
@@ -181,6 +187,7 @@ export interface IsolatedDataGridCommonProps {
   gridColumns: GridColDef[];
   refresh: boolean;
   setRefresh: Dispatch<SetStateAction<boolean>>;
+  dynamicButtons: any[];
   initialRow?: GridRowModel;
   fieldToFocus?: string;
   locked?: boolean;
@@ -234,7 +241,7 @@ export const CellItemContainer = styled('div')({
  * Function to determine if all entries in a column are null
  */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === undefined);
+  return rows.length > 0 && rows.every(row => row[field] === undefined || row[field] === null || row[field] === '');
 }
 
 /**
@@ -275,20 +282,7 @@ export interface MeasurementsCommonsProps {
   addNewRowToGrid: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
-}
-
-export interface IsolatedMeasurementsCommonsProps {
-  gridType: string;
-  gridColumns: GridColDef[];
-  refresh: boolean;
-  setRefresh: Dispatch<SetStateAction<boolean>>;
-  initialRow?: GridRowModel;
-  fieldToFocus?: string;
-  locked?: boolean;
-  selectionOptions?: { value: string | number; label: string }[];
-  onDataUpdate?: () => void;
-  clusters?: Record<string, string[]>;
-  handleExportErrors?: () => Promise<GridRowModel[]>;
+  dynamicButtons: any[];
 }
 
 export const errorMapping: { [key: string]: string[] } = {
@@ -297,17 +291,14 @@ export const errorMapping: { [key: string]: string[] } = {
   '3': ['measuredHOM'],
   '4': ['treeTag', 'stemTag'],
   '5': ['treeTag', 'stemTag', 'quadratName'],
-  '6': ['stemQuadX', 'stemQuadY'],
-  '7': ['speciesName'],
+  '6': ['stemLocalX', 'stemLocalY'],
+  '7': ['speciesCode'],
   '8': ['measurementDate'],
   '9': ['treeTag', 'stemTag', 'plotCensusNumber'],
   '10': ['treeTag', 'stemTag', 'plotCensusNumber'],
   '11': ['quadratName'],
-  '12': ['speciesName'],
-  '13': ['measuredDBH'],
-  '14': ['measuredDBH'],
-  '15': ['treeTag'],
-  '16': ['quadratName']
+  '12': ['speciesCode'],
+  '13': ['measuredDBH', 'measuredHOM']
 };
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
   return rows.slice().sort((a, b) => {

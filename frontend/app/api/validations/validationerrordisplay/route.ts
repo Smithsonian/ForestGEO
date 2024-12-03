@@ -1,23 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getConn, runQuery } from '@/components/processors/processormacros';
-import { PoolConnection } from 'mysql2/promise';
 import { CMError } from '@/config/macros/uploadsystemmacros';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest) {
-  let conn: PoolConnection | null = null;
+  const conn = new ConnectionManager();
   const schema = request.nextUrl.searchParams.get('schema');
+  const plotIDParam = request.nextUrl.searchParams.get('plotIDParam');
+  const censusPCNParam = request.nextUrl.searchParams.get('censusPCNParam');
   if (!schema) throw new Error('No schema variable provided!');
 
   try {
-    conn = await getConn();
-
+    await conn.beginTransaction();
     // Query to fetch existing validation errors
     const validationErrorsQuery = `
       SELECT 
           cm.CoreMeasurementID AS CoreMeasurementID, 
           GROUP_CONCAT(ve.ValidationID) AS ValidationErrorIDs,
-          GROUP_CONCAT(ve.Description) AS Descriptions
+          GROUP_CONCAT(ve.Description) AS Descriptions,
+          GROUP_CONCAT(ve.Criteria) AS Criteria
       FROM 
           ${schema}.cmverrors AS cve
       JOIN 
@@ -27,13 +28,15 @@ export async function GET(request: NextRequest) {
       GROUP BY 
           cm.CoreMeasurementID;
     `;
-    const validationErrorsRows = await runQuery(conn, validationErrorsQuery);
+    const validationErrorsRows = await conn.executeQuery(validationErrorsQuery);
 
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
       coreMeasurementID: row.CoreMeasurementID,
       validationErrorIDs: row.ValidationErrorIDs.split(',').map(Number),
-      descriptions: row.Descriptions.split(',')
+      descriptions: row.Descriptions.split(','),
+      criteria: row.Criteria.split(',')
     }));
+    console.log('parsedValidationErrors: ', parsedValidationErrors);
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors
@@ -46,10 +49,11 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error: any) {
+    await conn.rollbackTransaction();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
   } finally {
-    if (conn) conn.release();
+    await conn.closeConnection();
   }
 }

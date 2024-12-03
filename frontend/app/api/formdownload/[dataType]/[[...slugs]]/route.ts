@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PoolConnection } from 'mysql2/promise';
-import { getConn, runQuery } from '@/components/processors/processormacros';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { HTTPResponses } from '@/config/macros';
+import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(_request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   const { dataType, slugs } = params;
@@ -14,17 +13,16 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
 
-  let conn: PoolConnection | null = null;
+  const connectionManager = new ConnectionManager();
   let query: string = '';
   let results: any[] = [];
   let mappedResults: any[] = [];
   let formMappedResults: any[] = [];
   try {
-    conn = await getConn();
     switch (dataType) {
       case 'attributes':
         query = `SELECT * FROM ${schema}.attributes`;
-        results = await runQuery(conn, query);
+        results = await connectionManager.executeQuery(query);
         mappedResults = MapperFactory.getMapper<any, any>('attributes').mapData(results);
         formMappedResults = mappedResults.map((row: AttributesRDS) => ({
           code: row.code,
@@ -38,7 +36,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           LEFT JOIN ${schema}.roles r ON p.RoleID = r.RoleID 
           LEFT JOIN ${schema}.census c ON c.CensusID = p.CensusID 
           WHERE c.PlotID = ? AND p.CensusID = ?`;
-        results = await runQuery(conn, query, [plotID, censusID]);
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           firstname: row.FirstName,
           lastname: row.LastName,
@@ -58,7 +56,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID 
           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID 
           WHERE q.PlotID = ? AND cq.CensusID = ?`;
-        results = await runQuery(conn, query, [plotID, censusID]);
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           spcode: row.SpeciesCode,
           family: row.Family,
@@ -74,7 +72,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         query = `SELECT * FROM ${schema}.quadrats q 
           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID 
           WHERE q.PlotID = ? AND cq.CensusID = ?`;
-        results = await runQuery(conn, query, [plotID, censusID]);
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           quadrat: row.QuadratName,
           startx: row.StartX,
@@ -102,7 +100,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID 
           JOIN ${schema}.species s ON s.SpeciesID = t.SpeciesID 
           WHERE q.PlotID = ? AND cq.CensusID = ?`;
-        results = await runQuery(conn, query, [plotID, censusID]);
+        results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
           tag: row.TreeTag,
           stemtag: row.StemTag,
@@ -125,6 +123,6 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
   } catch (e: any) {
     throw new Error(e);
   } finally {
-    if (conn) conn.release();
+    await connectionManager.closeConnection();
   }
 }

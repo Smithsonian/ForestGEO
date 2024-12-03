@@ -1,0 +1,101 @@
+name: Build, Test, and Deploy Writerside Documentation
+
+on:
+  push:
+    branches: # Trigger on push to any branch
+      - "*"
+    paths:
+      - "frontend/documentation/**" # Only run on changes in the documentation folder
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  pages: write
+
+env:
+  INSTANCE: 'documentation/fad'
+  ARTIFACT: 'webHelpFAD2-all.zip'
+  DOCKER_VERSION: '243.21565' # Writerside's recommended Docker version
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Step 2: Build Writerside documentation
+      - name: Build docs using Writerside Docker builder
+        uses: JetBrains/writerside-github-action@v4
+        with:
+          instance: ${{ env.INSTANCE }}
+          artifact: ${{ env.ARTIFACT }}
+          docker-version: ${{ env.DOCKER_VERSION }}
+          args: --verbose
+
+      # Debug: List artifacts directory
+      - name: List artifacts directory
+        run: ls -la artifacts/
+
+      # Step 3: Save artifact with build results
+      - name: Save artifact with build results
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: |
+            artifacts/${{ env.ARTIFACT }}
+            artifacts/report.json
+          retention-days: 7
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Download artifacts
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docs
+          path: artifacts
+
+      # Step 2: Test Writerside documentation
+      - name: Test documentation
+        uses: JetBrains/writerside-checker-action@v1
+        with:
+          instance: ${{ env.INSTANCE }}
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Download artifacts
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docs
+
+      # Step 2: Unzip the artifact
+      - name: Unzip artifact
+        run: unzip -O UTF-8 -qq '${{ env.ARTIFACT }}' -d dir
+
+      # Step 3: Set up GitHub Pages
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      # Step 4: Package and upload Pages artifact
+      - name: Package and upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dir
+
+      # Step 5: Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+

@@ -7,7 +7,6 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import WidgetsIcon from '@mui/icons-material/Widgets';
 import SchemaIcon from '@mui/icons-material/Schema';
-import FilterIcon from '@mui/icons-material/FilterList';
 import HistoryIcon from '@mui/icons-material/History';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -56,6 +55,38 @@ export const siteConfigNav: SiteConfigProps[] = [
     expanded: []
   },
   {
+    label: 'Stem & Plot Details',
+    href: '/fixeddatainput',
+    tip: 'View Modifiable Properties',
+    icon: SettingsSuggestIcon,
+    expanded: [
+      {
+        label: 'Stem Codes',
+        href: '/attributes',
+        tip: '',
+        icon: DescriptionIcon
+      },
+      {
+        label: 'Personnel',
+        href: '/personnel',
+        tip: '',
+        icon: AccountCircleIcon
+      },
+      {
+        label: 'Quadrats',
+        href: '/quadrats',
+        tip: '',
+        icon: WidgetsIcon
+      },
+      {
+        label: 'Species List',
+        href: '/alltaxonomies',
+        tip: '',
+        icon: SchemaIcon
+      }
+    ]
+  },
+  {
     label: 'Census Hub',
     href: '/measurementshub',
     tip: 'View existing core measurement data for a given plot, census, and quadrat',
@@ -92,45 +123,6 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: FactCheckIcon
       }
     ]
-  },
-
-  {
-    label: 'Stem & Plot Details',
-    href: '/fixeddatainput',
-    tip: 'View Modifiable Properties',
-    icon: SettingsSuggestIcon,
-    expanded: [
-      {
-        label: 'Stem Codes',
-        href: '/attributes',
-        tip: '',
-        icon: DescriptionIcon
-      },
-      {
-        label: 'Personnel',
-        href: '/personnel',
-        tip: '',
-        icon: AccountCircleIcon
-      },
-      {
-        label: 'Quadrats',
-        href: '/quadrats',
-        tip: '',
-        icon: WidgetsIcon
-      },
-      {
-        label: 'Species List',
-        href: '/alltaxonomies',
-        tip: '',
-        icon: SchemaIcon
-      },
-      {
-        label: 'Plot-Species List',
-        href: '/stemtaxonomies',
-        tip: '',
-        icon: FilterIcon
-      }
-    ]
   }
 ];
 
@@ -156,8 +148,6 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'Quadrats';
     case '/fixeddatainput/subquadrats':
       return 'Subquadrats';
-    case '/fixeddatainput/stemtaxonomies':
-      return 'Plot-Species List';
     case '/fixeddatainput/quadratpersonnel':
       return 'Quadrat-Assigned Personnel';
     case '/fixeddatainput/alltaxonomies':
