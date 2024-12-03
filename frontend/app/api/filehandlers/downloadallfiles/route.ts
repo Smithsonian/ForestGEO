@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   if (!containerClient) {
     return NextResponse.json({ statusText: 'Container client creation error' }, { status: 400 });
   } else {
-    console.log(`container client created`);
+    console.warn(`container client created`);
   }
   const listOptions = {
     includeMetadata: true,

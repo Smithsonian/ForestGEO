@@ -31,7 +31,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
         },
         'TreeID'
       );
-      console.log('tree tag: ', tag, ' was ', treeOperation, ' on ID # ', treeID);
 
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
@@ -43,14 +42,12 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit },
           'StemID'
         );
-        console.log('stem tag: ', stemtag, ' was ', stemOperation, ' on ID # ', stemID);
 
         if (stemOperation === 'inserted') {
           stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
         } else {
           stemStatus = 'old tree';
         }
-        console.log('stem status: ', stemStatus);
 
         // Prepare additional fields for core measurements
         const userDefinedFields = JSON.stringify({
@@ -109,7 +106,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             WHERE c.CensusID = ${censusID};`;
 
         await connectionManager.executeQuery(combinedQuery);
-        console.log('Upsert successful. CoreMeasurement ID generated:', coreMeasurementID);
         return coreMeasurementID;
       }
     }

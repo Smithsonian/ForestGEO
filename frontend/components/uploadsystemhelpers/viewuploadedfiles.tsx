@@ -120,7 +120,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         console.error('response.statusText', jsonOutput.statusText);
         setErrorMessage(`API response: ${jsonOutput.statusText}`);
       } else {
-        console.log(response.status + ', ' + response.statusText);
         const data = await response.json();
         setFileRows(data.blobData);
         setIsLoaded(true);

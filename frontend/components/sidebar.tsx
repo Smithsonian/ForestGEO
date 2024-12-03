@@ -219,7 +219,6 @@ export default function Sidebar(props: SidebarProps) {
               censusListContext[0]?.plotCensusNumber ?? 0
             )
           : 0;
-      console.log('highest plot number: ', highestPlotCensusNumber);
 
       const mapper = new OrgCensusToCensusResultMapper();
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);

@@ -8,7 +8,6 @@ import { useSession } from 'next-auth/react';
 import { parse, ParseResult } from 'papaparse';
 import { Box, Typography } from '@mui/joy';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
-import UploadReviewFiles from '@/components/uploadsystem/segments/uploadreviewfiles';
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
@@ -174,9 +173,7 @@ export default function UploadParent(props: UploadParentProps) {
     // Update headers after replacement
     setAllFileHeaders(prevHeaders => {
       const updatedHeaders = { ...prevHeaders };
-      console.log('updated headers: ', updatedHeaders);
       delete updatedHeaders[fileToReplace.name];
-      console.log('post-deletion updated headers: ', updatedHeaders);
       return updatedHeaders;
     });
   };
@@ -293,7 +290,8 @@ export default function UploadParent(props: UploadParentProps) {
   };
 
   async function handleInitialSubmit() {
-    setReviewState(ReviewStates.REVIEW);
+    // setReviewState(ReviewStates.REVIEW);
+    setReviewState(ReviewStates.UPLOAD_SQL);
   }
 
   useEffect(() => {
@@ -342,38 +340,38 @@ export default function UploadParent(props: UploadParentProps) {
             handleReplaceFile={handleReplaceFile}
           />
         );
-      case ReviewStates.REVIEW:
-        return (
-          <UploadReviewFiles
-            dbhUnit={dbhUnit}
-            homUnit={homUnit}
-            coordUnit={coordUnit}
-            acceptedFiles={acceptedFiles}
-            setAcceptedFiles={setAcceptedFiles}
-            uploadForm={uploadForm}
-            errors={errors}
-            errorRows={errorRows}
-            parsedData={parsedData}
-            expectedHeaders={expectedHeaders}
-            currentFileHeaders={currentFileHeaders}
-            dataViewActive={dataViewActive}
-            setDataViewActive={setDataViewActive}
-            areHeadersValid={areHeadersValid}
-            setErrors={setErrors}
-            setErrorRows={setErrorRows}
-            setReviewState={setReviewState}
-            confirmationDialogOpen={confirmationDialogOpen}
-            setParsedData={setParsedData}
-            handleConfirm={handleConfirmationConfirm}
-            handleCancel={handleConfirmationCancel}
-            handleApproval={handleConfirmationApproval}
-            handleChange={handleChange}
-            setUploadError={setUploadError}
-            setErrorComponent={setErrorComponent}
-            handleReplaceFile={handleReplaceFile}
-            handleRemoveFile={handleRemoveFile}
-          />
-        );
+      // case ReviewStates.REVIEW:
+      //   return (
+      //     <UploadReviewFiles
+      //       dbhUnit={dbhUnit}
+      //       homUnit={homUnit}
+      //       coordUnit={coordUnit}
+      //       acceptedFiles={acceptedFiles}
+      //       setAcceptedFiles={setAcceptedFiles}
+      //       uploadForm={uploadForm}
+      //       errors={errors}
+      //       errorRows={errorRows}
+      //       parsedData={parsedData}
+      //       expectedHeaders={expectedHeaders}
+      //       currentFileHeaders={currentFileHeaders}
+      //       dataViewActive={dataViewActive}
+      //       setDataViewActive={setDataViewActive}
+      //       areHeadersValid={areHeadersValid}
+      //       setErrors={setErrors}
+      //       setErrorRows={setErrorRows}
+      //       setReviewState={setReviewState}
+      //       confirmationDialogOpen={confirmationDialogOpen}
+      //       setParsedData={setParsedData}
+      //       handleConfirm={handleConfirmationConfirm}
+      //       handleCancel={handleConfirmationCancel}
+      //       handleApproval={handleConfirmationApproval}
+      //       handleChange={handleChange}
+      //       setUploadError={setUploadError}
+      //       setErrorComponent={setErrorComponent}
+      //       handleReplaceFile={handleReplaceFile}
+      //       handleRemoveFile={handleRemoveFile}
+      //     />
+      //   );
       case ReviewStates.UPLOAD_SQL:
         return (
           <UploadFireSQL

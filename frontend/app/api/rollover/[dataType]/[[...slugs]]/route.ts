@@ -19,13 +19,10 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     const { incoming } = await request.json();
     if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No quadrat or personnel IDs provided');
 
-    if (connectionManager) console.log('connection created.');
-
     let query = ``;
     let queryParams = [];
 
     await connectionManager.beginTransaction();
-    console.log('transaction started.');
 
     switch (params.dataType) {
       case 'quadrats':

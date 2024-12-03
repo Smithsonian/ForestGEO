@@ -48,7 +48,6 @@ const handler = NextAuth({
         }
         user.userStatus = userStatus as UserAuthRoles;
         user.email = userEmail;
-        // console.log('getting all sites: ');
         const allSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(await connectionManager.executeQuery(`SELECT * FROM catalog.sites`));
         const allowedSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(
           await connectionManager.executeQuery(

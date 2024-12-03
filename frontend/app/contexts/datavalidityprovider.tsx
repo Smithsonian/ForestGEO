@@ -85,7 +85,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
       await checkDataValidity(typesToRefresh);
       setRefreshNeeded(false); // Reset the refresh flag after rechecking
     } else {
-      console.log('No flags set for rechecking, or missing site/plot/census data');
+      console.error('No flags set for rechecking, or missing site/plot/census data');
     }
   }, [validity, checkDataValidity, refreshNeeded]);
 

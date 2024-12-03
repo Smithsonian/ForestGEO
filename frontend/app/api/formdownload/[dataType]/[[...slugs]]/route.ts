@@ -88,7 +88,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
         query = `SELECT st.StemTag AS StemTag, t.TreeTag AS TreeTag, s.SpeciesCode AS SpeciesCode, q.QuadratName AS QuadratName, 
-          q.StartX AS StartX, q.StartY AS StartY, q.CoordinateUnits AS CoordinateUnits, cm.MeasuredDBH AS MeasuredDBH, cm.DBHUnit AS DBHUnit, 
+          st.LocalX AS StartX, st.LocalY AS StartY, q.CoordinateUnits AS CoordinateUnits, cm.MeasuredDBH AS MeasuredDBH, cm.DBHUnit AS DBHUnit, 
           cm.MeasuredHOM AS MeasuredHOM, cm.HOMUnit AS HOMUnit, cm.MeasurementDate AS MeasurementDate, 
           (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
             FROM ${schema}.cmattributes ca

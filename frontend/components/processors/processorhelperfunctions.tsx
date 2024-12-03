@@ -45,7 +45,7 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
         await connectionManager.executeQuery(query, values);
       } catch (error) {
         // Rollback the transaction in case of an error
-        console.log(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
+        console.error(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
         throw error; // Re-throw the error after rollback
       }
     }
@@ -72,28 +72,21 @@ export async function handleUpsertForSlices<Result>(
   config: UpdateQueryConfig
 ): Promise<{ [key: string]: number }> {
   const insertedIds: { [key: string]: number } = {};
-  console.log('Initial newRow data:', newRow);
 
   // Get the correct mapper for the view you're working with
   const mapper = MapperFactory.getMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>('alltaxonomiesview');
 
   // Convert newRow from RDS to Result upfront
   const mappedNewRow = mapper.demapData([newRow as any])[0];
-  console.log('Mapped newRow:', mappedNewRow);
 
   for (const sliceKey in config.slices) {
-    console.log('sliceKey: ', sliceKey);
     const { range, primaryKey } = config.slices[sliceKey];
-    console.log('range: ', range);
-    console.log('primaryKey: ', primaryKey);
 
     // Extract fields relevant to the current slice from the already transformed newRow
     const rowData: Partial<Result> = {};
     const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
 
     fieldsInSlice.forEach(field => {
-      console.log('field in slice: ', field);
-
       // Explicitly cast field as keyof Result and check if the field exists in mappedNewRow
       if (field in mappedNewRow) {
         rowData[field as keyof Result] = mappedNewRow[field as keyof typeof mappedNewRow];
@@ -105,7 +98,6 @@ export async function handleUpsertForSlices<Result>(
     if (prevSlice && insertedIds[prevSlice]) {
       const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
       (rowData as any)[prevPrimaryKey] = insertedIds[prevSlice]; // Set the foreign key in the current row
-      console.log(`Propagated foreign key ${String(prevPrimaryKey)}: `, insertedIds[prevSlice]);
     }
 
     // Perform the upsert and store the resulting ID
@@ -138,13 +130,9 @@ export async function handleDeleteForSlices<Result>(
   const sliceKeys = Object.keys(config.slices).reverse();
 
   for (const sliceKey of sliceKeys) {
-    console.log('Deleting sliceKey: ', sliceKey);
     const { range, primaryKey } = config.slices[sliceKey];
-    console.log('range: ', range);
-    console.log('primaryKey: ', primaryKey);
 
     const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
-    console.log('fieldsInSlice: ', fieldsInSlice);
 
     // Build the row data for this slice
     const deleteConditions: Partial<Result> = {};
@@ -166,7 +154,6 @@ export async function handleDeleteForSlices<Result>(
         WHERE \`SpeciesID\` = ?;
       `;
       try {
-        console.log('Deleting related rows from trees for SpeciesID:', primaryKeyValue);
         await connectionManager.executeQuery(deleteFromRelatedTableQuery, [primaryKeyValue]);
       } catch (error) {
         console.error(`Error deleting related rows from trees for SpeciesID ${primaryKeyValue}:`, error);
@@ -181,9 +168,6 @@ export async function handleDeleteForSlices<Result>(
     `;
 
     try {
-      console.log('Executing delete query for slice:', sliceKey);
-      console.log('Delete query:', deleteQuery);
-
       // Use runQuery helper for executing the delete query
       await connectionManager.executeQuery(deleteQuery, [primaryKeyValue]);
     } catch (error) {

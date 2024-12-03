@@ -103,7 +103,7 @@ export default function PostValidationPage() {
     };
 
     if (postValidations.length > 0) {
-      fetchSchema().then(r => console.log(r));
+      fetchSchema().then(r => console.warn(r));
     }
   }, [postValidations]);
 
