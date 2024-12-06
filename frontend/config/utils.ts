@@ -172,7 +172,10 @@ export async function handleUpsert<Result>(
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+    console.log('query: ', query);
+    console.log('values: ', Object.values(data));
     const result = await connectionManager.executeQuery(query, Object.values(data));
+    console.log('result: ', result);
 
     id = result.insertId;
 
@@ -189,7 +192,11 @@ export async function handleUpsert<Result>(
       const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
       const values = Object.values(data).filter(value => value !== null);
 
+      console.log('insertId is 0, find existing query', findExistingQuery);
+      console.log('values: ', Object.values(values));
+
       const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
+      console.log('search result: ', searchResult);
 
       if (searchResult.length > 0) {
         // Return the primary key if the record is found
@@ -205,6 +212,7 @@ export async function handleUpsert<Result>(
     return { id, operation: 'inserted' };
   } catch (e: any) {
     console.log('error in handleUpsert: ', e.message);
+    process.exit(0);
     createError(e.message, e);
   }
   return { id, operation }; // exiting return statement in case existing system does not trigger correctly

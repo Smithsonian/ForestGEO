@@ -58,12 +58,13 @@ values
         FROM ${schema}.trees t
         JOIN ${schema}.stems s ON t.TreeID = s.TreeID
         JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
         JOIN ${schema}.plots p ON q.PlotID = p.PlotID
             WHERE s.LocalX IS NULL
                 OR s.LocalY IS NULL
                 OR LocalX > (p.GlobalX + p.DimensionX)
                 OR LocalY > (p.GlobalY + p.DimensionY)
-                AND p.PlotID = ${currentPlotID};',
+                AND p.PlotID = ${currentPlotID} AND cq.CensusID = ${currentCensusID};',
      'Finds and returns any trees outside plot limits', true),
     ('Highest DBH measurement and HOM measurement by species',
      'SELECT sp.SpeciesID, sp.SpeciesName, MAX(cm.MeasuredDBH) AS LargestDBH, MAX(cm.MeasuredHOM) AS LargestHOM
@@ -71,6 +72,9 @@ values
             JOIN ${schema}.trees t ON sp.SpeciesID = t.SpeciesID
             JOIN ${schema}.stems s ON s.TreeID = t.TreeID
             JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID
+            JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
+            JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+            WHERE cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
         GROUP BY sp.SpeciesID, sp.SpeciesName;',
      'Finds and returns the largest DBH/HOM measurement and their host species ID', true),
     ('Checks that all trees from the last census are present',
@@ -80,7 +84,10 @@ values
               ${schema}.stems s_last ON t.TreeID = s_last.TreeID
                   JOIN
               ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID
+              ${schema}.quadrats q_last ON q.QuadratID = s_last.QuadratID
+              ${schema}.censusquadrat cq_last ON cq.QuadratID = q.QuadratID
          WHERE cm_last.CensusID = ${currentCensusID} - 1
+        AND cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
            AND NOT EXISTS (SELECT 1
                            FROM ${schema}.stems s_current
                                     JOIN
@@ -103,7 +110,7 @@ values
             FROM ${schema}.quadrats q
                 JOIN ${schema}.stems s_current ON q.QuadratID = s_current.QuadratID
                 JOIN ${schema}.coremeasurements cm_current ON s_current.StemID = cm_current.StemID
-            WHERE cm_current.CensusID = ${currentCensusID}
+            WHERE cm_current.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
                 AND NOT EXISTS (SELECT 1
                     FROM ${schema}.stems s_last
                         JOIN ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID
@@ -171,6 +178,7 @@ values
                 JOIN
             ${schema}.attributes a ON cma.Code = a.Code
        WHERE cm.CensusID = ${currentCensusID}
+         AND q.PlotID = ${currentPlotID}
          AND a.Status = ''dead''
        ORDER BY q.QuadratName, s.StemID;',
      'dead stems by quadrat. also useful for tracking overall changes across plot', true),
@@ -198,7 +206,8 @@ values
             ${schema}.trees t ON s.TreeID = t.TreeID
                 JOIN
             ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
-       WHERE cm.CensusID = ${currentCensusID}
+            JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
+       WHERE cm.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
          AND a.Status = ''dead''
        ORDER BY sp.SpeciesName, s.StemID;',
      'dead stems by species, organized to determine which species (if any) are struggling', true);

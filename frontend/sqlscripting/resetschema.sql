@@ -9,8 +9,8 @@ drop table if exists family;
 drop table if exists genus;
 drop table if exists measurementssummary;
 drop table if exists personnel;
-drop table if exists plots;
-drop table if exists postvalidationqueries;
+# drop table if exists plots;
+# drop table if exists postvalidationqueries;
 drop table if exists quadratpersonnel
 drop table if exists quadrats;
 drop table if exists reference;
