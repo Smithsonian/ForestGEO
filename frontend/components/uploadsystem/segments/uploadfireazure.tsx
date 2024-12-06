@@ -99,16 +99,14 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
     };
 
     if (!hasUploaded.current) {
-      uploadFiles().catch(console.error);
-      hasUploaded.current = true;
+      uploadFiles()
+        .catch(console.error)
+        .then(() => {
+          hasUploaded.current = true;
+          setReviewState(ReviewStates.COMPLETE);
+        });
     }
   }, [acceptedFiles, uploadToStorage, uploadForm, setIsDataUnsaved]);
-
-  useEffect(() => {
-    if (!loading && completedOperations === totalOperations && !refreshError) {
-      setReviewState(ReviewStates.COMPLETE);
-    }
-  }, [loading, completedOperations, totalOperations, refreshError]);
 
   return (
     <>
