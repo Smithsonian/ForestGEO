@@ -13,7 +13,7 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
     return new NextResponse('Missing parameters', { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const query = `SELECT QueryDefinition FROM ${schema}.postvalidationqueries WHERE QueryID = ${queryID}`;
     const results = await connectionManager.executeQuery(query);

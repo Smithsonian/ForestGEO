@@ -4,7 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(request: NextRequest) {
-  const conn = new ConnectionManager();
+  const conn = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
   const plotIDParam = request.nextUrl.searchParams.get('plotIDParam');
   const censusPCNParam = request.nextUrl.searchParams.get('censusPCNParam');

@@ -6,7 +6,7 @@ import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
 
 export async function GET(_request: NextRequest) {
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const query = `SELECT * FROM catalog.validationprocedures;`;
     const results = await connectionManager.executeQuery(query);
@@ -21,7 +21,7 @@ export async function GET(_request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     delete validationProcedure['validationID'];
     const insertQuery = format('INSERT INTO ?? SET ?', [`catalog.validationprocedures`, validationProcedure]);
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const updatedValidationProcedure = delete validationProcedure['validationID'];
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [
@@ -60,7 +60,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`catalog.validationprocedures`, validationProcedure.validationID]);
     await connectionManager.executeQuery(deleteQuery);

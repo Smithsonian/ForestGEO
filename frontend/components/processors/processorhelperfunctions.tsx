@@ -281,7 +281,7 @@ export async function runValidation(
     maxHOM?: number | null;
   } = {}
 ): Promise<boolean> {
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
 
   try {
     await connectionManager.beginTransaction();
@@ -370,7 +370,7 @@ export async function runValidation(
 }
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
 
   const insertTemp = `

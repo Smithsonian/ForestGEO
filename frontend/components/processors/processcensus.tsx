@@ -20,28 +20,25 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connectionManager, 'QuadratID');
 
     if (tag) {
+      const tagSearch: Partial<TreeResult> = {
+        TreeTag: tag,
+        SpeciesID: speciesID
+      };
       // Handle Tree Upsert
-      const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(
-        connectionManager,
-        schema,
-        'trees',
-        {
-          TreeTag: tag,
-          SpeciesID: speciesID
-        },
-        'TreeID'
-      );
+      const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(connectionManager, schema, 'trees', tagSearch, 'TreeID');
 
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
         // Handle Stem Upsert
-        const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(
-          connectionManager,
-          schema,
-          'stems',
-          { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit },
-          'StemID'
-        );
+        const stemSearch: Partial<StemResult> = {
+          StemTag: stemtag,
+          TreeID: treeID,
+          QuadratID: quadratID,
+          LocalX: lx,
+          LocalY: ly,
+          CoordinateUnits: coordinateunit
+        };
+        const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(connectionManager, schema, 'stems', stemSearch, 'StemID');
 
         if (stemOperation === 'inserted') {
           stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
@@ -55,22 +52,23 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
         });
 
         // Handle Core Measurement Upsert
+        const coreMeasurementSearch: Partial<CoreMeasurementsResult> = {
+          CensusID: censusID,
+          StemID: stemID,
+          IsValidated: null,
+          MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
+          MeasuredDBH: dbh ? parseFloat(dbh) : null,
+          DBHUnit: dbhunit,
+          MeasuredHOM: hom ? parseFloat(hom) : null,
+          HOMUnit: homunit,
+          Description: null,
+          UserDefinedFields: userDefinedFields
+        };
         const { id: coreMeasurementID } = await handleUpsert<CoreMeasurementsResult>(
           connectionManager,
           schema,
           'coremeasurements',
-          {
-            CensusID: censusID,
-            StemID: stemID,
-            IsValidated: null,
-            MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
-            MeasuredDBH: dbh ? parseFloat(dbh) : null,
-            DBHUnit: dbhunit,
-            MeasuredHOM: hom ? parseFloat(hom) : null,
-            HOMUnit: homunit,
-            Description: null,
-            UserDefinedFields: userDefinedFields // using this to track the operation on the tree and stem
-          },
+          coreMeasurementSearch,
           'CoreMeasurementID'
         );
 
@@ -93,19 +91,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           }
         }
 
-        // Update Census Start/End Dates
-        const combinedQuery = `
-            UPDATE ${schema}.census c
-            JOIN (
-              SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
-              FROM ${schema}.coremeasurements
-              WHERE CensusID = ${censusID} 
-              GROUP BY CensusID
-            ) m ON c.CensusID = m.CensusID
-            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
-            WHERE c.CensusID = ${censusID};`;
-
-        await connectionManager.executeQuery(combinedQuery);
         return coreMeasurementID;
       }
     }

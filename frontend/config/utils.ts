@@ -166,17 +166,15 @@ export async function handleUpsert<Result>(
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
   let id: number = 0;
-  const operation: string = '';
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
+    console.log('Insert/Update Query:', query, 'Values:', Object.values(data));
     const result = await connectionManager.executeQuery(query, Object.values(data));
 
     id = result.insertId;
 
-    // If insertId is 0, it means the row was updated, not inserted
     if (id === 0) {
-      // Try to find the existing row based on the data provided
       const whereConditions = Object.keys(data)
         .map(field => {
           const value = data[field as keyof Result];
@@ -187,25 +185,25 @@ export async function handleUpsert<Result>(
       const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
       const values = Object.values(data).filter(value => value !== null);
 
+      console.log('Generated Query:', findExistingQuery, 'Values:', values);
+
       const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
 
       if (searchResult.length > 0) {
-        // Return the primary key if the record is found
         id = searchResult[0][key as keyof Result] as unknown as number;
         return { id, operation: 'updated' };
       } else {
-        // More detailed error information
-        console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
+        console.error(`Record not found after update. Data: ${JSON.stringify(data)}, Query: ${findExistingQuery}, Values: ${values}`);
         throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
       }
     }
 
     return { id, operation: 'inserted' };
   } catch (e: any) {
-    console.error('error in handleUpsert: ', e.message);
-    createError(e.message, e);
+    console.error('Error in handleUpsert:', e.message, 'Stack:', e.stack);
+    process.exit(0);
+    throw createError(e.message, e);
   }
-  return { id, operation }; // exiting return statement in case existing system does not trigger correctly
 }
 
 export function createError(message: string, context: any): Error {

@@ -10,7 +10,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const { uploadForm, handleCloseUploadModal } = props;
+  const { handleCloseUploadModal } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
 
@@ -74,7 +74,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
   };
 
-  // Effect to run async tasks before countdown
   useEffect(() => {
     const runAsyncTasks = async () => {
       try {
@@ -87,7 +86,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       }
     };
     runAsyncTasks().catch(console.error);
-  }, [triggerRefresh]);
+  }, []);
 
   return (
     <Box

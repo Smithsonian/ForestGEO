@@ -7,7 +7,7 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
   const query = `SELECT table_name, column_name 
     FROM information_schema.columns 
     WHERE table_schema = ?`;
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const results = await connectionManager.executeQuery(query, [schema]);
     return new Response(JSON.stringify(results), { status: 200 });

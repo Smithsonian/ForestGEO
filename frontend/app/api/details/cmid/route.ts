@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const cmID = parseInt(request.nextUrl.searchParams.get('cmid')!);
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('no schema variable provided!');
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const query = `
         SELECT

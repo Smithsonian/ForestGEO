@@ -33,7 +33,7 @@ export async function POST(
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
     const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
 
-    const connectionManager = new ConnectionManager();
+    const connectionManager = ConnectionManager.getInstance();
     const { newRow } = await request.json();
     let insertIDs: { [key: string]: number } = {};
 
@@ -98,7 +98,7 @@ export async function POST(
     const pageSize = parseInt(pageSizeParam);
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
     const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
-    const connectionManager = new ConnectionManager();
+    const connectionManager = ConnectionManager.getInstance();
     let updatedMeasurementsExist = false;
     let censusIDs;
     let pastCensusIDs: string | any[];
@@ -362,7 +362,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
   let updateIDs: { [key: string]: number } = {};
@@ -419,7 +419,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
   try {

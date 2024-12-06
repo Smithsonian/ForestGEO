@@ -8,7 +8,7 @@ export async function GET(request: NextRequest, { params }: { params: { speciesI
   if (!schema) throw new Error('Schema not provided');
   if (params.speciesID === 'undefined') throw new Error('SpeciesID not provided');
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const query = `SELECT * FROM ${schema}.specieslimits WHERE SpeciesID = ?`;
     const results = await connectionManager.executeQuery(query, [params.speciesID]);
@@ -25,7 +25,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { specie
   if (!schema) throw new Error('Schema not provided');
   if (params.speciesID === 'undefined') throw new Error('SpeciesID not provided');
   const { newRow } = await request.json();
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     await connectionManager.beginTransaction();
     const newRowData = MapperFactory.getMapper<any, any>('specieslimits').demapData([newRow])[0];

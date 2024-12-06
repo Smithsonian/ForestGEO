@@ -3,12 +3,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
-import { Stack } from '@mui/joy';
+import { LinearProgress, Stack } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
-import { LinearProgressWithLabel } from '@/components/client/clientmacros';
+import PQueue from 'p-queue';
 
 interface IDToRow {
   coreMeasurementID: number;
@@ -37,28 +37,32 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [currentlyRunning, setCurrentlyRunning] = useState<string>('');
   const hasUploaded = useRef(false);
   const { data: session } = useSession();
-  const [totalRows, setTotalRows] = useState(0);
+  const [totalChunks, setTotalChunks] = useState(0);
   const [currentlyParsing, setCurrentlyParsing] = useState<string>('');
-  const [processedRows, setProcessedRows] = useState<number>(0);
+  const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [userID, setUserID] = useState<number | null>(null);
+  const chunkSize = 2048;
 
-  const countTotalRows = (file: File): Promise<number> => {
+  const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
-      let rowCount = 0;
+      let chunkCount = 0;
 
       parse<File>(file, {
         worker: true,
-        chunkSize: 1024,
-        chunk: results => {
-          rowCount += results.data.length;
-        },
-        complete: () => resolve(rowCount),
+        header: true,
+        skipEmptyLines: true,
+        chunkSize: chunkSize,
+        chunk: () => (chunkCount += 1),
+        complete: () => resolve(chunkCount),
         error: err => reject(err)
       });
     });
   };
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
+    let activeTasks = 0;
+    const connectionLimit = 100;
+    const queue = new PQueue({ concurrency: connectionLimit });
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
 
@@ -101,11 +105,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         delimiter: delimiter,
         header: true,
         skipEmptyLines: true,
-        chunkSize: 1024 * 1024, // Process 1MB chunks
+        chunkSize: chunkSize,
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
           try {
+            if (activeTasks >= connectionLimit) parser.pause();
+            // parser.pause();
             const fileRowSet: FileRowSet = {};
             const transformedChunk = results.data.map((row, index) => {
               const updatedRow: FileRow = { ...row };
@@ -121,7 +127,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             });
 
             transformedChunk.forEach((row, index) => {
-              const rowId = `row-${processedRows + index}`;
+              const rowId = `row-${completedChunks + index}`;
               fileRowSet[rowId] = row;
             });
 
@@ -129,18 +135,31 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               [file.name]: fileRowSet
             };
 
-            await uploadToSql(fileCollectionRowSet, file.name);
+            activeTasks++;
 
-            // Update processed rows
-            setProcessedRows(prev => prev + results.data.length);
+            await queue.add(async () => {
+              try {
+                await uploadToSql(fileCollectionRowSet, file.name);
+              } catch (error) {
+                console.error('Error uploading to SQL:', error);
+                throw error;
+              } finally {
+                activeTasks--;
+                setCompletedChunks(prev => prev + 1);
+                if (activeTasks < connectionLimit / 10) {
+                  parser.resume();
+                }
+              }
+            });
+            // parser.resume();
           } catch (err) {
             console.error('Error processing chunk:', err);
             reject(err);
           }
         },
-        complete: () => {
+        complete: async () => {
+          await queue.onIdle();
           console.log('File parsing and upload complete');
-          setCompletedOperations(prev => prev + 1);
           resolve();
         },
         error: err => {
@@ -163,7 +182,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         );
         if (!response.ok) throw new Error('SQLLOAD ERROR: ' + response.statusText);
-        setCompletedOperations(prevCompleted => prevCompleted + 1);
         return response.ok ? 'SQL load successful' : 'SQL load failed';
       } catch (error) {
         setUploadError(error);
@@ -198,54 +216,48 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     const uploadFiles = async () => {
       calculateTotalOperations();
 
-      const fileUploadPromises = acceptedFiles.map(async file => {
+      for (const file of acceptedFiles) {
+        const count = await countTotalChunks(file as File);
+        setTotalChunks(prev => prev + count);
+      }
+
+      for (const file of acceptedFiles) {
         const isCSV = file.name.endsWith('.csv');
         const delimiter = isCSV ? ',' : '\t';
-
-        setTotalRows(await countTotalRows(file as File));
         setCurrentlyParsing(file.name);
 
         await parseFileInChunks(file as File, delimiter);
 
-        setCompletedOperations(prev => prev + 1);
-
-        setTotalRows(0);
-        setProcessedRows(0);
-      });
-
-      await Promise.all(fileUploadPromises);
+        setCompletedOperations(prevCompleted => prevCompleted + 1);
+      }
 
       setLoading(false);
       setIsDataUnsaved(false);
     };
 
     if (!hasUploaded.current) {
-      getUserID();
-      uploadFiles()
-        .catch(console.error)
-        .then(() => {
-          hasUploaded.current = true;
-        });
-    }
-  }, [acceptedFiles, uploadToSql]);
+      getUserID().then(() => {
+        uploadFiles()
+          .catch(console.error)
+          .then(() => {
+            hasUploaded.current = true;
+            const timeout = setTimeout(() => {
+              if (uploadForm === FormType.measurements) {
+                setReviewState(ReviewStates.VALIDATE);
+              } else {
+                setReviewState(ReviewStates.UPLOAD_AZURE);
+              }
+            }, 500);
 
-  useEffect(() => {
-    if (hasUploaded.current) {
-      const timeout = setTimeout(() => {
-        if (uploadForm === FormType.measurements) {
-          setReviewState(ReviewStates.VALIDATE);
-        } else {
-          setReviewState(ReviewStates.UPLOAD_AZURE);
-        }
-      }, 500);
-
-      return () => clearTimeout(timeout);
+            return () => clearTimeout(timeout);
+          });
+      });
     }
   }, []);
 
   return (
     <>
-      {loading ? (
+      {!hasUploaded.current ? (
         <Box
           sx={{
             display: 'flex',
@@ -256,31 +268,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ width: '100%' }}>
-            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}`}</Typography>
+            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}, Total Chunks: ${totalChunks}`}</Typography>
 
-            {/* Overall Progress */}
             <Box sx={{ width: '100%', mb: 2 }}>
               <Typography variant="h6" gutterBottom>
-                Overall Progress
+                Total File Progress - Completed: {completedOperations}
               </Typography>
-              <LinearProgressWithLabel
-                variant={'determinate'}
-                value={(completedOperations / totalOperations) * 100}
-                currentlyrunningmsg={`Completed ${completedOperations} of ${totalOperations} files`}
-              />
+              <LinearProgress determinate value={(completedOperations / totalOperations) * 100} />
             </Box>
 
-            {/* File-Specific Progress */}
-            {totalRows !== 0 && (
+            {totalChunks !== 0 && (
               <Box sx={{ width: '100%', mb: 2 }}>
                 <Typography variant="h6" gutterBottom>
-                  File Progress
+                  Total Parsing Progress - Completed: {completedChunks}
                 </Typography>
-                <LinearProgressWithLabel
-                  variant={'determinate'}
-                  value={(processedRows / totalRows) * 100}
-                  currentlyrunningmsg={`Parsing ${currentlyParsing}`}
-                />
+                <LinearProgress determinate value={(completedChunks / totalChunks) * 100} />
               </Box>
             )}
           </Stack>
@@ -297,7 +299,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
             <Typography variant="h5" gutterBottom>
-              Upload Complete
+              SQL Upload Complete
             </Typography>
           </Stack>
         </Box>

@@ -19,7 +19,7 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
     acceptedFiles,
     dataViewActive,
     setDataViewActive,
-    parseFile,
+    parseFullFile,
     handleInitialSubmit,
     handleAddFile,
     handleReplaceFile,
@@ -35,8 +35,8 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
       if (existingFile) {
         setFileToReplace(file);
       } else {
-        // await parseFile(file); // parse the file
         handleAddFile(file);
+        // await parseFullFile(file); // parse the file
       }
     }
   };
@@ -58,7 +58,6 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
                       if (fileToReplace) {
                         const index = acceptedFiles.findIndex(f => f.name === fileToReplace.name);
                         handleReplaceFile(index, fileToReplace);
-                        // await parseFile(fileToReplace); // Parse the replaced file
                       }
                       setFileToReplace(null);
                     }}
