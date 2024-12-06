@@ -1,7 +1,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar } from '@mui/joy';
@@ -46,6 +46,8 @@ export default function MeasurementsSummaryViewDataGrid() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const currentSite = useSiteContext();
+  const { setLoading } = useLoading();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
@@ -103,6 +105,24 @@ export default function MeasurementsSummaryViewDataGrid() {
     setTriggerGlobalError(false);
   };
 
+  async function reloadMSV() {
+    try {
+      setLoading(true, 'Refreshing Measurements View...');
+      const startTime = Date.now();
+      const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+      if (!response.ok) throw new Error('Measurements View Refresh failure');
+      setLoading(true, 'Processing data...');
+      await response.json();
+      const duration = (Date.now() - startTime) / 1000;
+      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <>
       {globalError && (
@@ -115,16 +135,20 @@ export default function MeasurementsSummaryViewDataGrid() {
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
-          setIsUploadModalOpen(false);
-          setOpenAlert(true);
+          reloadMSV().then(() => {
+            setIsUploadModalOpen(false);
+            setOpenAlert(true);
+          });
         }}
         formType={FormType.measurements}
       />
       <MultilineModal
         isManualEntryFormOpen={isManualEntryFormOpen}
         handleCloseManualEntryForm={() => {
-          setIsManualEntryFormOpen(false);
-          setOpenAlert(true);
+          reloadMSV().then(() => {
+            setIsManualEntryFormOpen(false);
+            setOpenAlert(true);
+          });
         }}
         formType={'measurements'}
       />

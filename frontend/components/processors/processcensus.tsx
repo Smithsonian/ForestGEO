@@ -96,19 +96,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           }
         }
 
-        // Update Census Start/End Dates
-        const combinedQuery = `
-            UPDATE ${schema}.census c
-            JOIN (
-              SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
-              FROM ${schema}.coremeasurements
-              WHERE CensusID = ${censusID} 
-              GROUP BY CensusID
-            ) m ON c.CensusID = m.CensusID
-            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
-            WHERE c.CensusID = ${censusID};`;
-
-        await connectionManager.executeQuery(combinedQuery);
         console.log('Upsert successful. CoreMeasurement ID generated:', coreMeasurementID);
         return coreMeasurementID;
       }
