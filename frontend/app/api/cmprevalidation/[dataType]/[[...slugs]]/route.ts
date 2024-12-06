@@ -19,7 +19,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
   )
     throw new Error('incorrect slugs provided');
 
-  const connection = new ConnectionManager();
+  const connection = ConnectionManager.getInstance();
   try {
     switch (params.dataType) {
       case 'attributes':

@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { CMError, ReviewProgress, ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { CMError, FileWithStream, ReviewProgress, ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -50,7 +50,7 @@ export default function UploadParent(props: UploadParentProps) {
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
   // dropped file storage
-  const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
+  const [acceptedFiles, setAcceptedFiles] = useState<FileWithStream[]>([]);
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
@@ -76,6 +76,8 @@ export default function UploadParent(props: UploadParentProps) {
   const currentSite = useSiteContext();
   if (!currentSite) throw new Error('site must be selected!');
   const { data: session } = useSession();
+  const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
+  const [isStreaming, setIsStreaming] = useState(false);
 
   const handleCancelUpload = (): void => {
     handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
@@ -146,9 +148,46 @@ export default function UploadParent(props: UploadParentProps) {
     setDataViewActive(value);
   };
 
+  function parseStreamCheck(newFile: FileWithPath, setAllFileHeaders: React.Dispatch<React.SetStateAction<{ [key: string]: string[] }>>) {
+    const testFile = new FileWithStream(newFile, false, newFile.path);
+    const startTime = Date.now();
+    let aborted = false;
+
+    parse(newFile as File, {
+      worker: true,
+      header: true,
+      chunkSize: 1024, // Small chunk for testing
+      step: (_row, parser) => {
+        if (Date.now() - startTime > PARSING_TIME_THRESHOLD_MS) {
+          parser.abort();
+          aborted = true;
+        }
+      },
+      complete: results => {
+        testFile.useStreaming = aborted; // If aborted, mark file for streaming
+        console.log(`File ${newFile.name} will ${aborted ? 'use streaming' : 'be fully parsed'}.`);
+
+        // Update file headers if available
+        if (results && results.meta && results.meta.fields) {
+          setAllFileHeaders(prevHeaders => ({
+            ...prevHeaders,
+            [newFile.name]: results.meta.fields || []
+          }));
+        }
+      },
+      error: error => {
+        console.error('Error during time estimation:', error);
+        testFile.useStreaming = true; // Ensure default behavior on error
+      }
+    });
+
+    return testFile;
+  }
+
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
-    setAcceptedFiles(prevFiles => [...prevFiles, newFile]);
+    // setAcceptedFiles(prevFiles => [...prevFiles, parseStreamCheck(newFile, setAllFileHeaders)]);
+    setAcceptedFiles(prevFiles => [...prevFiles, new FileWithStream(newFile, true, newFile.path)]);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
@@ -166,9 +205,7 @@ export default function UploadParent(props: UploadParentProps) {
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     const fileToReplace = acceptedFiles[fileIndex];
     console.log('filetoreplace: ', fileToReplace);
-    setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), newFile, ...prevFiles.slice(fileIndex + 1)]);
-
-    await parseFile(newFile);
+    setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), new FileWithStream(newFile, true, newFile.path), ...prevFiles.slice(fileIndex + 1)]);
 
     // Update headers after replacement
     setAllFileHeaders(prevHeaders => {
@@ -178,16 +215,16 @@ export default function UploadParent(props: UploadParentProps) {
     });
   };
 
-  const parseFile = async (file: FileWithPath) => {
+  const parseFullFile = async (file: FileWithPath) => {
     try {
-      const fileText = await file.text();
       const isCSV = file.name.endsWith('.csv');
       const delimiter = isCSV ? ',' : '\t';
 
-      parse<FileRow>(fileText, {
+      parse<FileRow>(file as File, {
         delimiter: delimiter,
         header: true,
         skipEmptyLines: true,
+        chunkSize: 1024,
         transformHeader: h => h.trim(),
         transform: (value, field) => {
           if (uploadForm === FormType.measurements && field === 'date') {
@@ -270,11 +307,6 @@ export default function UploadParent(props: UploadParentProps) {
             ...prevErrors,
             [file.name]: fileErrors
           }));
-
-          setAllFileHeaders(prevHeaders => ({
-            ...prevHeaders,
-            [file.name]: results.meta.fields || []
-          }));
         }
       });
     } catch (error: any) {
@@ -306,11 +338,6 @@ export default function UploadParent(props: UploadParentProps) {
     if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
 
-  useEffect(() => {
-    console.log(`progressTracker: ${progressTracker}`);
-    console.log(`review state: ${reviewState}`);
-  }, [progressTracker, reviewState]);
-
   const renderStateContent = () => {
     if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
     switch (reviewState) {
@@ -333,7 +360,7 @@ export default function UploadParent(props: UploadParentProps) {
             personnelRecording={personnelRecording}
             dataViewActive={dataViewActive}
             setDataViewActive={setDataViewActive}
-            parseFile={parseFile}
+            parseFullFile={parseFullFile}
             handleInitialSubmit={handleInitialSubmit}
             handleAddFile={handleAddFile}
             handleRemoveFile={handleRemoveFile}

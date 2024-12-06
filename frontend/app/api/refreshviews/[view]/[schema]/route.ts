@@ -5,7 +5,7 @@ import ConnectionManager from '@/config/connectionmanager';
 export async function POST(_request: NextRequest, { params }: { params: { view: string; schema: string } }) {
   if (!params.schema || params.schema === 'undefined' || !params.view || params.view === 'undefined' || !params) throw new Error('schema not provided');
   const { view, schema } = params;
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     await connectionManager.beginTransaction();
     const query = `CALL ${schema}.Refresh${view === 'viewfulltable' ? 'ViewFullTable' : view === 'measurementssummary' ? 'MeasurementsSummary' : ''}();`;

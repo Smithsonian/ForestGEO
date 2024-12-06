@@ -17,7 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     for (const rowID in rows) {
       await connectionManager.beginTransaction();

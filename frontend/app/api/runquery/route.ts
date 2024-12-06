@@ -5,7 +5,7 @@ import ConnectionManager from '@/config/connectionmanager';
 export async function POST(request: NextRequest) {
   const query = await request.json(); // receiving query already formatted and prepped for execution
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   const results = await connectionManager.executeQuery(query);
   return new NextResponse(JSON.stringify(results), {
     status: 200,

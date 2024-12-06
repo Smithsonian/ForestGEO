@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const [schema, plotID, sourceCensusID, newCensusID] = params.slugs;
   if (!schema || !plotID || !sourceCensusID || !newCensusID) throw new Error('no schema or plotID or censusID provided');
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const { incoming } = await request.json();
     if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No quadrat or personnel IDs provided');

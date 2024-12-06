@@ -739,10 +739,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         { count: data.CountValid, message: `${data.CountValid} row(s) passed validation.`, severity: 'success' }
       ];
       const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
-      setSnackbar({
-        children: highestCount.message,
-        severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
-      });
+      if (highestCount.count !== null) {
+        setSnackbar({
+          children: highestCount.message,
+          severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
+        });
+      }
     });
   }, [rows, paginationModel]);
 

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: { params: { changelo
   const [plotIDParam, pcnParam] = params.options;
   const plotID = parseInt(plotIDParam);
   const pcn = parseInt(pcnParam);
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     let query = ``;
     switch (params.changelogType) {

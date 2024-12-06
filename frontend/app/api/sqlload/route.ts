@@ -34,11 +34,11 @@ export async function POST(request: NextRequest) {
   // full name
   const fullName = request.nextUrl.searchParams.get('user') ?? undefined;
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
 
   const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
-  await connectionManager.beginTransaction();
   for (const rowId in fileRowSet) {
+    await connectionManager.beginTransaction();
     const row = fileRowSet[rowId];
     try {
       const props: InsertUpdateProcessingProps = {
@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       } else if (formType === 'measurements' && coreMeasurementID === undefined) {
         throw new Error('CoreMeasurement insertion failure at row: ' + row);
       }
+      await connectionManager.commitTransaction();
     } catch (error) {
       await connectionManager.rollbackTransaction();
       await connectionManager.closeConnection();
@@ -80,7 +81,6 @@ export async function POST(request: NextRequest) {
       }
     }
   }
-  await connectionManager.commitTransaction();
   await connectionManager.closeConnection();
   return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
 }

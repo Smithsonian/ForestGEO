@@ -387,11 +387,7 @@ create table if not exists stems
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID),
     constraint stems_quadrats_QuadratID_fk
-        foreign key (QuadratID) references quadrats (QuadratID),
-    constraint unique_stem_per_tree_quadrat
-        unique (StemTag, TreeID, QuadratID),
-    constraint unique_stem_coordinates
-        unique (StemTag, TreeID, QuadratID, LocalX, LocalY, CoordinateUnits)
+        foreign key (QuadratID) references quadrats (QuadratID)
 );
 
 CREATE INDEX idx_treeid ON stems (TreeID);

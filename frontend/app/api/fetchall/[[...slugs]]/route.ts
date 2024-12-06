@@ -57,7 +57,7 @@ export async function GET(request: NextRequest, { params }: { params: { slugs?: 
   }
 
   const query = buildQuery(schema, dataType, plotID, plotCensusNumber, quadratID);
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
 
   try {
     const results = await connectionManager.executeQuery(query);

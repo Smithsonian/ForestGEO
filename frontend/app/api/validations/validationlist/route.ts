@@ -21,7 +21,7 @@ type ValidationMessages = {
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse<ValidationMessages>> {
-  const conn = new ConnectionManager();
+  const conn = ConnectionManager.getInstance();
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('No schema variable provided!');
   try {

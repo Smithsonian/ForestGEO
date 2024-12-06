@@ -3,71 +3,98 @@ import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 
 class ConnectionManager {
-  private connection: PoolConnection | null = null;
-  private transactionActive: boolean = false;
-  private rollbackCalled: boolean = false;
+  private static instance: ConnectionManager | null = null; // Singleton instance
 
-  async acquireConnection(): Promise<void> {
-    if (!this.connection) {
-      console.log(chalk.cyan('Acquiring new connection...'));
-      this.connection = await getConn();
-    }
+  // Private constructor
+  private constructor() {
+    console.log(chalk.green('ConnectionManager initialized as a singleton.'));
   }
 
-  async beginTransaction(): Promise<void> {
-    await this.acquireConnection();
-    if (!this.transactionActive) {
-      await this.connection!.beginTransaction();
-      this.transactionActive = true;
-      this.rollbackCalled = false;
-      console.log(chalk.green('Transaction started.'));
+  // Singleton instance getter
+  public static getInstance(): ConnectionManager {
+    if (!ConnectionManager.instance) {
+      ConnectionManager.instance = new ConnectionManager();
     }
+    return ConnectionManager.instance;
   }
 
-  async executeQuery(query: string, params?: any[]): Promise<any> {
-    await this.acquireConnection();
+  // Acquire a connection for the current operation
+  private async acquireConnectionInternal(): Promise<PoolConnection> {
+    console.log(chalk.cyan('Acquiring a connection for operation...'));
+    return await getConn(); // Delegates to PoolMonitor indirectly via processormacros
+  }
+
+  // Existing method: Acquire a single connection (for backward compatibility)
+  public async acquireConnection(): Promise<void> {
+    console.warn(chalk.yellow('Warning: acquireConnection is deprecated for concurrency. Consider managing connections dynamically.'));
+    // This function is a no-op for concurrency but must be preserved for compatibility
+  }
+
+  // Existing method: Execute a query (preserves function signature)
+  public async executeQuery(query: string, params?: any[]): Promise<any> {
+    let connection: PoolConnection | null = null;
+
     try {
+      connection = await this.acquireConnectionInternal();
       const isModifyingQuery = query.trim().match(/^(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE|TRUNCATE)/i);
 
-      if (isModifyingQuery && !this.transactionActive) {
-        console.warn(chalk.yellow('No transaction active for modifying query. Starting a new transaction.'));
-        await this.beginTransaction();
+      if (isModifyingQuery) {
+        console.warn(chalk.yellow('Warning: Modifying query detected. For optimal safety, consider wrapping modifying queries in transactions.'));
       }
 
-      return await runQuery(this.connection!, query, params);
+      // Execute the query using the dynamic connection
+      return await runQuery(connection, query, params);
     } catch (error) {
       console.error(chalk.red('Error executing query:', error));
       throw error;
-    }
-  }
-
-  async commitTransaction(): Promise<void> {
-    if (this.transactionActive && this.connection) {
-      await this.connection.commit();
-      console.log(chalk.green('Transaction committed.'));
-      this.transactionActive = false;
-    }
-  }
-
-  async rollbackTransaction(): Promise<void> {
-    if (this.transactionActive && this.connection) {
-      await this.connection.rollback();
-      console.log(chalk.red('Transaction rolled back.'));
-      this.transactionActive = false;
-      this.rollbackCalled = true; // Set rollback flag
-    }
-  }
-
-  async closeConnection(): Promise<void> {
-    if (this.connection) {
-      if (this.transactionActive && !this.rollbackCalled) {
-        console.log(chalk.green('Auto-committing active transaction before closing connection.'));
-        await this.commitTransaction(); // Commit any active transaction if no rollback was called
+    } finally {
+      if (connection) {
+        console.log(chalk.blue('Releasing connection after query execution.'));
+        connection.release();
       }
-      console.log(chalk.blue('Releasing connection...'));
-      this.connection.release();
-      this.connection = null;
     }
+  }
+
+  // Existing method: Begin a transaction
+  public async beginTransaction(): Promise<void> {
+    const connection = await this.acquireConnectionInternal();
+    console.log(chalk.cyan('Starting transaction...'));
+    await connection.beginTransaction();
+    console.log(chalk.green('Transaction started.'));
+    // Store the connection on the class instance for backward compatibility
+    (this as any)._transactionConnection = connection;
+  }
+
+  // Existing method: Commit a transaction
+  public async commitTransaction(): Promise<void> {
+    const connection = (this as any)._transactionConnection;
+    if (connection) {
+      try {
+        await connection.commit();
+      } finally {
+        connection.release(); // Always release the connection
+        delete (this as any)._transactionConnection;
+      }
+    }
+  }
+
+  // Existing method: Rollback a transaction
+  public async rollbackTransaction(): Promise<void> {
+    const connection = (this as any)._transactionConnection;
+    if (connection) {
+      try {
+        await connection.rollback();
+      } finally {
+        connection.release(); // Always release the connection
+        delete (this as any)._transactionConnection;
+      }
+    }
+  }
+
+  // Existing method: Close connection
+  public async closeConnection(): Promise<void> {
+    console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
+    // This function is a no-op for concurrency but must be preserved for compatibility
   }
 }
 

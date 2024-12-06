@@ -17,22 +17,21 @@ export class PoolMonitor {
     this.pool = createPool(config);
     this.poolClosed = false;
 
-    this.pool.on('acquire', connection => {
-      if (!this.acquiredConnectionIds.has(connection.threadId)) {
-        this.acquiredConnectionIds.add(connection.threadId);
-        ++this.activeConnections;
-        console.log(chalk.green(`Acquired: ${connection.threadId}`));
-        this.logPoolStatus();
-        this.resetInactivityTimer();
-      }
-    });
+    // this.pool.on('acquire', connection => {
+    //   if (!this.acquiredConnectionIds.has(connection.threadId)) {
+    //     this.acquiredConnectionIds.add(connection.threadId);
+    //     this.activeConnections = this.acquiredConnectionIds.size;
+    //   }
+    //   if (this.waitingForConnection > 0) {
+    //     --this.waitingForConnection;
+    //   }
+    //   this.logPoolStatus();
+    // });
 
     this.pool.on('release', connection => {
       if (this.acquiredConnectionIds.has(connection.threadId)) {
         this.acquiredConnectionIds.delete(connection.threadId);
-        if (this.activeConnections > 0) {
-          --this.activeConnections;
-        }
+        this.activeConnections = this.acquiredConnectionIds.size;
         console.log(chalk.blue(`Released: ${connection.threadId}`));
         this.logPoolStatus();
         this.resetInactivityTimer();
@@ -40,6 +39,13 @@ export class PoolMonitor {
     });
 
     this.pool.on('connection', connection => {
+      if (!this.acquiredConnectionIds.has(connection.threadId)) {
+        this.acquiredConnectionIds.add(connection.threadId);
+        this.activeConnections = this.acquiredConnectionIds.size;
+      }
+      if (this.waitingForConnection > 0) {
+        --this.waitingForConnection;
+      }
       ++this.totalConnectionsCreated;
       console.log(chalk.yellow(`New: ${connection.threadId}`));
       this.logPoolStatus();
@@ -47,12 +53,11 @@ export class PoolMonitor {
     });
 
     this.pool.on('enqueue', () => {
-      ++this.waitingForConnection;
+      ++this.waitingForConnection; // Increment when a request is queued
       console.log(chalk.magenta('Enqueued.'));
       this.logPoolStatus();
     });
 
-    // Initialize inactivity timer
     this.resetInactivityTimer();
   }
 
@@ -61,27 +66,20 @@ export class PoolMonitor {
       throw new Error('Connection pool is closed');
     }
 
-    let connection: PoolConnection | null = null;
     try {
       console.log(chalk.cyan('Requesting new connection...'));
-      connection = await this.pool.getConnection();
+      const connection = await this.pool.getConnection();
       console.log(chalk.green('Connection acquired'));
-      --this.waitingForConnection;
       this.resetInactivityTimer();
       return connection;
     } catch (error) {
       console.error(chalk.red('Error getting connection from pool:', error));
       throw error;
-    } finally {
-      if (connection) {
-        connection.release();
-        console.log(chalk.blue('Connection released in finally block'));
-      }
     }
   }
 
   getPoolStatus() {
-    return `Active: ${this.activeConnections} | Total: ${this.totalConnectionsCreated} | Waiting: ${this.waitingForConnection}`;
+    return `Active: ${this.activeConnections} | Total: ${this.totalConnectionsCreated} | Queued: ${this.waitingForConnection}`;
   }
 
   logPoolStatus() {

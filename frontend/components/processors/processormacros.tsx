@@ -85,3 +85,15 @@ export async function runQuery(connection: PoolConnection, query: string, params
     throw error;
   }
 }
+
+// process.on('SIGTERM', async () => {
+//   console.log('Received SIGTERM. Closing connections...');
+//   await poolMonitor.closeAllConnections();
+//   process.exit(0);
+// });
+
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT. Closing connections...');
+  await poolMonitor.closeAllConnections();
+  process.exit(0);
+});
