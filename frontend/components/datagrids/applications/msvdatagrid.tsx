@@ -43,6 +43,7 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
 };
 
 export default function MeasurementsSummaryViewDataGrid() {
+  const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
@@ -64,6 +65,20 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const { setLoading } = useLoading();
+
+  async function reloadMSV() {
+    setLoading(true, 'Refreshing Measurements View...');
+    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
+    if (!response.ok) throw new Error('Measurements View Refresh failure');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  useEffect(() => {
+    reloadMSV()
+      .catch(console.error)
+      .then(() => setLoading(false));
+  }, []);
 
   const addNewRowToGrid = () => {
     const id = randomId();
