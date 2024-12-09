@@ -1,3 +1,66 @@
+DROP TRIGGER IF EXISTS `after_insert_attributes`;
+DROP TRIGGER IF EXISTS `after_update_attributes`;
+DROP TRIGGER IF EXISTS `after_delete_attributes`;
+DROP TRIGGER IF EXISTS `after_insert_census`;
+DROP TRIGGER IF EXISTS `after_update_census`;
+DROP TRIGGER IF EXISTS `after_delete_census`;
+DROP TRIGGER IF EXISTS `after_insert_cmattributes`;
+DROP TRIGGER IF EXISTS `after_update_cmattributes`;
+DROP TRIGGER IF EXISTS `after_delete_cmattributes`;
+DROP TRIGGER IF EXISTS `after_insert_cmverrors`;
+DROP TRIGGER IF EXISTS `after_update_cmverrors`;
+DROP TRIGGER IF EXISTS `after_delete_cmverrors`;
+DROP TRIGGER IF EXISTS `after_insert_coremeasurements`;
+DROP TRIGGER IF EXISTS `after_update_coremeasurements`;
+DROP TRIGGER IF EXISTS `after_delete_coremeasurements`;
+DROP TRIGGER IF EXISTS `after_insert_family`;
+DROP TRIGGER IF EXISTS `after_update_family`;
+DROP TRIGGER IF EXISTS `after_delete_family`;
+DROP TRIGGER IF EXISTS `after_insert_genus`;
+DROP TRIGGER IF EXISTS `after_update_genus`;
+DROP TRIGGER IF EXISTS `after_delete_genus`;
+DROP TRIGGER IF EXISTS `after_insert_personnel`;
+DROP TRIGGER IF EXISTS `after_update_personnel`;
+DROP TRIGGER IF EXISTS `after_delete_personnel`;
+DROP TRIGGER IF EXISTS `after_insert_plots`;
+DROP TRIGGER IF EXISTS `after_update_plots`;
+DROP TRIGGER IF EXISTS `after_delete_plots`;
+DROP TRIGGER IF EXISTS `after_insert_quadratpersonnel`;
+DROP TRIGGER IF EXISTS `after_update_quadratpersonnel`;
+DROP TRIGGER IF EXISTS `after_delete_quadratpersonnel`;
+DROP TRIGGER IF EXISTS `after_insert_quadrats`;
+DROP TRIGGER IF EXISTS `after_update_quadrats`;
+DROP TRIGGER IF EXISTS `after_delete_quadrats`;
+DROP TRIGGER IF EXISTS `after_insert_reference`;
+DROP TRIGGER IF EXISTS `after_update_reference`;
+DROP TRIGGER IF EXISTS `after_delete_reference`;
+DROP TRIGGER IF EXISTS `after_insert_roles`;
+DROP TRIGGER IF EXISTS `after_update_roles`;
+DROP TRIGGER IF EXISTS `after_delete_roles`;
+DROP TRIGGER IF EXISTS `after_insert_species`;
+DROP TRIGGER IF EXISTS `after_update_species`;
+DROP TRIGGER IF EXISTS `after_delete_species`;
+DROP TRIGGER IF EXISTS `after_insert_specieslimits`;
+DROP TRIGGER IF EXISTS `after_update_specieslimits`;
+DROP TRIGGER IF EXISTS `after_delete_specieslimits`;
+DROP TRIGGER IF EXISTS `after_insert_specimens`;
+DROP TRIGGER IF EXISTS `after_update_specimens`;
+DROP TRIGGER IF EXISTS `after_delete_specimens`;
+DROP TRIGGER IF EXISTS `after_insert_stems`;
+DROP TRIGGER IF EXISTS `before_stem_update`;
+DROP TRIGGER IF EXISTS `after_update_stems`;
+DROP TRIGGER IF EXISTS `after_delete_stems`;
+DROP TRIGGER IF EXISTS `after_insert_subquadrats`;
+DROP TRIGGER IF EXISTS `after_update_subquadrats`;
+DROP TRIGGER IF EXISTS `after_delete_subquadrats`;
+DROP TRIGGER IF EXISTS `after_insert_trees`;
+DROP TRIGGER IF EXISTS `after_update_trees`;
+DROP TRIGGER IF EXISTS `after_delete_trees`;
+DROP TRIGGER IF EXISTS `after_insert_validationchangelog`;
+DROP TRIGGER IF EXISTS `after_update_validationchangelog`;
+DROP TRIGGER IF EXISTS `after_delete_validationchangelog`;
+
+
 DELIMITER
 //
 
@@ -648,7 +711,7 @@ BEGIN
     DECLARE plot_id INT;
 
     -- Fetch PlotID associated with the QuadratID
-    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID LIMIT 1;
 
     SET new_json = JSON_OBJECT(
             'QuadratPersonnelID', NEW.QuadratPersonnelID,
@@ -671,7 +734,7 @@ BEGIN
     DECLARE plot_id INT;
 
     -- Fetch PlotID associated with the QuadratID
-    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'QuadratPersonnelID', OLD.QuadratPersonnelID,
@@ -700,7 +763,7 @@ BEGIN
     DECLARE plot_id INT;
 
     -- Fetch PlotID associated with the QuadratID
-    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = OLD.QuadratID;
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = OLD.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'QuadratPersonnelID', OLD.QuadratPersonnelID,
@@ -1047,7 +1110,7 @@ BEGIN
                             FROM quadrats q
                             JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
                             JOIN census c ON c.CensusID = cq.CensusID
-                            WHERE q.QuadratID = NEW.QuadratID;
+                            WHERE q.QuadratID = NEW.QuadratID LIMIT 1;
 
     SET new_json = JSON_OBJECT(
             'StemID', NEW.StemID,
@@ -1081,7 +1144,7 @@ BEGIN
                             FROM quadrats q
                             JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
                             JOIN census c ON c.CensusID = cq.CensusID
-                            WHERE q.QuadratID = NEW.QuadratID;
+                            WHERE q.QuadratID = NEW.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
@@ -1127,7 +1190,7 @@ BEGIN
                             FROM quadrats q
                             JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
                             JOIN census c ON c.CensusID = cq.CensusID
-                            WHERE q.QuadratID = OLD.QuadratID;
+                            WHERE q.QuadratID = OLD.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
@@ -1165,7 +1228,7 @@ BEGIN
     INTO plot_id
     FROM quadrats q
              JOIN stems s ON q.QuadratID = s.QuadratID
-    WHERE s.StemID = NEW.StemID;
+    WHERE s.StemID = NEW.StemID LIMIT 1;
 
     SET new_json = JSON_OBJECT(
             'CoreMeasurementID', NEW.CoreMeasurementID,
@@ -1199,7 +1262,7 @@ BEGIN
     INTO plot_id
     FROM quadrats q
              JOIN stems s ON q.QuadratID = s.QuadratID
-    WHERE s.StemID = NEW.StemID;
+    WHERE s.StemID = NEW.StemID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'CoreMeasurementID', OLD.CoreMeasurementID,
@@ -1246,7 +1309,7 @@ BEGIN
     INTO plot_id
     FROM quadrats q
              JOIN stems s ON q.QuadratID = s.QuadratID
-    WHERE s.StemID = OLD.StemID;
+    WHERE s.StemID = OLD.StemID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'CoreMeasurementID', OLD.CoreMeasurementID,
