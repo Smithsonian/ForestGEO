@@ -107,7 +107,7 @@ export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> }
   }) as { [K in keyof T]: InitialValue<T[K]> };
 }
 
-export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>): string {
+export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>, limiter?: number): string {
   const whereKeys = Object.keys(whereClause);
 
   if (whereKeys.length === 0) {
@@ -118,7 +118,7 @@ export function createSelectQuery<Result>(schema: string, tableName: string, whe
     .map(key => `\`${key}\` = ?`) // Escaping column names with backticks
     .join(' AND ');
 
-  return `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
+  return `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions} ${limiter ? `LIMIT ${limiter}` : ``}`;
 }
 
 export function createInsertOrUpdateQuery<Result>(schema: string, tableName: string, data: Partial<Result>): string {
