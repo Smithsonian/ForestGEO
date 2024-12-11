@@ -11,7 +11,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
   }
-  const { tag, stemtag, spcode, quadrat, lx, ly, coordinateunit, dbh, dbhunit, hom, homunit, date, codes } = rowData;
+  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
 
   try {
     // Fetch species
@@ -40,7 +40,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           connectionManager,
           schema,
           'stems',
-          { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit ?? 'm' },
+          { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly },
           'StemID'
         );
         console.log('results: ', results);
@@ -70,9 +70,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             IsValidated: null,
             MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
             MeasuredDBH: dbh ? parseFloat(dbh) : null,
-            DBHUnit: dbhunit ?? 'mm',
             MeasuredHOM: hom ? parseFloat(hom) : null,
-            HOMUnit: homunit ?? 'm',
             Description: null,
             UserDefinedFields: userDefinedFields // using this to track the operation on the tree and stem
           },

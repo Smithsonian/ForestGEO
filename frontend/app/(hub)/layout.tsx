@@ -4,7 +4,7 @@ import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { Box, IconButton, Stack, Typography } from '@mui/joy';
+import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -287,6 +287,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     }
   }, [session]);
 
+  const theme = useTheme();
+
   return (
     <>
       <Box
@@ -396,10 +398,17 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               bottom: 20,
               right: 20,
               zIndex: 2000,
-              bgcolor: 'primary.main',
-              color: 'white',
+              backgroundColor: 'transparent', // Remove background color
+              boxShadow: 'none', // Remove shadow if present
+              color: theme.vars.palette.primary.solidColor, // Text/icon color
+              opacity: 0.5, // Initial opacity
+              transition: 'opacity 0.3s ease',
               '&:hover': {
-                bgcolor: 'primary.dark'
+                opacity: 1,
+                backgroundColor: 'transparent' // Ensure no hover background
+              },
+              '&:focus-visible': {
+                outline: `2px solid ${theme.vars.palette.primary.solidColor}` // Add focus ring for accessibility if needed
               }
             }}
           >

@@ -1,6 +1,6 @@
-import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
+import { CELL_ALIGN, HEADER_ALIGN, unitSelectionOptions } from '@/config/macros';
 import { Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
-import { GridColDef, GridRenderEditCellParams, useGridApiRef } from '@mui/x-data-grid';
+import { GridColDef, useGridApiRef } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
@@ -19,8 +19,8 @@ export const quadratGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -28,8 +28,8 @@ export const quadratGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -38,8 +38,8 @@ export const quadratGridColumns: GridColDef[] = [
     headerClassName: 'header',
     renderHeader: () => formatHeader('Quadrat', 'Name'),
     flex: 0.75,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     type: 'string',
     editable: true
   },
@@ -48,8 +48,8 @@ export const quadratGridColumns: GridColDef[] = [
     headerName: 'X',
     headerClassName: 'header',
     flex: 0.5,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
@@ -61,48 +61,26 @@ export const quadratGridColumns: GridColDef[] = [
     headerName: 'Y',
     headerClassName: 'header',
     flex: 0.5,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
     editable: true
-  },
-  {
-    field: 'coordinateUnits',
-    headerName: 'Coordinate Units',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'right',
-    headerAlign: 'right',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
   },
   {
     field: 'area',
     headerName: 'Area',
     headerClassName: 'header',
     flex: 0.75,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
     editable: true
-  },
-  {
-    field: 'areaUnits',
-    headerName: 'Area Unit',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'right',
-    headerAlign: 'right',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: areaSelectionOptions
   },
   {
     field: 'dimensionX',
@@ -110,7 +88,8 @@ export const quadratGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     renderHeader: () => formatHeader('Dimension', 'X'),
-    align: 'right',
+    headerAlign: HEADER_ALIGN,
+    align: CELL_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       let parsedValue = Number(value);
@@ -125,8 +104,8 @@ export const quadratGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     renderHeader: () => formatHeader('Dimension', 'Y'),
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       let parsedValue = Number(value);
@@ -136,25 +115,13 @@ export const quadratGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'dimensionUnits',
-    headerName: 'Dimension Unit',
-    headerClassName: 'header',
-    flex: 1,
-    renderHeader: () => formatHeader('Dimension', 'Unit'),
-    align: 'right',
-    headerAlign: 'right',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
-  },
-  {
     field: 'quadratShape',
     headerName: 'Quadrat Shape',
     headerClassName: 'header',
     flex: 1,
     renderHeader: () => formatHeader('Quadrat', 'Shape'),
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     type: 'string',
     editable: true
   }
@@ -166,8 +133,8 @@ export const AttributeGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   { field: 'code', headerName: 'Code', headerClassName: 'header', minWidth: 150, flex: 1, editable: true }, // all unique ID columns need to be tagged 'id'
@@ -175,6 +142,7 @@ export const AttributeGridColumns: GridColDef[] = [
     field: 'description',
     headerName: 'Description',
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     minWidth: 250,
     flex: 1,
     align: 'left',
@@ -184,6 +152,7 @@ export const AttributeGridColumns: GridColDef[] = [
     field: 'status',
     headerName: 'Status',
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     minWidth: 150,
     flex: 1,
     align: 'left',
@@ -199,14 +168,15 @@ export const PersonnelGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
     field: 'personnelID',
     headerName: 'PersonnelID',
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left',
     editable: false
@@ -214,7 +184,7 @@ export const PersonnelGridColumns: GridColDef[] = [
   {
     field: 'censusID',
     headerName: 'Census ID',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -224,6 +194,7 @@ export const PersonnelGridColumns: GridColDef[] = [
     field: 'firstName',
     headerName: 'First Name',
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left',
     editable: true
@@ -231,6 +202,7 @@ export const PersonnelGridColumns: GridColDef[] = [
   {
     field: 'lastName',
     headerName: 'Last Name',
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -244,34 +216,36 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
-  { field: 'stemID', headerName: '#', headerClassName: 'header', flex: 0.1, align: 'left' },
-  { field: 'stemTag', headerName: 'Stem', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'treeTag', headerName: 'Tree', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left' },
+  { field: 'stemID', headerName: '#', headerClassName: 'header', flex: 0.1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'stemTag', headerName: 'Stem Tag', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'treeID', headerName: 'Tree ID', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'treeTag', headerName: 'Tree Tag', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'speciesID', headerName: 'Species ID', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
   {
     field: 'speciesCode',
     headerName: 'Species Code',
     renderHeader: () => formatHeader('Species', 'Code'),
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left'
   },
-  { field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'genusID', headerName: 'Genus ID', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left' },
-  { field: 'subspeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left' },
+  { field: 'familyID', headerName: 'Family ID', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'family', headerName: 'Family', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'genusID', headerName: 'Genus ID', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'genus', headerName: 'Genus', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'speciesName', headerName: 'Species', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
+  { field: 'subspeciesName', headerName: 'Subspecies', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN },
   {
     field: 'genusAuthority',
     headerName: 'Genus Authority',
     renderHeader: () => formatHeader('Genus', 'Authority'),
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left'
   },
@@ -280,6 +254,7 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
     headerName: 'Species Authority',
     renderHeader: () => formatHeader('Species', 'Authority'),
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left'
   },
@@ -296,6 +271,7 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
     headerName: 'Species ID Level',
     renderHeader: () => formatHeader('Species', 'ID Level'),
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left'
   },
@@ -304,6 +280,7 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
     headerName: 'Species Field Family',
     renderHeader: () => formatHeader('Species', 'Field Family'),
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left'
   }
@@ -311,84 +288,9 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = [
 
 // note --> originally attempted to use GridValueFormatterParams, but this isn't exported by MUI X DataGrid anymore. replaced with <any> for now.
 
-export const renderDBHCell = (params: GridRenderEditCellParams) => {
-  const value = params.row.measuredDBH ? Number(params.row.measuredDBH).toFixed(2) : 'null';
-  const units = params.row.dbhUnits ? (params.row.measuredDBH !== null ? params.row.dbhUnits : '') : '';
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      <Typography level="body-sm">{value}</Typography>
-      <Typography level="body-sm">{units}</Typography>
-    </Box>
-  );
-};
-
-export const renderEditDBHCell = (params: GridRenderEditCellParams) => {
-  const apiRef = useGridApiRef();
-  const { id, row } = params;
-  const [error, setError] = useState(false);
-  const [value, setValue] = useState(row.measuredDBH);
-
-  const handleValueChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const inputValue = event.target.value;
-    const isValid = /^\d*\.?\d{0,2}$/.test(inputValue);
-    setError(!isValid);
-    if (isValid) {
-      setValue(inputValue);
-    }
-  };
-
-  const handleValueBlur = () => {
-    const truncatedValue = Number(value).toFixed(2);
-    apiRef.current.setEditCellValue({ id, field: 'measuredDBH', value: truncatedValue });
-  };
-
-  const handleUnitsChange = (_event: React.SyntheticEvent | null, newValue: string | null) => {
-    if (newValue !== null) {
-      apiRef.current.setEditCellValue({ id, field: 'dbhUnits', value: newValue });
-    }
-  };
-
-  useEffect(() => {
-    setValue(row.measuredDBH);
-  }, [row.measuredDBH]);
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      <Stack direction="column">
-        <Input
-          value={value}
-          onChange={handleValueChange}
-          onBlur={handleValueBlur}
-          error={error}
-          placeholder="Diameter at breast height (DBH)"
-          required
-          slotProps={{
-            input: {
-              'aria-invalid': error
-            }
-          }}
-        />
-        {error && (
-          <FormHelperText>
-            <Typography color="danger">Only numbers with up to 2 decimal places accepted!</Typography>
-          </FormHelperText>
-        )}
-      </Stack>
-      <Select value={row.dbhUnits} onChange={handleUnitsChange} placeholder={'Units'} required>
-        {unitSelectionOptions.map(option => (
-          <Option key={option} value={option}>
-            {option}
-          </Option>
-        ))}
-      </Select>
-    </Box>
-  );
-};
-
-const renderHOMCell = (params: GridRenderEditCellParams) => {
-  const value = params.row.measuredHOM ? Number(params.row.measuredHOM).toFixed(2) : 'null';
-  const units = params.row.homUnits ? (params.row.measuredHOM !== null ? params.row.homUnits : '') : '';
+const renderValueCell = (params: any, valueKey: string, unitKey: string) => {
+  const value = params.row[valueKey] ? Number(params.row[valueKey]).toFixed(2) : 'null';
+  const units = params.row[unitKey] ? (params.row[valueKey] !== null ? params.row[unitKey] : '') : '';
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
@@ -398,13 +300,13 @@ const renderHOMCell = (params: GridRenderEditCellParams) => {
   );
 };
 
-const renderEditHOMCell = (params: GridRenderEditCellParams) => {
+const renderEditValueCell = (params: any, valueKey: string, unitKey: string, placeholder: string) => {
   const apiRef = useGridApiRef();
   const { id, row } = params;
   const [error, setError] = useState(false);
-  const [value, setValue] = useState(row.measuredHOM);
+  const [value, setValue] = useState(row[valueKey]);
 
-  const handleValueChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleValueChange = (event: any) => {
     const inputValue = event.target.value;
     const isValid = /^\d*\.?\d{0,2}$/.test(inputValue);
     setError(!isValid);
@@ -415,18 +317,18 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
 
   const handleValueBlur = () => {
     const truncatedValue = Number(value).toFixed(2);
-    apiRef.current.setEditCellValue({ id, field: 'measuredHOM', value: truncatedValue });
+    apiRef.current.setEditCellValue({ id, field: valueKey, value: truncatedValue });
   };
 
-  const handleUnitsChange = (_event: React.SyntheticEvent | null, newValue: string | null) => {
+  const handleUnitsChange = (_event: any, newValue: any) => {
     if (newValue !== null) {
-      apiRef.current.setEditCellValue({ id, field: 'homUnits', value: newValue });
+      apiRef.current.setEditCellValue({ id, field: unitKey, value: newValue });
     }
   };
 
   useEffect(() => {
-    setValue(row.measuredHOM);
-  }, [row.measuredHOM]);
+    setValue(row[valueKey]);
+  }, [row[valueKey]]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
@@ -436,7 +338,7 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
           onChange={handleValueChange}
           onBlur={handleValueBlur}
           error={error}
-          placeholder="Height of Measure (HOM)"
+          placeholder={placeholder}
           required
           slotProps={{
             input: {
@@ -450,7 +352,7 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
           </FormHelperText>
         )}
       </Stack>
-      <Select value={row.homUnits} onChange={handleUnitsChange} placeholder={'Units'} required>
+      <Select value={row[unitKey]} onChange={handleUnitsChange} placeholder={'Units'} required>
         {unitSelectionOptions.map(option => (
           <Option key={option} value={option}>
             {option}
@@ -461,20 +363,29 @@ const renderEditHOMCell = (params: GridRenderEditCellParams) => {
   );
 };
 
+export const renderDBHCell = (params: any) => renderValueCell(params, 'measuredDBH', '');
+export const renderEditDBHCell = (params: any) => renderEditValueCell(params, 'measuredDBH', '', 'Diameter at breast height (DBH)');
+export const renderHOMCell = (params: any) => renderValueCell(params, 'measuredHOM', '');
+export const renderEditHOMCell = (params: any) => renderEditValueCell(params, 'measuredHOM', '', 'Height of Measure (HOM)');
+export const renderStemXCell = (params: any) => renderValueCell(params, 'localStemX', '');
+export const renderEditStemXCell = (params: any) => renderEditValueCell(params, 'localStemX', '', 'Stem Local X Coordinates');
+export const renderStemYCell = (params: any) => renderValueCell(params, 'localStemY', '');
+export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');
+
 export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'id',
     headerName: 'ID',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
     field: 'coreMeasurementID',
     headerName: '#',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 0.4,
     align: 'left'
@@ -482,7 +393,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'quadratName',
     headerName: 'Quadrat',
-    headerAlign: 'left',
+    renderHeader: () => formatHeader('Quadrat', 'Name'),
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 0.8,
     align: 'left',
@@ -491,7 +403,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'speciesID',
     headerName: 'Species ID',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -500,7 +412,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'speciesCode',
     headerName: 'Species Code',
-    headerAlign: 'left',
+    renderHeader: () => formatHeader('Species', 'Code'),
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 1.2,
     align: 'left',
@@ -509,7 +422,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'treeID',
     headerName: 'Tree ID',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -518,7 +431,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'treeTag',
     headerName: 'Tree',
-    headerAlign: 'left',
+    renderHeader: () => formatHeader('Tree', 'Tag'),
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 0.7,
     align: 'left',
@@ -527,7 +441,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'stemID',
     headerName: 'Stem ID',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 1,
     align: 'left',
@@ -536,7 +450,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'stemTag',
     headerName: 'Stem',
-    headerAlign: 'left',
+    renderHeader: () => formatHeader('Stem', 'Tag'),
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 0.7,
     align: 'left',
@@ -545,7 +460,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
   {
     field: 'stemLocalX',
     headerName: 'X',
-    headerAlign: 'left',
+    renderHeader: () => formatHeader('X', 'Stem'),
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 0.7,
     type: 'number',
@@ -554,12 +470,15 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     },
     maxWidth: 100,
     align: 'left',
+    renderCell: renderStemXCell,
+    renderEditCell: renderEditStemXCell,
     editable: true
   },
   {
     field: 'stemLocalY',
     headerName: 'Y',
-    headerAlign: 'left',
+    renderHeader: () => formatHeader('Y', 'Stem'),
+    headerAlign: HEADER_ALIGN,
     headerClassName: 'header',
     flex: 0.7,
     type: 'number',
@@ -568,26 +487,17 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     },
     maxWidth: 100,
     align: 'left',
+    renderCell: renderStemYCell,
+    renderEditCell: renderEditStemYCell,
     editable: true
-  },
-  {
-    field: 'coordinateUnits',
-    headerName: 'Stem Units',
-    headerClassName: 'header',
-    flex: 0.4,
-    maxWidth: 65,
-    renderHeader: () => formatHeader('Stem', 'Units'),
-    align: 'center',
-    editable: true,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
   },
   {
     field: 'measuredDBH',
     headerName: 'DBH',
     headerClassName: 'header',
     flex: 0.5,
-    align: 'right',
+    headerAlign: HEADER_ALIGN,
+    align: CELL_ALIGN,
     editable: true,
     renderCell: renderDBHCell,
     renderEditCell: renderEditDBHCell
@@ -597,8 +507,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     headerName: 'HOM',
     headerClassName: 'header',
     flex: 0.5,
-    align: 'right',
-    headerAlign: 'left',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: true,
     renderCell: renderHOMCell,
     renderEditCell: renderEditHOMCell
@@ -607,11 +517,12 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = [
     field: 'description',
     headerName: 'Description',
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 0.6,
     align: 'left',
     editable: true
   },
-  { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', editable: true }
+  { field: 'attributes', headerName: 'Attributes', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN, editable: true }
 ];
 
 export const StemGridColumns: GridColDef[] = [
@@ -620,8 +531,8 @@ export const StemGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -630,6 +541,7 @@ export const StemGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'string',
     editable: true
   },
@@ -639,6 +551,7 @@ export const StemGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
@@ -651,6 +564,7 @@ export const StemGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 1,
     align: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
@@ -658,20 +572,11 @@ export const StemGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'coordinateUnits',
-    headerName: 'Unit',
-    headerClassName: 'header',
-    flex: 1,
-    align: 'left',
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions,
-    editable: true
-  },
-  {
     field: 'moved',
     headerName: 'Moved',
     headerClassName: 'header',
     flex: 1,
+    headerAlign: HEADER_ALIGN,
     align: 'left',
     type: 'boolean',
     editable: true
@@ -681,6 +586,7 @@ export const StemGridColumns: GridColDef[] = [
     headerName: 'StemDescription',
     headerClassName: 'header',
     flex: 1,
+    headerAlign: HEADER_ALIGN,
     align: 'left',
     type: 'string',
     editable: true
@@ -693,8 +599,8 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -703,7 +609,7 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 0.3,
     align: 'left',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -712,7 +618,7 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 0.3,
     align: 'left',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -721,7 +627,7 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     renderHeader: () => formatHeader('Limit', 'Type'),
     flex: 0.5,
     align: 'left',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'singleSelect',
     valueOptions: ['DBH', 'HOM'],
     editable: true
@@ -732,7 +638,7 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     renderHeader: () => formatHeader('Lower', 'Limit'),
     flex: 0.5,
     align: 'left',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     editable: true
   },
@@ -742,7 +648,7 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     renderHeader: () => formatHeader('Upper', 'Limit'),
     flex: 0.5,
     align: 'left',
-    headerAlign: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'number',
     editable: true
   },
@@ -752,6 +658,7 @@ export const SpeciesLimitsGridColumns: GridColDef[] = [
     headerClassName: 'header',
     flex: 0.3,
     align: 'left',
+    headerAlign: HEADER_ALIGN,
     type: 'singleSelect',
     valueOptions: unitSelectionOptions
   }
@@ -763,8 +670,8 @@ export const RolesGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
   {
@@ -772,15 +679,16 @@ export const RolesGridColumns: GridColDef[] = [
     headerName: '#',
     headerClassName: 'header',
     flex: 0.2,
-    align: 'right',
-    headerAlign: 'right',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN,
     editable: false
   },
-  { field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', editable: true },
+  { field: 'roleName', headerName: 'Role', headerClassName: 'header', flex: 1, align: 'left', headerAlign: HEADER_ALIGN, editable: true },
   {
     field: 'roleDescription',
     headerName: 'Description',
     headerClassName: 'header',
+    headerAlign: HEADER_ALIGN,
     flex: 1,
     align: 'left',
     editable: true
@@ -818,12 +726,6 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
     return { ...column, renderHeader: () => formatHeader('Species', 'ID Level') };
   } else if (column.field === 'speciesFieldFamily') {
     return { ...column, renderHeader: () => formatHeader('Species', 'Field Family') };
-  } else if (column.field === 'stemUnits') {
-    return { ...column, renderHeader: () => formatHeader('Stem', 'Units') };
-  } else if (column.field === 'dbhUnits') {
-    return { ...column, renderHeader: () => formatHeader('DBH', 'Units') };
-  } else if (column.field === 'homUnits') {
-    return { ...column, renderHeader: () => formatHeader('HOM', 'Units') };
   }
   return column;
 });

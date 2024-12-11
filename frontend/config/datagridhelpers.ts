@@ -100,9 +100,9 @@ export const createPostPatchQuery: ProcessPostPatchQueryFunction = (
   dataType: string,
   gridID: string,
   plotID?: number,
-  censusID?: number
+  plotCensusNumber?: number
 ) => {
-  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}` + (plotID ? `/${plotID}` : '') + (censusID ? `/${censusID}` : '');
+  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}` + (plotID ? `/${plotID}` : '') + (plotCensusNumber ? `/${plotCensusNumber}` : '');
 };
 export const createFetchQuery: FetchQueryFunction = (
   siteSchema: string,

@@ -235,14 +235,11 @@ const measurementSummaryViewFields = [
   'SpeciesCode',
   'TreeTag',
   'StemTag',
-  'LocalX',
-  'LocalY',
-  'CoordinateUnits',
+  'StemLocalX',
+  'StemLocalY',
   'MeasurementDate',
   'MeasuredDBH',
-  'DBHUnits',
   'MeasuredHOM',
-  'HOMUnits',
   'Description',
   'Attributes'
 ];
@@ -374,7 +371,7 @@ export async function runValidation(
     // Execute the cursor query to get the rows that need validation
     console.log('running validation: ', validationProcedureName);
     console.log('running query: ', reformattedCursorQuery);
-    await connectionManager.executeQuery(reformattedCursorQuery);
+    console.log('running query: ', await connectionManager.executeQuery(reformattedCursorQuery));
     return true;
   } catch (error: any) {
     await connectionManager.rollbackTransaction();

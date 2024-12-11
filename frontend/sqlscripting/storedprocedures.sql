@@ -21,13 +21,13 @@ BEGIN
            st.StemTag                                          AS StemTag,
            st.LocalX                                           AS StemLocalX,
            st.LocalY                                           AS StemLocalY,
-           st.CoordinateUnits                                  AS StemUnits,
+           p.DefaultCoordinateUnits                                  AS StemUnits,
            q.QuadratName                                       AS QuadratName,
            cm.MeasurementDate                                  AS MeasurementDate,
            cm.MeasuredDBH                                      AS MeasuredDBH,
-           cm.DBHUnit                                          AS DBHUnits,
+           p.DefaultDBHUnits                                          AS DBHUnits,
            cm.MeasuredHOM                                      AS MeasuredHOM,
-           cm.HOMUnit                                          AS HOMUnits,
+           p.DefaultHOMUnits                                          AS HOMUnits,
            cm.IsValidated                                      AS IsValidated,
            cm.Description                                      AS Description,
            (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
@@ -38,7 +38,8 @@ BEGIN
              LEFT JOIN trees t ON st.TreeID = t.TreeID
              LEFT JOIN species s ON t.SpeciesID = s.SpeciesID
              LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
-             LEFT JOIN census c ON cm.CensusID = c.CensusID;
+             LEFT JOIN census c ON cm.CensusID = c.CensusID
+             LEFT JOIN plots p ON p.PlotID = c.PlotID;
     SET foreign_key_checks = 1;
 END;
 
@@ -53,9 +54,7 @@ BEGIN
         PlotID, PlotName, LocationName, CountryName, DimensionX, DimensionY, PlotDimensionUnits, PlotArea, PlotAreaUnits,
         PlotGlobalX, PlotGlobalY, PlotGlobalZ, PlotCoordinateUnits, PlotShape, PlotDescription, CensusID,
         CensusStartDate, CensusEndDate, CensusDescription, PlotCensusNumber, QuadratID, QuadratName, QuadratDimensionX,
-        QuadratDimensionY, QuadratDimensionUnits, QuadratArea, QuadratAreaUnits, QuadratStartX, QuadratStartY,
-        QuadratCoordinateUnits, QuadratShape, SubquadratID, SubquadratName, SubquadratDimensionX, SubquadratDimensionY,
-        SubquadratDimensionUnits, SubquadratX, SubquadratY, SubquadratCoordinateUnits, TreeID, TreeTag, StemID, StemTag,
+        QuadratDimensionY, QuadratArea, QuadratStartX, QuadratStartY, QuadratShape, TreeID, TreeTag, StemID, StemTag,
         StemLocalX, StemLocalY, StemCoordinateUnits, PersonnelID, FirstName, LastName, PersonnelRoles, SpeciesID,
         SpeciesCode, SpeciesName, SubspeciesName, SubspeciesAuthority, SpeciesIDLevel, GenusID, Genus, GenusAuthority,
         FamilyID, Family, AttributeCode, AttributeDescription, AttributeStatus
@@ -64,9 +63,9 @@ BEGIN
         cm.CoreMeasurementID AS CoreMeasurementID,
         cm.MeasurementDate AS MeasurementDate,
         cm.MeasuredDBH AS MeasuredDBH,
-        cm.DBHUnit AS DBHUnits,
+        p.DefaultDBHUnits AS DBHUnits,
         cm.MeasuredHOM AS MeasuredHOM,
-        cm.HOMUnit AS HOMUnits,
+        p.DefaultHOMUnits AS HOMUnits,
         cm.Description AS Description,
         cm.IsValidated AS IsValidated,
         p.PlotID AS PlotID,
@@ -75,13 +74,13 @@ BEGIN
         p.CountryName AS CountryName,
         p.DimensionX AS DimensionX,
         p.DimensionY AS DimensionY,
-        p.DimensionUnits AS PlotDimensionUnits,
+        p.DefaultDimensionUnits AS PlotDimensionUnits,
         p.Area AS PlotArea,
-        p.AreaUnits AS PlotAreaUnits,
+        p.DefaultAreaUnits AS PlotAreaUnits,
         p.GlobalX AS PlotGlobalX,
         p.GlobalY AS PlotGlobalY,
         p.GlobalZ AS PlotGlobalZ,
-        p.CoordinateUnits AS PlotCoordinateUnits,
+        p.DefaultCoordinateUnits AS PlotCoordinateUnits,
         p.PlotShape AS PlotShape,
         p.PlotDescription AS PlotDescription,
         c.CensusID AS CensusID,
@@ -93,28 +92,16 @@ BEGIN
         q.QuadratName AS QuadratName,
         q.DimensionX AS QuadratDimensionX,
         q.DimensionY AS QuadratDimensionY,
-        q.DimensionUnits AS QuadratDimensionUnits,
         q.Area AS QuadratArea,
-        q.AreaUnits AS QuadratAreaUnits,
         q.StartX AS QuadratStartX,
         q.StartY AS QuadratStartY,
-        q.CoordinateUnits AS QuadratCoordinateUnits,
         q.QuadratShape AS QuadratShape,
-        sq.SubquadratID AS SubquadratID,
-        sq.SubquadratName AS SubquadratName,
-        sq.DimensionX AS SubquadratDimensionX,
-        sq.DimensionY AS SubquadratDimensionY,
-        sq.DimensionUnits AS SubquadratDimensionUnits,
-        sq.QX AS SubquadratX,
-        sq.QY AS SubquadratY,
-        sq.CoordinateUnits AS SubquadratCoordinateUnits,
         t.TreeID AS TreeID,
         t.TreeTag AS TreeTag,
         s.StemID AS StemID,
         s.StemTag AS StemTag,
         s.LocalX AS StemLocalX,
         s.LocalY AS StemLocalY,
-        s.CoordinateUnits AS StemCoordinateUnits,
         pr.PersonnelID AS PersonnelID,
         pr.FirstName AS FirstName,
         pr.LastName AS LastName,
@@ -141,7 +128,6 @@ BEGIN
     LEFT JOIN family f ON g.FamilyID = f.FamilyID
     LEFT JOIN plots p ON s.QuadratID = p.PlotID
     LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
-    LEFT JOIN subquadrats sq ON q.QuadratID = sq.QuadratID
     LEFT JOIN census c ON cm.CensusID = c.CensusID
     LEFT JOIN personnel pr ON pr.CensusID = cm.CensusID
     LEFT JOIN roles r ON pr.RoleID = r.RoleID

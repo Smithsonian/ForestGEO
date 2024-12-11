@@ -7,23 +7,6 @@ import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmul
 import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
 import { DataGridSignals } from '@/config/macros/formdetails';
 
-/**
- *   [FormType.measurements]: [
- *     { label: 'tag' },
- *     { label: 'stemtag' },
- *     { label: 'spcode' },
- *     { label: 'quadrat' },
- *     { label: 'lx' },
- *     { label: 'ly' },
- *     { label: 'coordinateunit' },
- *     { label: 'dbh' },
- *     { label: 'dbhunit' },
- *     { label: 'hom' },
- *     { label: 'homunit' },
- *     { label: 'date' },
- *     { label: 'codes' }
- *   ],
- */
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
   const initialMeasurementsFormRow = {
@@ -34,11 +17,8 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
     quadrat: '',
     lx: 0,
     ly: 0,
-    coordinateunit: '',
     dbh: 0,
-    dbhunit: '',
     hom: 0,
-    homunit: '',
     date: null,
     codes: ''
   };
