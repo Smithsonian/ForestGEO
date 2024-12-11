@@ -6,7 +6,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, plotID, censusID } = props;
   if (!censusID || !plotID) throw createError('CensusID missing', { censusID });
 
-  const { quadrat, startx, starty, coordinateunit, dimx, dimy, dimensionunit, area, areaunit, quadratshape } = rowData;
+  const { quadrat, startx, starty, dimx, dimy, area, quadratshape } = rowData;
 
   try {
     const quadratsData: Partial<QuadratResult> = {
@@ -14,12 +14,9 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
       PlotID: plotID,
       StartX: startx,
       StartY: starty,
-      CoordinateUnits: coordinateunit,
       DimensionX: dimx,
       DimensionY: dimy,
-      DimensionUnits: dimensionunit,
       Area: area,
-      AreaUnits: areaunit,
       QuadratShape: quadratshape
     };
 

@@ -3,13 +3,13 @@ insert into postvalidationqueries
     (QueryName, QueryDefinition, Description, IsEnabled)
 values
     ('Number of Records by Quadrat',
-     'SELECT q.QuadratID, COUNT(DISTINCT cm.CoreMeasurementID) AS MeasurementCount
+     'SELECT q.QuadratName, COUNT(DISTINCT cm.CoreMeasurementID) AS MeasurementCount
       FROM ${schema}.quadrats q
       JOIN ${schema}.censusquadrat cq ON q.QuadratID = cq.QuadratID
       JOIN ${schema}.stems st ON st.QuadratID = q.QuadratID
       JOIN ${schema}.coremeasurements cm ON cm.StemID = st.StemID
       WHERE cm.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
-      GROUP BY q.QuadratID;',
+      GROUP BY q.QuadratName;',
      'Calculating the number of total records, organized by quadrat',
      true),
     ('Number of ALL Stem Records',
@@ -106,7 +106,6 @@ values
         s_current.QuadratID,
         s_current.LocalX,
         s_current.LocalY,
-        s_current.CoordinateUnits
             FROM ${schema}.quadrats q
                 JOIN ${schema}.stems s_current ON q.QuadratID = s_current.QuadratID
                 JOIN ${schema}.coremeasurements cm_current ON s_current.StemID = cm_current.StemID
@@ -119,7 +118,7 @@ values
         ORDER BY q.QuadratName, s_current.StemID;',
      'Finds new stems by quadrat for the current census', true),
     ('Determining which quadrats have the most and least number of new stems for the current census',
-     'WITH NewStems AS (SELECT s_current.QuadratID,
+     'WITH NewStems AS (SELECT s_current.QuadratName,
                             s_current.StemID
                      FROM ${schema}.stems s_current
                               JOIN
@@ -164,7 +163,6 @@ values
               s.QuadratID,
               s.LocalX,
               s.LocalY,
-              s.CoordinateUnits,
               a.Code        AS AttributeCode,
               a.Description AS AttributeDescription,
               a.Status      AS AttributeStatus
@@ -188,10 +186,9 @@ values
               s.StemID,
               s.StemTag,
               s.TreeID,
-              s.QuadratID,
+              q.QuadratName,
               s.LocalX,
               s.LocalY,
-              s.CoordinateUnits,
               a.Code        AS AttributeCode,
               a.Description AS AttributeDescription,
               a.Status      AS AttributeStatus

@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { CMError, ReviewProgress, ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -44,9 +44,6 @@ export default function UploadParent(props: UploadParentProps) {
   // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState<FormType | undefined>(overrideUploadForm);
   const [personnelRecording, setPersonnelRecording] = useState('');
-  const [coordUnit, setCoordUnit] = useState('');
-  const [dbhUnit, setDBHUnit] = useState('');
-  const [homUnit, setHOMUnit] = useState('');
 
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
@@ -70,17 +67,11 @@ export default function UploadParent(props: UploadParentProps) {
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
-  const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   if (!currentSite) throw new Error('site must be selected!');
   const { data: session } = useSession();
-
-  const handleCancelUpload = (): void => {
-    handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
-  };
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -308,11 +299,6 @@ export default function UploadParent(props: UploadParentProps) {
     if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
 
-  useEffect(() => {
-    console.log(`progressTracker: ${progressTracker}`);
-    console.log(`review state: ${reviewState}`);
-  }, [progressTracker, reviewState]);
-
   const renderStateContent = () => {
     if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
     switch (reviewState) {
@@ -345,9 +331,6 @@ export default function UploadParent(props: UploadParentProps) {
       case ReviewStates.REVIEW:
         return (
           <UploadReviewFiles
-            dbhUnit={dbhUnit}
-            homUnit={homUnit}
-            coordUnit={coordUnit}
             acceptedFiles={acceptedFiles}
             setAcceptedFiles={setAcceptedFiles}
             uploadForm={uploadForm}
@@ -380,9 +363,6 @@ export default function UploadParent(props: UploadParentProps) {
             personnelRecording={personnelRecording}
             acceptedFiles={acceptedFiles}
             uploadForm={uploadForm}
-            dbhUnit={dbhUnit}
-            homUnit={homUnit}
-            coordUnit={coordUnit}
             parsedData={parsedData}
             setReviewState={setReviewState}
             setIsDataUnsaved={setIsDataUnsaved}
@@ -407,7 +387,6 @@ export default function UploadParent(props: UploadParentProps) {
             setIsDataUnsaved={setIsDataUnsaved}
             setUploadError={setUploadError}
             setErrorComponent={setErrorComponent}
-            cmErrors={cmErrors}
             user={session?.user?.name ? session?.user?.name : ''}
             allRowToCMID={allRowToCMID}
           />

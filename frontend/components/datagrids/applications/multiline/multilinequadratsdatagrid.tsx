@@ -13,12 +13,9 @@ export default function MultilineQuadratsDataGrid(props: DataGridSignals) {
     quadrat: '',
     startx: 0,
     starty: 0,
-    coordinateunit: '',
     dimx: 0,
     dimy: 0,
-    dimensionunit: '',
     area: 0,
-    areaunit: '',
     quadratshape: ''
   };
   const [refresh, setRefresh] = useState(false);

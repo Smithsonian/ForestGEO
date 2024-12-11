@@ -31,7 +31,6 @@ import {
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Button, IconButton, Snackbar } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -150,9 +149,9 @@ const EditToolbar = (props: EditToolbarProps) => {
               </Tooltip>
             </Box>
           </Tooltip>
-          <Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
-            Add Row
-          </Button>
+          {/*<Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>*/}
+          {/*  Add Row*/}
+          {/*</Button>*/}
           <Button variant={'text'} color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
             Refresh
           </Button>
@@ -187,9 +186,21 @@ const EditToolbar = (props: EditToolbarProps) => {
       </Box>
       <Stack direction={'row'} spacing={2}>
         {dynamicButtons.map((button: any, index: number) => (
-          <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
-            {button.label}
-          </Button>
+          <>
+            {button.tooltip ? (
+              <>
+                <Tooltip title={button.tooltip} placement={'bottom'} arrow>
+                  <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+                    {button.label}
+                  </Button>
+                </Tooltip>
+              </>
+            ) : (
+              <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+                {button.label}
+              </Button>
+            )}
+          </>
         ))}
       </Stack>
     </GridToolbarContainer>
@@ -274,16 +285,33 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const fetchFullData = useCallback(async () => {
     setLoading(true);
     try {
-      const reworkedQuery = usingQuery
-        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-        .trim();
+      const tempQuery = createQFFetchQuery(
+        currentSite?.schemaName ?? '',
+        gridType,
+        paginationModel.page,
+        paginationModel.pageSize,
+        currentPlot?.plotID,
+        currentCensus?.plotCensusNumber
+      );
 
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(reworkedQuery)
+          body: JSON.stringify(
+            (
+              await (
+                await fetch(tempQuery, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filterModel })
+                })
+              ).json()
+            ).finishedQuery
+              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+              .trim()
+          )
         })
       ).json();
 

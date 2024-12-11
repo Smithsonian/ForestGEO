@@ -31,9 +31,7 @@ export default function ViewFullTableDataGrid() {
     // coremeasurements
     measurementDate: undefined,
     measuredDBH: 0,
-    dbhUnits: '',
     measuredHOM: 0,
-    homUnits: '',
     description: '',
     isValidated: false,
 
@@ -43,15 +41,17 @@ export default function ViewFullTableDataGrid() {
     countryName: '',
     dimensionX: 0,
     dimensionY: 0,
-    plotDimensionUnits: '',
     plotArea: 0,
-    plotAreaUnits: '',
     plotGlobalX: 0,
     plotGlobalY: 0,
     plotGlobalZ: 0,
-    plotCoordinateUnits: '',
     plotShape: '',
     plotDescription: '',
+    defaultDimensionUnits: '',
+    defaultCoordinateUnits: '',
+    defaultAreaUnits: '',
+    defaultDBHUnits: '',
+    defaultHOMUnits: '',
 
     // census
     censusStartDate: undefined,
@@ -63,12 +63,9 @@ export default function ViewFullTableDataGrid() {
     quadratName: '',
     quadratDimensionX: 0,
     quadratDimensionY: 0,
-    quadratDimensionUnits: '',
     quadratArea: 0,
-    quadratAreaUnits: '',
     quadratStartX: 0,
     quadratStartY: 0,
-    quadratCoordinateUnits: '',
     quadratShape: '',
 
     // trees
@@ -78,7 +75,6 @@ export default function ViewFullTableDataGrid() {
     stemTag: '',
     stemLocalX: 0,
     stemLocalY: 0,
-    stemCoordinateUnits: '',
 
     // personnel
     firstName: '',
@@ -139,13 +135,10 @@ export default function ViewFullTableDataGrid() {
   async function reloadVFT() {
     try {
       setLoading(true, 'Refreshing Historical View...');
-      const startTime = Date.now();
       const response = await fetch(`/api/refreshviews/viewfulltable/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Historical View Refresh failure');
       setLoading(true, 'Processing data...');
       await response.json();
-      const duration = (Date.now() - startTime) / 1000;
-      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       console.error(e);

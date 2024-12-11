@@ -541,14 +541,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'coordinateunit',
-    headerName: 'Coordinate Units',
-    headerClassName: 'header',
-    align: 'left',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
-  },
-  {
     field: 'dimx',
     headerName: 'Dimension X',
     headerClassName: 'header',
@@ -567,15 +559,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'dimensionunit',
-    headerName: 'Dimension Units',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'dimensionunit'} isArea={false} />
-  },
-  {
     field: 'area',
     headerName: 'Area',
     headerClassName: 'header',
@@ -583,15 +566,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     align: 'left',
     type: 'number',
     editable: true
-  },
-  {
-    field: 'areaunit',
-    headerName: 'Area Units',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'areaunit'} isArea={true} />
   },
   {
     field: 'quadratshape',
@@ -602,23 +576,6 @@ export const QuadratsFormGridColumns: GridColDef[] = [
     editable: true
   }
 ];
-/**
- *   [FormType.measurements]: [
- *     { label: 'tag' },
- *     { label: 'stemtag' },
- *     { label: 'spcode' },
- *     { label: 'quadrat' },
- *     { label: 'lx' },
- *     { label: 'ly' },
- *     { label: 'coordinateunit' },
- *     { label: 'dbh' },
- *     { label: 'dbhunit' },
- *     { label: 'hom' },
- *     { label: 'homunit' },
- *     { label: 'date' },
- *     { label: 'codes' }
- *   ],
- */
 export const MeasurementsFormGridColumns: GridColDef[] = [
   {
     field: 'id',
@@ -684,16 +641,6 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'coordinateunit',
-    headerName: '<= Units',
-    headerClassName: 'header',
-    // renderHeader: () => formatHeader('Coordinate', 'Units'),
-    flex: 0.5,
-    align: 'center',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
-  },
-  {
     field: 'dbh',
     headerName: 'DBH',
     headerClassName: 'header',
@@ -703,16 +650,6 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
     editable: true
   },
   {
-    field: 'dbhunit',
-    headerName: '<= Units',
-    headerClassName: 'header',
-    // renderHeader: () => formatHeader('DBH', 'Units'),
-    flex: 0.5,
-    align: 'center',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'dbhunit'} isArea={false} />
-  },
-  {
     field: 'hom',
     headerName: 'HOM',
     headerClassName: 'header',
@@ -720,15 +657,5 @@ export const MeasurementsFormGridColumns: GridColDef[] = [
     align: 'center',
     type: 'number',
     editable: true
-  },
-  {
-    field: 'homunit',
-    headerName: '<= Units',
-    headerClassName: 'header',
-    // renderHeader: () => formatHeader('HOM', 'Units'),
-    flex: 0.5,
-    align: 'center',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'homunit'} isArea={false} />
   }
 ];
