@@ -114,11 +114,11 @@ export function getTableHeaders(formType: FormType, _usesSubquadrats = false): {
 }
 
 export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[]> = {
-  [FormType.attributes]: [],
-  [FormType.personnel]: [],
-  [FormType.species]: [],
-  [FormType.quadrats]: [],
-  [FormType.measurements]: [],
+  [FormType.attributes]: TableHeadersByFormType[FormType.attributes].filter(header => header.category === 'required'),
+  [FormType.personnel]: TableHeadersByFormType[FormType.personnel].filter(header => header.category === 'required'),
+  [FormType.species]: TableHeadersByFormType[FormType.species].filter(header => header.category === 'required'),
+  [FormType.quadrats]: TableHeadersByFormType[FormType.quadrats].filter(header => header.category === 'required'),
+  [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required'),
   [FormType.arcgis_xlsx]: []
 };
 

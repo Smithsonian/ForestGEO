@@ -508,6 +508,8 @@ export default function Sidebar(props: SidebarProps) {
       size={'md'}
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
+      value={plot?.plotName || ''}
+      onFocus={event => event.preventDefault()}
       onChange={async (event: React.SyntheticEvent | null, newValue: string | null) => {
         event?.preventDefault();
         const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
