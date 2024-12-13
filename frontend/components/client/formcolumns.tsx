@@ -363,7 +363,14 @@ const renderCustomHeader = (formType: FormType, field: string) => {
   const { label, category, explanation } = metadata;
 
   return (
-    <Box>
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'start',
+        overflow: 'hidden' // Prevents content overflow
+      }}
+    >
       <Typography
         level={'title-md'}
         sx={{
@@ -377,7 +384,10 @@ const renderCustomHeader = (formType: FormType, field: string) => {
           level={'body-md'}
           color={'primary'}
           sx={{
-            display: 'block'
+            display: 'block',
+            whiteSpace: 'normal', // Allows text wrapping
+            wordWrap: 'break-word', // Ensures long words are wrapped
+            overflow: 'hidden' // Prevents overflow
           }}
         >
           {explanation}
@@ -397,21 +407,21 @@ export const AttributesFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'code',
     headerName: 'Code',
-    renderHeader: () => renderCustomHeader(FormType.attributes, 'code'),
+    // renderHeader: () => renderCustomHeader(FormType.attributes, 'code'),
     flex: 1,
     editable: true
   },
   {
     field: 'description',
     headerName: 'Description',
-    renderHeader: () => renderCustomHeader(FormType.attributes, 'description'),
+    // renderHeader: () => renderCustomHeader(FormType.attributes, 'description'),
     flex: 1,
     editable: true
   },
   {
     field: 'status',
     headerName: 'Status',
-    renderHeader: () => renderCustomHeader(FormType.attributes, 'status'),
+    // renderHeader: () => renderCustomHeader(FormType.attributes, 'status'),
     flex: 1,
     editable: true
     // This is temporarily being suspended -- it's a nice to have, not a need to have
@@ -429,28 +439,28 @@ export const PersonnelFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'firstname',
     headerName: 'First Name',
-    renderHeader: () => renderCustomHeader(FormType.personnel, 'firstname'),
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'firstname'),
     flex: 1,
     editable: true
   },
   {
     field: 'lastname',
     headerName: 'Last Name',
-    renderHeader: () => renderCustomHeader(FormType.personnel, 'lastname'),
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'lastname'),
     flex: 1,
     editable: true
   },
   {
     field: 'role',
     headerName: 'Role',
-    renderHeader: () => renderCustomHeader(FormType.personnel, 'role'),
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'role'),
     flex: 1,
     editable: true
   },
   {
     field: 'roledescription',
     headerName: 'Role Description',
-    renderHeader: () => renderCustomHeader(FormType.personnel, 'roledescription'),
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'roledescription'),
     flex: 1,
     editable: true
   }
@@ -466,56 +476,56 @@ export const SpeciesFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'spcode',
     headerName: 'Species Code',
-    renderHeader: () => renderCustomHeader(FormType.species, 'spcode'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'spcode'),
     flex: 1,
     editable: true
   },
   {
     field: 'family',
     headerName: 'Family',
-    renderHeader: () => renderCustomHeader(FormType.species, 'family'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'family'),
     flex: 1,
     editable: true
   },
   {
     field: 'genus',
     headerName: 'Genus',
-    renderHeader: () => renderCustomHeader(FormType.species, 'genus'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'genus'),
     flex: 1,
     editable: true
   },
   {
     field: 'species',
     headerName: 'Species',
-    renderHeader: () => renderCustomHeader(FormType.species, 'species'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'species'),
     flex: 1,
     editable: true
   },
   {
     field: 'subspecies',
     headerName: 'Subspecies',
-    renderHeader: () => renderCustomHeader(FormType.species, 'subspecies'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'subspecies'),
     flex: 1,
     editable: true
   },
   {
     field: 'idlevel',
     headerName: 'ID Level',
-    renderHeader: () => renderCustomHeader(FormType.species, 'idlevel'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'idlevel'),
     flex: 1,
     editable: true
   },
   {
     field: 'authority',
     headerName: 'Authority',
-    renderHeader: () => renderCustomHeader(FormType.species, 'authority'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'authority'),
     flex: 1,
     editable: true
   },
   {
     field: 'subspeciesauthority',
     headerName: 'Subspecies Authority',
-    renderHeader: () => renderCustomHeader(FormType.species, 'subspeciesauthority'),
+    // renderHeader: () => renderCustomHeader(FormType.species, 'subspeciesauthority'),
     flex: 1,
     editable: true
   }
@@ -531,14 +541,14 @@ export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'quadrat',
     headerName: 'Quadrat Name',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'quadrat'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'quadrat'),
     flex: 1,
     editable: true
   },
   {
     field: 'startx',
     headerName: 'StartX',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'startx'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'startx'),
     flex: 1,
     type: 'number',
     editable: true
@@ -546,7 +556,7 @@ export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'starty',
     headerName: 'StartY',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'starty'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'starty'),
     flex: 1,
     type: 'number',
     editable: true
@@ -554,7 +564,7 @@ export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'dimx',
     headerName: 'Dimension X',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'dimx'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'dimx'),
     flex: 1,
     type: 'number',
     editable: true
@@ -562,7 +572,7 @@ export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'dimy',
     headerName: 'Dimension Y',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'dimy'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'dimy'),
     flex: 1,
     type: 'number',
     editable: true
@@ -570,7 +580,7 @@ export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'area',
     headerName: 'Area',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'area'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'area'),
     flex: 1,
     type: 'number',
     editable: true
@@ -578,7 +588,7 @@ export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'quadratshape',
     headerName: 'Quadrat Shape',
-    renderHeader: () => renderCustomHeader(FormType.quadrats, 'quadratshape'),
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'quadratshape'),
     flex: 1,
     editable: true
   }
@@ -595,7 +605,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'tag',
     headerName: 'Tree Tag',
     // renderHeader: () => formatHeader('Tree', 'Tag'),
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'tag'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'tag'),
     flex: 0.75,
     editable: true
   },
@@ -603,7 +613,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'stemtag',
     headerName: 'Stem Tag',
     // renderHeader: () => formatHeader('Stem', 'Tag'),
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'stemtag'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'stemtag'),
     flex: 0.75,
     editable: true
   },
@@ -611,7 +621,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'spcode',
     headerName: 'Species Code',
     // renderHeader: () => formatHeader('Species', 'Code'),
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'spcode'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'spcode'),
     flex: 0.75,
     editable: true
   },
@@ -619,14 +629,14 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'quadrat',
     headerName: 'Quadrat Name',
     // renderHeader: () => formatHeader('Quadrat', 'Name'),
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'quadrat'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'quadrat'),
     flex: 0.75,
     editable: true
   },
   {
     field: 'lx',
     headerName: 'X',
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'lx'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'lx'),
     flex: 0.3,
     type: 'number',
     editable: true
@@ -634,7 +644,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'ly',
     headerName: 'Y',
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'ly'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'ly'),
     flex: 0.3,
     type: 'number',
     editable: true
@@ -642,7 +652,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'dbh',
     headerName: 'DBH',
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'dbh'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'dbh'),
     flex: 0.75,
     type: 'number',
     editable: true
@@ -650,7 +660,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'hom',
     headerName: 'HOM',
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'hom'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'hom'),
     flex: 0.75,
     type: 'number',
     editable: true
@@ -659,7 +669,7 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'codes',
     headerName: 'Codes',
     // renderHeader: () => formatHeader('Quadrat', 'Name'),
-    renderHeader: () => renderCustomHeader(FormType.measurements, 'codes'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'codes'),
     flex: 0.75,
     editable: true
   }
