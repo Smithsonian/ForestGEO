@@ -156,20 +156,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         let rowErrors = validateRowByFormType(formType, row);
 
         // Check species/genus condition independently
-        if (formType === 'species') {
-          const [speciesField, genusField] = [row['species'], row['genus']];
-          if (speciesField && !genusField) {
-            const speciesWords = speciesField.trim().split(/\s+/);
-            if (speciesWords.length === 2) {
-              const [genus, species] = speciesWords;
-              row['genus'] = genus;
-              row['species'] = species;
-              rowErrors = rowErrors || {};
-              rowErrors['genus'] = 'Genus was auto-filled based on species field.';
-              rowErrors['species'] = 'Species field was split into genus and species.';
-            }
-          }
-        } else if (formType === 'quadrats') {
+        if (formType === 'quadrats') {
           rowErrors = rowErrors || {};
 
           const [area, dimx, dimy] = [row['area'], row['dimx'], row['dimy']];
@@ -275,7 +262,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                   }
                 }
               }}
-              autoHeight
               getRowHeight={() => 'auto'}
             />
           )}
