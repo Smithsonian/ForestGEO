@@ -2,10 +2,11 @@
 
 // multiline measurements datagrid
 import React, { useState } from 'react';
-import { useSession } from 'next-auth/react';
 import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmultilinedatagridcommons';
 import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
-import { DataGridSignals } from '@/config/macros/formdetails';
+import { DataGridSignals, FormType } from '@/config/macros/formdetails';
+import { Box } from '@mui/joy';
+import RenderFormExplanations from '@/components/client/renderformexplanations';
 
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
@@ -23,16 +24,18 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
     codes: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
 
   return (
-    <IsolatedMultilineDataGridCommons
-      gridType="measurements"
-      gridColumns={MeasurementsFormGridColumns}
-      refresh={refresh}
-      setRefresh={setRefresh}
-      initialRow={initialMeasurementsFormRow}
-      setChangesSubmitted={setChangesSubmitted}
-    />
+    <Box>
+      {RenderFormExplanations(FormType.measurements)}
+      <IsolatedMultilineDataGridCommons
+        gridType="measurements"
+        gridColumns={MeasurementsFormGridColumns}
+        refresh={refresh}
+        setRefresh={setRefresh}
+        initialRow={initialMeasurementsFormRow}
+        setChangesSubmitted={setChangesSubmitted}
+      />
+    </Box>
   );
 }

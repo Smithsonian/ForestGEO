@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useSession } from 'next-auth/react';
 import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmultilinedatagridcommons';
 import { PersonnelFormGridColumns } from '@/components/client/formcolumns';
-import { DataGridSignals } from '@/config/macros/formdetails';
+import { DataGridSignals, FormType } from '@/config/macros/formdetails';
+import { Box } from '@mui/joy';
+import RenderFormExplanations from '@/components/client/renderformexplanations';
 
 export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
@@ -16,16 +17,18 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
     roledescription: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
 
   return (
-    <IsolatedMultilineDataGridCommons
-      gridType="personnel"
-      gridColumns={PersonnelFormGridColumns}
-      refresh={refresh}
-      setRefresh={setRefresh}
-      initialRow={initialPersonnelRow}
-      setChangesSubmitted={setChangesSubmitted}
-    />
+    <Box>
+      {RenderFormExplanations(FormType.personnel)}
+      <IsolatedMultilineDataGridCommons
+        gridType="personnel"
+        gridColumns={PersonnelFormGridColumns}
+        refresh={refresh}
+        setRefresh={setRefresh}
+        initialRow={initialPersonnelRow}
+        setChangesSubmitted={setChangesSubmitted}
+      />
+    </Box>
   );
 }
