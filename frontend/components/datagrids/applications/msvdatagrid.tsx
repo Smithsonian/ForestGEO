@@ -1,7 +1,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar } from '@mui/joy';
@@ -61,13 +61,6 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-
-  async function reloadMSV() {
-    setLoading(true, 'Refreshing Measurements View...');
-    const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
-    if (!response.ok) throw new Error('Measurements View Refresh failure');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
 
   useEffect(() => {
     reloadMSV()
