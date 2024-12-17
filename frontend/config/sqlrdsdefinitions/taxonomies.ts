@@ -109,7 +109,6 @@ export type StemRDS = {
   stemTag?: string;
   localX?: number;
   localY?: number;
-  coordinateUnits?: string;
   moved?: boolean;
   stemDescription?: string;
 };

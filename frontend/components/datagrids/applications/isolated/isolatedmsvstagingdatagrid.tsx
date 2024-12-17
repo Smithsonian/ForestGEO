@@ -29,18 +29,16 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
     stemTag: '',
     stemLocalX: 0,
     stemLocalY: 0,
-    coordinateUnits: '',
     measurementDate: null,
     measuredDBH: 0,
-    dbhUnits: '',
     measuredHOM: 0,
-    homUnits: '',
     isValidated: false,
     description: '',
     attributes: ''
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 
   return (
     <>
@@ -59,7 +57,10 @@ export default function IsolatedMeasurementsSummaryDraftDataGrid() {
         setRefresh={setRefresh}
         initialRow={initialMeasurementsSummaryStagingRDSRow}
         fieldToFocus={'quadratName'}
-        dynamicButtons={[{ label: 'Upload', onClick: () => setIsUploadModalOpen(true) }]}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+        ]}
       />
     </>
   );

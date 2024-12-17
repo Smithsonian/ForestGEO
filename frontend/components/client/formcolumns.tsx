@@ -2,15 +2,16 @@
 
 import { GridColDef, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import { formatHeader } from '@/components/client/datagridcolumns';
 import moment from 'moment/moment';
-import { Box, Input, Tooltip } from '@mui/joy';
+import { Box, Input, Tooltip, Typography } from '@mui/joy';
 import { DatePicker } from '@mui/x-date-pickers';
 import React, { useEffect, useRef, useState } from 'react';
 import useEnhancedEffect from '@mui/utils/useEnhancedEffect';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
+import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
+import { standardizeGridColumns } from '@/components/client/clientmacros';
 
 export const renderDatePicker = (params: GridRenderEditCellParams) => {
   const convertedValue = params.row.date ? moment(params.row.date, 'YYYY-MM-DD') : null;
@@ -350,385 +351,326 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
   );
 };
 
-export const AttributesFormGridColumns: GridColDef[] = [
+const getFieldMetadata = (formType: FormType, field: string) => {
+  return TableHeadersByFormType[formType]?.find(header => header.label === field) || null;
+};
+
+const renderCustomHeader = (formType: FormType, field: string) => {
+  const metadata = getFieldMetadata(formType, field);
+
+  if (!metadata) return field; // Default to field name if no metadata is found.
+
+  const { label, category, explanation } = metadata;
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'start',
+        overflow: 'hidden' // Prevents content overflow
+      }}
+    >
+      <Typography
+        level={'title-md'}
+        sx={{
+          fontWeight: category === 'required' ? 'bold' : 'normal'
+        }}
+      >
+        {label}
+      </Typography>
+      {explanation && (
+        <Typography
+          level={'body-md'}
+          color={'primary'}
+          sx={{
+            display: 'block',
+            whiteSpace: 'normal', // Allows text wrapping
+            wordWrap: 'break-word', // Ensures long words are wrapped
+            overflow: 'hidden' // Prevents overflow
+          }}
+        >
+          {explanation}
+        </Typography>
+      )}
+    </Box>
+  );
+};
+
+export const AttributesFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
-    headerClassName: 'header',
     flex: 0.3,
-    headerAlign: 'right',
     editable: false
   },
   {
     field: 'code',
     headerName: 'Code',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.attributes, 'code'),
     flex: 1,
     editable: true
   },
   {
     field: 'description',
     headerName: 'Description',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.attributes, 'description'),
     flex: 1,
     editable: true
   },
   {
     field: 'status',
     headerName: 'Status',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.attributes, 'status'),
     flex: 1,
     editable: true
     // This is temporarily being suspended -- it's a nice to have, not a need to have
     // renderEditCell: params => <EditStatusCell {...params} />
   }
-];
+]);
 
-export const PersonnelFormGridColumns: GridColDef[] = [
+export const PersonnelFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
-    headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
     editable: false
   },
   {
     field: 'firstname',
     headerName: 'First Name',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'firstname'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'lastname',
     headerName: 'Last Name',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'lastname'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'role',
     headerName: 'Role',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'role'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'roledescription',
     headerName: 'Role Description',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.personnel, 'roledescription'),
     flex: 1,
-    align: 'left',
     editable: true
   }
-];
+]);
 
-export const SpeciesFormGridColumns: GridColDef[] = [
+export const SpeciesFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
-    headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
     editable: false
   },
   {
     field: 'spcode',
     headerName: 'Species Code',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'spcode'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'family',
     headerName: 'Family',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'family'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'genus',
     headerName: 'Genus',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'genus'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'species',
     headerName: 'Species',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'species'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'subspecies',
     headerName: 'Subspecies',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'subspecies'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'idlevel',
     headerName: 'ID Level',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'idlevel'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'authority',
     headerName: 'Authority',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'authority'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'subspeciesauthority',
     headerName: 'Subspecies Authority',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.species, 'subspeciesauthority'),
     flex: 1,
-    align: 'left',
     editable: true
   }
-];
+]);
 
-export const QuadratsFormGridColumns: GridColDef[] = [
+export const QuadratsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
-    headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
     editable: false
   },
   {
     field: 'quadrat',
     headerName: 'Quadrat Name',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'quadrat'),
     flex: 1,
-    align: 'left',
     editable: true
   },
   {
     field: 'startx',
     headerName: 'StartX',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'startx'),
     flex: 1,
-    align: 'left',
     type: 'number',
     editable: true
   },
   {
     field: 'starty',
     headerName: 'StartY',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'starty'),
     flex: 1,
-    align: 'left',
     type: 'number',
     editable: true
   },
   {
-    field: 'coordinateunit',
-    headerName: 'Coordinate Units',
-    headerClassName: 'header',
-    align: 'left',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
-  },
-  {
     field: 'dimx',
     headerName: 'Dimension X',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'dimx'),
     flex: 1,
-    align: 'left',
     type: 'number',
     editable: true
   },
   {
     field: 'dimy',
     headerName: 'Dimension Y',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'dimy'),
     flex: 1,
-    align: 'left',
     type: 'number',
     editable: true
-  },
-  {
-    field: 'dimensionunit',
-    headerName: 'Dimension Units',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'dimensionunit'} isArea={false} />
   },
   {
     field: 'area',
     headerName: 'Area',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'area'),
     flex: 1,
-    align: 'left',
     type: 'number',
     editable: true
   },
   {
-    field: 'areaunit',
-    headerName: 'Area Units',
-    headerClassName: 'header',
-    flex: 0.3,
-    align: 'left',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'areaunit'} isArea={true} />
-  },
-  {
     field: 'quadratshape',
     headerName: 'Quadrat Shape',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.quadrats, 'quadratshape'),
     flex: 1,
-    align: 'left',
     editable: true
   }
-];
-/**
- *   [FormType.measurements]: [
- *     { label: 'tag' },
- *     { label: 'stemtag' },
- *     { label: 'spcode' },
- *     { label: 'quadrat' },
- *     { label: 'lx' },
- *     { label: 'ly' },
- *     { label: 'coordinateunit' },
- *     { label: 'dbh' },
- *     { label: 'dbhunit' },
- *     { label: 'hom' },
- *     { label: 'homunit' },
- *     { label: 'date' },
- *     { label: 'codes' }
- *   ],
- */
-export const MeasurementsFormGridColumns: GridColDef[] = [
+]);
+
+export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
-    headerClassName: 'header',
     flex: 0.3,
-    align: 'right',
-    headerAlign: 'right',
     editable: false
   },
   {
     field: 'tag',
     headerName: 'Tree Tag',
-    headerClassName: 'header',
-    renderHeader: () => formatHeader('Tree', 'Tag'),
+    // renderHeader: () => formatHeader('Tree', 'Tag'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'tag'),
     flex: 0.75,
-    align: 'center',
     editable: true
   },
   {
     field: 'stemtag',
     headerName: 'Stem Tag',
-    headerClassName: 'header',
-    renderHeader: () => formatHeader('Stem', 'Tag'),
+    // renderHeader: () => formatHeader('Stem', 'Tag'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'stemtag'),
     flex: 0.75,
-    align: 'center',
     editable: true
   },
   {
     field: 'spcode',
     headerName: 'Species Code',
-    headerClassName: 'header',
-    renderHeader: () => formatHeader('Species', 'Code'),
+    // renderHeader: () => formatHeader('Species', 'Code'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'spcode'),
     flex: 0.75,
-    align: 'center',
     editable: true
   },
   {
     field: 'quadrat',
     headerName: 'Quadrat Name',
-    headerClassName: 'header',
-    renderHeader: () => formatHeader('Quadrat', 'Name'),
+    // renderHeader: () => formatHeader('Quadrat', 'Name'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'quadrat'),
     flex: 0.75,
-    align: 'center',
     editable: true
   },
   {
     field: 'lx',
     headerName: 'X',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'lx'),
     flex: 0.3,
-    align: 'center',
     type: 'number',
     editable: true
   },
   {
     field: 'ly',
     headerName: 'Y',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'ly'),
     flex: 0.3,
-    align: 'center',
     type: 'number',
     editable: true
-  },
-  {
-    field: 'coordinateunit',
-    headerName: '<= Units',
-    headerClassName: 'header',
-    // renderHeader: () => formatHeader('Coordinate', 'Units'),
-    flex: 0.5,
-    align: 'center',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'coordinateunit'} isArea={false} />
   },
   {
     field: 'dbh',
     headerName: 'DBH',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'dbh'),
     flex: 0.75,
-    align: 'center',
     type: 'number',
     editable: true
-  },
-  {
-    field: 'dbhunit',
-    headerName: '<= Units',
-    headerClassName: 'header',
-    // renderHeader: () => formatHeader('DBH', 'Units'),
-    flex: 0.5,
-    align: 'center',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'dbhunit'} isArea={false} />
   },
   {
     field: 'hom',
     headerName: 'HOM',
-    headerClassName: 'header',
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'hom'),
     flex: 0.75,
-    align: 'center',
     type: 'number',
     editable: true
   },
   {
-    field: 'homunit',
-    headerName: '<= Units',
-    headerClassName: 'header',
-    // renderHeader: () => formatHeader('HOM', 'Units'),
-    flex: 0.5,
-    align: 'center',
-    editable: true,
-    renderEditCell: params => <EditUnitsCell {...params} fieldName={'homunit'} isArea={false} />
+    field: 'codes',
+    headerName: 'Codes',
+    // renderHeader: () => formatHeader('Quadrat', 'Name'),
+    // renderHeader: () => renderCustomHeader(FormType.measurements, 'codes'),
+    flex: 0.75,
+    editable: true
   }
-];
+]);

@@ -17,7 +17,6 @@ import {
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, Button, Snackbar } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
@@ -70,9 +69,9 @@ const EditToolbar = ({ handleAddNewRow, handleRefresh, handleExportAll, locked, 
   return (
     <GridToolbarContainer>
       <GridToolbar />
-      <Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>
-        Add Row
-      </Button>
+      {/*<Button color="primary" startIcon={<AddIcon />} onClick={handleAddNewRow} disabled={locked}>*/}
+      {/*  Add Row*/}
+      {/*</Button>*/}
       <Button color="primary" startIcon={<RefreshIcon />} onClick={handleRefresh}>
         Refresh
       </Button>

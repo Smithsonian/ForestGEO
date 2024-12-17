@@ -77,22 +77,19 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           quadrat: row.QuadratName,
           startx: row.StartX,
           starty: row.StartY,
-          coordinateunit: row.CoordinateUnits,
           dimx: row.DimensionX,
           dimy: row.DimensionY,
-          dimensionunit: row.DimensionUnits,
           area: row.Area,
-          areaunit: row.AreaUnits,
           quadratshape: row.QuadratShape
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
         query = `SELECT st.StemTag AS StemTag, t.TreeTag AS TreeTag, s.SpeciesCode AS SpeciesCode, q.QuadratName AS QuadratName, 
-          q.StartX AS StartX, q.StartY AS StartY, q.CoordinateUnits AS CoordinateUnits, cm.MeasuredDBH AS MeasuredDBH, cm.DBHUnit AS DBHUnit, 
-          cm.MeasuredHOM AS MeasuredHOM, cm.HOMUnit AS HOMUnit, cm.MeasurementDate AS MeasurementDate, 
+          st.StemLocalX AS StartX, st.StemLocalY AS StartY,  cm.MeasuredDBH AS MeasuredDBH, cm.MeasuredHOM AS MeasuredHOM, 
+          cm.MeasurementDate AS MeasurementDate, 
           (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
             FROM ${schema}.cmattributes ca
-            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes 
+            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes
           FROM ${schema}.coremeasurements cm 
           JOIN ${schema}.stems st ON st.StemID = cm.StemID 
           JOIN ${schema}.trees t ON t.TreeID = st.TreeID 
@@ -108,11 +105,8 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           quadrat: row.QuadratName,
           lx: row.StartX,
           ly: row.StartY,
-          coordinateunit: row.CoordinateUnits,
           dbh: row.MeasuredDBH,
-          dbhunit: row.DBHUnit,
           hom: row.MeasuredHOM,
-          homunit: row.HOMUnit,
           date: row.MeasurementDate,
           codes: row.Codes
         }));

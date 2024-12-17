@@ -42,6 +42,15 @@ export async function GET(
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} pdt WHERE pdt.SpeciesID = ? LIMIT ?, ?`;
         queryParams.push(speciesID, page * pageSize, pageSize);
         break;
+      case 'unifiedchangelog':
+        paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} uc
+            JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
+            JOIN ${schema}.census c ON uc.CensusID = c.CensusID
+            WHERE p.PlotID = ?
+            AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
+        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+        break;
       case 'attributes':
       case 'species':
       case 'stems':

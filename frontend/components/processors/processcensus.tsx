@@ -11,7 +11,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
   }
-  const { tag, stemtag, spcode, quadrat, lx, ly, coordinateunit, dbh, dbhunit, hom, homunit, date, codes } = rowData;
+  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
 
   try {
     // Fetch species
@@ -36,13 +36,15 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
         // Handle Stem Upsert
-        const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(
+        const results = await handleUpsert<StemResult>(
           connectionManager,
           schema,
           'stems',
-          { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly, CoordinateUnits: coordinateunit },
+          { StemTag: stemtag, TreeID: treeID, QuadratID: quadratID, LocalX: lx, LocalY: ly },
           'StemID'
         );
+        console.log('results: ', results);
+        const { id: stemID, operation: stemOperation } = results;
         console.log('stem tag: ', stemtag, ' was ', stemOperation, ' on ID # ', stemID);
 
         if (stemOperation === 'inserted') {
@@ -68,9 +70,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             IsValidated: null,
             MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
             MeasuredDBH: dbh ? parseFloat(dbh) : null,
-            DBHUnit: dbhunit,
             MeasuredHOM: hom ? parseFloat(hom) : null,
-            HOMUnit: homunit,
             Description: null,
             UserDefinedFields: userDefinedFields // using this to track the operation on the tree and stem
           },

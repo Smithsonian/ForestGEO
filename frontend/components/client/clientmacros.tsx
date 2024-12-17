@@ -2,6 +2,8 @@
 
 import { Box, Collapse, LinearProgress, LinearProgressProps, Slide, SlideProps, Typography } from '@mui/material';
 import React from 'react';
+import { GridColDef } from '@mui/x-data-grid';
+import { CELL_ALIGN, HEADER_ALIGN } from '@/config/macros';
 
 export function LinearProgressWithLabel(props: LinearProgressProps & { value?: number; currentlyrunningmsg?: string }) {
   return (
@@ -38,3 +40,16 @@ interface TransitionComponentProps extends Omit<SlideProps, 'children'> {
 }
 
 export const TransitionComponent: React.FC<TransitionComponentProps> = ({ children, ...props }) => <Slide {...props}>{children}</Slide>;
+
+function applyStandardSettings(col: GridColDef): GridColDef {
+  return {
+    ...col,
+    headerClassName: 'header',
+    align: CELL_ALIGN,
+    headerAlign: HEADER_ALIGN
+  };
+}
+
+export function standardizeGridColumns(cols: GridColDef[]): GridColDef[] {
+  return cols.map(col => applyStandardSettings(col));
+}

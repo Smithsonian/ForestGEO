@@ -1,3 +1,66 @@
+DROP TRIGGER IF EXISTS `after_insert_attributes`;
+DROP TRIGGER IF EXISTS `after_update_attributes`;
+DROP TRIGGER IF EXISTS `after_delete_attributes`;
+DROP TRIGGER IF EXISTS `after_insert_census`;
+DROP TRIGGER IF EXISTS `after_update_census`;
+DROP TRIGGER IF EXISTS `after_delete_census`;
+DROP TRIGGER IF EXISTS `after_insert_cmattributes`;
+DROP TRIGGER IF EXISTS `after_update_cmattributes`;
+DROP TRIGGER IF EXISTS `after_delete_cmattributes`;
+DROP TRIGGER IF EXISTS `after_insert_cmverrors`;
+DROP TRIGGER IF EXISTS `after_update_cmverrors`;
+DROP TRIGGER IF EXISTS `after_delete_cmverrors`;
+DROP TRIGGER IF EXISTS `after_insert_coremeasurements`;
+DROP TRIGGER IF EXISTS `after_update_coremeasurements`;
+DROP TRIGGER IF EXISTS `after_delete_coremeasurements`;
+DROP TRIGGER IF EXISTS `after_insert_family`;
+DROP TRIGGER IF EXISTS `after_update_family`;
+DROP TRIGGER IF EXISTS `after_delete_family`;
+DROP TRIGGER IF EXISTS `after_insert_genus`;
+DROP TRIGGER IF EXISTS `after_update_genus`;
+DROP TRIGGER IF EXISTS `after_delete_genus`;
+DROP TRIGGER IF EXISTS `after_insert_personnel`;
+DROP TRIGGER IF EXISTS `after_update_personnel`;
+DROP TRIGGER IF EXISTS `after_delete_personnel`;
+DROP TRIGGER IF EXISTS `after_insert_plots`;
+DROP TRIGGER IF EXISTS `after_update_plots`;
+DROP TRIGGER IF EXISTS `after_delete_plots`;
+DROP TRIGGER IF EXISTS `after_insert_quadratpersonnel`;
+DROP TRIGGER IF EXISTS `after_update_quadratpersonnel`;
+DROP TRIGGER IF EXISTS `after_delete_quadratpersonnel`;
+DROP TRIGGER IF EXISTS `after_insert_quadrats`;
+DROP TRIGGER IF EXISTS `after_update_quadrats`;
+DROP TRIGGER IF EXISTS `after_delete_quadrats`;
+DROP TRIGGER IF EXISTS `after_insert_reference`;
+DROP TRIGGER IF EXISTS `after_update_reference`;
+DROP TRIGGER IF EXISTS `after_delete_reference`;
+DROP TRIGGER IF EXISTS `after_insert_roles`;
+DROP TRIGGER IF EXISTS `after_update_roles`;
+DROP TRIGGER IF EXISTS `after_delete_roles`;
+DROP TRIGGER IF EXISTS `after_insert_species`;
+DROP TRIGGER IF EXISTS `after_update_species`;
+DROP TRIGGER IF EXISTS `after_delete_species`;
+DROP TRIGGER IF EXISTS `after_insert_specieslimits`;
+DROP TRIGGER IF EXISTS `after_update_specieslimits`;
+DROP TRIGGER IF EXISTS `after_delete_specieslimits`;
+DROP TRIGGER IF EXISTS `after_insert_specimens`;
+DROP TRIGGER IF EXISTS `after_update_specimens`;
+DROP TRIGGER IF EXISTS `after_delete_specimens`;
+DROP TRIGGER IF EXISTS `after_insert_stems`;
+DROP TRIGGER IF EXISTS `before_stem_update`;
+DROP TRIGGER IF EXISTS `after_update_stems`;
+DROP TRIGGER IF EXISTS `after_delete_stems`;
+DROP TRIGGER IF EXISTS `after_insert_subquadrats`;
+DROP TRIGGER IF EXISTS `after_update_subquadrats`;
+DROP TRIGGER IF EXISTS `after_delete_subquadrats`;
+DROP TRIGGER IF EXISTS `after_insert_trees`;
+DROP TRIGGER IF EXISTS `after_update_trees`;
+DROP TRIGGER IF EXISTS `after_delete_trees`;
+DROP TRIGGER IF EXISTS `after_insert_validationchangelog`;
+DROP TRIGGER IF EXISTS `after_update_validationchangelog`;
+DROP TRIGGER IF EXISTS `after_delete_validationchangelog`;
+
+
 DELIMITER
 //
 
@@ -54,15 +117,17 @@ BEGIN
             'CountryName', NEW.CountryName,
             'DimensionX', NEW.DimensionX,
             'DimensionY', NEW.DimensionY,
-            'DimensionUnits', NEW.DimensionUnits,
             'Area', NEW.Area,
-            'AreaUnits', NEW.AreaUnits,
             'GlobalX', NEW.GlobalX,
             'GlobalY', NEW.GlobalY,
             'GlobalZ', NEW.GlobalZ,
-            'CoordinateUnits', NEW.CoordinateUnits,
             'PlotShape', NEW.PlotShape,
-            'PlotDescription', NEW.PlotDescription
+            'PlotDescription', NEW.PlotDescription,
+            'DefaultDimensionUnits', NEW.DefaultDimensionUnits,
+            'DefaultCoordinateUnits', NEW.DefaultCoordinateUnits,
+            'DefaultAreaUnits', NEW.DefaultAreaUnits,
+            'DefaultDBHUnits', NEW.DefaultDBHUnits,
+            'DefaultHOMUnits', NEW.DefaultHOMUnits
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID)
     VALUES ('plots', NEW.PlotID, 'INSERT', new_json, NOW(), 'User', NEW.PlotID);
@@ -82,15 +147,17 @@ BEGIN
             'CountryName', OLD.CountryName,
             'DimensionX', OLD.DimensionX,
             'DimensionY', OLD.DimensionY,
-            'DimensionUnits', OLD.DimensionUnits,
             'Area', OLD.Area,
-            'AreaUnits', OLD.AreaUnits,
             'GlobalX', OLD.GlobalX,
             'GlobalY', OLD.GlobalY,
             'GlobalZ', OLD.GlobalZ,
-            'CoordinateUnits', OLD.CoordinateUnits,
             'PlotShape', OLD.PlotShape,
-            'PlotDescription', OLD.PlotDescription
+            'PlotDescription', OLD.PlotDescription,
+            'DefaultDimensionUnits', OLD.DefaultDimensionUnits,
+            'DefaultCoordinateUnits', OLD.DefaultCoordinateUnits,
+            'DefaultAreaUnits', OLD.DefaultAreaUnits,
+            'DefaultDBHUnits', OLD.DefaultDBHUnits,
+            'DefaultHOMUnits', OLD.DefaultHOMUnits
                    );
     SET new_json = JSON_OBJECT(
             'PlotID', NEW.PlotID,
@@ -99,15 +166,17 @@ BEGIN
             'CountryName', NEW.CountryName,
             'DimensionX', NEW.DimensionX,
             'DimensionY', NEW.DimensionY,
-            'DimensionUnits', NEW.DimensionUnits,
             'Area', NEW.Area,
-            'AreaUnits', NEW.AreaUnits,
             'GlobalX', NEW.GlobalX,
             'GlobalY', NEW.GlobalY,
             'GlobalZ', NEW.GlobalZ,
-            'CoordinateUnits', NEW.CoordinateUnits,
             'PlotShape', NEW.PlotShape,
-            'PlotDescription', NEW.PlotDescription
+            'PlotDescription', NEW.PlotDescription,
+            'DefaultDimensionUnits', NEW.DefaultDimensionUnits,
+            'DefaultCoordinateUnits', NEW.DefaultCoordinateUnits,
+            'DefaultAreaUnits', NEW.DefaultAreaUnits,
+            'DefaultDBHUnits', NEW.DefaultDBHUnits,
+            'DefaultHOMUnits', NEW.DefaultHOMUnits
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
                                   PlotID)
@@ -127,15 +196,17 @@ BEGIN
             'CountryName', OLD.CountryName,
             'DimensionX', OLD.DimensionX,
             'DimensionY', OLD.DimensionY,
-            'DimensionUnits', OLD.DimensionUnits,
             'Area', OLD.Area,
-            'AreaUnits', OLD.AreaUnits,
             'GlobalX', OLD.GlobalX,
             'GlobalY', OLD.GlobalY,
             'GlobalZ', OLD.GlobalZ,
-            'CoordinateUnits', OLD.CoordinateUnits,
             'PlotShape', OLD.PlotShape,
-            'PlotDescription', OLD.PlotDescription
+            'PlotDescription', OLD.PlotDescription,
+            'DefaultDimensionUnits', OLD.DefaultDimensionUnits,
+            'DefaultCoordinateUnits', OLD.DefaultCoordinateUnits,
+            'DefaultAreaUnits', OLD.DefaultAreaUnits,
+            'DefaultDBHUnits', OLD.DefaultDBHUnits,
+            'DefaultHOMUnits', OLD.DefaultHOMUnits
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID)
     VALUES ('plots', OLD.PlotID, 'DELETE', old_json, NOW(), 'User', OLD.PlotID);
@@ -235,12 +306,9 @@ BEGIN
             'QuadratName', NEW.QuadratName,
             'StartX', NEW.StartX,
             'StartY', NEW.StartY,
-            'CoordinateUnits', NEW.CoordinateUnits,
             'DimensionX', NEW.DimensionX,
             'DimensionY', NEW.DimensionY,
-            'DimensionUnits', NEW.DimensionUnits,
             'Area', NEW.Area,
-            'AreaUnits', NEW.AreaUnits,
             'QuadratShape', NEW.QuadratShape
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy, PlotID,
@@ -266,12 +334,9 @@ BEGIN
             'QuadratName', OLD.QuadratName,
             'StartX', OLD.StartX,
             'StartY', OLD.StartY,
-            'CoordinateUnits', OLD.CoordinateUnits,
             'DimensionX', OLD.DimensionX,
             'DimensionY', OLD.DimensionY,
-            'DimensionUnits', OLD.DimensionUnits,
             'Area', OLD.Area,
-            'AreaUnits', OLD.AreaUnits,
             'QuadratShape', OLD.QuadratShape
                    );
     SET new_json = JSON_OBJECT(
@@ -280,12 +345,9 @@ BEGIN
             'QuadratName', NEW.QuadratName,
             'StartX', NEW.StartX,
             'StartY', NEW.StartY,
-            'CoordinateUnits', NEW.CoordinateUnits,
             'DimensionX', NEW.DimensionX,
             'DimensionY', NEW.DimensionY,
-            'DimensionUnits', NEW.DimensionUnits,
             'Area', NEW.Area,
-            'AreaUnits', NEW.AreaUnits,
             'QuadratShape', NEW.QuadratShape
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy,
@@ -310,12 +372,9 @@ BEGIN
             'QuadratName', OLD.QuadratName,
             'StartX', OLD.StartX,
             'StartY', OLD.StartY,
-            'CoordinateUnits', OLD.CoordinateUnits,
             'DimensionX', OLD.DimensionX,
             'DimensionY', OLD.DimensionY,
-            'DimensionUnits', OLD.DimensionUnits,
             'Area', OLD.Area,
-            'AreaUnits', OLD.AreaUnits,
             'QuadratShape', OLD.QuadratShape
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy, PlotID,
@@ -648,7 +707,7 @@ BEGIN
     DECLARE plot_id INT;
 
     -- Fetch PlotID associated with the QuadratID
-    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID LIMIT 1;
 
     SET new_json = JSON_OBJECT(
             'QuadratPersonnelID', NEW.QuadratPersonnelID,
@@ -671,7 +730,7 @@ BEGIN
     DECLARE plot_id INT;
 
     -- Fetch PlotID associated with the QuadratID
-    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID;
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = NEW.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'QuadratPersonnelID', OLD.QuadratPersonnelID,
@@ -700,7 +759,7 @@ BEGIN
     DECLARE plot_id INT;
 
     -- Fetch PlotID associated with the QuadratID
-    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = OLD.QuadratID;
+    SELECT PlotID INTO plot_id FROM quadrats WHERE QuadratID = OLD.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'QuadratPersonnelID', OLD.QuadratPersonnelID,
@@ -823,8 +882,7 @@ BEGIN
             'SpeciesID', NEW.SpeciesID,
             'LimitType', NEW.LimitType,
             'UpperBound', NEW.UpperBound,
-            'LowerBound', NEW.LowerBound,
-            'Unit', NEW.Unit
+            'LowerBound', NEW.LowerBound
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
     VALUES ('specieslimits', NEW.SpeciesLimitID, 'INSERT', new_json, NOW(), 'User');
@@ -842,16 +900,14 @@ BEGIN
             'SpeciesID', OLD.SpeciesID,
             'LimitType', OLD.LimitType,
             'UpperBound', OLD.UpperBound,
-            'LowerBound', OLD.LowerBound,
-            'Unit', OLD.Unit
+            'LowerBound', OLD.LowerBound
                    );
     SET new_json = JSON_OBJECT(
             'SpeciesLimitID', NEW.SpeciesLimitID,
             'SpeciesID', NEW.SpeciesID,
             'LimitType', NEW.LimitType,
             'UpperBound', NEW.UpperBound,
-            'LowerBound', NEW.LowerBound,
-            'Unit', NEW.Unit
+            'LowerBound', NEW.LowerBound
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
     VALUES ('specieslimits', NEW.SpeciesLimitID, 'UPDATE', old_json, new_json, NOW(), 'User');
@@ -868,100 +924,13 @@ BEGIN
             'SpeciesID', OLD.SpeciesID,
             'LimitType', OLD.LimitType,
             'UpperBound', OLD.UpperBound,
-            'LowerBound', OLD.LowerBound,
-            'Unit', OLD.Unit
+            'LowerBound', OLD.LowerBound
                    );
     INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
     VALUES ('specieslimits', OLD.SpeciesLimitID, 'DELETE', old_json, NOW(), 'User');
 END //
 
 DELIMITER ;
-
-
-DELIMITER
-//
-
-CREATE TRIGGER after_insert_subquadrats
-    AFTER INSERT
-    ON subquadrats
-    FOR EACH ROW
-BEGIN
-    DECLARE new_json JSON;
-    SET new_json = JSON_OBJECT(
-            'SubquadratID', NEW.SubquadratID,
-            'SubquadratName', NEW.SubquadratName,
-            'QuadratID', NEW.QuadratID,
-            'DimensionX', NEW.DimensionX,
-            'DimensionY', NEW.DimensionY,
-            'DimensionUnits', NEW.DimensionUnits,
-            'QX', NEW.QX,
-            'QY', NEW.QY,
-            'CoordinateUnits', NEW.CoordinateUnits,
-            'Ordering', NEW.Ordering
-                   );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('subquadrats', NEW.SubquadratID, 'INSERT', new_json, NOW(), 'User');
-END //
-
-CREATE TRIGGER after_update_subquadrats
-    AFTER UPDATE
-    ON subquadrats
-    FOR EACH ROW
-BEGIN
-    DECLARE old_json JSON;
-    DECLARE new_json JSON;
-    SET old_json = JSON_OBJECT(
-            'SubquadratID', OLD.SubquadratID,
-            'SubquadratName', OLD.SubquadratName,
-            'QuadratID', OLD.QuadratID,
-            'DimensionX', OLD.DimensionX,
-            'DimensionY', OLD.DimensionY,
-            'DimensionUnits', OLD.DimensionUnits,
-            'QX', OLD.QX,
-            'QY', OLD.QY,
-            'CoordinateUnits', OLD.CoordinateUnits,
-            'Ordering', OLD.Ordering
-                   );
-    SET new_json = JSON_OBJECT(
-            'SubquadratID', NEW.SubquadratID,
-            'SubquadratName', NEW.SubquadratName,
-            'QuadratID', NEW.QuadratID,
-            'DimensionX', NEW.DimensionX,
-            'DimensionY', NEW.DimensionY,
-            'DimensionUnits', NEW.DimensionUnits,
-            'QX', NEW.QX,
-            'QY', NEW.QY,
-            'CoordinateUnits', NEW.CoordinateUnits,
-            'Ordering', NEW.Ordering
-                   );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, NewRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('subquadrats', NEW.SubquadratID, 'UPDATE', old_json, new_json, NOW(), 'User');
-END //
-
-CREATE TRIGGER after_delete_subquadrats
-    AFTER DELETE
-    ON subquadrats
-    FOR EACH ROW
-BEGIN
-    DECLARE old_json JSON;
-    SET old_json = JSON_OBJECT(
-            'SubquadratID', OLD.SubquadratID,
-            'SubquadratName', OLD.SubquadratName,
-            'QuadratID', OLD.QuadratID,
-            'DimensionX', OLD.DimensionX,
-            'DimensionY', OLD.DimensionY,
-            'DimensionUnits', OLD.DimensionUnits,
-            'QX', OLD.QX,
-            'QY', OLD.QY,
-            'CoordinateUnits', OLD.CoordinateUnits,
-            'Ordering', OLD.Ordering
-                   );
-    INSERT INTO unifiedchangelog (TableName, RecordID, Operation, OldRowState, ChangeTimestamp, ChangedBy)
-    VALUES ('subquadrats', OLD.SubquadratID, 'DELETE', old_json, NOW(), 'User');
-END //
-
-DELIMITER ;
-
 
 DELIMITER
 //
@@ -1027,7 +996,7 @@ BEFORE UPDATE ON stems
 FOR EACH ROW
 BEGIN
     -- Check if local coordinates are changing
-    IF NEW.LocalX <> OLD.LocalX OR NEW.LocalY <> OLD.LocalY OR NEW.CoordinateUnits <> OLD.CoordinateUnits THEN
+    IF NEW.LocalX <> OLD.LocalX OR NEW.LocalY <> OLD.LocalY THEN
         -- Mark the stem as moved
         SET NEW.Moved = 1;
     END IF;
@@ -1047,7 +1016,7 @@ BEGIN
                             FROM quadrats q
                             JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
                             JOIN census c ON c.CensusID = cq.CensusID
-                            WHERE q.QuadratID = NEW.QuadratID;
+                            WHERE q.QuadratID = NEW.QuadratID LIMIT 1;
 
     SET new_json = JSON_OBJECT(
             'StemID', NEW.StemID,
@@ -1057,7 +1026,6 @@ BEGIN
             'StemTag', NEW.StemTag,
             'LocalX', NEW.LocalX,
             'LocalY', NEW.LocalY,
-            'CoordinateUnits', NEW.CoordinateUnits,
             'Moved', NEW.Moved,
             'StemDescription', NEW.StemDescription
                    );
@@ -1081,7 +1049,7 @@ BEGIN
                             FROM quadrats q
                             JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
                             JOIN census c ON c.CensusID = cq.CensusID
-                            WHERE q.QuadratID = NEW.QuadratID;
+                            WHERE q.QuadratID = NEW.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
@@ -1091,7 +1059,6 @@ BEGIN
             'StemTag', OLD.StemTag,
             'LocalX', OLD.LocalX,
             'LocalY', OLD.LocalY,
-            'CoordinateUnits', OLD.CoordinateUnits,
             'Moved', OLD.Moved,
             'StemDescription', OLD.StemDescription
                    );
@@ -1103,7 +1070,6 @@ BEGIN
             'StemTag', NEW.StemTag,
             'LocalX', NEW.LocalX,
             'LocalY', NEW.LocalY,
-            'CoordinateUnits', NEW.CoordinateUnits,
             'Moved', NEW.Moved,
             'StemDescription', NEW.StemDescription
                    );
@@ -1127,7 +1093,7 @@ BEGIN
                             FROM quadrats q
                             JOIN censusquadrat cq ON cq.QuadratID = q.QuadratID
                             JOIN census c ON c.CensusID = cq.CensusID
-                            WHERE q.QuadratID = OLD.QuadratID;
+                            WHERE q.QuadratID = OLD.QuadratID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'StemID', OLD.StemID,
@@ -1137,7 +1103,6 @@ BEGIN
             'StemTag', OLD.StemTag,
             'LocalX', OLD.LocalX,
             'LocalY', OLD.LocalY,
-            'CoordinateUnits', OLD.CoordinateUnits,
             'Moved', OLD.Moved,
             'StemDescription', OLD.StemDescription
                    );
@@ -1165,7 +1130,7 @@ BEGIN
     INTO plot_id
     FROM quadrats q
              JOIN stems s ON q.QuadratID = s.QuadratID
-    WHERE s.StemID = NEW.StemID;
+    WHERE s.StemID = NEW.StemID LIMIT 1;
 
     SET new_json = JSON_OBJECT(
             'CoreMeasurementID', NEW.CoreMeasurementID,
@@ -1174,9 +1139,7 @@ BEGIN
             'IsValidated', NEW.IsValidated,
             'MeasurementDate', NEW.MeasurementDate,
             'MeasuredDBH', NEW.MeasuredDBH,
-            'DBHUnit', NEW.DBHUnit,
             'MeasuredHOM', NEW.MeasuredHOM,
-            'HOMUnit', NEW.HOMUnit,
             'Description', NEW.Description,
             'UserDefinedFields', NEW.UserDefinedFields
                    );
@@ -1199,7 +1162,7 @@ BEGIN
     INTO plot_id
     FROM quadrats q
              JOIN stems s ON q.QuadratID = s.QuadratID
-    WHERE s.StemID = NEW.StemID;
+    WHERE s.StemID = NEW.StemID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'CoreMeasurementID', OLD.CoreMeasurementID,
@@ -1208,9 +1171,7 @@ BEGIN
             'IsValidated', OLD.IsValidated,
             'MeasurementDate', OLD.MeasurementDate,
             'MeasuredDBH', OLD.MeasuredDBH,
-            'DBHUnit', OLD.DBHUnit,
             'MeasuredHOM', OLD.MeasuredHOM,
-            'HOMUnit', OLD.HOMUnit,
             'Description', OLD.Description,
             'UserDefinedFields', OLD.UserDefinedFields
                    );
@@ -1221,9 +1182,7 @@ BEGIN
             'IsValidated', NEW.IsValidated,
             'MeasurementDate', NEW.MeasurementDate,
             'MeasuredDBH', NEW.MeasuredDBH,
-            'DBHUnit', NEW.DBHUnit,
             'MeasuredHOM', NEW.MeasuredHOM,
-            'HOMUnit', NEW.HOMUnit,
             'Description', NEW.Description,
             'UserDefinedFields', NEW.UserDefinedFields
                    );
@@ -1246,7 +1205,7 @@ BEGIN
     INTO plot_id
     FROM quadrats q
              JOIN stems s ON q.QuadratID = s.QuadratID
-    WHERE s.StemID = OLD.StemID;
+    WHERE s.StemID = OLD.StemID LIMIT 1;
 
     SET old_json = JSON_OBJECT(
             'CoreMeasurementID', OLD.CoreMeasurementID,
@@ -1255,9 +1214,7 @@ BEGIN
             'IsValidated', OLD.IsValidated,
             'MeasurementDate', OLD.MeasurementDate,
             'MeasuredDBH', OLD.MeasuredDBH,
-            'DBHUnit', OLD.DBHUnit,
             'MeasuredHOM', OLD.MeasuredHOM,
-            'HOMUnit', OLD.HOMUnit,
             'Description', OLD.Description,
             'UserDefinedFields', OLD.UserDefinedFields
                    );

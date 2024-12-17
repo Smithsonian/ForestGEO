@@ -3,7 +3,7 @@
 import { GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { Box, Button, Chip, IconButton, Modal, ModalDialog, Stack, Typography } from '@mui/joy';
+import { Box, Chip, IconButton, Modal, ModalDialog, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
@@ -75,42 +75,6 @@ export default function IsolatedPersonnelDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Role: {session.user.userStatus}
-              </Typography>
-            )}
-          </Box>
-
-          <Stack direction="column" spacing={2}>
-            <Stack direction={'row'} spacing={2}>
-              <Button onClick={() => setIsManualEntryFormOpen(true)} variant={'solid'} color={'primary'}>
-                Manual Entry Form
-              </Button>
-              <Button onClick={() => setIsUploadModalOpen(true)} variant="solid" color="primary">
-                Upload
-              </Button>
-            </Stack>
-            <Button onClick={() => setIsRolesModalOpen(true)} variant={'solid'} color={'primary'}>
-              Edit Roles
-            </Button>
-          </Stack>
-        </Box>
-      </Box>
-
       <UploadParentModal
         isUploadModalOpen={isUploadModalOpen}
         handleCloseUploadModal={() => {
@@ -163,8 +127,8 @@ export default function IsolatedPersonnelDataGrid() {
           Role: ['roleID']
         }}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) },
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
           { label: 'View Quadrat Personnel', onClick: () => console.log('View Quadrat Personnel clicked') },
           { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true) }
         ]}

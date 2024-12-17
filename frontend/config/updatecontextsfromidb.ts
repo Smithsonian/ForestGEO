@@ -1,7 +1,7 @@
 // useUpdateContextsFromIDB.ts
-import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSubquadratListDispatch } from '@/app/contexts/listselectionprovider';
+import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { getData, setData } from '@/config/db';
-import { PlotRDS, QuadratRDS, SubquadratRDS } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS, QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import { CensusRDS, createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 
 async function fetchData(endpoint: string): Promise<any> {
@@ -33,7 +33,6 @@ const UpdateContextsFromIDB = ({ schema }: UpdateContextsIDBProps) => {
   const plotListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
   const orgCensusListDispatch = useOrgCensusListDispatch();
-  const subquadratListDispatch = useSubquadratListDispatch();
 
   const updateQuadratsContext = async () => {
     await loadServerDataIntoIDB('quadrats', schema);
@@ -41,9 +40,6 @@ const UpdateContextsFromIDB = ({ schema }: UpdateContextsIDBProps) => {
 
     const quadratList: QuadratRDS[] = await getData('quadratList', `/api/fetchall/quadrats?schema=${schema}`);
     if (quadratListDispatch) await quadratListDispatch({ quadratList });
-
-    const subquadratList: SubquadratRDS[] = await getData('subquadratList', `/api/fetchall/subquadrats?schema=${schema}`);
-    if (subquadratListDispatch) await subquadratListDispatch({ subquadratList });
   };
 
   const updateCensusContext = async () => {

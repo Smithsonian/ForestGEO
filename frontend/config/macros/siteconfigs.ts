@@ -10,6 +10,7 @@ import SchemaIcon from '@mui/icons-material/Schema';
 import HistoryIcon from '@mui/icons-material/History';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
@@ -105,6 +106,12 @@ export const siteConfigNav: SiteConfigProps[] = [
         icon: AssessmentIcon
       },
       {
+        label: 'Recent Changes',
+        href: '/recentchanges',
+        tip: '',
+        icon: TrackChangesIcon
+      },
+      {
         label: 'Uploaded Files',
         href: '/uploadedfiles',
         tip: 'uploaded file display',
@@ -134,6 +141,8 @@ export function getEndpointHeaderName(endpoint: string): string {
       return 'View Data';
     case '/measurementshub/postvalidation':
       return 'Post-Census Statistics';
+    case '/measurementshub/recentchanges':
+      return 'Recent Changes';
     case '/measurementshub/validationhistory':
       return 'Validation History';
     case '/measurementshub/viewfulltable':

@@ -1,6 +1,5 @@
 // quadratpersonnel datagrid
 'use client';
-import { Box, Button, Typography } from '@mui/joy';
 import { GridColDef } from '@mui/x-data-grid';
 import { useSession } from 'next-auth/react';
 import React, { useEffect, useState } from 'react';
@@ -24,6 +23,8 @@ export default function IsolatedQuadratPersonnelDataGrid() {
 
   const [quadratOptions, setQuadratOptions] = useState<GridSelections[]>([]);
   const [personnelOptions, setPersonnelOptions] = useState<GridSelections[]>([]);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -89,31 +90,6 @@ export default function IsolatedQuadratPersonnelDataGrid() {
 
   return (
     <>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, width: '100%' }}>
-        <Box
-          sx={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ flexGrow: 1 }}>
-            {session?.user.userStatus !== 'field crew' && (
-              <Typography level={'title-lg'} sx={{ color: '#ffa726' }}>
-                Note: ADMINISTRATOR VIEW
-              </Typography>
-            )}
-          </Box>
-          {/* Back Button */}
-          <Button onClick={() => router.back()} variant="solid" color="primary">
-            Back to Previous Grid
-          </Button>
-        </Box>
-      </Box>
       <IsolatedDataGridCommons
         gridType="quadratpersonnel"
         gridColumns={QuadratPersonnelGridColumns}
@@ -121,7 +97,10 @@ export default function IsolatedQuadratPersonnelDataGrid() {
         setRefresh={setRefresh}
         initialRow={initialQuadratPersonnelRDSRow}
         fieldToFocus={'quadratID'}
-        dynamicButtons={[]}
+        dynamicButtons={[
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+        ]}
       />
     </>
   );

@@ -16,8 +16,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   setUploadError,
   setErrorComponent,
   setReviewState,
-  allRowToCMID,
-  cmErrors
+  allRowToCMID
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [results, setResults] = useState<string[]>([]);
@@ -30,19 +29,6 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   const hasUploaded = useRef(false);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-
-  const mapCMErrorsToFileRowErrors = (fileName: string) => {
-    return cmErrors
-      .filter(error => allRowToCMID.some(row => row.fileName === fileName && row.coreMeasurementID === error.coreMeasurementID))
-      .flatMap(error => {
-        const relatedRow = allRowToCMID.find(row => row.coreMeasurementID === error.coreMeasurementID);
-        return error.validationErrorIDs.map(validationErrorID => ({
-          stemtag: relatedRow?.row.stemtag,
-          tag: relatedRow?.row.tag,
-          validationErrorID: validationErrorID
-        }));
-      });
-  };
 
   const uploadToStorage = useCallback(
     async (file: FileWithPath) => {
@@ -70,7 +56,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
         setReviewState(ReviewStates.ERRORS);
       }
     },
-    [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, cmErrors, allRowToCMID]
+    [currentCensus?.dateRanges[0].censusID, currentPlot?.plotName, setErrorComponent, setReviewState, setUploadError, user, allRowToCMID]
   );
 
   useEffect(() => {
