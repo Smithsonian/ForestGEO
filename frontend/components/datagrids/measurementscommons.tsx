@@ -989,7 +989,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       }
     }),
-    [rows, validationErrors]
+    [rows, validationErrors, paginationModel]
   );
 
   const measurementDateColumn: GridColDef = {
