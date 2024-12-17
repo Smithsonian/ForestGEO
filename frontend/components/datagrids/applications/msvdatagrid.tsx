@@ -43,7 +43,6 @@ export default function MeasurementsSummaryViewDataGrid() {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const currentSite = useSiteContext();
   const { setLoading } = useLoading();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
@@ -62,7 +61,6 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-  const { setLoading } = useLoading();
 
   async function reloadMSV() {
     setLoading(true, 'Refreshing Measurements View...');
