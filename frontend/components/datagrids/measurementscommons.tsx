@@ -665,8 +665,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Error fetching data');
 
-        console.log('fetched data: ', data);
-
         setRows(data.output);
         setRowCount(data.totalCount);
         setUsingQuery(data.finishedQuery);
@@ -696,8 +694,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }, [currentPlot, currentCensus, paginationModel, sortModel, isNewRowAdded, filterModel]);
 
   useEffect(() => {
-    console.log('updated rows object: ', rows);
-  }, [rows]);
+    console.log('row count updated: ', rowCount);
+  }, [rowCount]);
 
   useEffect(() => {
     async function getCounts() {
@@ -754,6 +752,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
+  };
+
+  const handleRowCountChange = (newRowCountChange: number) => {
+    setRowCount(rowCount);
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -956,14 +958,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       align: 'center',
       width: 50,
       renderCell: (params: GridCellParams) => {
-        console.log('validation errors full: ', validationErrors);
-        console.log('row: ', params.row);
-        console.log(
-          'row in rows: ',
-          rows.find(row => row.coreMeasurementID === params.row.coreMeasurementID)
-        );
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
-          console.log('val error: ', validationErrors[Number(params.row.coreMeasurementID)]);
           const validationStrings =
             validationErrors[Number(params.row.coreMeasurementID)]?.errors.map(errorDetail => {
               const pairsString = errorDetail.validationPairs
@@ -1270,6 +1265,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             paginationModel={paginationModel}
             rowCount={rowCount}
+            onRowCountChange={handleRowCountChange}
             pageSizeOptions={[10, 25, 50, 100]}
             sortModel={sortModel}
             onSortModelChange={handleSortModelChange}
