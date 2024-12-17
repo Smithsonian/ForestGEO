@@ -1049,7 +1049,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   );
 
   const columns = useMemo(() => {
-    return [...applyFilterToColumns(gridColumns), getGridActionsColumn()];
+    return [...applyFilterToColumns(gridColumns), ...(locked ? [] : [getGridActionsColumn()])];
   }, [gridColumns, rowModesModel, getGridActionsColumn]);
 
   const filteredColumns = useMemo(() => (gridType !== 'quadratpersonnel' ? filterColumns(rows, columns) : columns), [rows, columns]);

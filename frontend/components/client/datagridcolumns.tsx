@@ -573,4 +573,122 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
   return column;
 });
 
-// FORM GRID COLUMNS
+/**
+ * export type UnifiedChangelogRDS = {
+ *   id?: number;
+ *   changeID?: number;
+ *   tableName?: string;
+ *   recordID?: string;
+ *   operation?: string;
+ *   oldRowState?: Record<string, any>;
+ *   newRowState?: Record<string, any>;
+ *   changeTimestamp?: Date;
+ *   changedBy?: string;
+ *   plotID?: number;
+ *   censusID?: number;
+ * };
+ */
+export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns([
+  {
+    field: 'id',
+    headerName: '#',
+    flex: 1,
+    editable: false
+  },
+  {
+    field: 'changeID',
+    headerName: '#',
+    flex: 1,
+    editable: false
+  },
+  {
+    field: 'tableName',
+    headerName: 'Table',
+    flex: 0.5,
+    editable: false
+  },
+  {
+    field: 'recordID',
+    headerName: 'Record',
+    flex: 0.5,
+    editable: false
+  },
+  {
+    field: 'operation',
+    headerName: 'Op',
+    flex: 0.3,
+    editable: false
+  },
+  {
+    field: 'oldRowState',
+    headerName: 'Old',
+    flex: 1,
+    editable: false,
+    renderCell: params => {
+      const jsonData = params.row['oldRowState'] ? params.row['oldRowState'] : {};
+
+      return (
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            backgroundColor: 'neutral.softBg',
+            borderRadius: '8px',
+            padding: '8px',
+            maxHeight: '150px',
+            overflow: 'auto',
+            fontSize: '12px'
+          }}
+        >
+          {Object.entries(jsonData).map(([key, value]) => (
+            <Typography key={key} level="body-sm" sx={{ lineHeight: 1.5 }}>
+              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : value}
+            </Typography>
+          ))}
+        </Box>
+      );
+    }
+  },
+  {
+    field: 'newRowState',
+    headerName: 'New',
+    flex: 1,
+    editable: false,
+    renderCell: params => {
+      const jsonData = params.row['newRowState'] ? params.row['newRowState'] : {};
+
+      return (
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            backgroundColor: 'neutral.softBg',
+            borderRadius: '8px',
+            padding: '8px',
+            maxHeight: '150px',
+            overflow: 'auto',
+            fontSize: '12px'
+          }}
+        >
+          {Object.entries(jsonData).map(([key, value]) => (
+            <Typography key={key} level="body-sm" sx={{ lineHeight: 1.5 }}>
+              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : value}
+            </Typography>
+          ))}
+        </Box>
+      );
+    }
+  },
+  {
+    field: 'changeTimestamp',
+    headerName: 'Change Time',
+    flex: 0.5,
+    editable: false
+  },
+  {
+    field: 'changedBy',
+    headerName: 'Changed By',
+    flex: 0.5,
+    editable: false
+  }
+]);

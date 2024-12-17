@@ -89,6 +89,11 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   specieslimits: {
     id: false,
     ...getSpeciesLimitsHCs()
+  },
+  unifiedchangelog: {
+    id: false,
+    changeID: false,
+    changedBy: false
   }
 };
 

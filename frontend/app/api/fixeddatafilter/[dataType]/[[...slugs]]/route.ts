@@ -186,6 +186,19 @@ export async function POST(
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
+        case 'unifiedchangelog':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} uc
+            JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
+            JOIN ${schema}.census c ON uc.CensusID = c.CensusID
+            WHERE p.PlotID = ?
+            AND c.PlotCensusNumber = ?
+            ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
         case 'quadrats':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'q');
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'q');
