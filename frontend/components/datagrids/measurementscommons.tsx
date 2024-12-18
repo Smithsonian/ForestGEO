@@ -273,6 +273,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     snackbar,
     setSnackbar,
     refresh,
+    setRefresh,
     paginationModel,
     setPaginationModel,
     isNewRowAdded,
@@ -343,6 +344,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ]
     }));
   }, [showErrorRows, showValidRows, showPendingRows]);
+
+  useEffect(() => {
+    if (refresh) {
+      runFetchPaginated().then(() => setRefresh(false));
+    }
+  }, [refresh]);
 
   const exportAllCSV = useCallback(async () => {
     const response = await fetch(
@@ -691,7 +698,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       runFetchPaginated().catch(console.error);
     }
-  }, [currentPlot, currentCensus, paginationModel, sortModel, isNewRowAdded, filterModel]);
+  }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel]);
 
   useEffect(() => {
     console.log('row count updated: ', rowCount);
@@ -1289,7 +1296,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               toolbar: {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
-                handleRefresh: runFetchPaginated,
+                handleRefresh: () => setRefresh(true),
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
                 handleExportErrors: handleExportErrors,

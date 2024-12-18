@@ -99,6 +99,7 @@ export default function MeasurementsSummaryViewDataGrid() {
       console.error(e);
     } finally {
       setLoading(false);
+      setRefresh(true);
     }
   }
 
@@ -154,7 +155,8 @@ export default function MeasurementsSummaryViewDataGrid() {
         addNewRowToGrid={addNewRowToGrid}
         dynamicButtons={[
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
+          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view' }
         ]}
       />
       <Collapse in={openAlert} sx={{ width: '100%' }}>
