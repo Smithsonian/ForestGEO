@@ -1,3 +1,4 @@
+DROP TRIGGER IF EXISTS `after_insert_cleanup`;
 DROP TRIGGER IF EXISTS `after_insert_attributes`;
 DROP TRIGGER IF EXISTS `after_update_attributes`;
 DROP TRIGGER IF EXISTS `after_delete_attributes`;
@@ -1508,3 +1509,18 @@ BEGIN
 END //
 
 DELIMITER ;
+
+-- Incorporated into trigger system: When rows are added to the unified changelog (changes made to schema),
+-- changes older than 7 days RELATIVE TO timestamp @ addition are scrapped. This is to ensure that historical changes
+-- are preserved while not overwhelming the system.
+
+CREATE TRIGGER after_insert_cleanup
+AFTER INSERT
+ON unifiedchangelog
+FOR EACH ROW
+BEGIN
+    -- Delete rows older than 7 days from the latest ChangeTimestamp (newly added row)
+    DELETE FROM unifiedchangelog
+    WHERE ChangeTimestamp < NEW.ChangeTimestamp - INTERVAL 7 DAY
+      AND TableName = NEW.TableName;
+END;
