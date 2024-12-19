@@ -588,6 +588,21 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
  *   censusID?: number;
  * };
  */
+
+function formatValue(value: any): React.ReactNode {
+  if (value === null || value === undefined) {
+    return 'NULL';
+  }
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return '[Circular Object]';
+    }
+  }
+  return value.toString();
+}
+
 export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -625,7 +640,7 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     flex: 1,
     editable: false,
     renderCell: params => {
-      const jsonData = params.row['oldRowState'] ? params.row['oldRowState'] : {};
+      const jsonData = params.row['oldRowState'];
 
       return (
         <Box
@@ -640,11 +655,19 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
             fontSize: '12px'
           }}
         >
-          {Object.entries(jsonData).map(([key, value]) => (
-            <Typography key={key} level="body-sm" sx={{ lineHeight: 1.5 }}>
-              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+          {jsonData && Object.keys(jsonData).length > 0 ? (
+            Object.entries(jsonData).map(([key, value]) => (
+              <Stack direction={'row'} key={key}>
+                <Typography level={'body-md'}>
+                  <strong>{key}</strong>:{formatValue(value)}
+                </Typography>
+              </Stack>
+            ))
+          ) : (
+            <Typography level={'body-sm'} fontWeight={'bold'}>
+              No previous data available
             </Typography>
-          ))}
+          )}
         </Box>
       );
     }
@@ -655,7 +678,7 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     flex: 1,
     editable: false,
     renderCell: params => {
-      const jsonData = params.row['newRowState'] ? params.row['newRowState'] : {};
+      const jsonData = params.row['newRowState'];
 
       return (
         <Box
@@ -670,11 +693,19 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
             fontSize: '12px'
           }}
         >
-          {Object.entries(jsonData).map(([key, value]) => (
-            <Typography key={key} level="body-sm" sx={{ lineHeight: 1.5 }}>
-              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+          {jsonData && Object.keys(jsonData).length > 0 ? (
+            Object.entries(jsonData).map(([key, value]) => (
+              <Stack direction={'row'} key={key}>
+                <Typography level={'body-md'}>
+                  <strong>{key}</strong>:{formatValue(value)}
+                </Typography>
+              </Stack>
+            ))
+          ) : (
+            <Typography level={'body-sm'} fontWeight={'bold'}>
+              No previous data available
             </Typography>
-          ))}
+          )}
         </Box>
       );
     }

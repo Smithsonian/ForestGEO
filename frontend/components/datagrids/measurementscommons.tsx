@@ -353,7 +353,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const exportAllCSV = useCallback(async () => {
     const response = await fetch(
-      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(filterModel)}`,
       { method: 'GET' }
     );
     const data = await response.json();
@@ -369,6 +369,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           if (value === undefined || value === null || value === '') {
             return null;
           }
+          if (moment(value).isValid()) {
+            return moment(value).format('DD-MM-YYYY');
+          }
           if (typeof value === 'number') {
             return value;
           }
@@ -380,7 +383,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             value = value.replace(/"/g, '""');
             value = `"${value}"`;
           }
-
           return value;
         });
       csvRows += values.join(',') + '\n';
