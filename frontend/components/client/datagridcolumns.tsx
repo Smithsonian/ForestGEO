@@ -642,7 +642,7 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
         >
           {Object.entries(jsonData).map(([key, value]) => (
             <Typography key={key} level="body-sm" sx={{ lineHeight: 1.5 }}>
-              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : value}
+              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
             </Typography>
           ))}
         </Box>
@@ -672,7 +672,7 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
         >
           {Object.entries(jsonData).map(([key, value]) => (
             <Typography key={key} level="body-sm" sx={{ lineHeight: 1.5 }}>
-              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : value}
+              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
             </Typography>
           ))}
         </Box>
