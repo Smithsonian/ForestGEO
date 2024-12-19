@@ -5,11 +5,12 @@ import React, { useState } from 'react';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import { UnifiedChangelogGridColumns } from '@/components/client/datagridcolumns';
+import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 
 export default function IsolatedUnifiedChangelogDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const initialUCRDSRow = {
+  const initialUCRDSRow: UnifiedChangelogRDS = {
     id: 0,
     changeID: 0,
     tableName: '',
