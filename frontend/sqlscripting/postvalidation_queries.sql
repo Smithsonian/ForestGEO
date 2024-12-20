@@ -45,7 +45,7 @@ values
     ('All dead or missing stems and count by census',
      'SELECT cm.CensusID,
         COUNT(s.StemID) AS DeadOrMissingStems,
-        GROUP_CONCAT(s.StemID ORDER BY s.StemID) AS DeadOrMissingStemList
+        GROUP_CONCAT(s.StemTag ORDER BY s.StemTag) AS DeadOrMissingStemList
         FROM ${schema}.stems s
         JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID
         JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
@@ -54,7 +54,7 @@ values
         GROUP BY cm.CensusID;',
      'Finds and returns a count of, then all dead or missing stems by census', true),
     ('All trees outside plot limits',
-     'SELECT t.TreeID, (s.LocalX + q.StartX + p.GlobalX) AS LocalX, (s.LocalY + q.StartY + p.GlobalY) AS LocalY
+     'SELECT t.TreeTag, (s.LocalX + q.StartX + p.GlobalX) AS LocalX, (s.LocalY + q.StartY + p.GlobalY) AS LocalY
         FROM ${schema}.trees t
         JOIN ${schema}.stems s ON t.TreeID = s.TreeID
         JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
@@ -67,7 +67,7 @@ values
                 AND p.PlotID = ${currentPlotID} AND cq.CensusID = ${currentCensusID};',
      'Finds and returns any trees outside plot limits', true),
     ('Highest DBH measurement and HOM measurement by species',
-     'SELECT sp.SpeciesID, sp.SpeciesName, MAX(cm.MeasuredDBH) AS LargestDBH, MAX(cm.MeasuredHOM) AS LargestHOM
+     'SELECT sp.SpeciesCode, sp.SpeciesName, MAX(cm.MeasuredDBH) AS LargestDBH, MAX(cm.MeasuredHOM) AS LargestHOM
         FROM ${schema}.species sp
             JOIN ${schema}.trees t ON sp.SpeciesID = t.SpeciesID
             JOIN ${schema}.stems s ON s.TreeID = t.TreeID
@@ -75,17 +75,16 @@ values
             JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
             JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
             WHERE cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
-        GROUP BY sp.SpeciesID, sp.SpeciesName;',
+        GROUP BY sp.SpeciesCode, sp.SpeciesName;',
      'Finds and returns the largest DBH/HOM measurement and their host species ID', true),
     ('Checks that all trees from the last census are present',
-     'SELECT t.TreeID, t.TreeTag, t.SpeciesID
+     'SELECT t.TreeTag, sp.SpeciesCode
          FROM ${schema}.trees t
-                  JOIN
-              ${schema}.stems s_last ON t.TreeID = s_last.TreeID
-                  JOIN
-              ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID
-              ${schema}.quadrats q_last ON q.QuadratID = s_last.QuadratID
-              ${schema}.censusquadrat cq_last ON cq.QuadratID = q.QuadratID
+         JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
+         JOIN ${schema}.stems s_last ON t.TreeID = s_last.TreeID
+         JOIN ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID
+         JOIN ${schema}.quadrats q_last ON q.QuadratID = s_last.QuadratID
+         JOIN ${schema}.censusquadrat cq_last ON cq.QuadratID = q.QuadratID
          WHERE cm_last.CensusID = ${currentCensusID} - 1
         AND cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
            AND NOT EXISTS (SELECT 1
@@ -94,20 +93,19 @@ values
                                 ${schema}.coremeasurements cm_current ON s_current.StemID = cm_current.StemID
                            WHERE t.TreeID = s_current.TreeID
                              AND cm_current.CensusID = ${currentCensusID})
-         GROUP BY t.TreeID, t.TreeTag, t.SpeciesID;',
+         GROUP BY t.TreeTag, sp.SpeciesCode;',
      'Determining whether all trees accounted for in the last census have new measurements in the "next" measurement',
      true),
     ('Number of new stems, grouped by quadrat, and then by census',
      'SELECT
         q.QuadratName,
-        s_current.StemID,
         s_current.StemTag,
-        s_current.TreeID,
-        s_current.QuadratID,
+        t_current.TreeTag,
         s_current.LocalX,
         s_current.LocalY,
             FROM ${schema}.quadrats q
                 JOIN ${schema}.stems s_current ON q.QuadratID = s_current.QuadratID
+                JOIN ${schema}.trees t_current ON s_current.TreeID = t_current.TreeID
                 JOIN ${schema}.coremeasurements cm_current ON s_current.StemID = cm_current.StemID
             WHERE cm_current.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
                 AND NOT EXISTS (SELECT 1
@@ -115,7 +113,7 @@ values
                         JOIN ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID
                             WHERE s_current.StemID = s_last.StemID
                             AND cm_last.CensusID = ${currentCensusID} - 1)
-        ORDER BY q.QuadratName, s_current.StemID;',
+        ORDER BY q.QuadratName, s_current.StemTag;',
      'Finds new stems by quadrat for the current census', true),
     ('Determining which quadrats have the most and least number of new stems for the current census',
      'WITH NewStems AS (SELECT s_current.QuadratName,
@@ -157,35 +155,29 @@ values
      'Finds quadrats with most and least new stems. Useful for determining overall growth or changes from census to census', true),
     ('Number of dead stems per quadrat',
      'SELECT q.QuadratName,
-              s.StemID,
               s.StemTag,
-              s.TreeID,
-              s.QuadratID,
+              t.TreeTag,
               s.LocalX,
               s.LocalY,
               a.Code        AS AttributeCode,
               a.Description AS AttributeDescription,
               a.Status      AS AttributeStatus
        FROM ${schema}.quadrats q
-                JOIN
-            ${schema}.stems s ON q.QuadratID = s.QuadratID
-                JOIN
-            ${schema}.coremeasurements cm ON s.StemID = cm.StemID
-                JOIN
-            ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
-                JOIN
-            ${schema}.attributes a ON cma.Code = a.Code
+            JOIN ${schema}.stems s ON q.QuadratID = s.QuadratID
+            JOIN ${schema}.trees t ON s.TreeID = t.TreeID
+            JOIN ${schema}.coremeasurements cm ON s.StemID = cm.StemID
+            JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
+            JOIN ${schema}.attributes a ON cma.Code = a.Code
        WHERE cm.CensusID = ${currentCensusID}
          AND q.PlotID = ${currentPlotID}
          AND a.Status = ''dead''
-       ORDER BY q.QuadratName, s.StemID;',
+       ORDER BY q.QuadratName;',
      'dead stems by quadrat. also useful for tracking overall changes across plot', true),
     ('Number of dead stems by species',
      'SELECT sp.SpeciesName,
               sp.SpeciesCode,
-              s.StemID,
               s.StemTag,
-              s.TreeID,
+              t.TreeTag,
               q.QuadratName,
               s.LocalX,
               s.LocalY,
