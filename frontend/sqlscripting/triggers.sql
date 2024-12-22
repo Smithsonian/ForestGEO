@@ -1137,7 +1137,7 @@ BEGIN
             'CoreMeasurementID', NEW.CoreMeasurementID,
             'CensusID', NEW.CensusID,
             'StemID', NEW.StemID,
-            'IsValidated', NEW.IsValidated,
+            'IsValidated', CAST(NEW.IsValidated AS UNSIGNED),
             'MeasurementDate', NEW.MeasurementDate,
             'MeasuredDBH', NEW.MeasuredDBH,
             'MeasuredHOM', NEW.MeasuredHOM,
@@ -1169,7 +1169,7 @@ BEGIN
             'CoreMeasurementID', OLD.CoreMeasurementID,
             'CensusID', OLD.CensusID,
             'StemID', OLD.StemID,
-            'IsValidated', OLD.IsValidated,
+            'IsValidated', CAST(OLD.IsValidated AS UNSIGNED),
             'MeasurementDate', OLD.MeasurementDate,
             'MeasuredDBH', OLD.MeasuredDBH,
             'MeasuredHOM', OLD.MeasuredHOM,
@@ -1180,7 +1180,7 @@ BEGIN
             'CoreMeasurementID', NEW.CoreMeasurementID,
             'CensusID', NEW.CensusID,
             'StemID', NEW.StemID,
-            'IsValidated', NEW.IsValidated,
+            'IsValidated', CAST(NEW.IsValidated AS UNSIGNED),
             'MeasurementDate', NEW.MeasurementDate,
             'MeasuredDBH', NEW.MeasuredDBH,
             'MeasuredHOM', NEW.MeasuredHOM,
@@ -1212,7 +1212,7 @@ BEGIN
             'CoreMeasurementID', OLD.CoreMeasurementID,
             'CensusID', OLD.CensusID,
             'StemID', OLD.StemID,
-            'IsValidated', OLD.IsValidated,
+            'IsValidated', CAST(OLD.IsValidated AS UNSIGNED),
             'MeasurementDate', OLD.MeasurementDate,
             'MeasuredDBH', OLD.MeasuredDBH,
             'MeasuredHOM', OLD.MeasuredHOM,
@@ -1509,18 +1509,3 @@ BEGIN
 END //
 
 DELIMITER ;
-
--- Incorporated into trigger system: When rows are added to the unified changelog (changes made to schema),
--- changes older than 7 days RELATIVE TO timestamp @ addition are scrapped. This is to ensure that historical changes
--- are preserved while not overwhelming the system.
-
-CREATE TRIGGER after_insert_cleanup
-AFTER INSERT
-ON unifiedchangelog
-FOR EACH ROW
-BEGIN
-    -- Delete rows older than 7 days from the latest ChangeTimestamp (newly added row)
-    DELETE FROM unifiedchangelog
-    WHERE ChangeTimestamp < NEW.ChangeTimestamp - INTERVAL 7 DAY
-      AND TableName = NEW.TableName;
-END;
