@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { CMError, FileWithStream, ReviewProgress, ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -43,9 +43,6 @@ export default function UploadParent(props: UploadParentProps) {
   // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState<FormType | undefined>(overrideUploadForm);
   const [personnelRecording, setPersonnelRecording] = useState('');
-  const [coordUnit, setCoordUnit] = useState('');
-  const [dbhUnit, setDBHUnit] = useState('');
-  const [homUnit, setHOMUnit] = useState('');
 
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
@@ -69,8 +66,6 @@ export default function UploadParent(props: UploadParentProps) {
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
-  const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
@@ -78,10 +73,6 @@ export default function UploadParent(props: UploadParentProps) {
   const { data: session } = useSession();
   const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
   const [isStreaming, setIsStreaming] = useState(false);
-
-  const handleCancelUpload = (): void => {
-    handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
-  };
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -405,9 +396,6 @@ export default function UploadParent(props: UploadParentProps) {
             personnelRecording={personnelRecording}
             acceptedFiles={acceptedFiles}
             uploadForm={uploadForm}
-            dbhUnit={dbhUnit}
-            homUnit={homUnit}
-            coordUnit={coordUnit}
             parsedData={parsedData}
             setReviewState={setReviewState}
             setIsDataUnsaved={setIsDataUnsaved}
@@ -432,7 +420,6 @@ export default function UploadParent(props: UploadParentProps) {
             setIsDataUnsaved={setIsDataUnsaved}
             setUploadError={setUploadError}
             setErrorComponent={setErrorComponent}
-            cmErrors={cmErrors}
             user={session?.user?.name ? session?.user?.name : ''}
             allRowToCMID={allRowToCMID}
           />

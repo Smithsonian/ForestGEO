@@ -11,7 +11,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     console.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
   }
-  const { tag, stemtag, spcode, quadrat, lx, ly, coordinateunit, dbh, dbhunit, hom, homunit, date, codes } = rowData;
+  const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
 
   try {
     // Fetch species
@@ -36,7 +36,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           QuadratID: quadratID,
           LocalX: lx,
           LocalY: ly,
-          CoordinateUnits: coordinateunit
         };
         const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(connectionManager, schema, 'stems', stemSearch, 'StemID');
 
@@ -58,9 +57,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           IsValidated: null,
           MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
           MeasuredDBH: dbh ? parseFloat(dbh) : null,
-          DBHUnit: dbhunit,
           MeasuredHOM: hom ? parseFloat(hom) : null,
-          HOMUnit: homunit,
           Description: null,
           UserDefinedFields: userDefinedFields
         };
@@ -91,6 +88,20 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           }
         }
 
+        // Update Census Start/End Dates
+        // const combinedQuery = `
+        //     UPDATE ${schema}.census c
+        //     JOIN (
+        //       SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
+        //       FROM ${schema}.coremeasurements
+        //       WHERE CensusID = ${censusID}
+        //       GROUP BY CensusID
+        //     ) m ON c.CensusID = m.CensusID
+        //     SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
+        //     WHERE c.CensusID = ${censusID};`;
+        //
+        // await connectionManager.executeQuery(combinedQuery);
+        // console.log('Upsert successful. CoreMeasurement ID generated:', coreMeasurementID);
         return coreMeasurementID;
       }
     }

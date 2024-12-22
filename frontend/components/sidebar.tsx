@@ -145,9 +145,9 @@ export default function Sidebar(props: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [measurementsToggle, setMeasurementsToggle] = useState(false);
-  const [propertiesToggle, setPropertiesToggle] = useState(false);
-  const [formsToggle, setFormsToggle] = useState(false);
+  const [measurementsToggle, setMeasurementsToggle] = useState(true);
+  const [propertiesToggle, setPropertiesToggle] = useState(true);
+  const [formsToggle, setFormsToggle] = useState(true);
 
   const [storedPlot, setStoredPlot] = useState<Plot>();
   const [storedCensus, setStoredCensus] = useState<OrgCensus>();
@@ -507,6 +507,8 @@ export default function Sidebar(props: SidebarProps) {
       size={'md'}
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
+      value={plot?.plotName || ''}
+      onFocus={event => event.preventDefault()}
       onChange={async (event: React.SyntheticEvent | null, newValue: string | null) => {
         event?.preventDefault();
         const selectedPlot = plotListContext?.find(plot => plot?.plotName === newValue) || undefined;
@@ -789,7 +791,7 @@ export default function Sidebar(props: SidebarProps) {
                         <TransitionComponent
                           key={item.href}
                           in={site !== undefined && plot !== undefined}
-                          style={{ transitionDelay: `${delay}ms` }}
+                          // style={{ transitionDelay: `${delay}ms` }}
                           direction="down"
                         >
                           <ListItem
@@ -860,7 +862,7 @@ export default function Sidebar(props: SidebarProps) {
                         <TransitionComponent
                           key={item.href}
                           in={site !== undefined && plot !== undefined}
-                          style={{ transitionDelay: `${delay}ms` }}
+                          // style={{ transitionDelay: `${delay}ms` }}
                           direction="down"
                         >
                           <ListItem
@@ -883,6 +885,7 @@ export default function Sidebar(props: SidebarProps) {
                                 setToggle
                               )}
                               isOpen={!!toggle}
+                              // isOpen
                             >
                               <List size={'md'}>
                                 {item.expanded.map((link, subIndex) => {
@@ -892,10 +895,16 @@ export default function Sidebar(props: SidebarProps) {
                                   const isLinkDisabled = getDisabledState(link.href);
                                   const tooltipMessage = getTooltipMessage(link.href, isDataIncomplete || (link.href === '/summary' && !isAllValiditiesTrue));
                                   return (
-                                    <TransitionComponent key={link.href} in={!!toggle} style={{ transitionDelay: `${delay}ms` }} direction="down">
+                                    <TransitionComponent
+                                      key={link.href}
+                                      in={!!toggle}
+                                      // in
+                                      // style={{ transitionDelay: `${delay}ms` }}
+                                      direction="down"
+                                    >
                                       <ListItem
                                         data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}
-                                        className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
+                                        // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
                                         onMouseEnter={() => setHoveredIndex(index)}
                                         onMouseLeave={() => setHoveredIndex(null)}
                                       >

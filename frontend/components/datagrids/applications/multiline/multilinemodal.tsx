@@ -1,6 +1,6 @@
 'use client';
 
-import { Chip, Divider, IconButton, Modal, ModalDialog, Stack, Typography } from '@mui/joy';
+import { DialogTitle, IconButton, Modal, ModalDialog, Typography } from '@mui/joy';
 import CloseIcon from '@mui/icons-material/Close';
 import MultilineSpeciesDataGrid from '@/components/datagrids/applications/multiline/multilinespeciesdatagrid';
 import MultilineAttributesDataGrid from '@/components/datagrids/applications/multiline/multilineattributesdatagrid';
@@ -13,6 +13,7 @@ import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
 import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadupdatevalidations';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
+import Divider from '@mui/joy/Divider';
 
 interface MultilineModalProps {
   isManualEntryFormOpen: boolean;
@@ -71,37 +72,16 @@ export default function MultilineModal(props: MultilineModalProps) {
       aria-labelledby="upload-dialog-title"
       sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
-      <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog">
+      <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog" variant={'plain'}>
         <IconButton aria-label="close" onClick={handleCloseManualEntryForm} sx={{ position: 'absolute', top: 8, right: 8 }}>
           <CloseIcon />
         </IconButton>
-        <Typography level={'title-lg'} sx={{ marginY: 5, textAlign: 'center' }}>
-          Manual Input Form - {formType.charAt(0).toUpperCase() + formType.slice(1)}
-        </Typography>
-        <Stack direction={'row'} spacing={2} divider={<Divider orientation={'vertical'} />} sx={{ alignSelf: 'center', justifyContent: 'center' }}>
-          <Chip variant={'soft'} size={'lg'}>
-            <Chip color={'primary'} variant={'soft'}>
-              Alt/Opt
-            </Chip>{' '}
-            -{' '}
-            <Chip color={'primary'} variant={'soft'}>
-              n
-            </Chip>
-            : Create a new row
-          </Chip>
-          <Chip variant={'soft'} size={'lg'}>
-            <Chip variant={'soft'} color={'primary'}>
-              Save
-            </Chip>{' '}
-            your changes before finalizing
-          </Chip>
-          <Chip variant={'soft'} size={'lg'}>
-            <Chip variant={'soft'} color={'primary'}>
-              Finalize Changes
-            </Chip>{' '}
-            to submit your additions
-          </Chip>
-        </Stack>
+        <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }}>
+          <Typography level={'h2'} color={'primary'}>
+            Manual Input Form - {formType.charAt(0).toUpperCase() + formType.slice(1)}
+          </Typography>
+        </DialogTitle>
+        <Divider orientation={'horizontal'} sx={{ my: 2 }} />
         {openValidations && !openUpdateValidations && <UploadValidation schema={currentSite?.schemaName ?? ''} setReviewState={setTempReviewState} />}
         {openUpdateValidations && !openValidations && <UploadUpdateValidations schema={currentSite?.schemaName ?? ''} setReviewState={setTempReviewState} />}
         {getDataGrid()}

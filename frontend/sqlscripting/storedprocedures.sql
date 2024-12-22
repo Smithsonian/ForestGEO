@@ -7,13 +7,13 @@ BEGIN
     SET foreign_key_checks = 0;
     TRUNCATE TABLE measurementssummary;
     INSERT INTO measurementssummary
-    SELECT cm.CoreMeasurementID                                AS CoreMeasurementID,
-           st.StemID                                           AS StemID,
-           t.TreeID                                            AS TreeID,
-           s.SpeciesID                                         AS SpeciesID,
-           q.QuadratID                                         AS QuadratID,
-           q.PlotID                                            AS PlotID,
-           cm.CensusID                                         AS CensusID,
+    SELECT COALESCE(cm.CoreMeasurementID, 0)                  AS CoreMeasurementID,
+           COALESCE(st.StemID, 0)                             AS StemID,
+           COALESCE(t.TreeID, 0)                              AS TreeID,
+           COALESCE(s.SpeciesID, 0)                           AS SpeciesID,
+           COALESCE(q.QuadratID, 0)                           AS QuadratID,
+           COALESCE(q.PlotID, 0)                              AS PlotID,
+           COALESCE(cm.CensusID, 0)                           AS CensusID,
            s.SpeciesName                                       AS SpeciesName,
            s.SubspeciesName                                    AS SubspeciesName,
            s.SpeciesCode                                       AS SpeciesCode,
@@ -21,27 +21,25 @@ BEGIN
            st.StemTag                                          AS StemTag,
            st.LocalX                                           AS StemLocalX,
            st.LocalY                                           AS StemLocalY,
-           st.CoordinateUnits                                  AS StemUnits,
            q.QuadratName                                       AS QuadratName,
            cm.MeasurementDate                                  AS MeasurementDate,
            cm.MeasuredDBH                                      AS MeasuredDBH,
-           cm.DBHUnit                                          AS DBHUnits,
            cm.MeasuredHOM                                      AS MeasuredHOM,
-           cm.HOMUnit                                          AS HOMUnits,
            cm.IsValidated                                      AS IsValidated,
            cm.Description                                      AS Description,
            (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
             FROM cmattributes ca
-            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes
+            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
+            cm.UserDefinedFields AS UserDefinedFields
     FROM coremeasurements cm
              LEFT JOIN stems st ON cm.StemID = st.StemID
              LEFT JOIN trees t ON st.TreeID = t.TreeID
              LEFT JOIN species s ON t.SpeciesID = s.SpeciesID
              LEFT JOIN quadrats q ON st.QuadratID = q.QuadratID
-             LEFT JOIN census c ON cm.CensusID = c.CensusID;
+             LEFT JOIN census c ON cm.CensusID = c.CensusID
+             LEFT JOIN plots p ON p.PlotID = c.PlotID;
     SET foreign_key_checks = 1;
 END;
-
 
 create
     definer = azureroot@`%` procedure RefreshViewFullTable()
@@ -49,24 +47,20 @@ BEGIN
     SET foreign_key_checks = 0;
     TRUNCATE TABLE viewfulltable;
     INSERT INTO viewfulltable (
-        CoreMeasurementID, MeasurementDate, MeasuredDBH, DBHUnits, MeasuredHOM, HOMUnits, Description, IsValidated,
-        PlotID, PlotName, LocationName, CountryName, DimensionX, DimensionY, PlotDimensionUnits, PlotArea, PlotAreaUnits,
-        PlotGlobalX, PlotGlobalY, PlotGlobalZ, PlotCoordinateUnits, PlotShape, PlotDescription, CensusID,
+        CoreMeasurementID, MeasurementDate, MeasuredDBH, MeasuredHOM, Description, IsValidated,
+        PlotID, PlotName, LocationName, CountryName, DimensionX, DimensionY, PlotArea,
+        PlotGlobalX, PlotGlobalY, PlotGlobalZ, PlotShape, PlotDescription, PlotDefaultDimensionUnits,
+        PlotDefaultCoordinateUnits, PlotDefaultAreaUnits, PlotDefaultDBHUnits, PlotDefaultHOMUnits, CensusID,
         CensusStartDate, CensusEndDate, CensusDescription, PlotCensusNumber, QuadratID, QuadratName, QuadratDimensionX,
-        QuadratDimensionY, QuadratDimensionUnits, QuadratArea, QuadratAreaUnits, QuadratStartX, QuadratStartY,
-        QuadratCoordinateUnits, QuadratShape, SubquadratID, SubquadratName, SubquadratDimensionX, SubquadratDimensionY,
-        SubquadratDimensionUnits, SubquadratX, SubquadratY, SubquadratCoordinateUnits, TreeID, TreeTag, StemID, StemTag,
-        StemLocalX, StemLocalY, StemCoordinateUnits, PersonnelID, FirstName, LastName, PersonnelRoles, SpeciesID,
-        SpeciesCode, SpeciesName, SubspeciesName, SubspeciesAuthority, SpeciesIDLevel, GenusID, Genus, GenusAuthority,
-        FamilyID, Family, AttributeCode, AttributeDescription, AttributeStatus
+        QuadratDimensionY, QuadratArea, QuadratStartX, QuadratStartY, QuadratShape, TreeID, TreeTag, StemID, StemTag,
+        StemLocalX, StemLocalY, SpeciesID,SpeciesCode, SpeciesName, SubspeciesName, SubspeciesAuthority, SpeciesIDLevel,
+        GenusID, Genus, GenusAuthority, FamilyID, Family, Attributes, UserDefinedFields
     )
     SELECT
         cm.CoreMeasurementID AS CoreMeasurementID,
         cm.MeasurementDate AS MeasurementDate,
         cm.MeasuredDBH AS MeasuredDBH,
-        cm.DBHUnit AS DBHUnits,
         cm.MeasuredHOM AS MeasuredHOM,
-        cm.HOMUnit AS HOMUnits,
         cm.Description AS Description,
         cm.IsValidated AS IsValidated,
         p.PlotID AS PlotID,
@@ -75,15 +69,17 @@ BEGIN
         p.CountryName AS CountryName,
         p.DimensionX AS DimensionX,
         p.DimensionY AS DimensionY,
-        p.DimensionUnits AS PlotDimensionUnits,
         p.Area AS PlotArea,
-        p.AreaUnits AS PlotAreaUnits,
         p.GlobalX AS PlotGlobalX,
         p.GlobalY AS PlotGlobalY,
         p.GlobalZ AS PlotGlobalZ,
-        p.CoordinateUnits AS PlotCoordinateUnits,
         p.PlotShape AS PlotShape,
         p.PlotDescription AS PlotDescription,
+        p.DefaultDimensionUnits AS PlotDimensionUnits,
+        p.DefaultCoordinateUnits AS PlotCoordinateUnits,
+        p.DefaultAreaUnits AS PlotAreaUnits,
+        p.DefaultDBHUnits AS PlotDefaultDBHUnits,
+        p.DefaultHOMUnits AS PlotDefaultHOMUnits,
         c.CensusID AS CensusID,
         c.StartDate AS CensusStartDate,
         c.EndDate AS CensusEndDate,
@@ -93,32 +89,16 @@ BEGIN
         q.QuadratName AS QuadratName,
         q.DimensionX AS QuadratDimensionX,
         q.DimensionY AS QuadratDimensionY,
-        q.DimensionUnits AS QuadratDimensionUnits,
         q.Area AS QuadratArea,
-        q.AreaUnits AS QuadratAreaUnits,
         q.StartX AS QuadratStartX,
         q.StartY AS QuadratStartY,
-        q.CoordinateUnits AS QuadratCoordinateUnits,
         q.QuadratShape AS QuadratShape,
-        sq.SubquadratID AS SubquadratID,
-        sq.SubquadratName AS SubquadratName,
-        sq.DimensionX AS SubquadratDimensionX,
-        sq.DimensionY AS SubquadratDimensionY,
-        sq.DimensionUnits AS SubquadratDimensionUnits,
-        sq.QX AS SubquadratX,
-        sq.QY AS SubquadratY,
-        sq.CoordinateUnits AS SubquadratCoordinateUnits,
         t.TreeID AS TreeID,
         t.TreeTag AS TreeTag,
         s.StemID AS StemID,
         s.StemTag AS StemTag,
         s.LocalX AS StemLocalX,
         s.LocalY AS StemLocalY,
-        s.CoordinateUnits AS StemCoordinateUnits,
-        pr.PersonnelID AS PersonnelID,
-        pr.FirstName AS FirstName,
-        pr.LastName AS LastName,
-        r.RoleName AS PersonnelRoles,
         sp.SpeciesID AS SpeciesID,
         sp.SpeciesCode AS SpeciesCode,
         sp.SpeciesName AS SpeciesName,
@@ -130,23 +110,20 @@ BEGIN
         g.GenusAuthority AS GenusAuthority,
         f.FamilyID AS FamilyID,
         f.Family AS Family,
-        ca.Code AS AttributeCode,
-        a.Description AS AttributeDescription,
-        a.Status AS AttributeStatus
+        (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
+            FROM cmattributes ca
+            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
+        cm.UserDefinedFields AS UserDefinedFields
     FROM coremeasurements cm
     LEFT JOIN stems s ON cm.StemID = s.StemID
     LEFT JOIN trees t ON s.TreeID = t.TreeID
     LEFT JOIN species sp ON t.SpeciesID = sp.SpeciesID
     LEFT JOIN genus g ON sp.GenusID = g.GenusID
     LEFT JOIN family f ON g.FamilyID = f.FamilyID
-    LEFT JOIN plots p ON s.QuadratID = p.PlotID
     LEFT JOIN quadrats q ON s.QuadratID = q.QuadratID
-    LEFT JOIN subquadrats sq ON q.QuadratID = sq.QuadratID
+    LEFT JOIN plots p ON q.PlotID = p.PlotID
     LEFT JOIN census c ON cm.CensusID = c.CensusID
-    LEFT JOIN personnel pr ON pr.CensusID = cm.CensusID
-    LEFT JOIN roles r ON pr.RoleID = r.RoleID
     LEFT JOIN cmattributes ca ON ca.CoreMeasurementID = cm.CoreMeasurementID
     LEFT JOIN attributes a ON a.Code = ca.Code;
     SET foreign_key_checks = 1;
 END;
-

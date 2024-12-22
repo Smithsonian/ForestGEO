@@ -2,28 +2,12 @@
 
 // multiline measurements datagrid
 import React, { useState } from 'react';
-import { useSession } from 'next-auth/react';
 import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmultilinedatagridcommons';
 import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
-import { DataGridSignals } from '@/config/macros/formdetails';
+import { DataGridSignals, FormType } from '@/config/macros/formdetails';
+import { Box } from '@mui/joy';
+import RenderFormExplanations from '@/components/client/renderformexplanations';
 
-/**
- *   [FormType.measurements]: [
- *     { label: 'tag' },
- *     { label: 'stemtag' },
- *     { label: 'spcode' },
- *     { label: 'quadrat' },
- *     { label: 'lx' },
- *     { label: 'ly' },
- *     { label: 'coordinateunit' },
- *     { label: 'dbh' },
- *     { label: 'dbhunit' },
- *     { label: 'hom' },
- *     { label: 'homunit' },
- *     { label: 'date' },
- *     { label: 'codes' }
- *   ],
- */
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
   const initialMeasurementsFormRow = {
@@ -34,25 +18,24 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
     quadrat: '',
     lx: 0,
     ly: 0,
-    coordinateunit: '',
     dbh: 0,
-    dbhunit: '',
     hom: 0,
-    homunit: '',
     date: null,
     codes: ''
   };
   const [refresh, setRefresh] = useState(false);
-  const { data: session } = useSession();
 
   return (
-    <IsolatedMultilineDataGridCommons
-      gridType="measurements"
-      gridColumns={MeasurementsFormGridColumns}
-      refresh={refresh}
-      setRefresh={setRefresh}
-      initialRow={initialMeasurementsFormRow}
-      setChangesSubmitted={setChangesSubmitted}
-    />
+    <Box>
+      {RenderFormExplanations(FormType.measurements)}
+      <IsolatedMultilineDataGridCommons
+        gridType="measurements"
+        gridColumns={MeasurementsFormGridColumns}
+        refresh={refresh}
+        setRefresh={setRefresh}
+        initialRow={initialMeasurementsFormRow}
+        setChangesSubmitted={setChangesSubmitted}
+      />
+    </Box>
   );
 }

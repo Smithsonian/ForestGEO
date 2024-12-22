@@ -13,6 +13,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      cursor: {
+        wait: 'wait'
+      },
       colors: {
         lightBlue: colors.sky,
         warmGray: colors.stone,

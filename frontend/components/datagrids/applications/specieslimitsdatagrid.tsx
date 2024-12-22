@@ -608,7 +608,6 @@ export default function SpeciesLimitsDataGrid({ speciesID }: { speciesID: number
               filterModel: filterModel
             }
           }}
-          autoHeight
           getRowHeight={() => 'auto'}
         />
       </Box>
