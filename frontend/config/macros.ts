@@ -154,7 +154,8 @@ export const fileMappings: Record<string, FileMapping> = {
     columnMappings: {
       firstname: 'FirstName',
       lastname: 'LastName',
-      role: 'Role'
+      role: 'Role',
+      roledescription: 'Role Description'
     },
     specialProcessing: processPersonnel
   },
@@ -180,29 +181,12 @@ export const fileMappings: Record<string, FileMapping> = {
       plotID: 'PlotID',
       startx: 'StartX',
       starty: 'StartY',
-      coordinateunit: 'CoordinateUnits',
       dimx: 'DimensionX',
       dimy: 'DimensionY',
       dimensionunit: 'DimensionUnits',
       quadratshape: 'QuadratShape'
     },
     specialProcessing: processQuadrats
-  },
-  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
-  subquadrats: {
-    tableName: 'subquadrats',
-    columnMappings: {
-      subquadrat: 'SubquadratName',
-      quadrat: 'QuadratID',
-      plotID: 'PlotID',
-      censusID: 'CensusID',
-      dimx: 'DimensionX',
-      dimy: 'DimensionY',
-      xindex: 'X',
-      yindex: 'Y',
-      unit: 'Unit',
-      orderindex: 'Ordering'
-    }
   },
   measurements: {
     tableName: '', // Multiple tables involved
@@ -216,3 +200,6 @@ export type ValidationResponse = {
   message: string;
   failedCoreMeasurementIDs?: number[];
 };
+
+export const HEADER_ALIGN = 'center';
+export const CELL_ALIGN = 'center';

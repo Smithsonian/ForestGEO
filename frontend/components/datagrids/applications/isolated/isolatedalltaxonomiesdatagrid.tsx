@@ -305,8 +305,8 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           Subspecies: ['subspeciesName', 'subspeciesAuthority']
         }}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true) },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true) }
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
         ]}
       />
 

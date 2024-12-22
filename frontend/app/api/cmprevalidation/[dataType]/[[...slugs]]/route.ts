@@ -43,7 +43,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         const query = `SELECT 1 FROM ${schema}.quadrats q
          JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID 
          JOIN ${schema}.census c ON cq.CensusID = c.CensusID 
-         WHERE q.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
+         WHERE q.PlotID = ${plotID} AND c.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
         const results = await connection.executeQuery(query);
         if (results.length === 0)
           return new NextResponse(null, {
@@ -54,7 +54,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         const pvQuery = `SELECT 1 FROM ${schema}.coremeasurements cm
         JOIN ${schema}.census c ON C.CensusID = cm.CensusID
         JOIN ${schema}.plots p ON p.PlotID = c.PlotID
-        WHERE p.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
+        WHERE p.PlotID = ${plotID} AND c.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
         const pvResults = await connection.executeQuery(pvQuery);
         if (pvResults.length === 0)
           return new NextResponse(null, {
@@ -69,7 +69,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
                              JOIN ${schema}.census c on cq.CensusID = c.CensusID
                              JOIN ${schema}.personnel p ON p.CensusID = c.CensusID
                              WHERE q.PlotID = ${plotID}
-                               AND c.PlotCensusNumber = ${plotCensusNumber} LIMIT 1`;
+                               AND c.CensusID IN (SELECT CensusID from ${schema}.census WHERE PlotID = ${plotID} AND PlotCensusNumber = ${plotCensusNumber}) LIMIT 1`;
         const quadratsResults = await connection.executeQuery(quadratsQuery);
         if (quadratsResults.length === 0)
           return new NextResponse(null, {

@@ -10,7 +10,7 @@ import { FileCollectionRowSet, FileErrors, FileRow, FormType, getTableHeaders, R
 import { usePlotContext } from '@/app/contexts/userselectionprovider';
 import { Checkbox, Divider } from '@mui/joy';
 import { validateSpeciesFormRow } from '@/config/sqlrdsdefinitions/taxonomies';
-import { validateQuadratsRow, validateSubquadratsRow } from '@/config/sqlrdsdefinitions/zones';
+import { validateQuadratsRow } from '@/config/sqlrdsdefinitions/zones';
 import { validateMeasurementsRow } from '@/config/sqlrdsdefinitions/views';
 import { validatePersonnelRow } from '@/config/sqlrdsdefinitions/personnel';
 
@@ -21,7 +21,6 @@ const validationFunctions: Record<string, ValidationFunction> = {
   personnel: validatePersonnelRow,
   species: validateSpeciesFormRow,
   quadrats: validateQuadratsRow,
-  subquadrats: validateSubquadratsRow,
   measurements: validateMeasurementsRow
 };
 
@@ -157,34 +156,8 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         let rowErrors = validateRowByFormType(formType, row);
 
         // Check species/genus condition independently
-        if (formType === 'species') {
-          const [speciesField, genusField] = [row['species'], row['genus']];
-          if (speciesField && !genusField) {
-            const speciesWords = speciesField.trim().split(/\s+/);
-            if (speciesWords.length === 2) {
-              const [genus, species] = speciesWords;
-              row['genus'] = genus;
-              row['species'] = species;
-              rowErrors = rowErrors || {};
-              rowErrors['genus'] = 'Genus was auto-filled based on species field.';
-              rowErrors['species'] = 'Species field was split into genus and species.';
-            }
-          }
-        } else if (formType === 'quadrats') {
+        if (formType === 'quadrats') {
           rowErrors = rowErrors || {};
-          const [coordinateUnits, dimensionUnits, areaUnits] = [row['coordinateunit'], row['dimensionunit'], row['areaunit']];
-          if (!coordinateUnits) {
-            row['coordinateunit'] = 'm';
-            rowErrors['coordinateunit'] = 'Coordinate units were auto-filled based on table defaults.';
-          }
-          if (!dimensionUnits) {
-            row['dimensionunit'] = 'm';
-            rowErrors['dimensionunit'] = 'Dimension units were auto-filled based on table defaults.';
-          }
-          if (!areaUnits) {
-            row['areaunit'] = 'm2';
-            rowErrors['areaunit'] = 'Area units were auto-filled based on table defaults.';
-          }
 
           const [area, dimx, dimy] = [row['area'], row['dimx'], row['dimy']];
           if (!area && dimx && dimy) {
@@ -193,19 +166,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
           }
         } else if (formType === 'measurements') {
           rowErrors = rowErrors || {};
-          const [coordinateUnits, dbhUnits, homUnits] = [row['coordinateunit'], row['dbhunit'], row['homunit']];
-          if (!coordinateUnits) {
-            row['coordinateunit'] = 'm';
-            rowErrors['coordinateunit'] = 'Coordinate units were auto-filled based on table defaults.';
-          }
-          if (!dbhUnits) {
-            row['dbhunit'] = 'mm';
-            rowErrors['dbhunit'] = 'DBH units were auto-filled based on table defaults.';
-          }
-          if (!homUnits) {
-            row['homunit'] = 'm';
-            rowErrors['homunit'] = 'HOM units were auto-filled based on table defaults.';
-          }
         } else if (formType === 'attributes') {
           rowErrors = rowErrors || {};
           const [status] = [row['status']];
@@ -302,7 +262,6 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
                   }
                 }
               }}
-              autoHeight
               getRowHeight={() => 'auto'}
             />
           )}

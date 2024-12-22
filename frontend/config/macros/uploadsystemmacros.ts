@@ -32,9 +32,6 @@ export interface UploadParseFilesProps {
 
 export interface UploadReviewFilesProps {
   // state vars
-  dbhUnit: string;
-  homUnit: string;
-  coordUnit: string;
   uploadForm: FormType | undefined;
   acceptedFiles: FileWithStream[];
   expectedHeaders: string[];
@@ -69,9 +66,6 @@ export interface UploadFireProps {
   // state vars
   uploadForm: FormType | undefined;
   personnelRecording: string;
-  dbhUnit: string;
-  homUnit: string;
-  coordUnit: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
   uploadCompleteMessage: string;
@@ -90,7 +84,6 @@ export interface UploadFireAzureProps {
   // state vars
   uploadForm: FormType | undefined;
   acceptedFiles: FileWithStream[];
-  cmErrors: CMError[];
   allRowToCMID: DetailedCMIDRow[];
   // state setters
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;

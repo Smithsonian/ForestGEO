@@ -10,9 +10,7 @@ export type CoreMeasurementsRDS = {
   isValidated?: boolean;
   measurementDate?: Date;
   measuredDBH?: number;
-  dbhUnit?: string;
   measuredHOM?: number;
-  homUnit?: string;
   description?: string;
   userDefinedFields?: string;
 };
@@ -34,9 +32,7 @@ export type StagingCoreMeasurementsRDS = {
   censusID?: number;
   stemID?: number;
   measuredDBH?: number;
-  dbhUnit?: string;
   measuredHOM?: number;
-  homUnit?: string;
   measurementDate?: Date;
   description?: string;
   userDefinedFields?: string;

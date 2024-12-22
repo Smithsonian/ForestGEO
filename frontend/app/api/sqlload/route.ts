@@ -81,6 +81,20 @@ export async function POST(request: NextRequest) {
       }
     }
   }
+
+  // Update Census Start/End Dates
+  const combinedQuery = `
+            UPDATE ${schema}.census c
+            JOIN (
+              SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
+              FROM ${schema}.coremeasurements
+              WHERE CensusID = ${censusID} 
+              GROUP BY CensusID
+            ) m ON c.CensusID = m.CensusID
+            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
+            WHERE c.CensusID = ${censusID};`;
+
+  await connectionManager.executeQuery(combinedQuery);
   await connectionManager.closeConnection();
   return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
 }

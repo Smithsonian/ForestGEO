@@ -44,7 +44,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
     setFinish(false);
   };
   useEffect(() => {
-    if (quadratDispatch) quadratDispatch({ quadrat: undefined }); // deselect quadrat at start of execution
+    if (quadratDispatch) quadratDispatch({ quadrat: undefined }).then(() => {}); // deselect quadrat at start of execution
   }, []);
 
   useEffect(() => {

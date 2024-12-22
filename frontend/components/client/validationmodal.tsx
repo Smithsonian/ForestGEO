@@ -114,6 +114,7 @@ function ValidationModal(props: VMProps) {
       } finally {
         setIsUpdatingRows(false);
         setIsValidationComplete(true);
+        await handleCloseValidationModal();
       }
     } catch (error) {
       console.error('Error during validation process:', error);
@@ -130,12 +131,8 @@ function ValidationModal(props: VMProps) {
     ));
   };
 
-  useEffect(() => {
-    if (isValidationComplete) handleCloseValidationModal().catch(console.error);
-  }, [isValidationComplete]);
-
   return (
-    <Modal open={isValidationModalOpen} onClose={undefined}>
+    <Modal open={isValidationModalOpen} onClose={handleCloseValidationModal}>
       <ModalDialog
         sx={{
           width: '80%',
