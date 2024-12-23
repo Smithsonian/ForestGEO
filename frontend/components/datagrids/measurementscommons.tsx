@@ -369,11 +369,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           if (value === undefined || value === null || value === '') {
             return null;
           }
-          if (moment(value).isValid()) {
-            return moment(value).format('DD-MM-YYYY');
-          }
-          if (typeof value === 'number') {
-            return value;
+          const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+
+          if (match) {
+            let normalizedDate;
+            if (match[1]) {
+              normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+            } else {
+              normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+            }
+
+            const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+            if (parsedDate.isValid()) {
+              return parsedDate.format('YYYY-MM-DD');
+            }
           }
           if (/^0[0-9]+$/.test(value)) {
             return value; // Return as a string if it has leading zeroes
@@ -387,6 +396,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             value = value.replace(/"/g, '""');
             value = `"${value}"`;
           }
+
           return value;
         });
       csvRows += values.join(',') + '\n';
