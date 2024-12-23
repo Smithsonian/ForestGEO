@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
   for (const rowId in fileRowSet) {
-    await connectionManager.beginTransaction();
+    // await connectionManager.beginTransaction();
     const row = fileRowSet[rowId];
     try {
       const props: InsertUpdateProcessingProps = {
@@ -57,9 +57,9 @@ export async function POST(request: NextRequest) {
       } else if (formType === 'measurements' && coreMeasurementID === undefined) {
         throw new Error('CoreMeasurement insertion failure at row: ' + row);
       }
-      await connectionManager.commitTransaction();
+      // await connectionManager.commitTransaction();
     } catch (error) {
-      await connectionManager.rollbackTransaction();
+      // await connectionManager.rollbackTransaction();
       await connectionManager.closeConnection();
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);
@@ -83,18 +83,18 @@ export async function POST(request: NextRequest) {
   }
 
   // Update Census Start/End Dates
-  const combinedQuery = `
-            UPDATE ${schema}.census c
-            JOIN (
-              SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
-              FROM ${schema}.coremeasurements
-              WHERE CensusID = ${censusID} 
-              GROUP BY CensusID
-            ) m ON c.CensusID = m.CensusID
-            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
-            WHERE c.CensusID = ${censusID};`;
-
-  await connectionManager.executeQuery(combinedQuery);
-  await connectionManager.closeConnection();
+  // const combinedQuery = `
+  //           UPDATE ${schema}.census c
+  //           JOIN (
+  //             SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
+  //             FROM ${schema}.coremeasurements
+  //             WHERE CensusID = ${censusID}
+  //             GROUP BY CensusID
+  //           ) m ON c.CensusID = m.CensusID
+  //           SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
+  //           WHERE c.CensusID = ${censusID};`;
+  //
+  // await connectionManager.executeQuery(combinedQuery);
+  // await connectionManager.closeConnection();
   return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
 }

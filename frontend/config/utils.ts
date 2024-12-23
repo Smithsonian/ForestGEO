@@ -169,23 +169,45 @@ export async function handleUpsert<Result>(
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
-    console.log('Insert/Update Query:', query, 'Values:', Object.values(data));
+    // console.log('Insert/Update Query:', query, 'Values:', Object.values(data));
     const result = await connectionManager.executeQuery(query, Object.values(data));
+    // console.log('initial insert/update query result: ', result);
 
     id = result.insertId;
 
     if (id === 0) {
+      console.log('existing record found, updating...');
       const whereConditions = Object.keys(data)
         .map(field => {
           const value = data[field as keyof Result];
-          return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
+          if (value === null || value === '') {
+            return `\`${field}\` IS NULL`;
+          } else {
+            return `\`${field}\` = ?`;
+          }
         })
         .join(' AND ');
 
+      const values = Object.keys(data)
+        .map(field => {
+          const value = data[field as keyof Result];
+          if (typeof value === 'string' && /^[+-]?\d*\.\d+$/.test(value)) {
+            return parseFloat(value); // Convert to number
+          }
+          return value;
+        })
+        .filter(value => value !== null || value !== '');
+
+      if (Buffer.byteLength(JSON.stringify(values)) > 4194304) {
+        // 4MB
+        throw new Error('Query exceeds MySQL max_allowed_packet size.');
+      }
+
       const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
-      const values = Object.values(data).filter(value => value !== null);
+      console.log('find existing query: ', findExistingQuery, 'values: ', values);
 
       const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
+      console.log('find existing query search result: ', searchResult);
 
       if (searchResult.length > 0) {
         id = searchResult[0][key as keyof Result] as unknown as number;

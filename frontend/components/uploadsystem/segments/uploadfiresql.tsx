@@ -231,6 +231,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setCompletedOperations(prevCompleted => prevCompleted + 1);
       }
 
+      const combinedQuery = `
+            UPDATE ${schema}.census c
+            JOIN (
+              SELECT c1.PlotCensusNumber, MIN(cm.MeasurementDate) AS FirstMeasurementDate, MAX(cm.MeasurementDate) AS LastMeasurementDate
+              FROM ${schema}.coremeasurements cm
+              JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+              WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
+              GROUP BY c1.PlotCensusNumber
+            ) m ON c.PlotCensusNumber = m.PlotCensusNumber
+            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
+            WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
+      await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
+
       setLoading(false);
       setIsDataUnsaved(false);
     };

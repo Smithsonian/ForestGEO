@@ -35,7 +35,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           TreeID: treeID,
           QuadratID: quadratID,
           LocalX: lx,
-          LocalY: ly,
+          LocalY: ly
         };
         const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(connectionManager, schema, 'stems', stemSearch, 'StemID');
 
