@@ -11,6 +11,8 @@ import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
 import { processQuadrats } from '@/components/processors/processquadrats';
 import { processCensus } from '@/components/processors/processcensus';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export type ColumnStates = {
   [key: string]: boolean;
@@ -124,8 +126,8 @@ export interface SpecialProcessingProps {
   connectionManager: ConnectionManager;
   rowData: FileRow;
   schema: string;
-  plotID?: number;
-  censusID?: number;
+  plot?: Plot;
+  census?: OrgCensus;
   quadratID?: number;
   fullName?: string;
 }

@@ -3,15 +3,15 @@ import { CensusQuadratResult, QuadratResult } from '@/config/sqlrdsdefinitions/z
 import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
-  const { connectionManager, rowData, schema, plotID, censusID } = props;
-  if (!censusID || !plotID) throw createError('CensusID missing', { censusID });
+  const { connectionManager, rowData, schema, plot, census } = props;
+  if (!plot || !census) throw createError('missing core data', { plot, census });
 
   const { quadrat, startx, starty, dimx, dimy, area, quadratshape } = rowData;
 
   try {
     const quadratsData: Partial<QuadratResult> = {
       QuadratName: quadrat,
-      PlotID: plotID,
+      PlotID: plot.plotID,
       StartX: startx,
       StartY: starty,
       DimensionX: dimx,
@@ -26,7 +26,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
     // need to update censusquadrat
 
     const cqData = {
-      CensusID: censusID,
+      CensusID: census.dateRanges[0].censusID,
       QuadratID: quadratID
     };
     const { id: cqID } = await handleUpsert<CensusQuadratResult>(connectionManager, schema, 'censusquadrat', cqData, 'CQID');

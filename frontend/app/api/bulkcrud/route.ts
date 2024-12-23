@@ -4,16 +4,19 @@ import { FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
-  const { dataType, slugs } = params;
-  if (!dataType || !slugs) {
+  const body = await request.json();
+  const dataType: string = body.gridType;
+  const schema: string = body.schema;
+  const plot: Plot = body.plot;
+  const census: OrgCensus = body.census;
+  const rows: FileRowSet = body.fileRowSet;
+  if (!dataType || !plot || !census) {
     return new NextResponse('No dataType or SLUGS provided', { status: HTTPResponses.INVALID_REQUEST });
   }
-  const [schema, plotIDParam, censusIDParam] = slugs;
-  const plotID = parseInt(plotIDParam);
-  const censusID = parseInt(censusIDParam);
-  const rows: FileRowSet = await request.json();
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
@@ -27,8 +30,8 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         connectionManager: connectionManager,
         formType: dataType,
         rowData,
-        plotID,
-        censusID,
+        plot: plot,
+        census: census,
         quadratID: undefined,
         fullName: undefined
       };
