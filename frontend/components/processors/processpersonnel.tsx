@@ -3,8 +3,8 @@ import { PersonnelResult, RoleResult } from '@/config/sqlrdsdefinitions/personne
 import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
-  const { connectionManager, rowData, schema, censusID } = props;
-  if (!censusID) throw createError('CensusID missing', { censusID });
+  const { connectionManager, rowData, schema, census } = props;
+  if (!census) throw createError('CensusID missing', { census });
   if (!rowData.role) throw createError('Row data does not contain a role property', { rowData });
 
   const { firstname, lastname, role, roledescription } = rowData;
@@ -24,7 +24,9 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
     if (existingRoles.length > 0) {
       // If the role exists, update the description
       roleID = existingRoles[0].RoleID;
-      const updateRoleQuery = `UPDATE \`${schema}\`.\`roles\` SET RoleDescription = ? WHERE RoleID = ?`;
+      const updateRoleQuery = `UPDATE \`${schema}\`.\`roles\`
+                               SET RoleDescription = ?
+                               WHERE RoleID = ?`;
       await connectionManager.executeQuery(updateRoleQuery, [roledescription, roleID]);
     } else {
       // If the role does not exist, insert a new role
@@ -38,7 +40,7 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
 
     // Handle Personnel insertion/updation
     const personnelData = {
-      CensusID: censusID,
+      CensusID: census.dateRanges[0].censusID,
       FirstName: firstname,
       LastName: lastname,
       RoleID: roleID

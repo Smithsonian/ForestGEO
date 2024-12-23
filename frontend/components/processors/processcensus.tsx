@@ -6,8 +6,8 @@ import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefin
 import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
-  const { connectionManager, rowData, schema, plotID, censusID } = props;
-  if (!plotID || !censusID) {
+  const { connectionManager, rowData, schema, plot, census } = props;
+  if (!plot || !census) {
     console.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
   }
@@ -17,7 +17,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     // Fetch species
     const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connectionManager, 'SpeciesID');
     // Fetch quadrat
-    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plotID }, connectionManager, 'QuadratID');
+    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plot.plotID }, connectionManager, 'QuadratID');
 
     if (tag) {
       const tagSearch: Partial<TreeResult> = {
@@ -52,7 +52,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
         // Handle Core Measurement Upsert
         const coreMeasurementSearch: Partial<CoreMeasurementsResult> = {
-          CensusID: censusID,
+          CensusID: census.dateRanges[0].censusID,
           StemID: stemID,
           IsValidated: null,
           MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
@@ -79,7 +79,12 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             console.error('No valid attribute codes found:', codes);
           } else {
             for (const code of parsedCodes) {
-              const attributeRows = await connectionManager.executeQuery(`SELECT COUNT(*) as count FROM ${schema}.attributes WHERE Code = ?`, [code]);
+              const attributeRows = await connectionManager.executeQuery(
+                `SELECT COUNT(*) as count
+                 FROM ${schema}.attributes
+                 WHERE Code = ?`,
+                [code]
+              );
               if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
                 throw createError(`Attribute code ${code} not found or query failed.`, { code });
               }

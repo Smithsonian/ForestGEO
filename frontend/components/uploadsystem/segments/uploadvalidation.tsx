@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
 import { ReviewStates, UploadValidationProps } from '@/config/macros/uploadsystemmacros';
 import CircularProgress from '@mui/joy/CircularProgress';
@@ -12,7 +12,7 @@ type ValidationMessages = {
 
 const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, schema }) => {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
-  const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
+  const isValidationComplete = useRef(false);
   const [errorsFound, setErrorsFound] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
@@ -107,7 +107,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
         setApiErrors(prev => [...prev, `Failed to update validated rows: ${error.message}`]);
       } finally {
         setIsUpdatingRows(false);
-        setIsValidationComplete(true);
+        isValidationComplete.current = true;
       }
     } catch (error) {
       console.error('Error during validation process:', error);
@@ -125,7 +125,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
   };
 
   useEffect(() => {
-    if (isValidationComplete) setReviewState(ReviewStates.UPLOAD_AZURE);
+    if (isValidationComplete.current) setReviewState(ReviewStates.UPLOAD_AZURE);
   }, [isValidationComplete]);
 
   return (
@@ -140,7 +140,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
             flexDirection: 'column'
           }}
         >
-          {!isValidationComplete ? (
+          {!isValidationComplete.current ? (
             <Box
               sx={{
                 display: 'flex',

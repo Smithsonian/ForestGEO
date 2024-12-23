@@ -27,7 +27,7 @@ BEGIN
            cm.MeasuredHOM                                      AS MeasuredHOM,
            cm.IsValidated                                      AS IsValidated,
            cm.Description                                      AS Description,
-           (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
+           (SELECT GROUP_CONCAT( DISTINCT ca.Code SEPARATOR '; ')
             FROM cmattributes ca
             WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
             cm.UserDefinedFields AS UserDefinedFields

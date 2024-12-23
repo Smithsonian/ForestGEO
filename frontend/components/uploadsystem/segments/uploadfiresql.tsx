@@ -110,7 +110,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
           try {
-            if (activeTasks >= connectionLimit) parser.pause();
+            if (activeTasks >= 5) parser.pause();
             // parser.pause();
             const fileRowSet: FileRowSet = {};
             const transformedChunk = results.data.map((row, index) => {
@@ -173,14 +173,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
         setCurrentlyRunning(`Uploading file "${fileName}" to SQL...`);
-        const response = await fetch(
-          `/api/sqlload?schema=${schema}&formType=${uploadForm}&fileName=${fileName}&plot=${currentPlot?.plotID?.toString().trim()}&census=${currentCensus?.dateRanges[0].censusID.toString().trim()}&quadrat=${currentQuadrat?.quadratID?.toString().trim()}&user=${userID}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(fileData[fileName])
-          }
-        );
+        const response = await fetch(`/api/sqlpacketload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schema: schema,
+            formType: uploadForm,
+            fileName: fileName,
+            plot: currentPlot,
+            census: currentCensus,
+            user: userID,
+            fileRowSet: fileData[fileName]
+          })
+        });
         if (!response.ok) throw new Error('SQLLOAD ERROR: ' + response.statusText);
         return response.ok ? 'SQL load successful' : 'SQL load failed';
       } catch (error) {
@@ -232,16 +237,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       const combinedQuery = `
-            UPDATE ${schema}.census c
-            JOIN (
-              SELECT c1.PlotCensusNumber, MIN(cm.MeasurementDate) AS FirstMeasurementDate, MAX(cm.MeasurementDate) AS LastMeasurementDate
-              FROM ${schema}.coremeasurements cm
-              JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
-              WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
-              GROUP BY c1.PlotCensusNumber
-            ) m ON c.PlotCensusNumber = m.PlotCensusNumber
-            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
-            WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
+        UPDATE ${schema}.census c
+          JOIN (SELECT c1.PlotCensusNumber,
+                       MIN(cm.MeasurementDate) AS FirstMeasurementDate,
+                       MAX(cm.MeasurementDate) AS LastMeasurementDate
+                FROM ${schema}.coremeasurements cm
+                       JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+                WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
+                GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
+        SET c.StartDate = m.FirstMeasurementDate,
+            c.EndDate   = m.LastMeasurementDate
+        WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
       await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
 
       setLoading(false);

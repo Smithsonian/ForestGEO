@@ -267,12 +267,18 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
     }
 
     const fileRowSet: FileRowSet = convertRowsToFileRowSet(rows);
-    const response = await fetch(`/api/bulkcrud/${gridType}/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
+    const response = await fetch(`/api/bulkcrud`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(fileRowSet)
+      body: JSON.stringify({
+        gridType: gridType,
+        schema: currentSite?.schemaName,
+        plot: currentPlot,
+        census: currentCensus,
+        fileRowSet: fileRowSet
+      })
     });
     console.log('response: ', response);
     setChangesSubmitted(true);

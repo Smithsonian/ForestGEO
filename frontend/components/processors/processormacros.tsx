@@ -8,7 +8,7 @@ const sqlConfig: PoolOptions = {
   port: parseInt(process.env.AZURE_SQL_PORT!),
   database: process.env.AZURE_SQL_CATALOG_SCHEMA,
   waitForConnections: true,
-  connectionLimit: 150, // increased from 10 to prevent bottlenecks
+  connectionLimit: 100, // increased from 10 to prevent bottlenecks
   queueLimit: 20,
   keepAliveInitialDelay: 10000, // 0 by default.
   enableKeepAlive: true, // false by default.

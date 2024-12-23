@@ -21,8 +21,8 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       await mapping.specialProcessing({ ...subProps, schema });
     } else {
       const columns = Object.keys(mapping.columnMappings);
-      if (columns.includes('plotID')) rowData['plotID'] = subProps.plotID?.toString() ?? null;
-      if (columns.includes('censusID')) rowData['censusID'] = subProps.censusID?.toString() ?? null;
+      if (columns.includes('plotID')) rowData['plotID'] = subProps.plot?.plotID?.toString() ?? null;
+      if (columns.includes('censusID')) rowData['censusID'] = subProps.census?.dateRanges[0]?.censusID?.toString() ?? null;
       const tableColumns = columns.map(fileColumn => mapping.columnMappings[fileColumn]).join(', ');
       const placeholders = columns.map(() => '?').join(', '); // Use '?' for placeholders in MySQL
       const values = columns.map(fileColumn => {
@@ -32,9 +32,9 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       });
       const query = `
         INSERT INTO ${schema}.${mapping.tableName} (${tableColumns})
-        VALUES (${placeholders}) ON DUPLICATE KEY
-        UPDATE
-          ${tableColumns
+        VALUES (${placeholders})
+        ON DUPLICATE KEY
+          UPDATE ${tableColumns
             .split(', ')
             .map(column => `${column} = VALUES(${column})`)
             .join(', ')};
@@ -310,26 +310,23 @@ export async function runValidation(
     // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
     if (params.minDBH === null || params.maxDBH === null || params.minHOM === null || params.maxHOM === null) {
       const speciesLimitsQuery = `
-        SELECT 
-          sl.LimitType,
-          COALESCE(${params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL'}, IF(sl.LimitType = 'DBH', sl.LowerBound, NULL)) AS minDBH,
-          COALESCE(${params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL'}, IF(sl.LimitType = 'DBH', sl.UpperBound, NULL)) AS maxDBH,
-          COALESCE(${params.minHOM !== null && params.minHOM !== undefined ? params.minHOM.toString() : 'NULL'}, IF(sl.LimitType = 'HOM', sl.LowerBound, NULL)) AS minHOM,
-          COALESCE(${params.maxHOM !== null && params.maxHOM !== undefined ? params.maxHOM.toString() : 'NULL'}, IF(sl.LimitType = 'HOM', sl.UpperBound, NULL)) AS maxHOM
-        FROM 
-          ${schema}.specieslimits sl
-        JOIN 
-          ${schema}.species sp ON sp.SpeciesID = sl.SpeciesID
-        JOIN 
-          ${schema}.trees t ON t.SpeciesID = sp.SpeciesID
-        JOIN 
-          ${schema}.stems st ON st.TreeID = t.TreeID
-        JOIN
-          ${schema}.quadrats q ON st.QuadratID = q.QuadratID
-        JOIN 
-          ${schema}.coremeasurements cm ON cm.StemID = st.StemID
-        WHERE 
-          cm.IsValidated IS NULL
+        SELECT sl.LimitType,
+               COALESCE(${params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL'}, IF(sl.LimitType = 'DBH', sl.LowerBound, NULL)) AS minDBH,
+               COALESCE(${params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL'}, IF(sl.LimitType = 'DBH', sl.UpperBound, NULL)) AS maxDBH,
+               COALESCE(${params.minHOM !== null && params.minHOM !== undefined ? params.minHOM.toString() : 'NULL'}, IF(sl.LimitType = 'HOM', sl.LowerBound, NULL)) AS minHOM,
+               COALESCE(${params.maxHOM !== null && params.maxHOM !== undefined ? params.maxHOM.toString() : 'NULL'}, IF(sl.LimitType = 'HOM', sl.UpperBound, NULL)) AS maxHOM
+        FROM ${schema}.specieslimits sl
+               JOIN
+             ${schema}.species sp ON sp.SpeciesID = sl.SpeciesID
+               JOIN
+             ${schema}.trees t ON t.SpeciesID = sp.SpeciesID
+               JOIN
+             ${schema}.stems st ON st.TreeID = t.TreeID
+               JOIN
+             ${schema}.quadrats q ON st.QuadratID = q.QuadratID
+               JOIN
+             ${schema}.coremeasurements cm ON cm.StemID = st.StemID
+        WHERE cm.IsValidated IS NULL
           AND (${params.p_CensusID !== null ? `cm.CensusID = ${params.p_CensusID}` : 'TRUE'})
           AND (${params.p_PlotID !== null ? `q.PlotID = ${params.p_PlotID}` : 'TRUE'})
         LIMIT 1;
@@ -368,13 +365,16 @@ export async function runValidation(
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const connectionManager = ConnectionManager.getInstance();
-  const tempTable = `CREATE TEMPORARY TABLE UpdatedRows (CoreMeasurementID INT);`;
+  const tempTable = `CREATE TEMPORARY TABLE UpdatedRows
+                     (
+                       CoreMeasurementID INT
+                     );`;
 
   const insertTemp = `
     INSERT INTO UpdatedRows (CoreMeasurementID)
     SELECT cm.CoreMeasurementID
     FROM ${schema}.coremeasurements cm
-    JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+           JOIN ${schema}.census c ON cm.CensusID = c.CensusID
     WHERE cm.IsValidated IS NULL
       AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
       AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
