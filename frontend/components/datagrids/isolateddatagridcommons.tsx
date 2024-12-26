@@ -175,7 +175,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                 All data as JSON
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
-                All Data as Form
+                All Data as CSV
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={exportFilterModel}>
                 Filter Settings
@@ -338,7 +338,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     switch (gridType) {
       case 'attributes':
         const aResponse = await fetch(
-          `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+          `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(filterModel)}`,
           { method: 'GET' }
         );
         const aData = await aResponse.json();
@@ -991,11 +991,13 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   );
 
   function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel => ({
-      ...prevFilterModel,
-      items: [...(incomingValues.items || [])],
-      quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-    }));
+    setFilterModel(prevFilterModel => {
+      return {
+        ...prevFilterModel,
+        items: [...(incomingValues.items || [])],
+        quickFilterValues: [...(incomingValues.quickFilterValues || [])]
+      };
+    });
   }
 
   const getEnhancedCellAction = useCallback(
@@ -1134,8 +1136,12 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             paginationModel={paginationModel}
             rowCount={rowCount}
             pageSizeOptions={[paginationModel.pageSize]}
-            filterModel={filterModel}
-            onFilterModelChange={newFilterModel => setFilterModel(newFilterModel)}
+            onFilterModelChange={newFilterModel => {
+              setFilterModel(prevModel => ({
+                ...prevModel,
+                ...newFilterModel
+              }));
+            }}
             ignoreDiacritics
             initialState={{
               columns: {
