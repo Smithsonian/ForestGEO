@@ -224,7 +224,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                 All data as JSON
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
-                All Data as Form
+                All Data as CSV
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={handleExportErrorsClick}>
                 All errors as JSON
@@ -722,15 +722,14 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   useEffect(() => {
     async function getCounts() {
-      const query = `SELECT 
-            SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END) AS CountValid,
-            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
-            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending
-            FROM ${currentSite?.schemaName ?? ''}.${gridType} vft
-                     JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
-            WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
-              AND c.PlotID = ${currentPlot?.plotID ?? 0}
-              AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
+      const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END)  AS CountValid,
+                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
+                            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending
+                     FROM ${currentSite?.schemaName ?? ''}.${gridType} vft
+                            JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
+                     WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
+                       AND c.PlotID = ${currentPlot?.plotID ?? 0}
+                       AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
       const response = await fetch(`/api/runquery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1199,18 +1198,25 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   async function handleResetValidations() {
     const clearCMVQuery = `DELETE cmv
-      FROM ${currentSite?.schemaName}.cmverrors AS cmv
-      JOIN ${currentSite?.schemaName}.coremeasurements AS cm
-          ON cmv.CoreMeasurementID = cm.CoreMeasurementID
-      JOIN ${currentSite?.schemaName}.census AS c
-          ON c.CensusID = cm.CensusID
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
-        AND c.PlotID = ${currentPlot?.plotID}
-        AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
-    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm 
+                           FROM ${currentSite?.schemaName}.cmverrors AS cmv
+                                  JOIN ${currentSite?.schemaName}.coremeasurements AS cm
+                                       ON cmv.CoreMeasurementID = cm.CoreMeasurementID
+                                  JOIN ${currentSite?.schemaName}.census AS c
+                                       ON c.CensusID = cm.CensusID
+                           WHERE c.CensusID IN (SELECT CensusID
+                                                from ${currentSite?.schemaName}.census
+                                                WHERE PlotID = ${currentPlot?.plotID}
+                                                  AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+                             AND c.PlotID = ${currentPlot?.plotID}
+                             AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
+    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
       JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
-      SET cm.IsValidated = NULL
-      WHERE c.CensusID IN (SELECT CensusID from ${currentSite?.schemaName}.census WHERE PlotID = ${currentPlot?.plotID} AND PlotCensusNumber = ${currentCensus?.plotCensusNumber}) AND c.PlotID = ${currentPlot?.plotID}`;
+                   SET cm.IsValidated = NULL
+                   WHERE c.CensusID IN (SELECT CensusID
+                                        from ${currentSite?.schemaName}.census
+                                        WHERE PlotID = ${currentPlot?.plotID}
+                                          AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+                     AND c.PlotID = ${currentPlot?.plotID}`;
     const clearCMVResponse = await fetch(`/api/runquery`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

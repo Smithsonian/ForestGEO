@@ -92,8 +92,8 @@ export async function runQuery(connection: PoolConnection, query: string, params
 //   process.exit(0);
 // });
 
-// process.on('SIGINT', async () => {
-//   console.log('Received SIGINT. Closing connections...');
-//   await poolMonitor.closeAllConnections();
-//   process.exit(0);
-// });
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT. Closing connections...');
+  await poolMonitor.closeAllConnections();
+  process.exit(0);
+});

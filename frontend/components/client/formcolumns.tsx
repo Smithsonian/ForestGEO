@@ -439,28 +439,12 @@ export const PersonnelFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'firstname',
     headerName: 'First Name',
-    // renderHeader: () => renderCustomHeader(FormType.personnel, 'firstname'),
     flex: 1,
     editable: true
   },
   {
     field: 'lastname',
     headerName: 'Last Name',
-    // renderHeader: () => renderCustomHeader(FormType.personnel, 'lastname'),
-    flex: 1,
-    editable: true
-  },
-  {
-    field: 'role',
-    headerName: 'Role',
-    // renderHeader: () => renderCustomHeader(FormType.personnel, 'role'),
-    flex: 1,
-    editable: true
-  },
-  {
-    field: 'roledescription',
-    headerName: 'Role Description',
-    // renderHeader: () => renderCustomHeader(FormType.personnel, 'roledescription'),
     flex: 1,
     editable: true
   }
