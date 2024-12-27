@@ -9,8 +9,9 @@ import RenderFormExplanations from '@/components/client/renderformexplanations';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import { RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
-import { GridRenderEditCellParams } from '@mui/x-data-grid';
+import { GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { Add } from '@mui/icons-material';
+import levenshtein from 'fast-levenshtein';
 
 export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
   type ExtendedRoleRDS = RoleRDS & {
@@ -27,7 +28,6 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
   const [refresh, setRefresh] = useState(false);
   const currentSite = useSiteContext();
   const [storedRoles, setStoredRoles] = useState<RoleRDS[]>([]);
-  const [selectedRole, setSelectedRole] = useState<ExtendedRoleRDS | null>(null);
 
   useEffect(() => {
     async function getRoles() {
@@ -44,87 +44,104 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
       headerName: 'Role',
       flex: 1,
       editable: true,
-      renderEditCell: (params: GridRenderEditCellParams) => (
-        <Autocomplete
-          value={selectedRole}
-          onChange={(event, newValue: any) => {
-            if (typeof newValue === 'string') {
-              params.api.setEditCellValue({ id: params.id, field: 'role', value: newValue });
-              params.api.setEditCellValue({
-                id: params.id,
-                field: 'roledescription',
-                value: storedRoles.find(role => role.roleName === newValue)?.roleDescription ?? ''
-              });
-              setSelectedRole({
-                roleName: newValue
-              });
-            } else if (newValue && newValue.inputValue) {
-              // Create a new value from the user input
-              params.api.setEditCellValue({ id: params.id, field: 'role', value: newValue.inputValue });
-              params.api.setEditCellValue({
-                id: params.id,
-                field: 'roledescription',
-                value: storedRoles.find(role => role.roleName === newValue)?.roleDescription ?? ''
-              });
-              setSelectedRole({
-                roleName: newValue.inputValue
-              });
-            } else {
-              params.api.setEditCellValue({ id: params.id, field: 'role', value: newValue?.roleName ?? '' });
-              params.api.setEditCellValue({
-                id: params.id,
-                field: 'roledescription',
-                value: storedRoles.find(role => role.roleName === newValue)?.roleDescription ?? ''
-              });
-              setSelectedRole(newValue);
-            }
-          }}
-          filterOptions={(options, params) => {
-            const filtered = filter(options, params);
+      renderEditCell: (params: GridRenderEditCellParams) => {
+        const apiRef = useGridApiContext();
+        return (
+          <Autocomplete
+            value={params.row['role']}
+            onChange={(_event, newValue: any) => {
+              const autoCorrectRole = (input: string): string => {
+                const closestMatch = storedRoles.reduce(
+                  (bestMatch, role) => {
+                    const roleName = role.roleName?.toLowerCase() || '';
+                    if (!roleName) return bestMatch;
 
-            const { inputValue } = params;
-            // Suggest the creation of a new value
-            const isExisting = options.some(option => inputValue === option.roleName);
-            if (inputValue !== '' && !isExisting) {
-              filtered.push({
-                inputValue,
-                roleName: `Add "${inputValue}"`
-              });
-            }
+                    const distance = levenshtein.get(input.toLowerCase(), roleName);
 
-            return filtered;
-          }}
-          selectOnFocus
-          clearOnBlur
-          handleHomeEndKeys
-          freeSolo
-          options={storedRoles}
-          getOptionLabel={option => {
-            // Value selected with enter, right from the input
-            if (typeof option === 'string') {
-              return option;
-            }
-            // Add "xxx" option created dynamically
-            if (option.inputValue) {
-              return option.inputValue;
-            }
-            // Regular option
-            return option.roleName;
-          }}
-          renderOption={(props, option) => (
-            <AutocompleteOption {...props}>
-              {option.roleName?.startsWith('Add "') && (
-                <ListItemDecorator>
-                  <Add />
-                </ListItemDecorator>
-              )}
-              {option.roleName}
-            </AutocompleteOption>
-          )}
-          sx={{ width: '100%' }}
-          autoFocus
-        />
-      )
+                    return distance < bestMatch.distance ? { role: role.roleName!, distance } : bestMatch;
+                  },
+                  { role: '', distance: Number.MAX_VALUE }
+                );
+
+                return closestMatch.distance <= 3 ? closestMatch.role : input;
+              };
+
+              let roleValue = '';
+              let roledescriptionValue = '';
+
+              if (typeof newValue === 'string') {
+                roleValue = autoCorrectRole(newValue);
+                roledescriptionValue = storedRoles.find(role => role.roleName === roleValue)?.roleDescription ?? '';
+              } else if (newValue && newValue.inputValue) {
+                roleValue = autoCorrectRole(newValue.inputValue);
+                roledescriptionValue = storedRoles.find(role => role.roleName === roleValue)?.roleDescription ?? '';
+              } else {
+                roleValue = autoCorrectRole(newValue?.roleName ?? '');
+                roledescriptionValue = storedRoles.find(role => role.roleName === roleValue)?.roleDescription ?? '';
+              }
+
+              params.api.setEditCellValue({
+                id: params.id,
+                field: 'role',
+                value: roleValue
+              });
+
+              // Update `role` field
+              apiRef.current.updateRows([
+                {
+                  id: params.id,
+                  roledescription: roledescriptionValue
+                }
+              ]);
+            }}
+            filterOptions={(options, params) => {
+              const filtered = filter(options, params);
+
+              const { inputValue } = params;
+              // Suggest the creation of a new value
+              const isExisting = options.some(option => inputValue === option.roleName);
+              if (inputValue !== '' && !isExisting) {
+                filtered.push({
+                  inputValue,
+                  roleName: `Add "${inputValue}"`,
+                  roleDescription: ``
+                });
+              }
+
+              return filtered;
+            }}
+            selectOnFocus
+            clearOnBlur
+            handleHomeEndKeys
+            freeSolo
+            options={storedRoles}
+            getOptionLabel={option => {
+              // Value selected with enter, right from the input
+              if (typeof option === 'string') {
+                return option;
+              }
+              // Add "xxx" option created dynamically
+              if (option.inputValue) {
+                return option.inputValue;
+              }
+              // Regular option
+              return option.roleName;
+            }}
+            renderOption={(props, option) => (
+              <AutocompleteOption key={option.roleName} {...props}>
+                {option.roleName?.startsWith('Add "') && (
+                  <ListItemDecorator>
+                    <Add />
+                  </ListItemDecorator>
+                )}
+                {option.roleName}
+              </AutocompleteOption>
+            )}
+            sx={{ width: '100%' }}
+            autoFocus
+          />
+        );
+      }
     },
     {
       field: 'roledescription',
@@ -133,11 +150,6 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
       editable: true
     }
   ]);
-
-  useEffect(() => {
-    console.log('selected role: ', JSON.stringify(selectedRole));
-  }, [selectedRole]);
-
   return (
     <Box>
       {RenderFormExplanations(FormType.personnel)}
