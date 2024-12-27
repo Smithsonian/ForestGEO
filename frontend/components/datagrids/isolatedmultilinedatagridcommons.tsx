@@ -203,6 +203,10 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   }, [refresh, setRefresh]);
 
   useEffect(() => {
+    console.log('updated rows: ', rows);
+  }, [rows]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.altKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
