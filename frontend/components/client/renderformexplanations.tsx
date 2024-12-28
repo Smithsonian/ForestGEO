@@ -15,16 +15,24 @@ export default function RenderFormExplanations(uploadForm: FormType) {
     .trim();
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+    <Box
+      sx={{
+        display: 'inherit', // Ensure layout is flex-based
+        flexDirection: 'column',
+        width: '100%'
+      }}
+    >
       <Typography level="title-lg" sx={{ alignSelf: 'center', justifyContent: 'center', alignContent: 'center', my: 2 }}>
         Understanding the Headers
       </Typography>
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', // Dynamic grid layout
-          gap: '1rem', // Space between items
-          mb: 5 // Margin at the bottom
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '1rem',
+          mb: 1,
+          width: '100%', // Ensure the grid takes the full width
+          boxSizing: 'border-box'
         }}
       >
         {TableHeadersByFormType[uploadForm].map((header, index) => (
