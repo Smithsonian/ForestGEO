@@ -9,7 +9,7 @@ import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
 import { useOrgCensusListContext } from '@/app/contexts/listselectionprovider';
 import { Box } from '@mui/system';
 
-import { PersonnelGridColumns, quadratGridColumns } from './datagridcolumns';
+import { PersonnelGridColumns, QuadratGridColumns } from './datagridcolumns';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import { PersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
@@ -434,7 +434,7 @@ export default function RolloverModal(props: RolloverModalProps) {
                       {customizeQuadrats && (
                         <DataGrid
                           rows={previousQuadrats}
-                          columns={quadratGridColumns}
+                          columns={QuadratGridColumns}
                           pageSizeOptions={[5, 10, 25, 100]}
                           checkboxSelection
                           onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedPersonnel)}
