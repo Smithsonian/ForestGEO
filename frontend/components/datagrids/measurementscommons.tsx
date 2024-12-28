@@ -13,7 +13,9 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridSortModel,
+  GridToolbarColumnsButton,
   GridToolbarContainer,
+  GridToolbarFilterButton,
   GridToolbarProps,
   GridToolbarQuickFilter,
   ToolbarPropsOverrides,
@@ -172,7 +174,10 @@ const EditToolbar = (props: EditToolbarProps) => {
         <Box sx={{ display: 'flex', flex: 1 }}>
           <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
             <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarColumnsButton />
+              <GridToolbarFilterButton />
               <GridToolbarQuickFilter
+                sx={{ ml: 2 }}
                 variant={'outlined'}
                 value={inputValue}
                 onKeyDown={handleKeyDown}
@@ -237,23 +242,28 @@ const EditToolbar = (props: EditToolbarProps) => {
         </Box>
       </Box>
       <Stack direction={'row'} spacing={2}>
-        {dynamicButtons.map((button: any, index: number) => (
-          <>
-            {button.tooltip ? (
+        <Dropdown>
+          <MenuButton>Other</MenuButton>
+          <Menu>
+            {dynamicButtons.map((button: any, index: number) => (
               <>
-                <Tooltip title={button.tooltip} placement={'bottom'} arrow>
-                  <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+                {button.tooltip ? (
+                  <>
+                    <Tooltip title={button.tooltip} placement={'bottom'} arrow>
+                      <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
+                        {button.label}
+                      </MenuItem>
+                    </Tooltip>
+                  </>
+                ) : (
+                  <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
                     {button.label}
-                  </Button>
-                </Tooltip>
+                  </MenuItem>
+                )}
               </>
-            ) : (
-              <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
-                {button.label}
-              </Button>
-            )}
-          </>
-        ))}
+            ))}
+          </Menu>
+        </Dropdown>
       </Stack>
     </GridToolbarContainer>
   );
