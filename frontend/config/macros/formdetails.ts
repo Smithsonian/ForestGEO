@@ -243,14 +243,14 @@ export const HeadersByDatagridType: Record<DatagridType, { label: string; explan
   [DatagridType.measurementssummaryview]: MeasurementSummaryViewHeaders.map(header => ({
     label: header,
     explanation: {
-      Quadrat: 'The name of the quadrat where measurements were taken.',
+      'Quadrat Name': 'The name of the quadrat where measurements were taken.',
       'Species Code': 'The unique code for the species measured.',
-      Tree: 'The tag or identifier for the tree measured.',
-      Stem: 'The tag or identifier for the stem measured.',
-      X: 'The local X-coordinate of the stem.',
-      Y: 'The local Y-coordinate of the stem.',
-      DBH: 'The diameter at breast height of the tree.',
-      HOM: 'The height from the ground where DBH was measured.',
+      'Tree Tag': 'The tag or identifier for the tree measured.',
+      'Stem Tag': 'The tag or identifier for the stem measured.',
+      'X (Stem)': 'The local X-coordinate of the stem.',
+      'Y (Stem)': 'The local Y-coordinate of the stem.',
+      'DBH (Diameter at Breast Height)': 'The diameter at breast height of the tree.',
+      'HOM (Height of Measure)': 'The height from the ground where DBH was measured.',
       Description: 'A text description of the measurement.',
       Attributes: 'Additional attributes associated with the measurement.'
     }[header],
@@ -300,9 +300,9 @@ export const HeadersByDatagridType: Record<DatagridType, { label: string; explan
     explanation: {
       Table: 'The name of the table where changes were made.',
       Record: 'The ID of the record that was changed.',
-      Op: 'The type of operation performed (e.g., insert, update, delete).',
-      Old: 'The state of the record before the change.',
-      New: 'The state of the record after the change.',
+      Operation: 'The type of operation performed (e.g., insert, update, delete).',
+      'Old Row': 'The state of the record before the change.',
+      'New Row': 'The state of the record after the change.',
       'Change Time': 'The timestamp of when the change occurred.',
       'Changed By': 'The user who performed the change.'
     }[header],
