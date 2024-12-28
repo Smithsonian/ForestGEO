@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useSession } from 'next-auth/react';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
-import { quadratGridColumns } from '@/components/client/datagridcolumns';
+import { QuadratGridColumns } from '@/components/client/datagridcolumns';
 import { FormType } from '@/config/macros/formdetails';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
@@ -49,7 +49,7 @@ export default function IsolatedQuadratsDataGrid() {
       />
       <IsolatedDataGridCommons
         gridType="quadrats"
-        gridColumns={quadratGridColumns}
+        gridColumns={QuadratGridColumns}
         refresh={refresh}
         setRefresh={setRefresh}
         initialRow={initialQuadratRDSRow}

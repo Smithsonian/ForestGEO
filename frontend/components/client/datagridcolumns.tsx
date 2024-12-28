@@ -14,7 +14,7 @@ export const formatHeader = (word1: string, word2: string) => (
   </Stack>
 );
 
-export const quadratGridColumns: GridColDef[] = standardizeGridColumns([
+export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: '#',
@@ -506,13 +506,6 @@ export const SpeciesLimitsGridColumns: GridColDef[] = standardizeGridColumns([
     flex: 0.5,
     type: 'number',
     editable: true
-  },
-  {
-    field: 'unit',
-    headerName: 'Units',
-    flex: 0.3,
-    type: 'singleSelect',
-    valueOptions: unitSelectionOptions
   }
 ]);
 
@@ -572,22 +565,6 @@ export const ViewFullTableGridColumns = rawColumns.map(column => {
   }
   return column;
 });
-
-/**
- * export type UnifiedChangelogRDS = {
- *   id?: number;
- *   changeID?: number;
- *   tableName?: string;
- *   recordID?: string;
- *   operation?: string;
- *   oldRowState?: Record<string, any>;
- *   newRowState?: Record<string, any>;
- *   changeTimestamp?: Date;
- *   changedBy?: string;
- *   plotID?: number;
- *   censusID?: number;
- * };
- */
 
 function formatValue(value: any): React.ReactNode {
   if (value === null || value === undefined) {

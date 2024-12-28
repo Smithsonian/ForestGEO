@@ -43,8 +43,8 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     }
   ],
   [FormType.personnel]: [
-    { label: 'firstname', category: 'required' },
-    { label: 'lastname', category: 'required' },
+    { label: 'firstname', category: 'required', explanation: "Personnel's provided first name" },
+    { label: 'lastname', category: 'required', explanation: "Personnel's provided last name" },
     {
       label: 'role',
       explanation: 'Characterize the job assigned to this person',
@@ -108,6 +108,234 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'required' }
   ],
   [FormType.arcgis_xlsx]: arcgisHeaders
+};
+
+export enum DatagridType {
+  attributes = 'attributes',
+  personnel = 'personnel',
+  alltaxonomiesview = 'alltaxonomiesview',
+  quadrats = 'quadrats',
+  measurementssummaryview = 'measurementssummaryview',
+  roles = 'roles',
+  stemtaxonomiesview = 'stemtaxonomiesview',
+  stem = 'stem',
+  specieslimits = 'specieslimits',
+  unifiedchangelog = 'unifiedchangelog',
+  viewfulltable = 'viewfulltable'
+}
+
+export const QuadratHeaders = ['Quadrat Name', 'X (Starting)', 'Y (Starting)', 'Area', 'Dimension X', 'Dimension Y', 'Quadrat Shape'];
+
+export const AttributeHeaders = ['Code', 'Description', 'Status'];
+
+export const PersonnelHeaders = ['First Name', 'Last Name', 'Role', 'Role Description'];
+
+export const AllTaxonomiesViewHeaders = [
+  'Species Code',
+  'Family',
+  'Genus',
+  'Genus Auth',
+  'Species',
+  'Subspecies',
+  'Species ID Level',
+  'Species Auth',
+  'Subspecies Auth',
+  'Field Family',
+  'Valid Code',
+  'Species Description',
+  'Species Limits'
+];
+
+export const MeasurementSummaryViewHeaders = [
+  'Quadrat Name',
+  'Species Code',
+  'Tree Tag',
+  'Stem Tag',
+  'X (Stem)',
+  'Y (Stem)',
+  'DBH (Diameter at Breast Height)',
+  'HOM (Height of Measure)',
+  'Description',
+  'Attributes'
+];
+
+export const StemHeaders = ['Stem Tag', 'Local X', 'Local Y', 'Moved', 'Stem Description'];
+
+export const SpeciesLimitsHeaders = ['LimitType', 'LowerBound', 'UpperBound'];
+
+export const RolesHeaders = ['Role Name', 'Role Description'];
+
+export const UnifiedChangelogHeaders = ['Table', 'Record', 'Operation', 'Old Row', 'New Row', 'Change Time', 'Changed By'];
+
+export const ViewFullTableHeaders = [
+  'Quadrat',
+  'Species Code',
+  'Tree',
+  'Stem',
+  'X (Stem)',
+  'Y (Stem)',
+  'DBH (Diameter at Breast Height)',
+  'HOM (Height of Measure)',
+  'Description',
+  'Attributes',
+  'Stem Tag',
+  'Tree Tag',
+  'Family',
+  'Genus',
+  'Species',
+  'Subspecies',
+  'Genus Authority',
+  'Species Authority',
+  'Subspecies Authority',
+  'Species ID Level',
+  'Species Field Family'
+];
+
+export const HeadersByDatagridType: Record<DatagridType, { label: string; explanation?: string; category?: 'required' | 'optional' }[]> = {
+  [DatagridType.attributes]: TableHeadersByFormType[FormType.attributes].map(obj => ({
+    label: obj.label.charAt(0).toUpperCase() + obj.label.substring(1),
+    explanation: obj.explanation,
+    category: obj.category
+  })),
+  [DatagridType.personnel]: PersonnelHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'First Name': "Personnel's first name",
+      'Last Name': "Personnel's last name",
+      Role: 'The name or title of the role.',
+      'Role Description': 'A detailed description of the role and its responsibilities.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.alltaxonomiesview]: AllTaxonomiesViewHeaders.map(header => ({
+    label: header,
+    explanation:
+      {
+        'Species Code': 'A unique identifier code for the species.',
+        Family: 'The family taxon for the species.',
+        Genus: 'The genus taxon for the species.',
+        'Genus Auth': 'The authority responsible for the classification of the genus.',
+        Species: 'The specific epithet (species name) of the taxon.',
+        Subspecies: 'The subspecies name, if applicable.',
+        'Species ID Level': 'The taxonomic identification level of the species.',
+        'Species Auth': 'The authority responsible for the species classification.',
+        'Subspecies Auth': 'The authority responsible for the subspecies classification.',
+        'Field Family': 'The family as identified in the field.',
+        'Valid Code': 'Validation code for the species entry.',
+        'Species Description': 'A detailed description of the species.',
+        'Species Limits': 'The defined limits (e.g., DBH range) for the species.'
+      }[header] || `Information related to ${header.toLowerCase()}.`,
+    category: 'required'
+  })),
+  [DatagridType.quadrats]: QuadratHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Quadrat Name': 'The name or identifier for the quadrat.',
+      X: 'The starting X-coordinate of the quadrat.',
+      Y: 'The starting Y-coordinate of the quadrat.',
+      Area: 'The total area of the quadrat.',
+      DimX: 'The dimension of the quadrat along the X-axis.',
+      DimY: 'The dimension of the quadrat along the Y-axis.',
+      'Quadrat Shape': 'The shape of the quadrat, e.g., square or rectangle.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.measurementssummaryview]: MeasurementSummaryViewHeaders.map(header => ({
+    label: header,
+    explanation: {
+      Quadrat: 'The name of the quadrat where measurements were taken.',
+      'Species Code': 'The unique code for the species measured.',
+      Tree: 'The tag or identifier for the tree measured.',
+      Stem: 'The tag or identifier for the stem measured.',
+      X: 'The local X-coordinate of the stem.',
+      Y: 'The local Y-coordinate of the stem.',
+      DBH: 'The diameter at breast height of the tree.',
+      HOM: 'The height from the ground where DBH was measured.',
+      Description: 'A text description of the measurement.',
+      Attributes: 'Additional attributes associated with the measurement.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.roles]: RolesHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Role Name': 'The name or title of the role.',
+      'Role Description': 'A detailed description of the role and its responsibilities.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.stemtaxonomiesview]: StemHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Stem Tag': 'A unique identifier for the stem in the field.',
+      'Local X': 'The local X-coordinate of the stem.',
+      'Local Y': 'The local Y-coordinate of the stem.',
+      Moved: 'Indicates whether the stem has been moved.',
+      'Stem Description': 'A description of the stem.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.stem]: StemHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Stem Tag': 'A unique identifier for the stem in the field.',
+      'Local X': 'The local X-coordinate of the stem.',
+      'Local Y': 'The local Y-coordinate of the stem.',
+      Moved: 'Indicates whether the stem has been moved.',
+      'Stem Description': 'A description of the stem.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.specieslimits]: SpeciesLimitsHeaders.map(header => ({
+    label: header,
+    explanation: {
+      LimitType: 'The type of limit applied (e.g., DBH or HOM).',
+      LowerBound: 'The lower bound of the limit range.',
+      UpperBound: 'The upper bound of the limit range.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.unifiedchangelog]: UnifiedChangelogHeaders.map(header => ({
+    label: header,
+    explanation: {
+      Table: 'The name of the table where changes were made.',
+      Record: 'The ID of the record that was changed.',
+      Op: 'The type of operation performed (e.g., insert, update, delete).',
+      Old: 'The state of the record before the change.',
+      New: 'The state of the record after the change.',
+      'Change Time': 'The timestamp of when the change occurred.',
+      'Changed By': 'The user who performed the change.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.viewfulltable]: ViewFullTableHeaders.map(header => ({
+    label: header,
+    explanation:
+      {
+        Quadrat: 'The name of the quadrat where the data is located.',
+        'Species Code': 'The unique code for the species.',
+        Tree: 'The tag or identifier for the tree.',
+        Stem: 'The tag or identifier for the stem.',
+        X: 'The local X-coordinate of the stem.',
+        Y: 'The local Y-coordinate of the stem.',
+        DBH: 'The diameter at breast height of the tree.',
+        HOM: 'The height from the ground where DBH was measured.',
+        Description: 'A text description of the measurement.',
+        Attributes: 'Additional attributes associated with the measurement.',
+        'Stem Tag': 'A unique identifier for the stem in the field.',
+        'Tree Tag': 'A unique identifier for the tree in the field.',
+        Family: 'The family taxon for the species.',
+        Genus: 'The genus taxon for the species.',
+        Species: 'The specific epithet (species name) of the taxon.',
+        Subspecies: 'The subspecies name, if applicable.',
+        'Genus Authority': 'The authority responsible for the classification of the genus.',
+        'Species Authority': 'The authority responsible for the species classification.',
+        'Subspecies Authority': 'The authority responsible for the subspecies classification.',
+        'Species ID Level': 'The taxonomic identification level of the species.',
+        'Species Field Family': 'The family as identified in the field.'
+      }[header] || `Combined view field: ${header.toLowerCase()}.`,
+    category: 'required'
+  }))
 };
 
 export function getTableHeaders(formType: FormType, _usesSubquadrats = false): { label: string }[] {

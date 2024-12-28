@@ -1,33 +1,41 @@
 'use client';
 
-import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
+import { DatagridType, HeadersByDatagridType } from '@/config/macros/formdetails';
 import { Alert, Box, Card, CardContent, Chip, List, ListItem, Tooltip, Typography } from '@mui/joy';
 import React from 'react';
 import WarningIcon from '@mui/icons-material/Warning';
 
-export default function RenderFormExplanations(uploadForm: FormType) {
+export default function RenderGridExplanations({ datagridType }: { datagridType: DatagridType }) {
   const categoryRegex = /alive(?:-not measured)?|dead|missing|broken below|stem dead/g;
-  const matches = TableHeadersByFormType[uploadForm].find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
-  const cleanedString = TableHeadersByFormType[uploadForm]
+  const matches = HeadersByDatagridType[datagridType].find(obj => obj.label === 'status')?.explanation?.match(categoryRegex);
+  const cleanedString = HeadersByDatagridType[datagridType]
     .find(obj => obj.label === 'status')
     ?.explanation?.replace(categoryRegex, '')
     .replace(/\s*,\s*/g, '')
     .trim();
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+    <Box
+      sx={{
+        display: 'inherit', // Ensure layout is flex-based
+        flexDirection: 'column',
+        width: '100%'
+      }}
+    >
       <Typography level="title-lg" sx={{ alignSelf: 'center', justifyContent: 'center', alignContent: 'center', my: 2 }}>
         Understanding the Headers
       </Typography>
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', // Dynamic grid layout
-          gap: '1rem', // Space between items
-          mb: 5 // Margin at the bottom
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '1rem',
+          mb: 1,
+          width: '100%', // Ensure the grid takes the full width
+          boxSizing: 'border-box'
         }}
       >
-        {TableHeadersByFormType[uploadForm].map((header, index) => (
+        {HeadersByDatagridType[datagridType].map((header, index) => (
           <Card key={index} size="sm" sx={{ flex: 1 }}>
             <Typography level="title-sm" color="primary" sx={{ fontWeight: header.category === 'required' ? 'bold' : 'normal' }}>
               {header.label}
