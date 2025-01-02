@@ -21,7 +21,7 @@ import {
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
 import { usePathname, useRouter } from 'next/navigation';
-import { Badge, IconButton, SelectOption, Stack, Tooltip } from '@mui/joy';
+import { Badge, IconButton, Menu, MenuItem, SelectOption, Stack, Tooltip } from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
@@ -39,6 +39,8 @@ import RolloverModal from './client/rollovermodal';
 import RolloverStemsModal from './client/rolloverstemsmodal';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
+import { MoreHoriz } from '@mui/icons-material';
+import PlotCardModal from '@/components/client/plotcardmodal';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -156,11 +158,27 @@ export default function Sidebar(props: SidebarProps) {
   const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
   const [isRolloverStemsModalOpen, setIsRolloverStemsModalOpen] = useState(false);
 
-  const { siteListLoaded, setCensusListLoaded } = props;
+  const { siteListLoaded, setCensusListLoaded, setManualReset } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [anchorPlotEdit, setAnchorPlotEdit] = useState<HTMLElement | null>(null);
+  const [selectedPlot, setSelectedPlot] = useState<Plot>(undefined);
+  const [openPlotCardModal, setOpenPlotCardModal] = useState(false);
+
+  const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorPlotEdit(event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorPlotEdit(null);
+  };
+
+  const handleOptionClick = () => {
+    setOpenPlotCardModal(true);
+    handleClose();
+  };
 
   useEffect(() => {
     const updateSidebarWidth = () => {
@@ -526,10 +544,30 @@ export default function Sidebar(props: SidebarProps) {
             }}
             className="sidebar-item"
           >
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-              <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
-                {item?.plotName}
-              </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+              <Stack direction={'row'} justifyContent={'space-between'} alignItems={'center'} width={'100%'}>
+                <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
+                  {item?.plotName}
+                </Typography>
+                {(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global') && (
+                  <IconButton
+                    variant={'soft'}
+                    sx={{
+                      justifyContent: 'center',
+                      alignSelf: 'center'
+                    }}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={event => {
+                      event.stopPropagation();
+                      setSelectedPlot(item);
+                      handleOpen(event);
+                    }}
+                  >
+                    <MoreHoriz />
+                  </IconButton>
+                )}
+              </Stack>
+
               <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
                 {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
               </Typography>
@@ -993,6 +1031,17 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
+        <Menu anchorEl={anchorPlotEdit} open={Boolean(anchorPlotEdit)} onClose={handleClose} placement={'bottom-end'}>
+          <MenuItem onClick={handleOptionClick}>View/Edit this Plot</MenuItem>
+        </Menu>
+        {selectedPlot && (
+          <PlotCardModal
+            openPlotCardModal={openPlotCardModal}
+            plot={selectedPlot}
+            setOpenPlotCardModal={setOpenPlotCardModal}
+            setManualReset={setManualReset}
+          />
+        )}
       </Stack>
     </>
   );

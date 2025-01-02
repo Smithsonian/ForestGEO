@@ -4,6 +4,7 @@ import { GridColDef, useGridApiRef } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
+import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
 
 export const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -43,7 +44,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'startY',
@@ -53,7 +55,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'area',
@@ -63,7 +66,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'dimensionX',
@@ -76,7 +80,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
       if (isNaN(value)) parsedValue = 0.0;
       return parsedValue.toFixed(2);
     },
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'dimensionY',
@@ -89,7 +94,8 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
       if (isNaN(value)) parsedValue = 0.0;
       return parsedValue.toFixed(2);
     },
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'quadratShape',
@@ -372,7 +378,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     maxWidth: 100,
     renderCell: renderStemXCell,
     renderEditCell: renderEditStemXCell,
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'stemLocalY',
@@ -386,7 +393,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     maxWidth: 100,
     renderCell: renderStemYCell,
     renderEditCell: renderEditStemYCell,
-    editable: true
+    editable: true,
+    filterOperators: customNumericOperators
   },
   {
     field: 'measuredDBH',
@@ -394,7 +402,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     flex: 0.5,
     editable: true,
     renderCell: renderDBHCell,
-    renderEditCell: renderEditDBHCell
+    renderEditCell: renderEditDBHCell,
+    filterOperators: customNumericOperators
   },
   {
     field: 'measuredHOM',
@@ -402,7 +411,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     flex: 0.5,
     editable: true,
     renderCell: renderHOMCell,
-    renderEditCell: renderEditHOMCell
+    renderEditCell: renderEditHOMCell,
+    filterOperators: customNumericOperators
   },
   {
     field: 'description',

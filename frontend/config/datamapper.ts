@@ -134,8 +134,8 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
         // Add reverse transformation for ValidCode
         .replace(/IDLevel/gi, 'idLevel')
         .replace(/ValidCode/gi, 'validCode')
-        .replace(/DBHUnits/gi, 'dbhUnits')
-        .replace(/HOMUnits/gi, 'homUnits')
+        .replace(/DefaultDBHUnits/gi, 'defaultDBHUnits')
+        .replace(/DefaultHOMUnits/gi, 'defaultHOMUnits')
         .replace(/measureddbh/gi, 'measuredDBH')
         .replace(/measuredhom/gi, 'measuredHOM')
         .replace(/cam/gi, 'CAM')

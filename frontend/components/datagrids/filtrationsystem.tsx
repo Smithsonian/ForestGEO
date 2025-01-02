@@ -131,3 +131,28 @@ export const betweenOperator: GridFilterOperator<any, number> = {
   },
   InputComponent: InputNumberInterval
 };
+
+const createNumericOperator = (label: string, operator: (value: number, filterValue: number) => boolean): GridFilterOperator => ({
+  label,
+  value: label,
+  getApplyFilterFn: filterItem => {
+    if (
+      !filterItem.value ||
+      !['measuredDBH', 'measuredHOM', 'startX', 'startY', 'area', 'dimensionX', 'dimensionY', 'stemLocalX', 'stemLocalY'].includes(filterItem.field || '')
+    )
+      return null;
+    return (value, row) => {
+      const fieldValue = Number(row[filterItem.field!]); // Get field value from the row
+      return value != null && !isNaN(fieldValue) && operator(fieldValue, Number(filterItem.value));
+    };
+  },
+  InputComponentProps: { type: 'number' }
+});
+
+export const customNumericOperators: GridFilterOperator[] = [
+  createNumericOperator('>=', (value, filterValue) => value >= filterValue),
+  createNumericOperator('>', (value, filterValue) => value > filterValue),
+  createNumericOperator('=', (value, filterValue) => value === filterValue),
+  createNumericOperator('<', (value, filterValue) => value < filterValue),
+  createNumericOperator('<=', (value, filterValue) => value <= filterValue)
+];

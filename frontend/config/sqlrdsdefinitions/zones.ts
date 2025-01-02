@@ -49,22 +49,27 @@ export class SitesMapper implements IDataMapper<SitesRDS, SitesResult> {
 export type PlotRDS = {
   id?: number;
   plotID?: number;
+  // plot name & location
   plotName?: string;
   locationName?: string;
   countryName?: string;
+  plotShape?: string;
+  plotDescription?: string;
+  // plot area
   dimensionX?: number;
   dimensionY?: number;
   area?: number;
+  // plot coordinates
   globalX?: number;
   globalY?: number;
   globalZ?: number;
-  plotShape?: string;
-  plotDescription?: string;
+  // default units
   defaultDimensionUnits?: string;
   defaultCoordinateUnits?: string;
   defaultAreaUnits?: string;
   defaultDBHUnits?: string;
   defaultHOMUnits?: string;
+  // # of quadrats
   numQuadrats?: number;
   usesSubquadrats?: boolean;
 };
