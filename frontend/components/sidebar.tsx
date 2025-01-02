@@ -162,18 +162,43 @@ export default function Sidebar(props: SidebarProps) {
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(340); // Default width
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [anchorPlotEdit, setAnchorPlotEdit] = useState<HTMLElement | null>(null);
   const [selectedPlot, setSelectedPlot] = useState<Plot>(undefined);
   const [openPlotCardModal, setOpenPlotCardModal] = useState(false);
+  const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
+  const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
+  const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
   };
 
-  const handleClose = () => {
+  const handleClose = (event?: MouseEvent) => {
+    const target = event?.target as HTMLElement;
+    const selectElement = sidebarRef.current?.querySelector('.plot-selection');
+    const menuElement = sidebarRef.current?.querySelector('.MuiMenu-root');
+    if (menuElement?.contains(target)) {
+      return;
+    }
+    if (selectElement?.contains(target)) {
+      if (anchorPlotEdit) {
+        setAnchorPlotEdit(null);
+      }
+      return;
+    }
     setAnchorPlotEdit(null);
   };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      handleClose(event);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [anchorPlotEdit]);
 
   const handleOptionClick = () => {
     setOpenPlotCardModal(true);
@@ -436,6 +461,13 @@ export default function Sidebar(props: SidebarProps) {
       size={'md'}
       renderValue={renderCensusValue}
       data-testid={'census-select-component'}
+      listboxOpen={isCensusDropdownOpen}
+      onListboxOpenChange={() => {
+        setSiteDropdownOpen(false);
+        setPlotDropdownOpen(false);
+        setCensusDropdownOpen(true);
+      }}
+      onClose={() => setCensusDropdownOpen(false)}
       onChange={async (_event: React.SyntheticEvent | null, selectedPlotCensusNumberStr: string | null) => {
         if (selectedPlotCensusNumberStr === '' || selectedPlotCensusNumberStr === null) await handleCensusSelection(undefined);
         else {
@@ -526,6 +558,13 @@ export default function Sidebar(props: SidebarProps) {
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
       value={plot?.plotName || ''}
+      listboxOpen={isPlotDropdownOpen}
+      onListboxOpenChange={() => {
+        setSiteDropdownOpen(false);
+        setPlotDropdownOpen(true);
+        setCensusDropdownOpen(false);
+      }}
+      onClose={() => setPlotDropdownOpen(false)}
       onFocus={event => event.preventDefault()}
       onChange={async (event: React.SyntheticEvent | null, newValue: string | null) => {
         event?.preventDefault();
@@ -549,25 +588,24 @@ export default function Sidebar(props: SidebarProps) {
                 <Typography level="body-md" data-testid={'plot-selection-option-plotname'}>
                   {item?.plotName}
                 </Typography>
-                {(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global') && (
-                  <IconButton
-                    variant={'soft'}
-                    sx={{
-                      justifyContent: 'center',
-                      alignSelf: 'center'
-                    }}
-                    onMouseDown={event => event.preventDefault()}
-                    onClick={event => {
-                      event.stopPropagation();
-                      setSelectedPlot(item);
-                      handleOpen(event);
-                    }}
-                  >
-                    <MoreHoriz />
-                  </IconButton>
-                )}
+                <IconButton
+                  variant={'soft'}
+                  sx={{
+                    justifyContent: 'center',
+                    alignSelf: 'center'
+                  }}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={event => {
+                    event.stopPropagation();
+                    setSelectedPlot(item);
+                    handleOpen(event);
+                  }}
+                  // disabled={!(session?.user?.userStatus === 'db admin' || session?.user?.userStatus === 'global')}
+                  disabled={!['db admin', 'global'].includes(session?.user?.userStatus ?? '')}
+                >
+                  <MoreHoriz />
+                </IconButton>
               </Stack>
-
               <Typography level="body-sm" color={'primary'} data-testid={'plot-selection-option-quadrats'}>
                 {item?.numQuadrats ? ` — Quadrats: ${item.numQuadrats}` : ` — No Quadrats`}
               </Typography>
@@ -609,6 +647,13 @@ export default function Sidebar(props: SidebarProps) {
         renderValue={renderSiteValue}
         data-testid={'site-select-component'}
         value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ''}
+        listboxOpen={isSiteDropdownOpen}
+        onListboxOpenChange={() => {
+          setSiteDropdownOpen(true);
+          setPlotDropdownOpen(false);
+          setCensusDropdownOpen(false);
+        }}
+        onClose={() => setSiteDropdownOpen(false)}
         onChange={async (_event: React.SyntheticEvent | null, newValue: string | null) => {
           const selectedSite = siteListContext?.find(site => site?.siteName === newValue) || undefined;
           await handleSiteSelection(selectedSite);
@@ -832,12 +877,7 @@ export default function Sidebar(props: SidebarProps) {
                           // style={{ transitionDelay: `${delay}ms` }}
                           direction="down"
                         >
-                          <ListItem
-                            data-testid={`navigate-list-item-nonexpanding-${item.label}`}
-                            // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : ''}`}
-                            onMouseEnter={() => setHoveredIndex(index)}
-                            onMouseLeave={() => setHoveredIndex(null)}
-                          >
+                          <ListItem data-testid={`navigate-list-item-nonexpanding-${item.label}`}>
                             {site !== undefined && plot !== undefined && census !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
@@ -903,13 +943,7 @@ export default function Sidebar(props: SidebarProps) {
                           // style={{ transitionDelay: `${delay}ms` }}
                           direction="down"
                         >
-                          <ListItem
-                            nested
-                            data-testid={`navigate-list-item-expanding-${item.label}`}
-                            // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
-                            onMouseEnter={() => setHoveredIndex(index)}
-                            onMouseLeave={() => setHoveredIndex(null)}
-                          >
+                          <ListItem nested data-testid={`navigate-list-item-expanding-${item.label}`}>
                             <SimpleToggler
                               renderToggle={MenuRenderToggle(
                                 {
@@ -940,12 +974,7 @@ export default function Sidebar(props: SidebarProps) {
                                       // style={{ transitionDelay: `${delay}ms` }}
                                       direction="down"
                                     >
-                                      <ListItem
-                                        data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}
-                                        // className={`sidebar-item ${hoveredIndex !== null && hoveredIndex !== index ? 'animate-fade-blur-in' : 'animate-fade-blur-out'}`}
-                                        onMouseEnter={() => setHoveredIndex(index)}
-                                        onMouseLeave={() => setHoveredIndex(null)}
-                                      >
+                                      <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
                                         {site !== undefined && plot !== undefined && census !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
