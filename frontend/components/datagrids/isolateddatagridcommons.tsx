@@ -27,6 +27,8 @@ import {
   GridToolbarContainer,
   GridToolbarProps,
   GridToolbarQuickFilter,
+  GridToolbarColumnsButton,
+  GridToolbarFilterButton,
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
@@ -123,6 +125,8 @@ const EditToolbar = (props: EditToolbarProps) => {
         <Box sx={{ display: 'flex', flex: 1 }}>
           <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
             <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarColumnsButton />
+              <GridToolbarFilterButton />
               <GridToolbarQuickFilter
                 variant={'outlined'}
                 value={inputValue}
@@ -134,6 +138,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                     endAdornment: null
                   }
                 }}
+                sx={{ ml: 2 }}
               />
               <Tooltip title={'Clear filter'} placement={'right'}>
                 <IconButton

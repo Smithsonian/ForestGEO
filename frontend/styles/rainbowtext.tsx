@@ -5,6 +5,7 @@ import styled from '@emotion/styled';
 import React from 'react';
 import Typography from '@mui/joy/Typography';
 import { keyframes } from '@emotion/react';
+import { Box } from '@mui/joy';
 
 const generateDynamicColors = (): string[] => {
   // Adjusted to pastel colors with lower saturation and higher lightness
@@ -41,4 +42,18 @@ const RainbowText = styled(Typography)`
 
 export const RainbowTypography: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <RainbowText>{children}</RainbowText>;
+};
+
+export const StyledRainbowText: React.FC<{ level?: string; sx?: object; children: React.ReactNode }> = ({ level, sx, children }) => {
+  return (
+    <Box
+      component="div"
+      sx={{
+        typography: level,
+        ...sx
+      }}
+    >
+      <RainbowTypography>{children}</RainbowTypography>
+    </Box>
+  );
 };
