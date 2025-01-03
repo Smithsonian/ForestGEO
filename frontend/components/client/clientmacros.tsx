@@ -46,7 +46,8 @@ function applyStandardSettings(col: GridColDef): GridColDef {
     ...col,
     headerClassName: 'header',
     align: CELL_ALIGN,
-    headerAlign: HEADER_ALIGN
+    headerAlign: HEADER_ALIGN,
+    cellClassName: 'tw-wrap-text'
   };
 }
 

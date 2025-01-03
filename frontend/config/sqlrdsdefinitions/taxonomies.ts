@@ -24,10 +24,11 @@ export type SpeciesLimitsRDS = {
   id?: number;
   speciesLimitID?: number;
   speciesID?: number;
+  plotID?: number;
+  censusID?: number;
   limitType?: string;
   upperBound?: number;
   lowerBound?: number;
-  unit?: string;
 };
 export type SpeciesLimitsResult = ResultType<SpeciesLimitsRDS>;
 

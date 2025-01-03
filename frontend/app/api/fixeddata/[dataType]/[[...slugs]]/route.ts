@@ -138,10 +138,9 @@ export async function GET(
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   if (!params.slugs) throw new Error('slugs not provided');
-  const [schema, gridID, plotIDParam, censusIDParam] = params.slugs;
+  const [schema, gridID, _plotIDParam, censusIDParam] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
-  const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
 
   const connectionManager = ConnectionManager.getInstance();

@@ -109,6 +109,10 @@ module.exports = {
     plugin(function ({ addUtilities }) {
       addUtilities(
         {
+          '.tw-wrap-text': {
+            whiteSpace: 'normal',
+            wordWrap: 'break-word'
+          },
           '.fullWidthAutoComplete': {
             width: '100%'
           },
