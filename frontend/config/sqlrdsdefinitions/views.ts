@@ -26,8 +26,7 @@ export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
     speciesID: false,
     familyID: false,
-    genusID: false,
-    speciesLimits: false
+    genusID: false
   };
 }
 

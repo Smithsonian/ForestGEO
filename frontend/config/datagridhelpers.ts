@@ -180,6 +180,8 @@ export interface EditToolbarCustomProps {
   handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
   handleRunValidations?: () => Promise<void>;
+  hidingEmptyColumns?: boolean;
+  handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: GridFilterModel;
   apiRef?: MutableRefObject<GridApiCommunity>;

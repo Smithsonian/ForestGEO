@@ -313,18 +313,24 @@ create table if not exists specieslimits
 (
     SpeciesLimitID int auto_increment
         primary key,
-    SpeciesID      int                                                          null,
-    LimitType      enum ('DBH')                                                 null,
-    UpperBound     decimal(10, 6)                                               null,
-    LowerBound     decimal(10, 6)                                               null,
+    SpeciesID      int            null,
+    PlotID         int            null,
+    CensusID       int            null,
+    LimitType      enum ('DBH')   null,
+    UpperBound     decimal(10, 6) null,
+    LowerBound     decimal(10, 6) null,
+    constraint specieslimits_census_CensusID_fk
+        foreign key (CensusID) references census (CensusID),
+    constraint specieslimits_plots_PlotID_fk
+        foreign key (PlotID) references plots (PlotID),
     constraint specieslimits_species_SpeciesID_fk
         foreign key (SpeciesID) references species (SpeciesID)
 );
 
-CREATE INDEX idx_speciesid ON specieslimits (SpeciesID);
-CREATE INDEX idx_limittype ON specieslimits (LimitType);
-CREATE INDEX idx_upperbound ON specieslimits (UpperBound);
-CREATE INDEX idx_lowerbound ON specieslimits (LowerBound);
+create index idx_limittype on specieslimits (LimitType);
+create index idx_lowerbound on specieslimits (LowerBound);
+create index idx_speciesid on specieslimits (SpeciesID);
+create index idx_upperbound on specieslimits (UpperBound);
 
 create table if not exists trees
 (

@@ -890,6 +890,8 @@ BEGIN
   SET new_json = JSON_OBJECT(
     'SpeciesLimitID', NEW.SpeciesLimitID,
     'SpeciesID', NEW.SpeciesID,
+    'PlotID', NEW.PlotID,
+    'CensusID', NEW.CensusID,
     'LimitType', NEW.LimitType,
     'UpperBound', NEW.UpperBound,
     'LowerBound', NEW.LowerBound
@@ -908,6 +910,8 @@ BEGIN
   SET old_json = JSON_OBJECT(
     'SpeciesLimitID', OLD.SpeciesLimitID,
     'SpeciesID', OLD.SpeciesID,
+    'PlotID', OLD.PlotID,
+    'CensusID', OLD.CensusID,
     'LimitType', OLD.LimitType,
     'UpperBound', OLD.UpperBound,
     'LowerBound', OLD.LowerBound
@@ -915,6 +919,8 @@ BEGIN
   SET new_json = JSON_OBJECT(
     'SpeciesLimitID', NEW.SpeciesLimitID,
     'SpeciesID', NEW.SpeciesID,
+    'PlotID', NEW.PlotID,
+    'CensusID', NEW.CensusID,
     'LimitType', NEW.LimitType,
     'UpperBound', NEW.UpperBound,
     'LowerBound', NEW.LowerBound
@@ -932,6 +938,8 @@ BEGIN
   SET old_json = JSON_OBJECT(
     'SpeciesLimitID', OLD.SpeciesLimitID,
     'SpeciesID', OLD.SpeciesID,
+    'PlotID', OLD.PlotID,
+    'CensusID', OLD.CensusID,
     'LimitType', OLD.LimitType,
     'UpperBound', OLD.UpperBound,
     'LowerBound', OLD.LowerBound
