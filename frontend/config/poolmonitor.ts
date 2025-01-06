@@ -19,17 +19,6 @@ export class PoolMonitor {
     this.pool = createPool(config);
     this.poolClosed = false;
 
-    // this.pool.on('acquire', connection => {
-    //   if (!this.acquiredConnectionIds.has(connection.threadId)) {
-    //     this.acquiredConnectionIds.add(connection.threadId);
-    //     this.activeConnections = this.acquiredConnectionIds.size;
-    //   }
-    //   if (this.waitingForConnection > 0) {
-    //     --this.waitingForConnection;
-    //   }
-    //   this.logPoolStatus();
-    // });
-
     this.pool.on('release', connection => {
       if (this.acquiredConnectionIds.has(connection.threadId)) {
         this.acquiredConnectionIds.delete(connection.threadId);
