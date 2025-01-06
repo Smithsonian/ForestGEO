@@ -410,16 +410,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
                 justifyContent: 'center'
               }}
             >
-              {/*{siteConfig.name}*/}
               <AcaciaVersionTypography>{siteConfig.name}</AcaciaVersionTypography>
             </Typography>
-            {/*<Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>*/}
-            {/*  <Tooltip title="Version" variant="solid" placement="top" arrow sx={{ pointerEvents: 'none' }}>*/}
-            {/*    <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>*/}
-            {/*      <AcaciaVersionTypography>{siteConfig.version}</AcaciaVersionTypography>*/}
-            {/*    </Box>*/}
-            {/*  </Tooltip>*/}
-            {/*</Stack>*/}
           </Stack>
           <IconButton
             onClick={() => setIsFeedbackModalOpen(true)}
