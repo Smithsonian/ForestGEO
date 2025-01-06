@@ -11,6 +11,8 @@ export class PoolMonitor {
   private poolClosed = false;
   private acquiredConnectionIds: Set<number> = new Set();
   private reinitializing = false;
+  private unreleasedConnections: Set<number> = new Set();
+  private activeConnectionMap: Map<number, PoolConnection> = new Map();
 
   constructor(config: PoolOptions) {
     this.config = config;
@@ -32,6 +34,7 @@ export class PoolMonitor {
       if (this.acquiredConnectionIds.has(connection.threadId)) {
         this.acquiredConnectionIds.delete(connection.threadId);
         this.activeConnections = this.acquiredConnectionIds.size;
+        this.trackConnectionRelease(connection); // Track released connection
         console.log(chalk.blue(`Released: ${connection.threadId}`));
         this.logPoolStatus();
         this.resetInactivityTimer();
@@ -58,22 +61,20 @@ export class PoolMonitor {
       this.logPoolStatus();
     });
 
+    this.monitorPoolHealth();
+    this.monitorUnreleasedConnections();
     this.resetInactivityTimer();
   }
 
-  async getConnection(): Promise<PoolConnection> {
-    if (this.poolClosed) {
-      throw new Error('Connection pool is closed');
-    }
-
+  public async getConnection(): Promise<PoolConnection> {
     try {
       console.log(chalk.cyan('Requesting new connection...'));
       const connection = await this.pool.getConnection();
-      console.log(chalk.green('Connection acquired'));
-      this.resetInactivityTimer();
+      this.trackConnectionAcquire(connection);
+      console.log(chalk.green(`Connection acquired: ${connection.threadId}`));
       return connection;
     } catch (error) {
-      console.error(chalk.red('Error getting connection from pool:', error));
+      console.error(chalk.red('Error acquiring connection:', error));
       throw error;
     }
   }
@@ -111,13 +112,59 @@ export class PoolMonitor {
       await this.closeAllConnections(); // Ensure old pool is closed
       this.pool = createPool(this.config);
       this.poolClosed = false;
-      this.acquiredConnectionIds.clear();
+      this.acquiredConnectionIds.clear(); // Clear active connection tracking
+      this.unreleasedConnections.clear(); // Clear unreleased connections
       console.log(chalk.cyan('Connection pool reinitialized.'));
     } catch (error) {
       console.error(chalk.red('Error during reinitialization:', error));
     } finally {
       this.reinitializing = false;
     }
+  }
+
+  public trackConnectionAcquire(connection: PoolConnection): void {
+    this.unreleasedConnections.add(connection.threadId);
+    this.activeConnectionMap.set(connection.threadId, connection);
+    console.log(chalk.green(`Connection acquired and tracked: ${connection.threadId}`));
+  }
+
+  public trackConnectionRelease(connection: PoolConnection): void {
+    if (this.unreleasedConnections.has(connection.threadId)) {
+      this.unreleasedConnections.delete(connection.threadId);
+      this.activeConnectionMap.delete(connection.threadId);
+      console.log(chalk.blue(`Connection released: ${connection.threadId}`));
+    } else {
+      console.warn(chalk.yellow(`Connection ${connection.threadId} was not tracked or already released.`));
+    }
+  }
+
+  public logUnreleasedConnections(): void {
+    if (this.unreleasedConnections.size > 0) {
+      console.warn(chalk.red(`Unreleased connections: ${Array.from(this.unreleasedConnections).join(', ')}`));
+    }
+  }
+
+  public monitorPoolHealth(): void {
+    setInterval(() => {
+      this.logPoolStatus();
+      this.logUnreleasedConnections();
+    }, 10000); // Log every 10 seconds
+  }
+
+  public monitorUnreleasedConnections(): void {
+    setInterval(() => {
+      if (this.unreleasedConnections.size > 0) {
+        console.warn(chalk.red(`Unreleased connections detected: ${Array.from(this.unreleasedConnections).join(', ')}`));
+        for (const threadId of this.unreleasedConnections) {
+          const connection = this.activeConnectionMap.get(threadId);
+          if (connection) {
+            console.warn(chalk.yellow(`Force-closing connection: ${threadId}`));
+            connection.destroy(); // Immediately terminate the connection
+            this.trackConnectionRelease(connection); // Ensure it is removed from tracking
+          }
+        }
+      }
+    }, 60000); // Check every 1 minute
   }
 
   public isPoolClosed(): boolean {

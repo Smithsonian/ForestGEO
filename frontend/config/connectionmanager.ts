@@ -1,6 +1,6 @@
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
-import { getConn, runQuery } from '@/components/processors/processormacros';
+import { getConn, poolMonitor, runQuery } from '@/components/processors/processormacros';
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
@@ -20,16 +20,19 @@ class ConnectionManager {
 
   // Acquire a connection for the current operation
   private async acquireConnectionInternal(): Promise<PoolConnection> {
-    console.log(chalk.cyan('Acquiring a connection for operation...'));
-    return await getConn(); // Delegates to PoolMonitor indirectly via processormacros
+    const connection = await getConn();
+    try {
+      await connection.ping(); // Validate connection
+      return connection;
+    } catch (error) {
+      console.error(chalk.red('Error validating connection:', error));
+      connection.release(); // Release if validation fails
+      poolMonitor.trackConnectionRelease(connection);
+      throw error;
+    }
   }
 
   // Existing method: Acquire a single connection (for backward compatibility)
-  public async acquireConnection(): Promise<void> {
-    console.warn(chalk.yellow('Warning: acquireConnection is deprecated for concurrency. Consider managing connections dynamically.'));
-    // This function is a no-op for concurrency but must be preserved for compatibility
-  }
-
   // Existing method: Execute a query (preserves function signature)
   public async executeQuery(query: string, params?: any[]): Promise<any> {
     let connection: PoolConnection | null = null;
@@ -51,18 +54,29 @@ class ConnectionManager {
       if (connection) {
         console.log(chalk.blue('Releasing connection after query execution.'));
         connection.release();
+        poolMonitor.trackConnectionRelease(connection); // Explicitly track release
       }
     }
   }
 
   // Existing method: Begin a transaction
-  public async beginTransaction(): Promise<void> {
+  public async beginTransaction(timeout: number = 10000): Promise<void> {
     const connection = await this.acquireConnectionInternal();
-    console.log(chalk.cyan('Starting transaction...'));
-    await connection.beginTransaction();
-    console.log(chalk.green('Transaction started.'));
-    // Store the connection on the class instance for backward compatibility
-    (this as any)._transactionConnection = connection;
+    try {
+      const timer = setTimeout(() => {
+        console.warn(chalk.yellow('Transaction timeout exceeded.'));
+        throw new Error('Transaction timeout exceeded.');
+      }, timeout);
+
+      await connection.beginTransaction();
+      clearTimeout(timer); // Clear the timer if transaction starts successfully
+      console.log(chalk.green('Transaction started.'));
+      (this as any)._transactionConnection = connection;
+    } catch (error) {
+      console.error(chalk.red('Error starting transaction:', error));
+      connection.release(); // Release connection on failure
+      throw error;
+    }
   }
 
   // Existing method: Commit a transaction
@@ -71,21 +85,26 @@ class ConnectionManager {
     if (connection) {
       try {
         await connection.commit();
+      } catch (error) {
+        console.error(chalk.red('Error committing transaction:', error));
+        throw error;
       } finally {
-        connection.release(); // Always release the connection
+        connection.release(); // Ensure connection is always released
         delete (this as any)._transactionConnection;
       }
     }
   }
 
-  // Existing method: Rollback a transaction
   public async rollbackTransaction(): Promise<void> {
     const connection = (this as any)._transactionConnection;
     if (connection) {
       try {
         await connection.rollback();
+      } catch (error) {
+        console.error(chalk.red('Error rolling back transaction:', error));
+        throw error;
       } finally {
-        connection.release(); // Always release the connection
+        connection.release(); // Ensure connection is always released
         delete (this as any)._transactionConnection;
       }
     }
