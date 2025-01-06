@@ -2,7 +2,7 @@
 'use client';
 import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
-import { Box, Button, Tooltip, Typography } from '@mui/joy';
+import { Box, Button } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { AllTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
