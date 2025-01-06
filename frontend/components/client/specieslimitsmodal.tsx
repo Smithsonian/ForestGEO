@@ -127,6 +127,7 @@ export default function SpeciesLimitsModal(props: {
     try {
       const submittedSpeciesLimit: SpeciesLimitsRDS = {
         ...newSpeciesLimit,
+        limitType: 'DBH',
         censusID: currentCensus?.dateRanges[0].censusID,
         plotID: currentPlot?.plotID,
         speciesLimitID: 0

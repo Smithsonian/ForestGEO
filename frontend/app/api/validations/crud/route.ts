@@ -20,7 +20,7 @@ export async function GET(_request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
+  const validationProcedure: ValidationProceduresRDS = await request.json();
   const connectionManager = ConnectionManager.getInstance();
   try {
     delete validationProcedure['validationID'];
@@ -38,13 +38,13 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
+  const validationProcedure: ValidationProceduresRDS = await request.json();
   const connectionManager = ConnectionManager.getInstance();
   try {
-    const updatedValidationProcedure = delete validationProcedure['validationID'];
+    delete validationProcedure['id'];
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [
       `catalog.validationprocedures`,
-      updatedValidationProcedure,
+      validationProcedure,
       validationProcedure.validationID
     ]);
     await connectionManager.executeQuery(updateQuery);
@@ -59,7 +59,7 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { validationProcedure }: { validationProcedure: ValidationProceduresRDS } = await request.json();
+  const validationProcedure: ValidationProceduresRDS = await request.json();
   const connectionManager = ConnectionManager.getInstance();
   try {
     const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`catalog.validationprocedures`, validationProcedure.validationID]);

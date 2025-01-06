@@ -21,14 +21,29 @@ import {
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
+import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Checkbox, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from '@mui/joy/Box';
-import { DialogActions, DialogContent, DialogTitle, Dropdown, Menu, MenuButton, MenuItem, Modal, ModalDialog, Stack, Tooltip, Typography } from '@mui/joy';
+import {
+  Button,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Dropdown,
+  IconButton,
+  Menu,
+  MenuButton,
+  MenuItem,
+  Modal,
+  ModalDialog,
+  Stack,
+  Tooltip,
+  Typography
+} from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
   CellItemContainer,
@@ -53,7 +68,6 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
@@ -89,7 +103,6 @@ const EditToolbar = (props: EditToolbarProps) => {
     handleExportAll,
     handleExportCSV,
     handleQuickFilterChange,
-    locked,
     filterModel,
     dynamicButtons = []
   } = props;
@@ -190,23 +203,13 @@ const EditToolbar = (props: EditToolbarProps) => {
                 }}
               />
               <Tooltip title={'Clear filter'} placement={'right'}>
-                <IconButton
-                  aria-label={'clear filter'}
-                  disabled={inputValue === ''}
-                  onClick={handleClearInput}
-                  size={'small'}
-                  edge={'end'}
-                  sx={{ marginLeft: 1 }}
-                >
+                <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
                   <ClearIcon fontSize={'small'} />
                 </IconButton>
               </Tooltip>
             </Box>
           </Tooltip>
-          {/*<Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>*/}
-          {/*  Add Row*/}
-          {/*</Button>*/}
-          <Button variant={'text'} color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+          <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
             Refresh
           </Button>
           <Dropdown>
