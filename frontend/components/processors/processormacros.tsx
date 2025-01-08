@@ -10,7 +10,7 @@ const sqlConfig: PoolOptions = {
   database: process.env.AZURE_SQL_CATALOG_SCHEMA,
   waitForConnections: true,
   connectionLimit: 50, // Lower limit if 100 is excessive for your DB
-  queueLimit: 5, // Smaller queue to fail fast on overload
+  queueLimit: 0, // unlimited queue size
   keepAliveInitialDelay: 10000, // 0 by default.
   enableKeepAlive: true, // false by default.
   connectTimeout: 20000 // 10 seconds by default.
