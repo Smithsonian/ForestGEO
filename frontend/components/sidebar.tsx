@@ -202,7 +202,7 @@ export default function Sidebar(props: SidebarProps) {
 
   const handleOptionClick = () => {
     setOpenPlotCardModal(true);
-    handleClose();
+    setTimeout(() => handleClose(), 0); // Delay to ensure modal state updates first
   };
 
   useEffect(() => {
@@ -596,7 +596,8 @@ export default function Sidebar(props: SidebarProps) {
                   }}
                   onMouseDown={event => event.preventDefault()}
                   onClick={event => {
-                    event.stopPropagation();
+                    event.preventDefault();
+                    console.log('plot clicked: ', item);
                     setSelectedPlot(item);
                     handleOpen(event);
                   }}
@@ -1060,8 +1061,22 @@ export default function Sidebar(props: SidebarProps) {
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>
-        <Menu anchorEl={anchorPlotEdit} open={Boolean(anchorPlotEdit)} onClose={handleClose} placement={'bottom-end'}>
-          <MenuItem onClick={handleOptionClick}>View/Edit this Plot</MenuItem>
+        <Menu
+          anchorEl={anchorPlotEdit}
+          open={Boolean(anchorPlotEdit)}
+          onClose={handleClose}
+          placement={'bottom-end'}
+          sx={{
+            pointerEvents: 'auto'
+          }}
+        >
+          <MenuItem
+            onMouseDown={() => {
+              handleOptionClick();
+            }}
+          >
+            View/Edit this Plot
+          </MenuItem>
         </Menu>
         {selectedPlot && (
           <PlotCardModal
