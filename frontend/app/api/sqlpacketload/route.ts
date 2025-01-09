@@ -10,7 +10,6 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const schema: string = body.schema;
   const formType: string = body.formType;
-  const fileName: string = body.fileName;
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
   const user: string = body.user;
@@ -18,7 +17,7 @@ export async function POST(request: NextRequest) {
 
   const connectionManager = ConnectionManager.getInstance();
 
-  const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
+  const errorRows: FileRow[] = [];
   for (const rowId in fileRowSet) {
     // await connectionManager.beginTransaction();
     const row = fileRowSet[rowId];
@@ -32,34 +31,30 @@ export async function POST(request: NextRequest) {
         census,
         fullName: user
       };
-      const coreMeasurementID = await insertOrUpdate(props);
-      if (formType === 'measurements' && coreMeasurementID) {
-        idToRows.push({ coreMeasurementID: coreMeasurementID, fileRow: row });
-      } else if (formType === 'measurements' && coreMeasurementID === undefined) {
-        throw new Error('CoreMeasurement insertion failure at row: ' + row);
-      }
+      await insertOrUpdate(props);
       // await connectionManager.commitTransaction();
-    } catch (error) {
+    } catch (error: any) {
+      errorRows.push({ ...row, error: error }); // add error rows to list of broken arrays
       // await connectionManager.rollbackTransaction();
-      await connectionManager.closeConnection();
-      if (error instanceof Error) {
-        console.error(`Error processing row for file ${fileName}:`, error.message);
-        return new NextResponse(
-          JSON.stringify({
-            responseMessage: `Error processing row in file ${fileName}`,
-            error: error.message
-          }),
-          { status: HTTPResponses.SERVICE_UNAVAILABLE }
-        );
-      } else {
-        console.error('Unknown error processing row:', error);
-        return new NextResponse(
-          JSON.stringify({
-            responseMessage: `Unknown processing error at row, in file ${fileName}`
-          }),
-          { status: HTTPResponses.SERVICE_UNAVAILABLE }
-        );
-      }
+      // await connectionManager.closeConnection();
+      // if (error instanceof Error) {
+      //   console.error(`Error processing row for file ${fileName}:`, error.message);
+      //   return new NextResponse(
+      //     JSON.stringify({
+      //       responseMessage: `Error processing row in file ${fileName}`,
+      //       error: error.message
+      //     }),
+      //     { status: HTTPResponses.SERVICE_UNAVAILABLE }
+      //   );
+      // } else {
+      //   console.error('Unknown error processing row:', error);
+      //   return new NextResponse(
+      //     JSON.stringify({
+      //       responseMessage: `Unknown processing error at row, in file ${fileName}`
+      //     }),
+      //     { status: HTTPResponses.SERVICE_UNAVAILABLE }
+      //   );
+      // }
     }
   }
 
@@ -77,5 +72,7 @@ export async function POST(request: NextRequest) {
   //
   // await connectionManager.executeQuery(combinedQuery);
   // await connectionManager.closeConnection();
-  return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
+  return new NextResponse(JSON.stringify({ message: `Insert to SQL completed with ${errorRows.length} errors`, errorRows: errorRows }), {
+    status: HTTPResponses.OK
+  });
 }

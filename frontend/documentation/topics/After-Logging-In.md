@@ -4,11 +4,12 @@ After you complete logging in, you'll be redirected to a sidebar and an empty pa
 ![empty dashboard](emptydashboard.png)
 
 From here, you can:
+
 1. Select a site
 2. Select a plot
 3. Select a census
 
-> A site is the overall region of the world where a plot is located. 
+> A site is the overall region of the world where a plot is located.
 > For example, the plot `metrop2` is located in the `Panama` site
 
 > A plot describes the overall location where censuses are conducted and is divided into quadrats.

@@ -7,7 +7,7 @@ import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
 
 // need to try integrating this into validation system:
 
-export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<number | undefined> {
+export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promise<void> {
   const { formType, schema, ...subProps } = props;
   const { connectionManager, rowData } = subProps;
   const mapping = fileMappings[formType];
@@ -45,11 +45,10 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
         await connectionManager.executeQuery(query, values);
       } catch (error) {
         // Rollback the transaction in case of an error
-        console.error(`INSERT OR UPDATE: error in query execution: ${error}. Rollback commencing and error rethrow: `);
-        throw error; // Re-throw the error after rollback
+        console.error(`INSERT OR UPDATE: error in query execution: ${error}. Returning error breaking row to user... `);
+        throw error;
       }
     }
-    return undefined;
   }
 }
 

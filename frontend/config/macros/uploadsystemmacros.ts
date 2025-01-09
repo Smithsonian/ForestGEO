@@ -68,8 +68,10 @@ export interface UploadFireProps {
   personnelRecording: string;
   acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
+  errorRows: FileCollectionRowSet;
   uploadCompleteMessage: string;
   // state setters
+  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
   setUploadError: React.Dispatch<React.SetStateAction<any>>;
