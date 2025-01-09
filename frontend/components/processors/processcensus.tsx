@@ -5,7 +5,7 @@ import { QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialProcessingProps } from '@/config/macros';
 
-export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
+export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<void> {
   const { connectionManager, rowData, schema, plot, census } = props;
   if (!plot || !census) {
     console.error('Missing required parameters: plotID or censusID');
@@ -107,11 +107,11 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
         //
         // await connectionManager.executeQuery(combinedQuery);
         // console.log('Upsert successful. CoreMeasurement ID generated:', coreMeasurementID);
-        return coreMeasurementID;
       }
     }
   } catch (error: any) {
     console.error('Upsert failed:', error.message);
+    console.error('Storing row for return to user and proceeding...');
     throw error;
   }
 }

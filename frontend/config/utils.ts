@@ -224,7 +224,6 @@ export async function handleUpsert<Result>(
     return { id, operation: 'inserted' };
   } catch (e: any) {
     console.error('Error in handleUpsert:', e.message, 'Stack:', e.stack);
-    process.exit(0);
     throw createError(e.message, e);
   }
 }

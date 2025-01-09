@@ -102,8 +102,8 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     },
     { label: 'lx', explanation: 'The X-coordinate of the stem', category: 'required' },
     { label: 'ly', explanation: 'The Y-coordinate of the stem', category: 'required' },
-    { label: 'dbh', explanation: 'The diameter at breast height (DBH) of the tree', category: 'required' },
-    { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'required' },
+    { label: 'dbh', explanation: 'The diameter at breast height (DBH) of the tree', category: 'optional' }, // optional -- dead stems should not be measured
+    { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'date', explanation: 'The date of the measurement', category: 'required' },
     { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'required' }
   ],

@@ -10,23 +10,17 @@ import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 import PQueue from 'p-queue';
 
-interface IDToRow {
-  coreMeasurementID: number;
-  fileRow: FileRow;
-}
-
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
   acceptedFiles,
-  parsedData,
   uploadForm,
   setIsDataUnsaved,
   schema,
-  uploadCompleteMessage,
-  setUploadCompleteMessage,
   setUploadError,
   setReviewState,
-  setAllRowToCMID
+  setAllRowToCMID,
+  errorRows,
+  setErrorRows
 }) => {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -43,6 +37,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096;
 
+  const generateErrorRowId = (prefix: string, fileName: string) => `${prefix}-${fileName}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+
+  // Usage:
   const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
       let chunkCount = 0;
@@ -65,6 +62,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     const queue = new PQueue({ concurrency: connectionLimit });
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
+    const invalidRows: FileRow[] = [];
 
     if (!expectedHeaders || !requiredHeaders) {
       console.error(`No headers defined for form type: ${uploadForm}`);
@@ -73,7 +71,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     }
 
     const transformHeader = (header: string) => header.trim();
+    const validateRow = (row: FileRow): boolean => {
+      return requiredHeaders.every(header => {
+        const value = row[header.label];
+        return value !== null && value !== '' && value !== 'NA' && value !== 'NULL';
+      });
+    };
+
     const transform = (value: string, field: string) => {
+      if (value === 'NA' || value === 'NULL' || value === '') return null;
       if (uploadForm === FormType.measurements && field === 'date') {
         const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
 
@@ -111,22 +117,23 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         async chunk(results: ParseResult<FileRow>, parser) {
           try {
             if (activeTasks >= 5) parser.pause();
-            // parser.pause();
-            const fileRowSet: FileRowSet = {};
-            const transformedChunk = results.data.map((row, index) => {
-              const updatedRow: FileRow = { ...row };
 
-              expectedHeaders.forEach(header => {
-                const headerLabel = header.label;
-                if (!(headerLabel in row)) {
-                  updatedRow[header.label] = null;
-                }
-              });
-
-              return updatedRow;
+            const validRows: FileRow[] = [];
+            results.data.forEach(row => {
+              if (validateRow(row)) {
+                validRows.push(row);
+              } else {
+                invalidRows.push(row); // Collect invalid rows
+              }
             });
 
-            transformedChunk.forEach((row, index) => {
+            if (validRows.length === 0) {
+              parser.resume();
+              return;
+            }
+
+            const fileRowSet: FileRowSet = {};
+            validRows.forEach((row, index) => {
               const rowId = `row-${completedChunks + index}`;
               fileRowSet[rowId] = row;
             });
@@ -145,13 +152,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 throw error;
               } finally {
                 activeTasks--;
-                setCompletedChunks(prev => prev + 1);
+                setCompletedChunks(prev => prev + validRows.length);
                 if (activeTasks < connectionLimit / 10) {
                   parser.resume();
                 }
               }
             });
-            // parser.resume();
           } catch (err) {
             console.error('Error processing chunk:', err);
             reject(err);
@@ -160,6 +166,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         complete: async () => {
           await queue.onIdle();
           console.log('File parsing and upload complete');
+          if (invalidRows.length > 0) {
+            console.warn('Some rows were invalid and not uploaded:', invalidRows);
+            setErrorRows(prevErrorRows => {
+              const updatedErrorRows = { ...prevErrorRows };
+              if (!updatedErrorRows[file.name]) {
+                updatedErrorRows[file.name] = {};
+              }
+
+              invalidRows.forEach(row => {
+                updatedErrorRows[file.name][generateErrorRowId('error-row-parsing', file.name)] = row;
+              });
+
+              return updatedErrorRows;
+            });
+          }
           resolve();
         },
         error: err => {
@@ -169,6 +190,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       });
     });
   };
+
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
@@ -186,8 +208,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             fileRowSet: fileData[fileName]
           })
         });
-        if (!response.ok) throw new Error('SQLLOAD ERROR: ' + response.statusText);
-        return response.ok ? 'SQL load successful' : 'SQL load failed';
+        const { errorRows } = await response.json();
+        setErrorRows(prevErrorRows => {
+          const updatedErrorRows = { ...prevErrorRows };
+          if (!updatedErrorRows[fileName]) {
+            updatedErrorRows[fileName] = {};
+          }
+
+          errorRows.forEach((row: FileRow) => {
+            updatedErrorRows[fileName][generateErrorRowId('error-row-postupload', fileName)] = row;
+          });
+
+          return updatedErrorRows;
+        });
       } catch (error) {
         setUploadError(error);
         setReviewState(ReviewStates.ERRORS);
@@ -249,6 +282,40 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             c.EndDate   = m.LastMeasurementDate
         WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
       await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
+
+      Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
+        const rows: string[] = [];
+
+        // Collect headers from the FileRowSet
+        const headers = new Set<string>();
+        Object.values(fileRowSet).forEach(fileRow => {
+          Object.keys(fileRow).forEach(header => headers.add(header));
+        });
+        rows.push(Array.from(headers).join(',')); // Convert headers to a CSV row
+
+        // Add data rows
+        Object.values(fileRowSet).forEach(fileRow => {
+          const row = Array.from(headers).map(header => {
+            const value = fileRow[header];
+            return value !== null && value !== undefined ? `"${value}"` : ''; // Wrap value in quotes and handle null/undefined
+          });
+          rows.push(row.join(',')); // Convert row array to a CSV row
+        });
+
+        // Convert rows array to a single CSV string
+        const csvContent = rows.join('\n');
+
+        // Create and download the CSV file for the current FileRowSet
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+
+        // Name the file based on the original file name (with `.csv` extension)
+        a.download = `${fileName.replace(/\.[^/.]+$/, '')}_errors.csv`; // Replace extension with `_errors.csv`
+        a.click();
+        URL.revokeObjectURL(url);
+      });
 
       setLoading(false);
       setIsDataUnsaved(false);

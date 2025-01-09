@@ -405,6 +405,8 @@ export default function UploadParent(props: UploadParentProps) {
             setUploadError={setUploadError}
             setErrorComponent={setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
+            errorRows={errorRows}
+            setErrorRows={setErrorRows}
           />
         );
       case ReviewStates.VALIDATE:

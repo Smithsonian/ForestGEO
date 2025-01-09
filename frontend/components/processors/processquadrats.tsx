@@ -29,10 +29,7 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
       CensusID: census.dateRanges[0].censusID,
       QuadratID: quadratID
     };
-    const { id: cqID } = await handleUpsert<CensusQuadratResult>(connectionManager, schema, 'censusquadrat', cqData, 'CQID');
-    if (!cqID) throw createError('upsert failure on censusquadrat for row: ', { cqData });
-
-    return quadratID;
+    await handleUpsert<CensusQuadratResult>(connectionManager, schema, 'censusquadrat', cqData, 'CQID');
   } catch (error: any) {
     console.error('Upsert failed:', error.message);
     throw createError('Upsert failed', { error });

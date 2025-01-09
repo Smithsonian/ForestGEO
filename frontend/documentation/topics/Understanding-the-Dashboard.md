@@ -17,7 +17,6 @@ They're listed here again with some more information to better explain what they
 
 > The navigation menu will not become clickable until you have selected a site, plot, and census.
 
-
 > This is done to ensure that you can only see the data that you're allowed to see!
 >
 > It's important to make sure that you don't accidentally make changes to data that's historical
@@ -29,16 +28,16 @@ They're listed here again with some more information to better explain what they
 ### User-Specific Information
 
 To the right of the core instructions and requirements, you'll see a card with a list of
-user-specific information. 
+user-specific information.
 This includes:
 
 - The role you've been assigned
 - The sites you have access to
 - The email address associated with your account
 
-> Anything wrong, missing, or unclear? 
-> Please use the **question mark icon** in the bottom right corner to submit a GitHub issue! 
-> 
+> Anything wrong, missing, or unclear?
+> Please use the **question mark icon** in the bottom right corner to submit a GitHub issue!
+>
 > No issue is too big or too small!
 
 Now that you know how the dashboard works, let's switch gears and focus on the sidebar on the
