@@ -33,12 +33,3 @@ website: [Production URL](https://forestgeo-livesite.azurewebsites.net/)
 > {style="warning"}
 
 **Note:** Make sure you have at least one site registered to your account in-server.
-
-## Table of Contents
-
-1. [Getting Started!](#introduction)
-2. [Understanding the Dashboard](Understanding-the-Dashboard.md#first-look)
-3. [Working with the Sidebar](Working-with-the-Sidebar.md#making-selections)
-4. [The Census Hub](The-Census-Hub.md#view-data)
-5. [Stem & PlotDetails](Stem-Plot-Details.md#stem-codes)
-6. [Adding New Information](Adding-New-Information.md#interacting-with-the-data-view)
