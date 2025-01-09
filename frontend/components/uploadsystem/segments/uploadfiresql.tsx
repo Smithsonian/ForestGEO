@@ -41,7 +41,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [currentlyParsing, setCurrentlyParsing] = useState<string>('');
   const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 2048;
+  const chunkSize = 4096;
 
   const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
