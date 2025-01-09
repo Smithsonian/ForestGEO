@@ -21,11 +21,6 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
     console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
 
-    if (poolMonitor.isPoolClosed()) {
-      console.log('Connection pool is closed. Reinitializing...');
-      await poolMonitor.reinitializePool();
-    }
-
     // Acquire the connection and ping to validate it
     const connection = await poolMonitor.getConnection();
     await connection.ping(); // Use ping to check the connection
