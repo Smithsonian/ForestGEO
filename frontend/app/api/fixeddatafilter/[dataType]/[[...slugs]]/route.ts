@@ -333,11 +333,10 @@ export async function POST(
       }
       transactionID = await connectionManager.beginTransaction();
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
-      await connectionManager.commitTransaction(transactionID ?? '');
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
+      console.log('total rows: ', totalRowsResult);
       const totalRows = totalRowsResult[0].totalRows;
-
       await connectionManager.commitTransaction(transactionID ?? '');
       if (updatedMeasurementsExist) {
         const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
