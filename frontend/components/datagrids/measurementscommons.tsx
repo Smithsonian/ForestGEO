@@ -700,6 +700,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Error fetching data');
+        console.log('data: ', data);
 
         setRows(data.output);
         setRowCount(data.totalCount);
