@@ -36,9 +36,10 @@ export async function POST(
     const connectionManager = ConnectionManager.getInstance();
     const { newRow } = await request.json();
     let insertIDs: { [key: string]: number } = {};
+    let transactionID: string | undefined = undefined;
 
     try {
-      await connectionManager.beginTransaction();
+      transactionID = await connectionManager.beginTransaction();
 
       if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
 
@@ -80,10 +81,10 @@ export async function POST(
           if (results.length === 0) throw new Error('Error inserting to censusquadrats');
         }
       }
-
+      await connectionManager.commitTransaction(transactionID ?? '');
       return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
     } catch (error: any) {
-      return handleError(error, connectionManager, newRow);
+      return handleError(error, connectionManager, newRow, transactionID);
     } finally {
       await connectionManager.closeConnection();
     }
@@ -102,6 +103,7 @@ export async function POST(
     let updatedMeasurementsExist = false;
     let censusIDs;
     let pastCensusIDs: string | any[];
+    let transactionID: string | undefined = undefined;
 
     const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
       if (!filterModel.items || filterModel.items.length === 0) {
@@ -329,12 +331,14 @@ export async function POST(
           `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
         );
       }
+      transactionID = await connectionManager.beginTransaction();
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
-
+      await connectionManager.commitTransaction(transactionID ?? '');
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
       const totalRows = totalRowsResult[0].totalRows;
 
+      await connectionManager.commitTransaction(transactionID ?? '');
       if (updatedMeasurementsExist) {
         const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
 
@@ -362,6 +366,7 @@ export async function POST(
         );
       }
     } catch (error: any) {
+      await connectionManager.rollbackTransaction(transactionID ?? '');
       throw new Error(error);
     } finally {
       await connectionManager.closeConnection();
@@ -379,9 +384,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
   let updateIDs: { [key: string]: number } = {};
+  let transactionID: string | undefined = undefined;
 
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Handle views with handleUpsertForSlices (applies to both insert and update logic)
     if (params.dataType === 'alltaxonomiesview') {
@@ -418,9 +424,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       updateIDs = { [params.dataType]: gridIDKey };
     }
 
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, connectionManager, newRow);
+    return handleError(error, connectionManager, newRow, transactionID);
   } finally {
     await connectionManager.closeConnection();
   }
@@ -432,11 +439,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
+  let transactionID: string | undefined = undefined;
   const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for views
     if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
@@ -454,6 +462,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
 
       // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
       await handleDeleteForSlices(connectionManager, schema, deleteRowData, queryConfig);
+      await connectionManager.commitTransaction(transactionID ?? '');
       return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
     }
 
@@ -467,10 +476,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     }
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await connectionManager.executeQuery(deleteQuery);
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      await connectionManager.rollbackTransaction();
+      await connectionManager.rollbackTransaction(transactionID ?? '');
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
       const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
       return NextResponse.json(
@@ -480,7 +490,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
         },
         { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
       );
-    } else return handleError(error, connectionManager, newRow);
+    } else return handleError(error, connectionManager, newRow, transactionID);
   } finally {
     await connectionManager.closeConnection();
   }

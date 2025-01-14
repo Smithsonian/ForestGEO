@@ -21,9 +21,10 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     return new NextResponse('No rows provided', { status: 400 });
   }
   const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | undefined = undefined;
   try {
     for (const rowID in rows) {
-      await connectionManager.beginTransaction();
+      transactionID = await connectionManager.beginTransaction();
       const rowData = rows[rowID];
       const props: InsertUpdateProcessingProps = {
         schema,
@@ -36,11 +37,11 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         fullName: undefined
       };
       await insertOrUpdate(props);
-      await connectionManager.commitTransaction();
+      await connectionManager.commitTransaction(transactionID ?? '');
     }
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (e: any) {
-    await connectionManager.rollbackTransaction();
+    await connectionManager.rollbackTransaction(transactionID ?? '');
     return new NextResponse(
       JSON.stringify({
         responseMessage: `Failure in connecting to SQL with ${e.message}`,

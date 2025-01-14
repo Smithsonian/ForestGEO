@@ -276,9 +276,10 @@ export async function runValidation(
   } = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | undefined = undefined;
 
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Dynamically replace SQL variables with actual TypeScript input values
     const formattedCursorQuery = cursorQuery
@@ -346,9 +347,10 @@ export async function runValidation(
     console.log('running validation: ', validationProcedureName);
     console.log('running query: ', reformattedCursorQuery);
     console.log('running query: ', await connectionManager.executeQuery(reformattedCursorQuery));
+    await connectionManager.commitTransaction(transactionID ?? '');
     return true;
   } catch (error: any) {
-    await connectionManager.rollbackTransaction();
+    await connectionManager.rollbackTransaction(transactionID ?? '');
     console.error(`Error during ${validationProcedureName} or ${validationProcedureID} validation:`, error.message);
     return false;
   } finally {
@@ -358,6 +360,7 @@ export async function runValidation(
 
 export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | undefined = undefined;
   const tempTable = `CREATE TEMPORARY TABLE UpdatedRows
                      (
                        CoreMeasurementID INT
@@ -399,7 +402,7 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
 
   try {
     // Begin transaction
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Ensure any leftover temporary table is cleared
     await connectionManager.executeQuery(dropTemp);
@@ -420,7 +423,7 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
     return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
     // Roll back on error
-    await connectionManager.rollbackTransaction();
+    await connectionManager.rollbackTransaction(transactionID ?? '');
     console.error(`Error during updateValidatedRows:`, error.message);
     throw new Error(`updateValidatedRows failed for validation: Please check the logs for more details.`);
   } finally {

@@ -128,7 +128,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
 
   const handleConfirm = async () => {
     if (confirmNoStemsRollover && selectedStemsCensus.censusID === 0) {
-      console.log('confirm no rollover (stems)');
       onConfirm(false);
       resetState();
       return;

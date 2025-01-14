@@ -597,7 +597,6 @@ export default function Sidebar(props: SidebarProps) {
                   onMouseDown={event => event.preventDefault()}
                   onClick={event => {
                     event.preventDefault();
-                    console.log('plot clicked: ', item);
                     setSelectedPlot(item);
                     handleOpen(event);
                   }}

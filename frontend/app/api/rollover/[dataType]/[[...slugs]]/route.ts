@@ -15,6 +15,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   if (!schema || !plotID || !sourceCensusID || !newCensusID) throw new Error('no schema or plotID or censusID provided');
 
   const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | undefined = undefined;
   try {
     const { incoming } = await request.json();
     if (!Array.isArray(incoming) || incoming.length === 0) throw new Error('No quadrat or personnel IDs provided');
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
     let query = ``;
     let queryParams = [];
 
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     switch (params.dataType) {
       case 'quadrats':
@@ -50,9 +51,10 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
       default:
         throw new Error('Invalid data type');
     }
+    await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ message: 'Rollover successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {
-    await connectionManager.rollbackTransaction();
+    await connectionManager.rollbackTransaction(transactionID ?? '');
     console.error('Error in rollover API:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500

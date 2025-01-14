@@ -1,13 +1,15 @@
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
+import { v4 as uuidv4 } from 'uuid'; // For generating unique transaction IDs
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
+  private transactionConnections: Map<string, PoolConnection> = new Map(); // Store transaction-specific connections
 
   // Private constructor
   private constructor() {
-    console.log(chalk.green('ConnectionManager initialized as a singleton.'));
+    // console.log(chalk.green('ConnectionManager initialized as a singleton.'));
   }
 
   // Singleton instance getter
@@ -23,7 +25,7 @@ class ConnectionManager {
     try {
       const connection = await getConn(); // Reuse getConn from processormacros
       await connection.ping(); // Validate connection
-      console.log(chalk.green('Connection validated.'));
+      // console.log(chalk.green('Connection validated.'));
       return connection;
     } catch (error) {
       console.error(chalk.red('Error acquiring or validating connection:', error));
@@ -32,91 +34,87 @@ class ConnectionManager {
   }
 
   // Execute a query using the acquired connection
-  public async executeQuery(query: string, params?: any[]): Promise<any> {
-    let connection: PoolConnection | null = null;
+  public async executeQuery(query: string, params?: any[], transactionId?: string): Promise<any> {
+    const connection = transactionId ? this.transactionConnections.get(transactionId) : await this.acquireConnectionInternal();
+
+    if (!connection) {
+      throw new Error(transactionId ? `No connection found for transaction: ${transactionId}` : 'Unable to acquire connection.');
+    }
 
     try {
-      connection = await this.acquireConnectionInternal(); // Acquire connection
-      const isModifyingQuery = query.trim().match(/^(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE|TRUNCATE)/i);
-
-      if (isModifyingQuery) {
-        console.warn(chalk.yellow('Warning: Modifying query detected. For optimal safety, consider wrapping modifying queries in transactions.'));
-      }
-
-      // Execute the query using the helper function
       return await runQuery(connection, query, params);
     } catch (error) {
       console.error(chalk.red('Error executing query:', error));
       throw error;
     } finally {
-      if (connection) {
-        console.log(chalk.blue('Releasing connection after query execution.'));
-        connection.release(); // Ensure connection is released
+      if (!transactionId) {
+        connection.release(); // Release if not part of a transaction
       }
     }
   }
 
   // Begin a transaction
-  public async beginTransaction(timeout: number = 10000): Promise<void> {
-    let connection: PoolConnection | null = null;
+  public async beginTransaction(): Promise<string> {
+    const transactionId = uuidv4(); // Generate a unique transaction ID
+    const connection = await this.acquireConnectionInternal();
 
     try {
-      connection = await this.acquireConnectionInternal();
-      const timer = setTimeout(() => {
-        console.warn(chalk.yellow('Transaction timeout exceeded.'));
-        throw new Error('Transaction timeout exceeded.');
-      }, timeout);
-
       await connection.beginTransaction();
-      clearTimeout(timer);
-      console.log(chalk.green('Transaction started.'));
-      (this as any)._transactionConnection = connection;
+      this.transactionConnections.set(transactionId, connection); // Store the connection
+      console.log(chalk.green(`Transaction started: ${transactionId}`));
+      return transactionId;
     } catch (error) {
-      if (connection) connection.release();
+      connection.release();
       console.error(chalk.red('Error starting transaction:', error));
       throw error;
     }
   }
 
   // Commit a transaction
-  public async commitTransaction(): Promise<void> {
-    const connection = (this as any)._transactionConnection;
+  public async commitTransaction(transactionId: string): Promise<void> {
+    const connection = this.transactionConnections.get(transactionId);
 
-    if (connection) {
-      try {
-        await connection.commit();
-        console.log(chalk.green('Transaction committed.'));
-      } catch (error) {
-        console.error(chalk.red('Error committing transaction:', error));
-        throw error;
-      } finally {
-        connection.release(); // Ensure connection is always released
-        delete (this as any)._transactionConnection;
-      }
+    if (!connection) {
+      console.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
+      return; // Avoid throwing an error for an already finalized transaction
+    }
+
+    try {
+      await connection.commit();
+      console.log(chalk.green(`Transaction committed: ${transactionId}`));
+    } catch (error) {
+      console.error(chalk.red('Error committing transaction:', error));
+      throw error;
+    } finally {
+      connection.release();
+      this.transactionConnections.delete(transactionId); // Cleanup
     }
   }
 
   // Rollback a transaction
-  public async rollbackTransaction(): Promise<void> {
-    const connection = (this as any)._transactionConnection;
+  public async rollbackTransaction(transactionId: string): Promise<void> {
+    const connection = this.transactionConnections.get(transactionId);
 
-    if (connection) {
-      try {
-        await connection.rollback();
-        console.log(chalk.yellow('Transaction rolled back.'));
-      } catch (error) {
-        console.error(chalk.red('Error rolling back transaction:', error));
-        throw error;
-      } finally {
-        connection.release(); // Ensure connection is always released
-        delete (this as any)._transactionConnection;
-      }
+    if (!connection) {
+      console.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
+      return; // Avoid throwing an error for an already finalized transaction
+    }
+
+    try {
+      await connection.rollback();
+      console.warn(chalk.yellow(`Transaction rolled back: ${transactionId}`));
+    } catch (error) {
+      console.error(chalk.red('Error rolling back transaction:', error));
+      throw error;
+    } finally {
+      connection.release();
+      this.transactionConnections.delete(transactionId); // Cleanup
     }
   }
 
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
-    console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
+    // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
   }
 }
 

@@ -43,7 +43,6 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
   const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
-  console.log('filter model: ', filterModel);
 
   const connectionManager = ConnectionManager.getInstance();
   let query: string = '';

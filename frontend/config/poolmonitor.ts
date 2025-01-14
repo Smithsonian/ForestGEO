@@ -13,7 +13,7 @@ export class PoolMonitor {
     this.pool = createPool(config);
     this.poolClosed = false;
 
-    console.log(chalk.green('PoolMonitor initialized.'));
+    // console.log(chalk.green('PoolMonitor initialized.'));
     this.monitorPoolHealth();
     this.resetInactivityTimer();
   }
@@ -21,13 +21,14 @@ export class PoolMonitor {
   public async getConnection(): Promise<PoolConnection> {
     try {
       if (this.poolClosed) {
-        console.log(chalk.yellow('Reinitializing pool for new activity.'));
+        // console.log(chalk.yellow('Reinitializing pool for new activity.'));
         await this.reinitializePool();
+        ``;
       }
 
-      console.log(chalk.cyan('Requesting new connection...'));
+      // console.log(chalk.cyan('Requesting new connection...'));
       const connection = await this.pool.getConnection();
-      console.log(chalk.green(`Connection acquired: ${connection.threadId}`));
+      // console.log(chalk.green(`Connection acquired: ${connection.threadId}`));
       this.resetInactivityTimer(); // Reset inactivity timer on new activity
       return connection;
     } catch (error) {
@@ -59,11 +60,11 @@ export class PoolMonitor {
     this.reinitializing = true;
 
     try {
-      console.log(chalk.cyan('Reinitializing connection pool...'));
+      // console.log(chalk.cyan('Reinitializing connection pool...'));
       await this.closeAllConnections();
       this.pool = createPool(this.config);
       this.poolClosed = false;
-      console.log(chalk.cyan('Connection pool reinitialized.'));
+      // console.log(chalk.cyan('Connection pool reinitialized.'));
     } catch (error) {
       console.error(chalk.red('Error during reinitialization:', error));
     } finally {
@@ -76,8 +77,8 @@ export class PoolMonitor {
     try {
       const [rows]: any[] = await this.pool.query('SELECT * FROM information_schema.processlist WHERE TIME > 60;');
       if (rows.length > 0) {
-        console.log(chalk.cyan('Active MySQL Processes:'));
-        console.table(rows);
+        // console.log(chalk.cyan('Active MySQL Processes:'));
+        // console.table(rows);
 
         const { liveIds, sleepingIds } = rows.reduce(
           (acc: any, process: any) => {
@@ -122,7 +123,7 @@ export class PoolMonitor {
       if (live.length === 0) {
         console.log(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));
         await this.closeAllConnections();
-        console.log(chalk.red('Graceful shutdown complete.'));
+        // console.log(chalk.red('Graceful shutdown complete.'));
       }
     }, 3600000); // 1 hour in milliseconds
   }

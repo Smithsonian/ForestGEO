@@ -55,7 +55,6 @@ export default function UploadParent(props: UploadParentProps) {
   const [errorRows, setErrorRows] = useState<FileCollectionRowSet>({});
   const [errors, setErrors] = useState<FileCollectionRowSet>({});
   // Confirmation menu states:
-  const [confirmationDialogOpen, setConfirmationDialogOpen] = React.useState(false);
   const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
   const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   const [uploadCompleteMessage, setUploadCompleteMessage] = useState('');
@@ -120,59 +119,6 @@ export default function UploadParent(props: UploadParentProps) {
   async function resetError() {
     setUploadError(null);
     setErrorComponent('');
-  }
-
-  async function handleConfirmationApproval() {
-    setConfirmationDialogOpen(true);
-  }
-
-  async function handleConfirmationCancel() {
-    setConfirmationDialogOpen(false);
-  }
-
-  async function handleConfirmationConfirm() {
-    setConfirmationDialogOpen(false);
-    setReviewState(ReviewStates.UPLOAD_SQL);
-  }
-
-  const handleChange = (_event: React.ChangeEvent<unknown>, value: number) => {
-    setDataViewActive(value);
-  };
-
-  function parseStreamCheck(newFile: FileWithPath, setAllFileHeaders: React.Dispatch<React.SetStateAction<{ [key: string]: string[] }>>) {
-    const testFile = new FileWithStream(newFile, false, newFile.path);
-    const startTime = Date.now();
-    let aborted = false;
-
-    parse(newFile as File, {
-      worker: true,
-      header: true,
-      chunkSize: 1024, // Small chunk for testing
-      step: (_row, parser) => {
-        if (Date.now() - startTime > PARSING_TIME_THRESHOLD_MS) {
-          parser.abort();
-          aborted = true;
-        }
-      },
-      complete: results => {
-        testFile.useStreaming = aborted; // If aborted, mark file for streaming
-        console.log(`File ${newFile.name} will ${aborted ? 'use streaming' : 'be fully parsed'}.`);
-
-        // Update file headers if available
-        if (results && results.meta && results.meta.fields) {
-          setAllFileHeaders(prevHeaders => ({
-            ...prevHeaders,
-            [newFile.name]: results.meta.fields || []
-          }));
-        }
-      },
-      error: error => {
-        console.error('Error during time estimation:', error);
-        testFile.useStreaming = true; // Ensure default behavior on error
-      }
-    });
-
-    return testFile;
   }
 
   // Function to handle file addition
@@ -427,7 +373,7 @@ export default function UploadParent(props: UploadParentProps) {
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} />;
       default:
         return (
           <UploadError

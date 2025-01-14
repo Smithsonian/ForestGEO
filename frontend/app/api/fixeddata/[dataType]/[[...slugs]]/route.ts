@@ -146,9 +146,9 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const connectionManager = ConnectionManager.getInstance();
   const { newRow } = await request.json();
   let insertIDs: { [key: string]: number } = {};
-
+  let transactionID: string | undefined = undefined;
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
 
@@ -190,10 +190,10 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         if (results.length === 0) throw new Error('Error inserting to censusquadrats');
       }
     }
-
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, connectionManager, newRow);
+    return handleError(error, connectionManager, newRow, transactionID ?? undefined);
   } finally {
     await connectionManager.closeConnection();
   }
@@ -209,9 +209,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
   let updateIDs: { [key: string]: number } = {};
+  let transactionID: string | undefined = undefined;
 
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Handle views with handleUpsertForSlices (applies to both insert and update logic)
     if (params.dataType === 'alltaxonomiesview') {
@@ -247,10 +248,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       // For non-view tables, standardize the response format
       updateIDs = { [params.dataType]: gridIDKey };
     }
-
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, connectionManager, newRow);
+    return handleError(error, connectionManager, newRow, transactionID ?? undefined);
   } finally {
     await connectionManager.closeConnection();
   }
@@ -265,8 +266,9 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
+  let transactionID: string | undefined = undefined;
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for views
     if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
@@ -297,10 +299,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     }
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await connectionManager.executeQuery(deleteQuery);
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      await connectionManager.rollbackTransaction();
+      await connectionManager.rollbackTransaction(transactionID ?? '');
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
       const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
       return NextResponse.json(
