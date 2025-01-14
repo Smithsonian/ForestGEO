@@ -46,7 +46,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
     });
   } catch (error: any) {
     console.error('Error in GET request:', error.message);
-    await conn.rollbackTransaction();
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

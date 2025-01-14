@@ -37,7 +37,7 @@ export default function RenderFormExplanations(uploadForm: FormType) {
       >
         {TableHeadersByFormType[uploadForm].map((header, index) => (
           <Card key={index} size="sm" sx={{ flex: 1 }}>
-            <Typography level="title-sm" color="primary" sx={{ fontWeight: header.category === 'required' ? 'bold' : 'normal' }}>
+            <Typography level="title-sm" color={header.category === 'required' ? 'primary' : 'neutral'}>
               {header.label}
             </Typography>
             <CardContent>

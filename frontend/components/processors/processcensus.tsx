@@ -110,7 +110,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       }
     }
   } catch (error: any) {
-    console.error('Upsert failed:', error.message);
+    console.error('Rolling back changes! Upsert failed:', error.message);
     console.error('Storing row for return to user and proceeding...');
     throw error;
   }

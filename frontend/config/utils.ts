@@ -177,7 +177,7 @@ export async function handleUpsert<Result>(
     id = result.insertId;
 
     if (id === 0) {
-      console.log('existing record found, updating...');
+      // console.log('existing record found, updating...');
       const fieldsToSearch = Object.keys(data).filter(field => field !== 'UserDefinedFields' && data[field as keyof Result] !== null);
 
       const whereConditions = fieldsToSearch
@@ -207,10 +207,10 @@ export async function handleUpsert<Result>(
       const findExistingQuery = `SELECT *
                                  FROM \`${schema}\`.\`${tableName}\`
                                  WHERE ${whereConditions}`;
-      console.log('find existing query: ', findExistingQuery, 'values: ', values);
+      // console.log('find existing query: ', findExistingQuery, 'values: ', values);
 
       const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
-      console.log('find existing query search result: ', searchResult);
+      // console.log('find existing query search result: ', searchResult);
 
       if (searchResult.length > 0) {
         id = searchResult[0][key as keyof Result] as unknown as number;

@@ -121,6 +121,7 @@ export interface UploadUpdateValidationsProps {
 export interface UploadCompleteProps {
   // state vars
   uploadForm: FormType | undefined;
+  errorRows: FileCollectionRowSet;
   // state setters
   handleCloseUploadModal: () => void;
 }

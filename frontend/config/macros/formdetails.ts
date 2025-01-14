@@ -33,13 +33,13 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     {
       label: 'description',
       explanation: 'Describe your attribute. Use as much detail as possible so that your attribute is easily understood by others.',
-      category: 'required'
+      category: 'optional'
     },
     {
       label: 'status',
       explanation: `Which of the following categories does your attribute fit into: ${AttributeStatusOptions.join(', ')}`, // this is converted to Chip
       // array via regex in rendering.
-      category: 'required'
+      category: 'optional'
     }
   ],
   [FormType.personnel]: [
@@ -58,8 +58,8 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
       explanation: 'An identifying code composed of 25 or less characters. This code should be unique to your species.',
       category: 'required'
     },
-    { label: 'family', explanation: 'The family taxon of your species', category: 'required' },
-    { label: 'genus', explanation: 'The genus taxon of your species', category: 'required' },
+    { label: 'family', explanation: 'The family taxon of your species', category: 'optional' },
+    { label: 'genus', explanation: 'The genus taxon of your species', category: 'optional' },
     { label: 'species', explanation: 'The name of your species', category: 'required' },
     { label: 'subspecies', explanation: 'The subspecies taxon of your species', category: 'optional' },
     {
@@ -83,7 +83,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'dimx', explanation: 'The dimension of the quadrat in the X-direction', category: 'required' },
     { label: 'dimy', explanation: 'The dimension of the quadrat in the Y-direction', category: 'required' },
     { label: 'area', explanation: 'The area of the quadrat', category: 'required' },
-    { label: 'quadratshape', explanation: 'The shape of the quadrat', category: 'required' }
+    { label: 'quadratshape', explanation: 'The shape of the quadrat', category: 'optional' }
   ],
   [FormType.measurements]: [
     { label: 'tag', explanation: 'Tag number on the tree in the field, should be unique within each plot.', category: 'required' },
@@ -105,7 +105,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'dbh', explanation: 'The diameter at breast height (DBH) of the tree', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'date', explanation: 'The date of the measurement', category: 'required' },
-    { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'required' }
+    { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' }
   ],
   [FormType.arcgis_xlsx]: arcgisHeaders
 };

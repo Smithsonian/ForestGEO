@@ -1,9 +1,8 @@
 'use client';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Typography } from '@mui/material';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
-import { LinearProgress, Stack } from '@mui/joy';
+import { Box, LinearProgress, Stack, Typography } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
@@ -25,20 +24,34 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentQuadrat = useQuadratContext();
-  const [loading, setLoading] = useState<boolean>(true);
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
-  const [currentlyRunning, setCurrentlyRunning] = useState<string>('');
   const hasUploaded = useRef(false);
   const { data: session } = useSession();
   const [totalChunks, setTotalChunks] = useState(0);
-  const [currentlyParsing, setCurrentlyParsing] = useState<string>('');
   const [completedChunks, setCompletedChunks] = useState<number>(0);
+  const [handlingChunkError, setHandlingChunkError] = useState(false);
+  const [trackChunkReloadRowCount, setTrackChunkReloadRowCount] = useState<number>(0);
+  const [trackChunkReloadTotalRows, setTrackChunkReloadTotalRows] = useState<number>(0);
+  const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096;
 
-  const generateErrorRowId = (prefix: string, fileName: string) => `${prefix}-${fileName}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  const generateErrorRowId = (row: FileRow) =>
+    `row-${Object.values(row)
+      .join('-')
+      .replace(/[^a-zA-Z0-9-]/g, '')}`;
 
+  const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   // Usage:
   const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
@@ -58,11 +71,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
     let activeTasks = 0;
-    const connectionLimit = 100;
+    const connectionLimit = 10;
     const queue = new PQueue({ concurrency: connectionLimit });
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
-    const invalidRows: FileRow[] = [];
+    const parsingInvalidRows: FileRow[] = [];
 
     if (!expectedHeaders || !requiredHeaders) {
       console.error(`No headers defined for form type: ${uploadForm}`);
@@ -72,34 +85,55 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     const transformHeader = (header: string) => header.trim();
     const validateRow = (row: FileRow): boolean => {
-      return requiredHeaders.every(header => {
+      const missingFields = requiredHeaders.filter(header => {
         const value = row[header.label];
-        return value !== null && value !== '' && value !== 'NA' && value !== 'NULL';
+        return value === null || value === '' || value === 'NA' || value === 'NULL';
       });
+
+      if (missingFields.length > 0) {
+        parsingInvalidRows.push({
+          ...row,
+          failureReason: `Missing required fields: ${missingFields.map(f => f.label).join(', ')}`
+        });
+        return false;
+      }
+      return true;
     };
 
     const transform = (value: string, field: string) => {
       if (value === 'NA' || value === 'NULL' || value === '') return null;
+
       if (uploadForm === FormType.measurements && field === 'date') {
-        const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+        const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
 
         if (match) {
           let normalizedDate;
+
           if (match[1]) {
+            // Format: YYYY/MM/DD or YYYY-MM-DD
             normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
           } else {
-            normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+            // Format: MM/DD/YY(YY) or DD-MM-YY(YY)
+            const year = match[6].length === 2 ? `20${match[6]}` : match[6]; // Convert two-digit year to four-digit
+            normalizedDate = `${year}-${match[4].padStart(2, '0')}-${match[5].padStart(2, '0')}`;
           }
 
-          const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+          // Parse the date with both MM/DD/YYYY and DD/MM/YYYY for flexibility
+          const validFormats = ['YYYY-MM-DD', 'MM-DD-YYYY', 'DD-MM-YYYY', 'MM/DD/YYYY', 'DD/MM/YYYY'];
+          const parsedDate = moment(normalizedDate, validFormats, true);
+
           if (parsedDate.isValid()) {
             return parsedDate.toDate();
           } else {
-            console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+            console.error(
+              `Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY, and their variations with '/' or '-'.`
+            );
             return value;
           }
         } else {
-          console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
+          console.error(
+            `Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY, and their variations with '/' or '-'.`
+          );
           return value;
         }
       }
@@ -116,14 +150,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
           try {
-            if (activeTasks >= 5) parser.pause();
+            if (activeTasks >= connectionLimit) {
+              parser.pause();
+              queue.pause();
+            }
 
             const validRows: FileRow[] = [];
             results.data.forEach(row => {
               if (validateRow(row)) {
                 validRows.push(row);
-              } else {
-                invalidRows.push(row); // Collect invalid rows
               }
             });
 
@@ -148,13 +183,70 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               try {
                 await uploadToSql(fileCollectionRowSet, file.name);
               } catch (error) {
-                console.error('Error uploading to SQL:', error);
-                throw error;
+                console.error('Chunk rollback triggered. Error uploading to SQL:', error);
+                setFailedChunks(prev => {
+                  const updatedSet = new Set(prev);
+                  updatedSet.add(completedChunks);
+                  return updatedSet;
+                });
+                try {
+                  try {
+                    parser.pause();
+                    queue.pause();
+                  } catch (e: any) {
+                    console.error('Error pausing parser:', e.message);
+                  }
+
+                  await queue.onIdle();
+                  setHandlingChunkError(true);
+                  setTrackChunkReloadRowCount(0);
+                  setTrackChunkReloadTotalRows(Object.values(fileRowSet).length);
+
+                  const batchErrorRows: FileRowSet = {};
+                  for (const [rowId, row] of Object.entries(fileRowSet)) {
+                    if (errorRows[file.name]?.[rowId]) {
+                      setTrackChunkReloadRowCount(prev => Math.min(prev + 1, trackChunkReloadTotalRows));
+                      continue;
+                    }
+                    const singleRowSet: FileCollectionRowSet = { [file.name]: { [rowId]: row } as FileRowSet };
+                    try {
+                      await uploadToSql(singleRowSet, file.name);
+                    } catch (rowError) {
+                      console.error(`Row ${rowId} failed during retry:`, rowError);
+                      batchErrorRows[generateErrorRowId(row)] = row;
+                    } finally {
+                      setTrackChunkReloadRowCount(prev => Math.min(prev + 1, trackChunkReloadTotalRows));
+                    }
+                  }
+                  setErrorRows(prev => ({
+                    ...prev,
+                    [file.name]: {
+                      ...prev[file.name],
+                      ...Object.fromEntries(Object.entries(batchErrorRows).map(([_, value]) => [generateErrorRowId(value), value]))
+                    }
+                  }));
+                } catch (error) {
+                  console.error('Critical error during chunk error handling:', error);
+                } finally {
+                  setHandlingChunkError(false);
+                  try {
+                    parser.resume();
+                    queue.start();
+                  } catch (e: any) {
+                    console.error('Error resuming parser:', e.message);
+                  }
+                }
               } finally {
                 activeTasks--;
-                setCompletedChunks(prev => prev + validRows.length);
-                if (activeTasks < connectionLimit / 10) {
+                setCompletedChunks(prev => {
+                  if (!failedChunks.has(prev)) {
+                    return prev + 1;
+                  }
+                  return prev;
+                });
+                if (activeTasks < connectionLimit) {
                   parser.resume();
+                  queue.start();
                 }
               }
             });
@@ -166,16 +258,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         complete: async () => {
           await queue.onIdle();
           console.log('File parsing and upload complete');
-          if (invalidRows.length > 0) {
-            console.warn('Some rows were invalid and not uploaded:', invalidRows);
+          if (parsingInvalidRows.length > 0) {
+            console.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
             setErrorRows(prevErrorRows => {
               const updatedErrorRows = { ...prevErrorRows };
               if (!updatedErrorRows[file.name]) {
                 updatedErrorRows[file.name] = {};
               }
 
-              invalidRows.forEach(row => {
-                updatedErrorRows[file.name][generateErrorRowId('error-row-parsing', file.name)] = row;
+              parsingInvalidRows.forEach(row => {
+                updatedErrorRows[file.name][generateErrorRowId(row)] = row;
               });
 
               return updatedErrorRows;
@@ -194,36 +286,26 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
-        setCurrentlyRunning(`Uploading file "${fileName}" to SQL...`);
-        const response = await fetch(`/api/sqlpacketload`, {
+        const response = await fetchWithTimeout(`/api/sqlpacketload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            schema: schema,
+            schema,
             formType: uploadForm,
-            fileName: fileName,
+            fileName,
             plot: currentPlot,
             census: currentCensus,
             user: userID,
             fileRowSet: fileData[fileName]
           })
         });
-        const { errorRows } = await response.json();
-        setErrorRows(prevErrorRows => {
-          const updatedErrorRows = { ...prevErrorRows };
-          if (!updatedErrorRows[fileName]) {
-            updatedErrorRows[fileName] = {};
-          }
 
-          errorRows.forEach((row: FileRow) => {
-            updatedErrorRows[fileName][generateErrorRowId('error-row-postupload', fileName)] = row;
-          });
-
-          return updatedErrorRows;
-        });
+        if (!response.ok) {
+          throw new Error(`API returned status ${response.status}`);
+        }
       } catch (error) {
-        setUploadError(error);
-        setReviewState(ReviewStates.ERRORS);
+        console.error('Network or API error:', error);
+        throw error; // Re-throw to ensure retries or error reporting is triggered
       }
     },
     [
@@ -262,7 +344,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       for (const file of acceptedFiles) {
         const isCSV = file.name.endsWith('.csv');
         const delimiter = isCSV ? ',' : '\t';
-        setCurrentlyParsing(file.name);
 
         await parseFileInChunks(file as File, delimiter);
 
@@ -283,41 +364,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
       await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
 
-      Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
-        const rows: string[] = [];
-
-        // Collect headers from the FileRowSet
-        const headers = new Set<string>();
-        Object.values(fileRowSet).forEach(fileRow => {
-          Object.keys(fileRow).forEach(header => headers.add(header));
-        });
-        rows.push(Array.from(headers).join(',')); // Convert headers to a CSV row
-
-        // Add data rows
-        Object.values(fileRowSet).forEach(fileRow => {
-          const row = Array.from(headers).map(header => {
-            const value = fileRow[header];
-            return value !== null && value !== undefined ? `"${value}"` : ''; // Wrap value in quotes and handle null/undefined
-          });
-          rows.push(row.join(',')); // Convert row array to a CSV row
-        });
-
-        // Convert rows array to a single CSV string
-        const csvContent = rows.join('\n');
-
-        // Create and download the CSV file for the current FileRowSet
-        const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-
-        // Name the file based on the original file name (with `.csv` extension)
-        a.download = `${fileName.replace(/\.[^/.]+$/, '')}_errors.csv`; // Replace extension with `_errors.csv`
-        a.click();
-        URL.revokeObjectURL(url);
-      });
-
-      setLoading(false);
       setIsDataUnsaved(false);
     };
 
@@ -327,6 +373,45 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           .catch(console.error)
           .then(() => {
             hasUploaded.current = true;
+          })
+          .then(() => {
+            // force download of error rows:
+            Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
+              const rows: string[] = [];
+
+              // Collect headers from the FileRowSet
+              const headers = new Set<string>();
+              Object.values(fileRowSet).forEach(fileRow => {
+                Object.keys(fileRow).forEach(header => headers.add(header));
+              });
+              rows.push(Array.from(headers).join(',')); // Convert headers to a CSV row
+
+              // Add data rows
+              Object.values(fileRowSet).forEach(fileRow => {
+                const row = Array.from(headers).map(header => {
+                  const value = fileRow[header];
+                  return value !== null && value !== undefined ? `"${value}"` : ''; // Wrap value in quotes and handle null/undefined
+                });
+                rows.push(row.join(',')); // Convert row array to a CSV row
+              });
+
+              // Convert rows array to a single CSV string
+              const csvContent = rows.join('\n');
+
+              // Create and download the CSV file for the current FileRowSet
+              const blob = new Blob([csvContent], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+
+              // Name the file based on the original file name (with `.csv` extension)
+              a.download = `${fileName.replace(/\.[^/.]+$/, '')}_errors.csv`; // Replace extension with `_errors.csv`
+              a.click();
+              URL.revokeObjectURL(url);
+            });
+          })
+          .then(() => {
+            // enforce timeout before continuing forward
             const timeout = setTimeout(() => {
               if (uploadForm === FormType.measurements) {
                 setReviewState(ReviewStates.VALIDATE);
@@ -339,7 +424,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           });
       });
     }
-  }, []);
+  }, [hasUploaded.current, errorRows]);
 
   return (
     <>
@@ -354,10 +439,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ width: '100%' }}>
-            <Typography variant="h6" gutterBottom>{`Total Operations: ${totalOperations}, Total Chunks: ${totalChunks}`}</Typography>
+            <Typography level={'title-md'} gutterBottom>{`Total Operations: ${totalOperations}, Total Chunks: ${totalChunks}`}</Typography>
 
             <Box sx={{ width: '100%', mb: 2 }}>
-              <Typography variant="h6" gutterBottom>
+              <Typography level={'title-md'} gutterBottom>
                 Total File Progress - Completed: {completedOperations}
               </Typography>
               <LinearProgress determinate value={(completedOperations / totalOperations) * 100} />
@@ -365,10 +450,69 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
             {totalChunks !== 0 && (
               <Box sx={{ width: '100%', mb: 2 }}>
-                <Typography variant="h6" gutterBottom>
+                <Typography level={'title-md'} gutterBottom>
                   Total Parsing Progress - Completed: {completedChunks}
                 </Typography>
-                <LinearProgress determinate value={(completedChunks / totalChunks) * 100} />
+                <LinearProgress
+                  determinate
+                  variant="plain"
+                  color="primary"
+                  thickness={32}
+                  value={(completedChunks / totalChunks) * 100}
+                  sx={{
+                    '--LinearProgress-radius': '0px',
+                    '--LinearProgress-progressThickness': '24px'
+                  }}
+                >
+                  <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`}
+                    <br />
+                    {completedChunks} completed out of {totalChunks}: {totalChunks - completedChunks} remaining
+                  </Typography>
+                </LinearProgress>
+                {failedChunks.has(completedChunks) && (
+                  <Box sx={{ width: '100%', mb: 2 }}>
+                    <Typography level={'body-md'} color={'warning'}>
+                      Row-by-row processing for chunk {completedChunks + 1}/{totalChunks}
+                    </Typography>
+                    <LinearProgress
+                      determinate
+                      variant="plain"
+                      color="warning"
+                      thickness={32}
+                      value={(trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100}
+                      sx={{
+                        '--LinearProgress-radius': '0px',
+                        '--LinearProgress-progressThickness': '24px'
+                      }}
+                    >
+                      <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                        Retrying: {`${((trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100).toFixed(2)}%`}
+                        <br />
+                        {trackChunkReloadRowCount}/{trackChunkReloadTotalRows} rows retried
+                      </Typography>
+                    </LinearProgress>
+                  </Box>
+                )}
+                {failedChunks.size > 0 &&
+                  Array.from(failedChunks).map(chunk => (
+                    <Box key={chunk} sx={{ width: '100%', mb: 2 }}>
+                      <Typography level={'body-md'} color={'success'}>
+                        Completed retry for chunk {chunk + 1}/{totalChunks}
+                      </Typography>
+                      <LinearProgress
+                        determinate
+                        variant="plain"
+                        color="success"
+                        thickness={32}
+                        value={100}
+                        sx={{
+                          '--LinearProgress-radius': '0px',
+                          '--LinearProgress-progressThickness': '24px'
+                        }}
+                      />
+                    </Box>
+                  ))}
               </Box>
             )}
           </Stack>
@@ -384,7 +528,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }}
         >
           <Stack direction={'column'} sx={{ display: 'inherit' }}>
-            <Typography variant="h5" gutterBottom>
+            <Typography level={'title-md'} gutterBottom>
               SQL Upload Complete
             </Typography>
           </Stack>

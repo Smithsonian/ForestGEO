@@ -10,8 +10,10 @@ export async function GET(request: NextRequest) {
   const censusPCNParam = request.nextUrl.searchParams.get('censusPCNParam');
   if (!schema) throw new Error('No schema variable provided!');
 
+  let transactionID: string | undefined = undefined;
+
   try {
-    await conn.beginTransaction();
+    transactionID = await conn.beginTransaction();
     // Query to fetch existing validation errors
     const validationErrorsQuery = `
       SELECT 
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
       descriptions: row.Descriptions.split(','),
       criteria: row.Criteria.split(',')
     }));
+    await conn.commitTransaction(transactionID ?? '');
     return new NextResponse(
       JSON.stringify({
         failed: parsedValidationErrors
@@ -48,7 +51,7 @@ export async function GET(request: NextRequest) {
       }
     );
   } catch (error: any) {
-    await conn.rollbackTransaction();
+    await conn.rollbackTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
