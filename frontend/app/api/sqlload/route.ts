@@ -3,56 +3,34 @@ import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import ConnectionManager from '@/config/connectionmanager';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export async function POST(request: NextRequest) {
-  const fileRowSet: FileRowSet = await request.json();
-  console.log(`file row set: ${Object.keys(fileRowSet)}`);
-  // request parameter handling:
-  // schema
-  let schema = request.nextUrl.searchParams.get('schema');
-  if (!schema) throw new Error('no schema provided!');
-  schema = schema.trim();
-  // file name
-  let fileName = request.nextUrl.searchParams.get('fileName');
-  if (!fileName) throw new Error('no file name provided!');
-  fileName = fileName.trim();
-  // plot ID
-  const plotIDParam = request.nextUrl.searchParams.get('plot');
-  if (!plotIDParam) throw new Error('no plot id provided!');
-  const plotID = parseInt(plotIDParam.trim());
-  // census ID
-  const censusIDParam = request.nextUrl.searchParams.get('census');
-  if (!censusIDParam) throw new Error('no census id provided!');
-  const censusID = parseInt(censusIDParam.trim());
-  // quadrat ID
-  const quadratIDParam = request.nextUrl.searchParams.get('quadrat');
-  if (!quadratIDParam) console.error('no quadrat ID provided');
-  const quadratID = quadratIDParam ? parseInt(quadratIDParam.trim()) : undefined;
-  // form type
-  let formType = request.nextUrl.searchParams.get('formType');
-  if (!formType) throw new Error('no formType provided!');
-  formType = formType.trim();
-  // full name
-  const fullName = request.nextUrl.searchParams.get('user') ?? undefined;
+  const body = await request.json();
+  const schema: string = body.schema;
+  const formType: string = body.formType;
+  const fileName: string = body.fileName;
+  const plot: Plot = body.plot;
+  const census: OrgCensus = body.census;
+  const user: string = body.user;
+  const fileRowSet: FileRowSet = body.fileRowSet;
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
 
   const idToRows: { coreMeasurementID: number; fileRow: FileRow }[] = [];
   for (const rowId in fileRowSet) {
-    await connectionManager.beginTransaction();
-    console.log(`rowID: ${rowId}`);
+    // await connectionManager.beginTransaction();
     const row = fileRowSet[rowId];
-    console.log('row for row ID: ', row);
     try {
       const props: InsertUpdateProcessingProps = {
         schema,
         connectionManager: connectionManager,
         formType,
         rowData: row,
-        plotID,
-        censusID,
-        quadratID,
-        fullName
+        plot,
+        census,
+        fullName: user
       };
       const coreMeasurementID = await insertOrUpdate(props);
       if (formType === 'measurements' && coreMeasurementID) {
@@ -60,9 +38,10 @@ export async function POST(request: NextRequest) {
       } else if (formType === 'measurements' && coreMeasurementID === undefined) {
         throw new Error('CoreMeasurement insertion failure at row: ' + row);
       }
-      await connectionManager.commitTransaction();
+      // await connectionManager.commitTransaction();
     } catch (error) {
-      await connectionManager.rollbackTransaction();
+      // await connectionManager.rollbackTransaction();
+      await connectionManager.closeConnection();
       if (error instanceof Error) {
         console.error(`Error processing row for file ${fileName}:`, error.message);
         return new NextResponse(
@@ -85,18 +64,18 @@ export async function POST(request: NextRequest) {
   }
 
   // Update Census Start/End Dates
-  const combinedQuery = `
-            UPDATE ${schema}.census c
-            JOIN (
-              SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
-              FROM ${schema}.coremeasurements
-              WHERE CensusID = ${censusID} 
-              GROUP BY CensusID
-            ) m ON c.CensusID = m.CensusID
-            SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
-            WHERE c.CensusID = ${censusID};`;
-
-  await connectionManager.executeQuery(combinedQuery);
-  await connectionManager.closeConnection();
+  // const combinedQuery = `
+  //           UPDATE ${schema}.census c
+  //           JOIN (
+  //             SELECT CensusID, MIN(MeasurementDate) AS FirstMeasurementDate, MAX(MeasurementDate) AS LastMeasurementDate
+  //             FROM ${schema}.coremeasurements
+  //             WHERE CensusID = ${censusID}
+  //             GROUP BY CensusID
+  //           ) m ON c.CensusID = m.CensusID
+  //           SET c.StartDate = m.FirstMeasurementDate, c.EndDate = m.LastMeasurementDate
+  //           WHERE c.CensusID = ${censusID};`;
+  //
+  // await connectionManager.executeQuery(combinedQuery);
+  // await connectionManager.closeConnection();
   return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful', idToRows: idToRows }), { status: HTTPResponses.OK });
 }

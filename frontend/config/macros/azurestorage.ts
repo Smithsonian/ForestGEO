@@ -2,8 +2,8 @@ import { BlobServiceClient, BlobUploadCommonResponse, ContainerClient } from '@a
 
 export async function getContainerClient(containerName: string): Promise<ContainerClient | undefined> {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
-  console.log('Connection String:', storageAccountConnectionString);
-  console.log(`container name: ${containerName.toLowerCase()}`);
+  // console.log('Connection String:', storageAccountConnectionString);
+  // console.log(`container name: ${containerName.toLowerCase()}`);
   if (!storageAccountConnectionString) {
     console.error('process envs failed');
     throw new Error('process envs failed');
@@ -14,7 +14,6 @@ export async function getContainerClient(containerName: string): Promise<Contain
   else console.error('blob service client created & connected');
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
-  console.log(containerClient.url);
   if (!(await containerClient.createIfNotExists())) console.error('container client createifnotexists failure');
   else {
     console.log(`container client with name ${containerName.toLowerCase()} created and accessed.`);

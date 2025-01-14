@@ -28,7 +28,7 @@ const handler = NextAuth({
         return false; // Email is not a valid string, abort sign-in
       }
       if (userEmail) {
-        const connectionManager = new ConnectionManager();
+        const connectionManager = ConnectionManager.getInstance();
         let emailVerified, userStatus, userID;
         try {
           const query = `SELECT UserID, UserStatus FROM catalog.users WHERE Email = '${userEmail}' LIMIT 1`;
@@ -48,7 +48,6 @@ const handler = NextAuth({
         }
         user.userStatus = userStatus as UserAuthRoles;
         user.email = userEmail;
-        // console.log('getting all sites: ');
         const allSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(await connectionManager.executeQuery(`SELECT * FROM catalog.sites`));
         const allowedSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(
           await connectionManager.executeQuery(

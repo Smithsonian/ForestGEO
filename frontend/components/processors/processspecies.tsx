@@ -12,9 +12,8 @@ function cleanInputData(data: any) {
   return cleanedData;
 }
 
-export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<number | undefined> {
+export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<void> {
   const { connectionManager, rowData, schema } = props;
-  console.log('rowData: ', rowData);
 
   try {
     let familyID: number | undefined;
@@ -27,7 +26,6 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       genusID = (await handleUpsert<GenusResult>(connectionManager, schema, 'genus', { Genus: rowData.genus, FamilyID: familyID }, 'GenusID')).id;
     }
 
-    let speciesID: number | undefined;
     if (rowData.spcode) {
       const speciesData = {
         SpeciesCode: rowData.spcode,
@@ -40,13 +38,8 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);
-      console.log('Cleaned species data: ', cleanedSpeciesData);
-
-      speciesID = (await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID')).id;
+      await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID');
     }
-
-    console.log('Upsert successful');
-    return speciesID;
   } catch (error: any) {
     console.error('Upsert failed:', error.message);
     throw createError('Upsert failed', { error });

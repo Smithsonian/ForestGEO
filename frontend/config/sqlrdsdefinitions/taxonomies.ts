@@ -24,10 +24,11 @@ export type SpeciesLimitsRDS = {
   id?: number;
   speciesLimitID?: number;
   speciesID?: number;
+  plotID?: number;
+  censusID?: number;
   limitType?: string;
   upperBound?: number;
   lowerBound?: number;
-  unit?: string;
 };
 export type SpeciesLimitsResult = ResultType<SpeciesLimitsRDS>;
 
@@ -109,7 +110,6 @@ export type StemRDS = {
   stemTag?: string;
   localX?: number;
   localY?: number;
-  coordinateUnits?: string;
   moved?: boolean;
   stemDescription?: string;
 };

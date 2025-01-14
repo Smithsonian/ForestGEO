@@ -1,6 +1,6 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { CMError, ReviewProgress, ReviewStates } from '@/config/macros/uploadsystemmacros';
+import { FileWithStream, ReviewStates } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -8,7 +8,6 @@ import { useSession } from 'next-auth/react';
 import { parse, ParseResult } from 'papaparse';
 import { Box, Typography } from '@mui/joy';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
-import UploadReviewFiles from '@/components/uploadsystem/segments/uploadreviewfiles';
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
 import UploadError from '@/components/uploadsystem/segments/uploaderror';
 import UploadValidation from '@/components/uploadsystem/segments/uploadvalidation';
@@ -44,14 +43,11 @@ export default function UploadParent(props: UploadParentProps) {
   // select schema table that file should be uploaded to --> state
   const [uploadForm, setUploadForm] = useState<FormType | undefined>(overrideUploadForm);
   const [personnelRecording, setPersonnelRecording] = useState('');
-  const [coordUnit, setCoordUnit] = useState('');
-  const [dbhUnit, setDBHUnit] = useState('');
-  const [homUnit, setHOMUnit] = useState('');
 
   // core enum to handle state progression
   const [reviewState, setReviewState] = useState<ReviewStates>(ReviewStates.UPLOAD_FILES);
   // dropped file storage
-  const [acceptedFiles, setAcceptedFiles] = useState<FileWithPath[]>([]);
+  const [acceptedFiles, setAcceptedFiles] = useState<FileWithStream[]>([]);
   // pagination counter to manage validation table view/allow scroll through files in REVIEW
   const [dataViewActive, setDataViewActive] = useState(1);
   // for REVIEW --> storage of parsed data for display
@@ -59,7 +55,6 @@ export default function UploadParent(props: UploadParentProps) {
   const [errorRows, setErrorRows] = useState<FileCollectionRowSet>({});
   const [errors, setErrors] = useState<FileCollectionRowSet>({});
   // Confirmation menu states:
-  const [confirmationDialogOpen, setConfirmationDialogOpen] = React.useState(false);
   const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
   const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   const [uploadCompleteMessage, setUploadCompleteMessage] = useState('');
@@ -70,17 +65,13 @@ export default function UploadParent(props: UploadParentProps) {
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');
   const [allRowToCMID, setAllRowToCMID] = useState<DetailedCMIDRow[]>([]);
-  const [progressTracker, setProgressTracker] = useState<ReviewProgress>(ReviewProgress.START);
-  const [cmErrors, setCMErrors] = useState<CMError[]>([]);
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
   if (!currentSite) throw new Error('site must be selected!');
   const { data: session } = useSession();
-
-  const handleCancelUpload = (): void => {
-    handleReturnToStart().then(() => onReset()); // Resets the upload state within UploadParent, Triggers the reset action in the parent component
-  };
+  const PARSING_TIME_THRESHOLD_MS = 5000; // 5 second limit for full-file parsing
+  const [isStreaming, setIsStreaming] = useState(false);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -130,26 +121,10 @@ export default function UploadParent(props: UploadParentProps) {
     setErrorComponent('');
   }
 
-  async function handleConfirmationApproval() {
-    setConfirmationDialogOpen(true);
-  }
-
-  async function handleConfirmationCancel() {
-    setConfirmationDialogOpen(false);
-  }
-
-  async function handleConfirmationConfirm() {
-    setConfirmationDialogOpen(false);
-    setReviewState(ReviewStates.UPLOAD_SQL);
-  }
-
-  const handleChange = (_event: React.ChangeEvent<unknown>, value: number) => {
-    setDataViewActive(value);
-  };
-
   // Function to handle file addition
   const handleAddFile = (newFile: FileWithPath) => {
-    setAcceptedFiles(prevFiles => [...prevFiles, newFile]);
+    // setAcceptedFiles(prevFiles => [...prevFiles, parseStreamCheck(newFile, setAllFileHeaders)]);
+    setAcceptedFiles(prevFiles => [...prevFiles, new FileWithStream(newFile, true, newFile.path)]);
   };
 
   const handleRemoveFile = (fileIndex: number) => {
@@ -167,30 +142,26 @@ export default function UploadParent(props: UploadParentProps) {
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     const fileToReplace = acceptedFiles[fileIndex];
     console.log('filetoreplace: ', fileToReplace);
-    setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), newFile, ...prevFiles.slice(fileIndex + 1)]);
-
-    await parseFile(newFile);
+    setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), new FileWithStream(newFile, true, newFile.path), ...prevFiles.slice(fileIndex + 1)]);
 
     // Update headers after replacement
     setAllFileHeaders(prevHeaders => {
       const updatedHeaders = { ...prevHeaders };
-      console.log('updated headers: ', updatedHeaders);
       delete updatedHeaders[fileToReplace.name];
-      console.log('post-deletion updated headers: ', updatedHeaders);
       return updatedHeaders;
     });
   };
 
-  const parseFile = async (file: FileWithPath) => {
+  const parseFullFile = async (file: FileWithPath) => {
     try {
-      const fileText = await file.text();
       const isCSV = file.name.endsWith('.csv');
       const delimiter = isCSV ? ',' : '\t';
 
-      parse<FileRow>(fileText, {
+      parse<FileRow>(file as File, {
         delimiter: delimiter,
         header: true,
         skipEmptyLines: true,
+        chunkSize: 1024,
         transformHeader: h => h.trim(),
         transform: (value, field) => {
           if (uploadForm === FormType.measurements && field === 'date') {
@@ -273,11 +244,6 @@ export default function UploadParent(props: UploadParentProps) {
             ...prevErrors,
             [file.name]: fileErrors
           }));
-
-          setAllFileHeaders(prevHeaders => ({
-            ...prevHeaders,
-            [file.name]: results.meta.fields || []
-          }));
         }
       });
     } catch (error: any) {
@@ -293,7 +259,8 @@ export default function UploadParent(props: UploadParentProps) {
   };
 
   async function handleInitialSubmit() {
-    setReviewState(ReviewStates.REVIEW);
+    // setReviewState(ReviewStates.REVIEW);
+    setReviewState(ReviewStates.UPLOAD_SQL);
   }
 
   useEffect(() => {
@@ -307,11 +274,6 @@ export default function UploadParent(props: UploadParentProps) {
     }
     if (acceptedFiles.length === 0 && reviewState === ReviewStates.REVIEW) setReviewState(ReviewStates.UPLOAD_FILES); // if the user removes all files, move back to file drop phase
   }, [reviewState, dataViewActive, acceptedFiles, setCurrentFileHeaders, allFileHeaders]);
-
-  useEffect(() => {
-    console.log(`progressTracker: ${progressTracker}`);
-    console.log(`review state: ${reviewState}`);
-  }, [progressTracker, reviewState]);
 
   const renderStateContent = () => {
     if (!uploadForm && reviewState !== ReviewStates.START) handleReturnToStart().catch(console.error);
@@ -335,54 +297,51 @@ export default function UploadParent(props: UploadParentProps) {
             personnelRecording={personnelRecording}
             dataViewActive={dataViewActive}
             setDataViewActive={setDataViewActive}
-            parseFile={parseFile}
+            parseFullFile={parseFullFile}
             handleInitialSubmit={handleInitialSubmit}
             handleAddFile={handleAddFile}
             handleRemoveFile={handleRemoveFile}
             handleReplaceFile={handleReplaceFile}
           />
         );
-      case ReviewStates.REVIEW:
-        return (
-          <UploadReviewFiles
-            dbhUnit={dbhUnit}
-            homUnit={homUnit}
-            coordUnit={coordUnit}
-            acceptedFiles={acceptedFiles}
-            setAcceptedFiles={setAcceptedFiles}
-            uploadForm={uploadForm}
-            errors={errors}
-            errorRows={errorRows}
-            parsedData={parsedData}
-            expectedHeaders={expectedHeaders}
-            currentFileHeaders={currentFileHeaders}
-            dataViewActive={dataViewActive}
-            setDataViewActive={setDataViewActive}
-            areHeadersValid={areHeadersValid}
-            setErrors={setErrors}
-            setErrorRows={setErrorRows}
-            setReviewState={setReviewState}
-            confirmationDialogOpen={confirmationDialogOpen}
-            setParsedData={setParsedData}
-            handleConfirm={handleConfirmationConfirm}
-            handleCancel={handleConfirmationCancel}
-            handleApproval={handleConfirmationApproval}
-            handleChange={handleChange}
-            setUploadError={setUploadError}
-            setErrorComponent={setErrorComponent}
-            handleReplaceFile={handleReplaceFile}
-            handleRemoveFile={handleRemoveFile}
-          />
-        );
+      // case ReviewStates.REVIEW:
+      //   return (
+      //     <UploadReviewFiles
+      //       dbhUnit={dbhUnit}
+      //       homUnit={homUnit}
+      //       coordUnit={coordUnit}
+      //       acceptedFiles={acceptedFiles}
+      //       setAcceptedFiles={setAcceptedFiles}
+      //       uploadForm={uploadForm}
+      //       errors={errors}
+      //       errorRows={errorRows}
+      //       parsedData={parsedData}
+      //       expectedHeaders={expectedHeaders}
+      //       currentFileHeaders={currentFileHeaders}
+      //       dataViewActive={dataViewActive}
+      //       setDataViewActive={setDataViewActive}
+      //       areHeadersValid={areHeadersValid}
+      //       setErrors={setErrors}
+      //       setErrorRows={setErrorRows}
+      //       setReviewState={setReviewState}
+      //       confirmationDialogOpen={confirmationDialogOpen}
+      //       setParsedData={setParsedData}
+      //       handleConfirm={handleConfirmationConfirm}
+      //       handleCancel={handleConfirmationCancel}
+      //       handleApproval={handleConfirmationApproval}
+      //       handleChange={handleChange}
+      //       setUploadError={setUploadError}
+      //       setErrorComponent={setErrorComponent}
+      //       handleReplaceFile={handleReplaceFile}
+      //       handleRemoveFile={handleRemoveFile}
+      //     />
+      //   );
       case ReviewStates.UPLOAD_SQL:
         return (
           <UploadFireSQL
             personnelRecording={personnelRecording}
             acceptedFiles={acceptedFiles}
             uploadForm={uploadForm}
-            dbhUnit={dbhUnit}
-            homUnit={homUnit}
-            coordUnit={coordUnit}
             parsedData={parsedData}
             setReviewState={setReviewState}
             setIsDataUnsaved={setIsDataUnsaved}
@@ -392,6 +351,8 @@ export default function UploadParent(props: UploadParentProps) {
             setUploadError={setUploadError}
             setErrorComponent={setErrorComponent}
             setAllRowToCMID={setAllRowToCMID}
+            errorRows={errorRows}
+            setErrorRows={setErrorRows}
           />
         );
       case ReviewStates.VALIDATE:
@@ -407,13 +368,12 @@ export default function UploadParent(props: UploadParentProps) {
             setIsDataUnsaved={setIsDataUnsaved}
             setUploadError={setUploadError}
             setErrorComponent={setErrorComponent}
-            cmErrors={cmErrors}
             user={session?.user?.name ? session?.user?.name : ''}
             allRowToCMID={allRowToCMID}
           />
         );
       case ReviewStates.COMPLETE:
-        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} />;
+        return <UploadComplete handleCloseUploadModal={onReset} uploadForm={uploadForm} errorRows={errorRows} />;
       default:
         return (
           <UploadError

@@ -2,7 +2,8 @@
 
 import { useMonaco } from '@monaco-editor/react';
 import dynamic from 'next/dynamic';
-import React, { Dispatch, memo, SetStateAction, useEffect } from 'react';
+import React, { Dispatch, memo, SetStateAction, useEffect, useState } from 'react';
+import { Box, Button, Snackbar } from '@mui/joy';
 
 const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
@@ -17,9 +18,38 @@ type CustomMonacoEditorProps = {
   isDarkMode?: boolean;
 } & React.ComponentPropsWithoutRef<typeof Editor>;
 
+function processExplainOutput(explainRows: any[]): { valid: boolean; message: string } {
+  for (const row of explainRows) {
+    if (row.Extra?.includes('Impossible WHERE')) {
+      return { valid: false, message: 'The WHERE clause is impossible to satisfy.' };
+    }
+
+    if (!row.table) {
+      return { valid: false, message: 'Invalid table reference.' };
+    }
+
+    if (!row.key && row.possible_keys) {
+      return { valid: false, message: `No indexes are being used for table ${row.table}. Consider adding an index.` };
+    }
+  }
+
+  return { valid: true, message: 'The query is valid.' };
+}
+
 function CustomMonacoEditor(broadProps: CustomMonacoEditorProps) {
   const { schemaDetails, setContent = () => {}, content, height, options = {}, isDarkMode, ...props } = broadProps;
   const monaco = useMonaco();
+  const [snackbarContent, setSnackbarContent] = useState<{ valid: boolean; message: string } | undefined>();
+  const [openSnackbar, setOpenSnackbar] = useState(false);
+
+  async function validateQuery() {
+    const response = await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify('EXPLAIN ' + content) });
+    const data = await response.json();
+    const { valid, message } = processExplainOutput(data);
+
+    setSnackbarContent({ valid, message });
+    setOpenSnackbar(true);
+  }
 
   useEffect(() => {
     if (monaco) {
@@ -57,18 +87,41 @@ function CustomMonacoEditor(broadProps: CustomMonacoEditorProps) {
   }, [monaco]);
 
   return (
-    <Editor
-      height={height ?? '60vh'}
-      language="mysql"
-      value={content}
-      onChange={value => setContent(value ?? '')}
-      theme={isDarkMode ? 'vs-dark' : 'light'}
-      options={{
-        ...options, // Spread the existing options
-        readOnly: options.readOnly ?? false // Ensure readOnly is explicitly respected
-      }}
-      {...props}
-    />
+    <>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <Button onClick={validateQuery}>Validate Query</Button>
+        <Editor
+          height={height ?? '60vh'}
+          language="mysql"
+          value={content}
+          onChange={value => setContent(value ?? '')}
+          theme={isDarkMode ? 'vs-dark' : 'light'}
+          options={{
+            ...options,
+            readOnly: options.readOnly ?? false
+          }}
+          {...props}
+        />
+      </Box>
+      <Snackbar
+        variant={'soft'}
+        open={openSnackbar}
+        color={snackbarContent?.valid ? 'success' : 'danger'}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        autoHideDuration={1000}
+        endDecorator={
+          <Button onClick={() => setOpenSnackbar(false)} size="sm" variant="soft">
+            Dismiss
+          </Button>
+        }
+        onClose={() => {
+          setSnackbarContent(undefined);
+        }}
+      >
+        Query validation results: {snackbarContent?.valid ? 'Valid' : 'Invalid'} <br />
+        Details: {snackbarContent?.message}
+      </Snackbar>
+    </>
   );
 }
 

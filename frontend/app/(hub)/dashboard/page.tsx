@@ -253,7 +253,7 @@ export default function DashboardPage() {
                                     Object.entries(changelog.oldRowState).map(([key, value]) => (
                                       <Stack direction={'row'} key={key}>
                                         <Typography level={'body-md'}>
-                                          <strong>{key}</strong>: {value ?? 'NULL'}
+                                          <strong>{JSON.stringify(key)}</strong>: {JSON.stringify(value) ?? 'NULL'}
                                         </Typography>
                                       </Stack>
                                     ))
@@ -277,7 +277,7 @@ export default function DashboardPage() {
                                     Object.entries(changelog.newRowState).map(([key, value]) => (
                                       <Stack direction={'row'} key={key}>
                                         <Typography level={'body-md'}>
-                                          <strong>{key}</strong>: {value ?? 'NULL'}
+                                          <strong>{JSON.stringify(key)}</strong>: {JSON.stringify(value) ?? 'NULL'}
                                         </Typography>
                                       </Stack>
                                     ))

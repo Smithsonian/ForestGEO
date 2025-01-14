@@ -17,13 +17,13 @@ export interface UploadStartProps {
 export interface UploadParseFilesProps {
   // state vars
   uploadForm: FormType | undefined;
-  acceptedFiles: FileWithPath[];
+  acceptedFiles: FileWithStream[];
   personnelRecording: string;
   dataViewActive: number;
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
   // centralized functions
-  parseFile: (file: FileWithPath) => Promise<void>;
+  parseFullFile: (file: FileWithPath) => Promise<void>;
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
   handleRemoveFile: (fileIndex: number) => void;
@@ -32,11 +32,8 @@ export interface UploadParseFilesProps {
 
 export interface UploadReviewFilesProps {
   // state vars
-  dbhUnit: string;
-  homUnit: string;
-  coordUnit: string;
   uploadForm: FormType | undefined;
-  acceptedFiles: FileWithPath[];
+  acceptedFiles: FileWithStream[];
   expectedHeaders: string[];
   parsedData: FileCollectionRowSet;
   errors: FileCollectionRowSet;
@@ -46,7 +43,7 @@ export interface UploadReviewFilesProps {
   currentFileHeaders: string[];
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
-  setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
+  setAcceptedFiles: Dispatch<SetStateAction<FileWithStream[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   setParsedData: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setErrors: Dispatch<SetStateAction<FileCollectionRowSet>>;
@@ -69,13 +66,12 @@ export interface UploadFireProps {
   // state vars
   uploadForm: FormType | undefined;
   personnelRecording: string;
-  dbhUnit: string;
-  homUnit: string;
-  coordUnit: string;
-  acceptedFiles: FileWithPath[];
+  acceptedFiles: FileWithStream[];
   parsedData: FileCollectionRowSet;
+  errorRows: FileCollectionRowSet;
   uploadCompleteMessage: string;
   // state setters
+  setErrorRows: Dispatch<SetStateAction<FileCollectionRowSet>>;
   setUploadCompleteMessage: Dispatch<SetStateAction<string>>;
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
   setUploadError: React.Dispatch<React.SetStateAction<any>>;
@@ -89,8 +85,7 @@ export interface UploadFireAzureProps {
   user: string;
   // state vars
   uploadForm: FormType | undefined;
-  acceptedFiles: FileWithPath[];
-  cmErrors: CMError[];
+  acceptedFiles: FileWithStream[];
   allRowToCMID: DetailedCMIDRow[];
   // state setters
   setIsDataUnsaved: React.Dispatch<React.SetStateAction<boolean>>;
@@ -126,6 +121,7 @@ export interface UploadUpdateValidationsProps {
 export interface UploadCompleteProps {
   // state vars
   uploadForm: FormType | undefined;
+  errorRows: FileCollectionRowSet;
   // state setters
   handleCloseUploadModal: () => void;
 }
@@ -140,9 +136,9 @@ export interface UploadErrorProps {
   // state vars
   error: any;
   component: string;
-  acceptedFiles: FileWithPath[];
+  acceptedFiles: FileWithStream[];
   // state setters
-  setAcceptedFiles: Dispatch<SetStateAction<FileWithPath[]>>;
+  setAcceptedFiles: Dispatch<SetStateAction<FileWithStream[]>>;
   setReviewState: Dispatch<SetStateAction<ReviewStates>>;
   // centralized functions
   handleReturnToStart: () => Promise<void>;
@@ -200,3 +196,17 @@ export type CoreMeasurementError = {
 };
 
 export type ErrorMap = Record<number, CoreMeasurementError>;
+
+export class FileWithStream extends File implements FileWithPath {
+  path?: string;
+  useStreaming: boolean;
+
+  constructor(file: File, stream: boolean, path?: string) {
+    super([file], file.name, {
+      type: file.type,
+      lastModified: file.lastModified
+    });
+    this.useStreaming = stream;
+    this.path = path;
+  }
+}

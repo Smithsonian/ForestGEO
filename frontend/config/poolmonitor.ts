@@ -3,13 +3,9 @@ import chalk from 'chalk';
 
 export class PoolMonitor {
   public pool: Pool;
-  private activeConnections = 0;
-  private totalConnectionsCreated = 0;
-  private waitingForConnection = 0;
-  private inactivityTimer: NodeJS.Timeout | null = null;
   private readonly config: PoolOptions;
+  private inactivityTimer: NodeJS.Timeout | null = null;
   private poolClosed = false;
-  private acquiredConnectionIds: Set<number> = new Set();
   private reinitializing = false;
 
   constructor(config: PoolOptions) {
@@ -17,78 +13,33 @@ export class PoolMonitor {
     this.pool = createPool(config);
     this.poolClosed = false;
 
-    this.pool.on('acquire', connection => {
-      if (!this.acquiredConnectionIds.has(connection.threadId)) {
-        this.acquiredConnectionIds.add(connection.threadId);
-        ++this.activeConnections;
-        console.log(chalk.green(`Acquired: ${connection.threadId}`));
-        this.logPoolStatus();
-        this.resetInactivityTimer();
-      }
-    });
-
-    this.pool.on('release', connection => {
-      if (this.acquiredConnectionIds.has(connection.threadId)) {
-        this.acquiredConnectionIds.delete(connection.threadId);
-        if (this.activeConnections > 0) {
-          --this.activeConnections;
-        }
-        console.log(chalk.blue(`Released: ${connection.threadId}`));
-        this.logPoolStatus();
-        this.resetInactivityTimer();
-      }
-    });
-
-    this.pool.on('connection', connection => {
-      ++this.totalConnectionsCreated;
-      console.log(chalk.yellow(`New: ${connection.threadId}`));
-      this.logPoolStatus();
-      this.resetInactivityTimer();
-    });
-
-    this.pool.on('enqueue', () => {
-      ++this.waitingForConnection;
-      console.log(chalk.magenta('Enqueued.'));
-      this.logPoolStatus();
-    });
-
-    // Initialize inactivity timer
+    // console.log(chalk.green('PoolMonitor initialized.'));
+    this.monitorPoolHealth();
     this.resetInactivityTimer();
   }
 
-  async getConnection(): Promise<PoolConnection> {
-    if (this.poolClosed) {
-      throw new Error('Connection pool is closed');
-    }
-
-    let connection: PoolConnection | null = null;
+  public async getConnection(): Promise<PoolConnection> {
     try {
-      console.log(chalk.cyan('Requesting new connection...'));
-      connection = await this.pool.getConnection();
-      console.log(chalk.green('Connection acquired'));
-      --this.waitingForConnection;
-      this.resetInactivityTimer();
+      if (this.poolClosed) {
+        // console.log(chalk.yellow('Reinitializing pool for new activity.'));
+        await this.reinitializePool();
+        ``;
+      }
+
+      // console.log(chalk.cyan('Requesting new connection...'));
+      const connection = await this.pool.getConnection();
+      // console.log(chalk.green(`Connection acquired: ${connection.threadId}`));
+      this.resetInactivityTimer(); // Reset inactivity timer on new activity
       return connection;
     } catch (error) {
-      console.error(chalk.red('Error getting connection from pool:', error));
+      console.error(chalk.red('Error acquiring connection:', error));
+      console.warn(chalk.yellow('Reinitializing pool due to connection error.'));
+      await this.reinitializePool();
       throw error;
-    } finally {
-      if (connection) {
-        connection.release();
-        console.log(chalk.blue('Connection released in finally block'));
-      }
     }
   }
 
-  getPoolStatus() {
-    return `Active: ${this.activeConnections} | Total: ${this.totalConnectionsCreated} | Waiting: ${this.waitingForConnection}`;
-  }
-
-  logPoolStatus() {
-    console.log(chalk.gray(this.getPoolStatus()));
-  }
-
-  async closeAllConnections(): Promise<void> {
+  public async closeAllConnections(): Promise<void> {
     try {
       if (this.poolClosed) {
         console.log(chalk.yellow('Pool already closed.'));
@@ -104,17 +55,16 @@ export class PoolMonitor {
     }
   }
 
-  async reinitializePool(): Promise<void> {
+  private async reinitializePool(): Promise<void> {
     if (this.reinitializing) return; // Prevent concurrent reinitialization
     this.reinitializing = true;
 
     try {
-      console.log(chalk.cyan('Reinitializing connection pool...'));
-      await this.closeAllConnections(); // Ensure old pool is closed
+      // console.log(chalk.cyan('Reinitializing connection pool...'));
+      await this.closeAllConnections();
       this.pool = createPool(this.config);
       this.poolClosed = false;
-      this.acquiredConnectionIds.clear();
-      console.log(chalk.cyan('Connection pool reinitialized.'));
+      // console.log(chalk.cyan('Connection pool reinitialized.'));
     } catch (error) {
       console.error(chalk.red('Error during reinitialization:', error));
     } finally {
@@ -122,21 +72,85 @@ export class PoolMonitor {
     }
   }
 
-  public isPoolClosed(): boolean {
-    return this.poolClosed;
+  private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
+    const bufferTime = 120;
+    try {
+      const [rows]: any[] = await this.pool.query('SELECT * FROM information_schema.processlist WHERE TIME > 60;');
+      if (rows.length > 0) {
+        // console.log(chalk.cyan('Active MySQL Processes:'));
+        // console.table(rows);
+
+        const { liveIds, sleepingIds } = rows.reduce(
+          (acc: any, process: any) => {
+            if (process.COMMAND !== 'Sleep') {
+              acc.liveIds.push(process.ID);
+            } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime) {
+              acc.sleepingIds.push(process.ID);
+            }
+            return acc;
+          },
+          { liveIds: [], sleepingIds: [] }
+        );
+
+        return { sleeping: sleepingIds, live: liveIds };
+      }
+      return { sleeping: [], live: [] };
+    } catch (error) {
+      console.error(chalk.red('Error fetching process list:', error));
+      return { sleeping: [], live: [] };
+    }
   }
 
-  private resetInactivityTimer() {
+  private async terminateSleepingConnections(): Promise<void> {
+    const { sleeping } = await this.logAndReturnConnections();
+    for (const id of sleeping) {
+      try {
+        await this.pool.query(`KILL ${id}`);
+        console.log(chalk.red(`Terminated sleeping connection: ${id}`));
+      } catch (error) {
+        console.error(chalk.red(`Error terminating connection ${id}:`, error));
+      }
+    }
+  }
+
+  private resetInactivityTimer(): void {
     if (this.inactivityTimer) {
       clearTimeout(this.inactivityTimer);
     }
 
     this.inactivityTimer = setTimeout(async () => {
-      if (this.activeConnections === 0) {
-        console.log(chalk.red('Inactivity period exceeded. Initiating graceful shutdown...'));
+      const { live } = await this.logAndReturnConnections();
+      if (live.length === 0) {
+        console.log(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));
         await this.closeAllConnections();
-        console.log(chalk.red('Graceful shutdown complete.'));
+        // console.log(chalk.red('Graceful shutdown complete.'));
       }
     }, 3600000); // 1 hour in milliseconds
+  }
+
+  private monitorPoolHealth(): void {
+    setInterval(async () => {
+      try {
+        const { sleeping } = await this.logAndReturnConnections();
+        console.log(chalk.cyan('Pool Health Check:'));
+        console.log(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
+
+        if (sleeping.length > 50) {
+          // Example threshold for excessive sleeping connections
+          console.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
+          await this.reinitializePool();
+        } else {
+          await this.terminateSleepingConnections();
+        }
+      } catch (error) {
+        console.error(chalk.red('Error during pool health check:', error));
+        console.warn(chalk.yellow('Attempting to reinitialize pool.'));
+        await this.reinitializePool();
+      }
+    }, 10000); // Poll every 10 seconds
+  }
+
+  public isPoolClosed(): boolean {
+    return this.poolClosed;
   }
 }

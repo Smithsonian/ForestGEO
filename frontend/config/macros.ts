@@ -11,6 +11,8 @@ import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
 import { processQuadrats } from '@/components/processors/processquadrats';
 import { processCensus } from '@/components/processors/processcensus';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export type ColumnStates = {
   [key: string]: boolean;
@@ -100,11 +102,9 @@ export function bitToBoolean(bitField: any): boolean {
 }
 
 export const booleanToBit = (value: boolean | undefined): number => (value ? 1 : 0);
-export type UnitSelection = 'km' | 'hm' | 'dam' | 'm' | 'dm' | 'cm' | 'mm';
-export type AreaSelection = 'km2' | 'hm2' | 'dam2' | 'm2' | 'dm2' | 'cm2' | 'mm2';
 
-export const unitSelectionOptions: UnitSelection[] = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
-export const areaSelectionOptions: AreaSelection[] = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
+export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
+export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
 export type UnifiedValidityFlags = {
   attributes: boolean;
   personnel: boolean;
@@ -124,8 +124,8 @@ export interface SpecialProcessingProps {
   connectionManager: ConnectionManager;
   rowData: FileRow;
   schema: string;
-  plotID?: number;
-  censusID?: number;
+  plot?: Plot;
+  census?: OrgCensus;
   quadratID?: number;
   fullName?: string;
 }
@@ -137,7 +137,7 @@ export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
 export type FileMapping = {
   tableName: string;
   columnMappings: { [fileColumn: string]: string };
-  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<number | undefined>;
+  specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
 };
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
@@ -154,7 +154,8 @@ export const fileMappings: Record<string, FileMapping> = {
     columnMappings: {
       firstname: 'FirstName',
       lastname: 'LastName',
-      role: 'Role'
+      role: 'Role',
+      roledescription: 'Role Description'
     },
     specialProcessing: processPersonnel
   },
@@ -180,29 +181,12 @@ export const fileMappings: Record<string, FileMapping> = {
       plotID: 'PlotID',
       startx: 'StartX',
       starty: 'StartY',
-      coordinateunit: 'CoordinateUnits',
       dimx: 'DimensionX',
       dimy: 'DimensionY',
       dimensionunit: 'DimensionUnits',
       quadratshape: 'QuadratShape'
     },
     specialProcessing: processQuadrats
-  },
-  // "subquadrats": "subquadrat, quadrat, dimx, dimy, xindex, yindex, unit, orderindex",
-  subquadrats: {
-    tableName: 'subquadrats',
-    columnMappings: {
-      subquadrat: 'SubquadratName',
-      quadrat: 'QuadratID',
-      plotID: 'PlotID',
-      censusID: 'CensusID',
-      dimx: 'DimensionX',
-      dimy: 'DimensionY',
-      xindex: 'X',
-      yindex: 'Y',
-      unit: 'Unit',
-      orderindex: 'Ordering'
-    }
   },
   measurements: {
     tableName: '', // Multiple tables involved
@@ -216,3 +200,6 @@ export type ValidationResponse = {
   message: string;
   failedCoreMeasurementIDs?: number[];
 };
+
+export const HEADER_ALIGN = 'center';
+export const CELL_ALIGN = 'center';

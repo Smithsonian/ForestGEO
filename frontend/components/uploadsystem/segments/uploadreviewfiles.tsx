@@ -45,12 +45,15 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const requiredHeadersTrimmed = expectedHeaders.map(item => item.trim());
 
   useEffect(() => {
-    if (currentFileHeaders.length === 0 || currentFileHeaders.some(header => header === '')) {
-      setRequireReupload(true);
-    } else {
-      setRequireReupload(false);
-    }
-  }, [currentFileHeaders]);
+    console.log('accepted files: ', acceptedFiles);
+    console.log('current file: ', acceptedFiles[dataViewActive - 1]);
+    console.log('current file headers: ', currentFileHeaders);
+    const needsReupload = !(
+      acceptedFiles[dataViewActive - 1].useStreaming ||
+      (currentFileHeaders.length > 0 && !currentFileHeaders.some(header => header === ''))
+    );
+    setRequireReupload(needsReupload);
+  }, [currentFileHeaders, acceptedFiles]);
 
   const handleReUploadFileChange = async (newFiles: FileWithPath[]) => {
     setReuploadInProgress(true);
@@ -169,7 +172,12 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
               <Grid size={4} />
               <Grid size={12}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', mr: 10 }}>
-                  {acceptedFiles.length > 0 && acceptedFiles[dataViewActive - 1] && currentFileHeaders.length > 0 && uploadForm !== undefined ? (
+                  {acceptedFiles.length > 0 &&
+                  acceptedFiles[dataViewActive - 1] &&
+                  Object.keys(parsedData).find(key => key === acceptedFiles[dataViewActive - 1].name) && // parsedData is only updated with file if file is
+                  // NOT streamed. check to ensure that file is in parsedData (ergo not streamed)
+                  currentFileHeaders.length > 0 &&
+                  uploadForm !== undefined ? (
                     <>
                       <Typography level={'title-md'} color={'primary'} sx={{ marginBottom: 1 }}>
                         Form: {uploadForm}
@@ -188,11 +196,17 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
                     </>
                   ) : (
                     <Typography level="body-lg" bgcolor="error">
-                      The selected file is missing required headers or the headers cannot be read. Please check the file and re-upload.
-                      <br />
-                      Your file&apos;s headers were: {currentFileHeaders.join(', ')}
-                      <br />
-                      The expected headers were {expectedHeaders.join(', ')}
+                      {!Object.keys(parsedData).find(key => key === acceptedFiles[dataViewActive - 1].name) ? (
+                        <>File was successfully uploaded, but is too large to fully parse and display. Please click the Confirm Files button to proceed.</>
+                      ) : (
+                        <>
+                          The selected file is missing required headers or the headers cannot be read. Please check the file and re-upload.
+                          <br />
+                          Your file&apos;s headers were: {currentFileHeaders.join(', ')}
+                          <br />
+                          The expected headers were {expectedHeaders.join(', ')}
+                        </>
+                      )}
                     </Typography>
                   )}
                 </Box>
@@ -221,7 +235,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
           </>
         )}
       </Box>
-      <Modal open={isReuploadDialogOpen || requireReupload} onClose={() => setIsReuploadDialogOpen(false)}>
+      <Modal open={isReuploadDialogOpen || requireReupload || !acceptedFiles[dataViewActive - 1].useStreaming} onClose={() => setIsReuploadDialogOpen(false)}>
         <Box>
           <ModalClose onClick={() => setIsReuploadDialogOpen(false)} />
           <DialogTitle>{requireReupload ? 'Headers Missing or Corrupted' : 'Re-upload Corrected File'}</DialogTitle>

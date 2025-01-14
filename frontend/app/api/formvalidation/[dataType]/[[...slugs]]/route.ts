@@ -16,7 +16,7 @@ export async function GET(request: NextRequest, { params }: { params: { dataType
 
   if (!schema || !columnName || !value) return new NextResponse(null, { status: 404 });
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const query = `SELECT 1 FROM ?? WHERE ?? = ? LIMIT 1`;
     const formatted = format(query, [`${schema}.${params.dataType}`, columnName, value]);

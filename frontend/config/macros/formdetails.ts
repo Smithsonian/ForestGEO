@@ -1,4 +1,5 @@
 import { Dispatch, SetStateAction } from 'react';
+import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
 const arcgisHeaderString: string =
   'OBJECTID Q20 P5 Lx Ly Px Py SPP TAG STEMTAG DBH Viejo HOM Viejo Códigos Viejos Tallo Principal DBH HOM Tipo Arbol Estado Censo STEMTAG GlobalID Códigos D - Dead N - Tag and tree missing L - Leaning CYL - Trunk cylindrical for B trees R - Resprout B - Buttressed tree Q - Broken above 1.3 m M - Multiple-stemmed P - Problem A - Needs checking Ss - Dead stem still standing Cs - Dead stem fallen Ns - Stemtag and stem missing Ts - Stemtag found, stem missing Ascender DBH a 1.30 DOS - Dos placas EM - Error de medida ID - Problema identificación MED - Problema medida NC - No califica NUM - Número Equivocado PP - Placa Perdida Placa Repuesta POSIBLE - Placa/Planta dudosa VIVO - Posiblemente muerto MAP - Problema mapeo Problemas Comentarios Censado Por UTM X (m) UTM Y (m) Fecha Captura Mensaje DBH Equipo x y';
@@ -17,64 +18,324 @@ export enum FormType {
   personnel = 'personnel',
   species = 'species',
   quadrats = 'quadrats',
-  subquadrats = 'subquadrats',
   measurements = 'measurements',
   arcgis_xlsx = 'arcgis_xlsx'
 }
 
 // this does not include app users -- that is a different configuration. used solely to define users being submitted as part of census.
-export const TableHeadersByFormType: Record<FormType, { label: string }[]> = {
-  [FormType.attributes]: [{ label: 'code' }, { label: 'description' }, { label: 'status' }],
-  [FormType.personnel]: [{ label: 'firstname' }, { label: 'lastname' }, { label: 'role' }, { label: 'roledescription' }],
+export const TableHeadersByFormType: Record<FormType, { label: string; explanation?: string; category?: 'required' | 'optional' }[]> = {
+  [FormType.attributes]: [
+    {
+      label: 'code',
+      explanation: 'A representative string composed of 10 or less characters that describes your attribute',
+      category: 'required'
+    },
+    {
+      label: 'description',
+      explanation: 'Describe your attribute. Use as much detail as possible so that your attribute is easily understood by others.',
+      category: 'optional'
+    },
+    {
+      label: 'status',
+      explanation: `Which of the following categories does your attribute fit into: ${AttributeStatusOptions.join(', ')}`, // this is converted to Chip
+      // array via regex in rendering.
+      category: 'optional'
+    }
+  ],
+  [FormType.personnel]: [
+    { label: 'firstname', category: 'required', explanation: "Personnel's provided first name" },
+    { label: 'lastname', category: 'required', explanation: "Personnel's provided last name" },
+    {
+      label: 'role',
+      explanation: 'Characterize the job assigned to this person',
+      category: 'required'
+    },
+    { label: 'roledescription', explanation: 'Describe the job in more detail', category: 'optional' }
+  ],
   [FormType.species]: [
-    { label: 'spcode' },
-    { label: 'family' },
-    { label: 'genus' },
-    { label: 'species' },
-    { label: 'subspecies' },
-    { label: 'idlevel' },
-    { label: 'authority' },
-    { label: 'subspeciesauthority' }
+    {
+      label: 'spcode',
+      explanation: 'An identifying code composed of 25 or less characters. This code should be unique to your species.',
+      category: 'required'
+    },
+    { label: 'family', explanation: 'The family taxon of your species', category: 'optional' },
+    { label: 'genus', explanation: 'The genus taxon of your species', category: 'optional' },
+    { label: 'species', explanation: 'The name of your species', category: 'required' },
+    { label: 'subspecies', explanation: 'The subspecies taxon of your species', category: 'optional' },
+    {
+      label: 'idlevel',
+      explanation:
+        'The deepest taxonomic level for which full identification is known. Limited to values species, genus, family, none, or multiple. ' +
+        'None is used when family is not known. Multiple is used when the name may include mixture of more than one species.',
+      category: 'optional'
+    },
+    { label: 'authority', explanation: 'Taxonomic authority for the classification of the species', category: 'optional' },
+    { label: 'subspeciesauthority', explanation: 'Taxonomic authority for the classification of the subspecies.', category: 'optional' }
   ],
   [FormType.quadrats]: [
-    { label: 'quadrat' },
-    { label: 'startx' },
-    { label: 'starty' },
-    { label: 'coordinateunit' },
-    { label: 'dimx' },
-    { label: 'dimy' },
-    { label: 'dimensionunit' },
-    { label: 'area' },
-    { label: 'areaunit' },
-    { label: 'quadratshape' }
-  ],
-  [FormType.subquadrats]: [
-    { label: 'subquadrat' },
-    { label: 'quadrat' },
-    { label: 'dimx' },
-    { label: 'dimy' },
-    { label: 'dimensionunit' },
-    { label: 'xindex' },
-    { label: 'yindex' },
-    { label: 'coordinateunit' },
-    { label: 'orderindex' }
+    {
+      label: 'quadrat',
+      explanation: 'The character name for the quadrat, usually the name used in the field; may be the row and column. eg.: ' + '"0322"',
+      category: 'required'
+    },
+    { label: 'startx', explanation: 'X-coordinate describing the starting point (lower left corner) of the quadrat', category: 'required' },
+    { label: 'starty', explanation: 'Y-coordinate describing the starting point (lower left corner) of the quadrat', category: 'required' },
+    { label: 'dimx', explanation: 'The dimension of the quadrat in the X-direction', category: 'required' },
+    { label: 'dimy', explanation: 'The dimension of the quadrat in the Y-direction', category: 'required' },
+    { label: 'area', explanation: 'The area of the quadrat', category: 'required' },
+    { label: 'quadratshape', explanation: 'The shape of the quadrat', category: 'optional' }
   ],
   [FormType.measurements]: [
-    { label: 'tag' },
-    { label: 'stemtag' },
-    { label: 'spcode' },
-    { label: 'quadrat' },
-    { label: 'lx' },
-    { label: 'ly' },
-    { label: 'coordinateunit' },
-    { label: 'dbh' },
-    { label: 'dbhunit' },
-    { label: 'hom' },
-    { label: 'homunit' },
-    { label: 'date' },
-    { label: 'codes' }
+    { label: 'tag', explanation: 'Tag number on the tree in the field, should be unique within each plot.', category: 'required' },
+    {
+      label: 'stemtag',
+      explanation:
+        'The stem tag used in the field to identify the diﬀerent stems of a tree in the case of multiple-stemmed trees. Most sites give the main stem a' +
+        ' value of 0 and additional stems consecutive values 1,2 etc. Some sites have given multiple stems tags in the same series as trees.',
+      category: 'required'
+    },
+    { label: 'spcode', explanation: 'The species code for the tree', category: 'required' },
+    {
+      label: 'quadrat',
+      explanation: 'The character name for the quadrat, usually the name used in the field; may be the row and column.',
+      category: 'required'
+    },
+    { label: 'lx', explanation: 'The X-coordinate of the stem', category: 'required' },
+    { label: 'ly', explanation: 'The Y-coordinate of the stem', category: 'required' },
+    { label: 'dbh', explanation: 'The diameter at breast height (DBH) of the tree', category: 'optional' }, // optional -- dead stems should not be measured
+    { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'optional' }, // optional -- dead stems should not be measured
+    { label: 'date', explanation: 'The date of the measurement', category: 'required' },
+    { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' }
   ],
   [FormType.arcgis_xlsx]: arcgisHeaders
+};
+
+export enum DatagridType {
+  attributes = 'attributes',
+  personnel = 'personnel',
+  alltaxonomiesview = 'alltaxonomiesview',
+  quadrats = 'quadrats',
+  measurementssummaryview = 'measurementssummaryview',
+  roles = 'roles',
+  stemtaxonomiesview = 'stemtaxonomiesview',
+  stem = 'stem',
+  specieslimits = 'specieslimits',
+  unifiedchangelog = 'unifiedchangelog',
+  viewfulltable = 'viewfulltable'
+}
+
+export const QuadratHeaders = ['Quadrat Name', 'X (Starting)', 'Y (Starting)', 'Area', 'Dimension X', 'Dimension Y', 'Quadrat Shape'];
+
+export const AttributeHeaders = ['Code', 'Description', 'Status'];
+
+export const PersonnelHeaders = ['First Name', 'Last Name', 'Role', 'Role Description'];
+
+export const AllTaxonomiesViewHeaders = [
+  'Species Code',
+  'Family',
+  'Genus',
+  'Genus Auth',
+  'Species',
+  'Subspecies',
+  'Species ID Level',
+  'Species Auth',
+  'Subspecies Auth',
+  'Field Family',
+  'Valid Code',
+  'Species Description',
+  'Species Limits'
+];
+
+export const MeasurementSummaryViewHeaders = [
+  'Quadrat Name',
+  'Species Code',
+  'Tree Tag',
+  'Stem Tag',
+  'X (Stem)',
+  'Y (Stem)',
+  'DBH (Diameter at Breast Height)',
+  'HOM (Height of Measure)',
+  'Description',
+  'Attributes'
+];
+
+export const StemHeaders = ['Stem Tag', 'Local X', 'Local Y', 'Moved', 'Stem Description'];
+
+export const SpeciesLimitsHeaders = ['LimitType', 'LowerBound', 'UpperBound'];
+
+export const RolesHeaders = ['Role Name', 'Role Description'];
+
+export const UnifiedChangelogHeaders = ['Table', 'Record', 'Operation', 'Old Row', 'New Row', 'Change Time', 'Changed By'];
+
+export const ViewFullTableHeaders = [
+  'Quadrat',
+  'Species Code',
+  'Tree',
+  'Stem',
+  'X (Stem)',
+  'Y (Stem)',
+  'DBH (Diameter at Breast Height)',
+  'HOM (Height of Measure)',
+  'Description',
+  'Attributes',
+  'Stem Tag',
+  'Tree Tag',
+  'Family',
+  'Genus',
+  'Species',
+  'Subspecies',
+  'Genus Authority',
+  'Species Authority',
+  'Subspecies Authority',
+  'Species ID Level',
+  'Species Field Family'
+];
+
+export const HeadersByDatagridType: Record<DatagridType, { label: string; explanation?: string; category?: 'required' | 'optional' }[]> = {
+  [DatagridType.attributes]: TableHeadersByFormType[FormType.attributes].map(obj => ({
+    label: obj.label.charAt(0).toUpperCase() + obj.label.substring(1),
+    explanation: obj.explanation,
+    category: obj.category
+  })),
+  [DatagridType.personnel]: PersonnelHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'First Name': "Personnel's first name",
+      'Last Name': "Personnel's last name",
+      Role: 'The name or title of the role.',
+      'Role Description': 'A detailed description of the role and its responsibilities.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.alltaxonomiesview]: AllTaxonomiesViewHeaders.map(header => ({
+    label: header,
+    explanation:
+      {
+        'Species Code': 'A unique identifier code for the species.',
+        Family: 'The family taxon for the species.',
+        Genus: 'The genus taxon for the species.',
+        'Genus Auth': 'The authority responsible for the classification of the genus.',
+        Species: 'The specific epithet (species name) of the taxon.',
+        Subspecies: 'The subspecies name, if applicable.',
+        'Species ID Level': 'The taxonomic identification level of the species.',
+        'Species Auth': 'The authority responsible for the species classification.',
+        'Subspecies Auth': 'The authority responsible for the subspecies classification.',
+        'Field Family': 'The family as identified in the field.',
+        'Valid Code': 'Validation code for the species entry.',
+        'Species Description': 'A detailed description of the species.',
+        'Species Limits': 'The defined limits (e.g., DBH range) for the species.'
+      }[header] || `Information related to ${header.toLowerCase()}.`,
+    category: 'required'
+  })),
+  [DatagridType.quadrats]: QuadratHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Quadrat Name': 'The name or identifier for the quadrat.',
+      X: 'The starting X-coordinate of the quadrat.',
+      Y: 'The starting Y-coordinate of the quadrat.',
+      Area: 'The total area of the quadrat.',
+      DimX: 'The dimension of the quadrat along the X-axis.',
+      DimY: 'The dimension of the quadrat along the Y-axis.',
+      'Quadrat Shape': 'The shape of the quadrat, e.g., square or rectangle.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.measurementssummaryview]: MeasurementSummaryViewHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Quadrat Name': 'The name of the quadrat where measurements were taken.',
+      'Species Code': 'The unique code for the species measured.',
+      'Tree Tag': 'The tag or identifier for the tree measured.',
+      'Stem Tag': 'The tag or identifier for the stem measured.',
+      'X (Stem)': 'The local X-coordinate of the stem.',
+      'Y (Stem)': 'The local Y-coordinate of the stem.',
+      'DBH (Diameter at Breast Height)': 'The diameter at breast height of the tree.',
+      'HOM (Height of Measure)': 'The height from the ground where DBH was measured.',
+      Description: 'A text description of the measurement.',
+      Attributes: 'Additional attributes associated with the measurement.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.roles]: RolesHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Role Name': 'The name or title of the role.',
+      'Role Description': 'A detailed description of the role and its responsibilities.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.stemtaxonomiesview]: StemHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Stem Tag': 'A unique identifier for the stem in the field.',
+      'Local X': 'The local X-coordinate of the stem.',
+      'Local Y': 'The local Y-coordinate of the stem.',
+      Moved: 'Indicates whether the stem has been moved.',
+      'Stem Description': 'A description of the stem.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.stem]: StemHeaders.map(header => ({
+    label: header,
+    explanation: {
+      'Stem Tag': 'A unique identifier for the stem in the field.',
+      'Local X': 'The local X-coordinate of the stem.',
+      'Local Y': 'The local Y-coordinate of the stem.',
+      Moved: 'Indicates whether the stem has been moved.',
+      'Stem Description': 'A description of the stem.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.specieslimits]: SpeciesLimitsHeaders.map(header => ({
+    label: header,
+    explanation: {
+      LimitType: 'The type of limit applied (e.g., DBH or HOM).',
+      LowerBound: 'The lower bound of the limit range.',
+      UpperBound: 'The upper bound of the limit range.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.unifiedchangelog]: UnifiedChangelogHeaders.map(header => ({
+    label: header,
+    explanation: {
+      Table: 'The name of the table where changes were made.',
+      Record: 'The ID of the record that was changed.',
+      Operation: 'The type of operation performed (e.g., insert, update, delete).',
+      'Old Row': 'The state of the record before the change.',
+      'New Row': 'The state of the record after the change.',
+      'Change Time': 'The timestamp of when the change occurred.',
+      'Changed By': 'The user who performed the change.'
+    }[header],
+    category: 'required'
+  })),
+  [DatagridType.viewfulltable]: ViewFullTableHeaders.map(header => ({
+    label: header,
+    explanation:
+      {
+        Quadrat: 'The name of the quadrat where the data is located.',
+        'Species Code': 'The unique code for the species.',
+        Tree: 'The tag or identifier for the tree.',
+        Stem: 'The tag or identifier for the stem.',
+        X: 'The local X-coordinate of the stem.',
+        Y: 'The local Y-coordinate of the stem.',
+        DBH: 'The diameter at breast height of the tree.',
+        HOM: 'The height from the ground where DBH was measured.',
+        Description: 'A text description of the measurement.',
+        Attributes: 'Additional attributes associated with the measurement.',
+        'Stem Tag': 'A unique identifier for the stem in the field.',
+        'Tree Tag': 'A unique identifier for the tree in the field.',
+        Family: 'The family taxon for the species.',
+        Genus: 'The genus taxon for the species.',
+        Species: 'The specific epithet (species name) of the taxon.',
+        Subspecies: 'The subspecies name, if applicable.',
+        'Genus Authority': 'The authority responsible for the classification of the genus.',
+        'Species Authority': 'The authority responsible for the species classification.',
+        'Subspecies Authority': 'The authority responsible for the subspecies classification.',
+        'Species ID Level': 'The taxonomic identification level of the species.',
+        'Species Field Family': 'The family as identified in the field.'
+      }[header] || `Combined view field: ${header.toLowerCase()}.`,
+    category: 'required'
+  }))
 };
 
 export function getTableHeaders(formType: FormType, _usesSubquadrats = false): { label: string }[] {
@@ -82,23 +343,15 @@ export function getTableHeaders(formType: FormType, _usesSubquadrats = false): {
 }
 
 export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[]> = {
-  [FormType.attributes]: [],
-  [FormType.personnel]: [],
-  [FormType.species]: [],
-  [FormType.quadrats]: [],
-  [FormType.subquadrats]: [],
-  [FormType.measurements]: [],
+  [FormType.attributes]: TableHeadersByFormType[FormType.attributes].filter(header => header.category === 'required'),
+  [FormType.personnel]: TableHeadersByFormType[FormType.personnel].filter(header => header.category === 'required'),
+  [FormType.species]: TableHeadersByFormType[FormType.species].filter(header => header.category === 'required'),
+  [FormType.quadrats]: TableHeadersByFormType[FormType.quadrats].filter(header => header.category === 'required'),
+  [FormType.measurements]: TableHeadersByFormType[FormType.measurements].filter(header => header.category === 'required'),
   [FormType.arcgis_xlsx]: []
 };
 
-export const DBInputForms: FormType[] = [
-  FormType.attributes,
-  FormType.personnel,
-  FormType.species,
-  FormType.quadrats,
-  FormType.subquadrats,
-  FormType.measurements
-];
+export const DBInputForms: FormType[] = [FormType.attributes, FormType.personnel, FormType.species, FormType.quadrats, FormType.measurements];
 
 export const FormGroups: Record<string, string[]> = {
   'Database Forms': DBInputForms,

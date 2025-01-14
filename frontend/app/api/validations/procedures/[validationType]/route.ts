@@ -6,17 +6,14 @@ export async function POST(request: NextRequest, { params }: { params: { validat
   try {
     if (!params.validationType) throw new Error('validationProcedureName not provided');
     const body = await request.json();
-    const { schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH, minHOM, maxHOM } = body;
-    console.log('body received from request: ', body);
+    const { schema, validationProcedureID, cursorQuery, p_CensusID, p_PlotID, minDBH, maxDBH } = body;
 
     // Execute the validation procedure using the provided inputs
     const validationResponse = await runValidation(validationProcedureID, params.validationType, schema, cursorQuery, {
       p_CensusID,
       p_PlotID,
       minDBH,
-      maxDBH,
-      minHOM,
-      maxHOM
+      maxDBH
     });
 
     return new NextResponse(JSON.stringify(validationResponse), {

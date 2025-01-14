@@ -3,23 +3,20 @@ import { CensusQuadratResult, QuadratResult } from '@/config/sqlrdsdefinitions/z
 import { SpecialProcessingProps } from '@/config/macros';
 
 export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
-  const { connectionManager, rowData, schema, plotID, censusID } = props;
-  if (!censusID || !plotID) throw createError('CensusID missing', { censusID });
+  const { connectionManager, rowData, schema, plot, census } = props;
+  if (!plot || !census) throw createError('missing core data', { plot, census });
 
-  const { quadrat, startx, starty, coordinateunit, dimx, dimy, dimensionunit, area, areaunit, quadratshape } = rowData;
+  const { quadrat, startx, starty, dimx, dimy, area, quadratshape } = rowData;
 
   try {
     const quadratsData: Partial<QuadratResult> = {
       QuadratName: quadrat,
-      PlotID: plotID,
+      PlotID: plot.plotID,
       StartX: startx,
       StartY: starty,
-      CoordinateUnits: coordinateunit,
       DimensionX: dimx,
       DimensionY: dimy,
-      DimensionUnits: dimensionunit,
       Area: area,
-      AreaUnits: areaunit,
       QuadratShape: quadratshape
     };
 
@@ -29,13 +26,10 @@ export async function processQuadrats(props: Readonly<SpecialProcessingProps>) {
     // need to update censusquadrat
 
     const cqData = {
-      CensusID: censusID,
+      CensusID: census.dateRanges[0].censusID,
       QuadratID: quadratID
     };
-    const { id: cqID } = await handleUpsert<CensusQuadratResult>(connectionManager, schema, 'censusquadrat', cqData, 'CQID');
-    if (!cqID) throw createError('upsert failure on censusquadrat for row: ', { cqData });
-
-    return quadratID;
+    await handleUpsert<CensusQuadratResult>(connectionManager, schema, 'censusquadrat', cqData, 'CQID');
   } catch (error: any) {
     console.error('Upsert failed:', error.message);
     throw createError('Upsert failed', { error });

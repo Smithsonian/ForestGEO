@@ -8,12 +8,13 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
   const plotID = parseInt(params.plotID);
   const censusID = parseInt(params.censusID);
   const queryID = parseInt(params.queryID);
+  let transactionID: string | undefined = undefined;
 
   if (!schema || !plotID || !censusID || !queryID) {
     return new NextResponse('Missing parameters', { status: HTTPResponses.INVALID_REQUEST });
   }
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   try {
     const query = `SELECT QueryDefinition FROM ${schema}.postvalidationqueries WHERE QueryID = ${queryID}`;
     const results = await connectionManager.executeQuery(query);
@@ -28,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
       currentCensusID: censusID
     };
     const formattedQuery = results[0].QueryDefinition.replace(/\${(.*?)}/g, (_match: any, p1: string) => replacements[p1 as keyof typeof replacements]);
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
     const queryResults = await connectionManager.executeQuery(formattedQuery);
 
     if (queryResults.length === 0) throw new Error('failure');
@@ -39,9 +40,10 @@ export async function GET(_request: NextRequest, { params }: { params: { schema:
                             SET LastRunAt = ?, LastRunResult = ?, LastRunStatus = 'success' 
                             WHERE QueryID = ${queryID}`;
     await connectionManager.executeQuery(successUpdate, [currentTime, successResults]);
+    await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
-    await connectionManager.rollbackTransaction();
+    await connectionManager.rollbackTransaction(transactionID ?? '');
     if (e.message === 'failure') {
       const currentTime = moment().format('YYYY-MM-DD HH:mm:ss');
       const failureUpdate = `UPDATE ${schema}.postvalidationqueries 

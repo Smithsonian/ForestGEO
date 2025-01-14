@@ -4,10 +4,17 @@ import { title } from '@/config/primitives';
 import { useSession } from 'next-auth/react';
 import { redirect, usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { Box, IconButton, Stack, Typography } from '@mui/joy';
+import { Box, IconButton, Stack, Typography, useTheme } from '@mui/joy';
 import Divider from '@mui/joy/Divider';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import {
+  useOrgCensusContext,
+  useOrgCensusDispatch,
+  usePlotContext,
+  usePlotDispatch,
+  useSiteContext,
+  useSiteDispatch
+} from '@/app/contexts/userselectionprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
 import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
@@ -49,6 +56,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
+  const siteDispatch = useSiteDispatch();
+  const plotDispatch = usePlotDispatch();
+  const censusDispatch = useOrgCensusDispatch();
   const { data: session } = useSession();
   const previousSiteRef = useRef<string | undefined>(undefined);
   const previousPlotRef = useRef<number | undefined>(undefined);
@@ -205,16 +215,37 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   // Handle manual reset logic
   useEffect(() => {
+    async function clearContexts() {
+      if (currentSite) {
+        if (siteDispatch) await siteDispatch({ site: undefined });
+      }
+      if (currentPlot) {
+        if (plotDispatch) await plotDispatch({ plot: undefined });
+      }
+      if (currentCensus) {
+        if (censusDispatch) await censusDispatch({ census: undefined });
+      }
+    }
+
     if (manualReset) {
       setLoading(true, 'Manual refresh beginning...');
 
-      // Reset all loading states
-      setSiteListLoaded(false);
-      setPlotListLoaded(false);
-      setCensusListLoaded(false);
-      setQuadratListLoaded(false);
-
-      setManualReset(false);
+      clearContexts()
+        .then(() => {
+          setSiteListLoaded(false);
+        })
+        .then(() => {
+          setPlotListLoaded(false);
+        })
+        .then(() => {
+          setCensusListLoaded(false);
+        })
+        .then(() => {
+          setQuadratListLoaded(false);
+        })
+        .finally(() => {
+          setManualReset(false);
+        });
     }
   }, [manualReset]);
 
@@ -286,6 +317,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
       return () => clearTimeout(timer);
     }
   }, [session]);
+
+  const theme = useTheme();
 
   return (
     <>
@@ -377,16 +410,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
                 justifyContent: 'center'
               }}
             >
-              {/*{siteConfig.name}*/}
               <AcaciaVersionTypography>{siteConfig.name}</AcaciaVersionTypography>
             </Typography>
-            {/*<Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center' }}>*/}
-            {/*  <Tooltip title="Version" variant="solid" placement="top" arrow sx={{ pointerEvents: 'none' }}>*/}
-            {/*    <Box sx={{ display: 'inline-block', verticalAlign: 'middle' }}>*/}
-            {/*      <AcaciaVersionTypography>{siteConfig.version}</AcaciaVersionTypography>*/}
-            {/*    </Box>*/}
-            {/*  </Tooltip>*/}
-            {/*</Stack>*/}
           </Stack>
           <IconButton
             onClick={() => setIsFeedbackModalOpen(true)}
@@ -396,10 +421,17 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
               bottom: 20,
               right: 20,
               zIndex: 2000,
-              bgcolor: 'primary.main',
-              color: 'white',
+              backgroundColor: 'transparent', // Remove background color
+              boxShadow: 'none', // Remove shadow if present
+              color: theme.vars.palette.primary.solidColor, // Text/icon color
+              opacity: 0.5, // Initial opacity
+              transition: 'opacity 0.3s ease',
               '&:hover': {
-                bgcolor: 'primary.dark'
+                opacity: 1,
+                backgroundColor: 'transparent' // Ensure no hover background
+              },
+              '&:focus-visible': {
+                outline: `2px solid ${theme.vars.palette.primary.solidColor}` // Add focus ring for accessibility if needed
               }
             }}
           >

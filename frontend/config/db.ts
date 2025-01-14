@@ -13,9 +13,9 @@ const storeName = 'MyStore';
 async function getDb(): Promise<IDBPDatabase<MyDB>> {
   return await openDB<MyDB>(dbName, undefined, {
     upgrade(db, oldVersion, newVersion, transaction) {
-      console.log('db.ts: db object store names: ', db.objectStoreNames);
+      // console.log('db.ts: db object store names: ', db.objectStoreNames);
       if (!db.objectStoreNames.contains(storeName)) {
-        console.log(`Creating object store: ${storeName}`);
+        // console.log(`Creating object store: ${storeName}`);
         db.createObjectStore(storeName);
       }
     }

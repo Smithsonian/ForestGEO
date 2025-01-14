@@ -13,21 +13,37 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridSortModel,
+  GridToolbarColumnsButton,
   GridToolbarContainer,
+  GridToolbarFilterButton,
   GridToolbarProps,
   GridToolbarQuickFilter,
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Checkbox, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from '@mui/joy/Box';
-import { Dropdown, Menu, MenuButton, MenuItem, Stack, Tooltip, Typography } from '@mui/joy';
+import {
+  Button,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Dropdown,
+  IconButton,
+  Menu,
+  MenuButton,
+  MenuItem,
+  Modal,
+  ModalDialog,
+  Stack,
+  Tooltip,
+  Typography
+} from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
   CellItemContainer,
@@ -52,7 +68,6 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-
 import ConfirmationDialog from './confirmationdialog';
 import ReEnterDataModal from './reentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
@@ -62,6 +77,7 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ValidationModal from '@/components/client/validationmodal';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
+import ValidationOverrideModal from '@/components/client/validationoverridemodal';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -87,7 +103,6 @@ const EditToolbar = (props: EditToolbarProps) => {
     handleExportAll,
     handleExportCSV,
     handleQuickFilterChange,
-    locked,
     filterModel,
     dynamicButtons = []
   } = props;
@@ -172,7 +187,10 @@ const EditToolbar = (props: EditToolbarProps) => {
         <Box sx={{ display: 'flex', flex: 1 }}>
           <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
             <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarColumnsButton />
+              <GridToolbarFilterButton />
               <GridToolbarQuickFilter
+                sx={{ ml: 2 }}
                 variant={'outlined'}
                 value={inputValue}
                 onKeyDown={handleKeyDown}
@@ -185,23 +203,13 @@ const EditToolbar = (props: EditToolbarProps) => {
                 }}
               />
               <Tooltip title={'Clear filter'} placement={'right'}>
-                <IconButton
-                  aria-label={'clear filter'}
-                  disabled={inputValue === ''}
-                  onClick={handleClearInput}
-                  size={'small'}
-                  edge={'end'}
-                  sx={{ marginLeft: 1 }}
-                >
+                <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
                   <ClearIcon fontSize={'small'} />
                 </IconButton>
               </Tooltip>
             </Box>
           </Tooltip>
-          <Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
-            Add Row
-          </Button>
-          <Button variant={'text'} color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+          <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
             Refresh
           </Button>
           <Dropdown>
@@ -224,7 +232,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                 All data as JSON
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
-                All Data as Form
+                All Data as CSV
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={handleExportErrorsClick}>
                 All errors as JSON
@@ -237,11 +245,28 @@ const EditToolbar = (props: EditToolbarProps) => {
         </Box>
       </Box>
       <Stack direction={'row'} spacing={2}>
-        {dynamicButtons.map((button: any, index: number) => (
-          <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
-            {button.label}
-          </Button>
-        ))}
+        <Dropdown>
+          <MenuButton>Other</MenuButton>
+          <Menu>
+            {dynamicButtons.map((button: any, index: number) => (
+              <>
+                {button.tooltip ? (
+                  <>
+                    <Tooltip title={button.tooltip} placement={'bottom'} arrow>
+                      <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
+                        {button.label}
+                      </MenuItem>
+                    </Tooltip>
+                  </>
+                ) : (
+                  <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
+                    {button.label}
+                  </MenuItem>
+                )}
+              </>
+            ))}
+          </Menu>
+        </Dropdown>
       </Stack>
     </GridToolbarContainer>
   );
@@ -280,6 +305,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
+  const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
+  const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
     reject: (reason?: any) => void;
@@ -331,9 +358,15 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }));
   }, [showErrorRows, showValidRows, showPendingRows]);
 
+  useEffect(() => {
+    if (refresh) {
+      runFetchPaginated().then(() => setRefresh(false));
+    }
+  }, [refresh]);
+
   const exportAllCSV = useCallback(async () => {
     const response = await fetch(
-      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(filterModel)}`,
       { method: 'GET' }
     );
     const data = await response.json();
@@ -349,9 +382,25 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           if (value === undefined || value === null || value === '') {
             return null;
           }
-          if (typeof value === 'number') {
-            return value;
+          const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+
+          if (match) {
+            let normalizedDate;
+            if (match[1]) {
+              normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+            } else {
+              normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+            }
+
+            const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+            if (parsedDate.isValid()) {
+              return parsedDate.format('YYYY-MM-DD');
+            }
           }
+          if (/^0[0-9]+$/.test(value)) {
+            return value; // Return as a string if it has leading zeroes
+          }
+          // Attempt to parse as a float
           const parsedValue = parseFloat(value);
           if (!isNaN(parsedValue)) {
             return parsedValue;
@@ -527,11 +576,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setLoading(false);
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
-      const startTime = Date.now();
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      const duration = (Date.now() - startTime) / 1000;
-      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       console.error(e);
@@ -581,11 +627,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setRows(rows.filter(row => String(row.id) !== String(id)));
       try {
         setLoading(true, 'Refreshing Measurements Summary View...');
-        const startTime = Date.now();
         const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
         if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-        const duration = (Date.now() - startTime) / 1000;
-        setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (e: any) {
         console.error(e);
@@ -657,8 +700,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Error fetching data');
-
-        console.log('fetched data: ', data);
+        console.log('data: ', data);
 
         setRows(data.output);
         setRowCount(data.totalCount);
@@ -686,23 +728,22 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
       runFetchPaginated().catch(console.error);
     }
-  }, [currentPlot, currentCensus, paginationModel, sortModel, isNewRowAdded, filterModel]);
+  }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel]);
 
   useEffect(() => {
-    console.log('updated rows object: ', rows);
-  }, [rows]);
+    console.log('row count updated: ', rowCount);
+  }, [rowCount]);
 
   useEffect(() => {
     async function getCounts() {
-      const query = `SELECT 
-            SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END) AS CountValid,
-            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
-            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending
-            FROM ${currentSite?.schemaName ?? ''}.${gridType} vft
-                     JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
-            WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
-              AND c.PlotID = ${currentPlot?.plotID ?? 0}
-              AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
+      const query = `SELECT SUM(CASE WHEN vft.IsValidated = TRUE THEN 1 ELSE 0 END)  AS CountValid,
+                            SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
+                            SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending
+                     FROM ${currentSite?.schemaName ?? ''}.${gridType} vft
+                            JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
+                     WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
+                       AND c.PlotID = ${currentPlot?.plotID ?? 0}
+                       AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
       const response = await fetch(`/api/runquery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -723,10 +764,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         { count: data.CountValid, message: `${data.CountValid} row(s) passed validation.`, severity: 'success' }
       ];
       const highestCount = counts.reduce((prev, current) => (current.count > prev.count ? current : prev));
-      setSnackbar({
-        children: highestCount.message,
-        severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
-      });
+      if (highestCount.count !== null) {
+        setSnackbar({
+          children: highestCount.message,
+          severity: highestCount.severity as OverridableStringUnion<AlertColor, AlertPropsColorOverrides> | undefined
+        });
+      }
     });
   }, [rows, paginationModel]);
 
@@ -747,6 +790,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const handleRowModesModelChange = (newRowModesModel: GridRowModesModel) => {
     setRowModesModel(newRowModesModel);
+  };
+
+  const handleRowCountChange = (newRowCountChange: number) => {
+    setRowCount(rowCount);
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -885,16 +932,33 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const fetchFullData = useCallback(async () => {
     setLoading(true);
     try {
-      const reworkedQuery = usingQuery
-        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-        .trim();
+      const tempQuery = createQFFetchQuery(
+        currentSite?.schemaName ?? '',
+        gridType,
+        paginationModel.page,
+        paginationModel.pageSize,
+        currentPlot?.plotID,
+        currentCensus?.plotCensusNumber
+      );
 
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(reworkedQuery)
+          body: JSON.stringify(
+            (
+              await (
+                await fetch(tempQuery, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filterModel })
+                })
+              ).json()
+            ).finishedQuery
+              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+              .trim()
+          )
         })
       ).json();
 
@@ -932,14 +996,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       align: 'center',
       width: 50,
       renderCell: (params: GridCellParams) => {
-        console.log('validation errors full: ', validationErrors);
-        console.log('row: ', params.row);
-        console.log(
-          'row in rows: ',
-          rows.find(row => row.coreMeasurementID === params.row.coreMeasurementID)
-        );
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
-          console.log('val error: ', validationErrors[Number(params.row.coreMeasurementID)]);
           const validationStrings =
             validationErrors[Number(params.row.coreMeasurementID)]?.errors.map(errorDetail => {
               const pairsString = errorDetail.validationPairs
@@ -970,7 +1027,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       }
     }),
-    [rows, validationErrors]
+    [rows, validationErrors, paginationModel]
   );
 
   const measurementDateColumn: GridColDef = {
@@ -1025,10 +1082,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                   : params.row.measuredHOM
                     ? Number(params.row.measuredHOM).toFixed(2)
                     : 'null'}
-              </Typography>
-              <Typography level="body-sm">
-                {column.field === 'measuredDBH' && params.row.dbhUnits && params.row.measuredDBH !== null && params.row.dbhUnits}
-                {column.field === 'measuredHOM' && params.row.homUnits && params.row.measuredHOM !== null && params.row.homUnits}
               </Typography>
             </>
           );
@@ -1142,15 +1195,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     });
   }
 
-  async function handleCloseValidationModal() {
-    setIsValidationModalOpen(false);
+  async function handleCloseModal(closeModal: Dispatch<SetStateAction<boolean>>) {
+    closeModal(false);
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
-      const startTime = Date.now();
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      const duration = (Date.now() - startTime) / 1000;
-      setLoading(true, `Completed in ${duration.toFixed(2)} seconds.`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       console.error(e);
@@ -1160,16 +1210,40 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     await runFetchPaginated();
   }
 
-  const testRows = [
-    {
-      id: 1,
-      coreMeasurementID: 2770850,
-      measurementDate: '2016-02-25T05:00:00.000Z',
-      measuredDBH: null,
-      isValidated: false,
-      measuredHOM: '1.300000'
-    }
-  ];
+  async function handleResetValidations() {
+    const clearCMVQuery = `DELETE cmv
+                           FROM ${currentSite?.schemaName}.cmverrors AS cmv
+                                  JOIN ${currentSite?.schemaName}.coremeasurements AS cm
+                                       ON cmv.CoreMeasurementID = cm.CoreMeasurementID
+                                  JOIN ${currentSite?.schemaName}.census AS c
+                                       ON c.CensusID = cm.CensusID
+                           WHERE c.CensusID IN (SELECT CensusID
+                                                from ${currentSite?.schemaName}.census
+                                                WHERE PlotID = ${currentPlot?.plotID}
+                                                  AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+                             AND c.PlotID = ${currentPlot?.plotID}
+                             AND (cm.IsValidated = FALSE OR cm.IsValidated IS NULL);`;
+    const query = `UPDATE ${currentSite?.schemaName}.coremeasurements AS cm
+      JOIN ${currentSite?.schemaName}.census AS c ON c.CensusID = cm.CensusID
+                   SET cm.IsValidated = NULL
+                   WHERE c.CensusID IN (SELECT CensusID
+                                        from ${currentSite?.schemaName}.census
+                                        WHERE PlotID = ${currentPlot?.plotID}
+                                          AND PlotCensusNumber = ${currentCensus?.plotCensusNumber})
+                     AND c.PlotID = ${currentPlot?.plotID}`;
+    const clearCMVResponse = await fetch(`/api/runquery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(clearCMVQuery)
+    });
+    if (!clearCMVResponse.ok) throw new Error('clear cmverrors query failed!');
+    const response = await fetch(`/api/runquery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query)
+    });
+    if (!response.ok) throw new Error('validation override failed');
+  }
 
   if (!currentSite || !currentPlot || !currentCensus) {
     redirect('/dashboard');
@@ -1236,6 +1310,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             paginationModel={paginationModel}
             rowCount={rowCount}
+            onRowCountChange={handleRowCountChange}
             pageSizeOptions={[10, 25, 50, 100]}
             sortModel={sortModel}
             onSortModelChange={handleSortModelChange}
@@ -1259,13 +1334,22 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               toolbar: {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
-                handleRefresh: runFetchPaginated,
+                handleRefresh: () => setRefresh(true),
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
                 handleExportErrors: handleExportErrors,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
-                dynamicButtons: [...dynamicButtons, { label: 'Run Validations', onClick: () => setIsValidationModalOpen(true) }]
+                dynamicButtons: [
+                  ...dynamicButtons,
+                  { label: 'Run Validations', onClick: () => setIsValidationModalOpen(true) },
+                  ...(errorCount !== null && errorCount > 0
+                    ? [{ label: 'Override Failed Validations?', onClick: () => setIsValidationOverrideModalOpen(true) }]
+                    : []),
+                  ...((errorCount !== null && errorCount > 0) || (validCount !== null && validCount > 0)
+                    ? [{ label: 'Reset Validation Results?', onClick: () => setIsResetValidationModalOpen(true) }]
+                    : [])
+                ]
               }
             }}
             getRowHeight={() => 'auto'}
@@ -1297,7 +1381,37 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             content="Are you sure you want to delete this row? This action cannot be undone."
           />
         )}
-        {isValidationModalOpen && <ValidationModal isValidationModalOpen={isValidationModalOpen} handleCloseValidationModal={handleCloseValidationModal} />}
+        {isValidationModalOpen && (
+          <ValidationModal
+            isValidationModalOpen={isValidationModalOpen}
+            handleCloseValidationModal={async () => await handleCloseModal(setIsValidationModalOpen)}
+          />
+        )}
+        {isValidationOverrideModalOpen && (
+          <ValidationOverrideModal
+            isValidationOverrideModalOpen={isValidationOverrideModalOpen}
+            handleValidationOverrideModalClose={async () => await handleCloseModal(setIsValidationOverrideModalOpen)}
+          />
+        )}
+        {isResetValidationModalOpen && (
+          <Modal open={isResetValidationModalOpen} onClose={async () => await handleCloseModal(setIsResetValidationModalOpen)}>
+            <ModalDialog role={'alertdialog'}>
+              <DialogTitle>Reset Validation States?</DialogTitle>
+              <DialogContent>Are you sure you want to reset all validation states? </DialogContent>
+              <DialogActions>
+                <Button
+                  onClick={async () => {
+                    await handleResetValidations();
+                    await handleCloseModal(setIsResetValidationModalOpen);
+                  }}
+                >
+                  Yes
+                </Button>
+                <Button onClick={async () => await handleCloseModal(setIsResetValidationModalOpen)}>No</Button>
+              </DialogActions>
+            </ModalDialog>
+          </Modal>
+        )}
       </Box>
     );
   }

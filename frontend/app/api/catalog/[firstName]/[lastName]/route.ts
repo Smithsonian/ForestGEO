@@ -6,7 +6,7 @@ export async function GET(_request: NextRequest, { params }: { params: { firstNa
   const { firstName, lastName } = params;
   if (!firstName || !lastName) throw new Error('no first or last name provided!');
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
 
   try {
     const query = `SELECT UserID FROM catalog.users WHERE FirstName = ? AND LastName = ?;`;

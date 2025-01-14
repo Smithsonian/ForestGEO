@@ -4,44 +4,44 @@ import { FileRowSet } from '@/config/macros/formdetails';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
-  const { dataType, slugs } = params;
-  if (!dataType || !slugs) {
+  const body = await request.json();
+  const dataType: string = body.gridType;
+  const schema: string = body.schema;
+  const plot: Plot = body.plot;
+  const census: OrgCensus = body.census;
+  const rows: FileRowSet = body.fileRowSet;
+  if (!dataType || !plot || !census) {
     return new NextResponse('No dataType or SLUGS provided', { status: HTTPResponses.INVALID_REQUEST });
   }
-  const [schema, plotIDParam, censusIDParam] = slugs;
-  const plotID = parseInt(plotIDParam);
-  const censusID = parseInt(censusIDParam);
-  console.log('params: schema: ', schema, ', plotID: ', plotID, ', censusID: ', censusID);
-  const rows: FileRowSet = await request.json();
   if (!rows) {
     return new NextResponse('No rows provided', { status: 400 });
   }
-  console.log('rows produced: ', rows);
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
+  let transactionID: string | undefined = undefined;
   try {
     for (const rowID in rows) {
-      await connectionManager.beginTransaction();
+      transactionID = await connectionManager.beginTransaction();
       const rowData = rows[rowID];
-      console.log('rowData obtained: ', rowData);
       const props: InsertUpdateProcessingProps = {
         schema,
         connectionManager: connectionManager,
         formType: dataType,
         rowData,
-        plotID,
-        censusID,
+        plot: plot,
+        census: census,
         quadratID: undefined,
         fullName: undefined
       };
-      console.log('assembled props: ', props);
       await insertOrUpdate(props);
-      await connectionManager.commitTransaction();
+      await connectionManager.commitTransaction(transactionID ?? '');
     }
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (e: any) {
-    await connectionManager.rollbackTransaction();
+    await connectionManager.rollbackTransaction(transactionID ?? '');
     return new NextResponse(
       JSON.stringify({
         responseMessage: `Failure in connecting to SQL with ${e.message}`,

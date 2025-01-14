@@ -89,6 +89,11 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   specieslimits: {
     id: false,
     ...getSpeciesLimitsHCs()
+  },
+  unifiedchangelog: {
+    id: false,
+    changeID: false,
+    changedBy: false
   }
 };
 
@@ -100,9 +105,9 @@ export const createPostPatchQuery: ProcessPostPatchQueryFunction = (
   dataType: string,
   gridID: string,
   plotID?: number,
-  censusID?: number
+  plotCensusNumber?: number
 ) => {
-  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}` + (plotID ? `/${plotID}` : '') + (censusID ? `/${censusID}` : '');
+  return `/api/fixeddata/${dataType}/${siteSchema}/${gridID}` + (plotID ? `/${plotID}` : '') + (plotCensusNumber ? `/${plotCensusNumber}` : '');
 };
 export const createFetchQuery: FetchQueryFunction = (
   siteSchema: string,
@@ -175,6 +180,8 @@ export interface EditToolbarCustomProps {
   handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
   handleRunValidations?: () => Promise<void>;
+  hidingEmptyColumns?: boolean;
+  handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: GridFilterModel;
   apiRef?: MutableRefObject<GridApiCommunity>;

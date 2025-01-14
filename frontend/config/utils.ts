@@ -107,7 +107,7 @@ export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> }
   }) as { [K in keyof T]: InitialValue<T[K]> };
 }
 
-export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>): string {
+export function createSelectQuery<Result>(schema: string, tableName: string, whereClause: Partial<Result>, limiter?: number): string {
   const whereKeys = Object.keys(whereClause);
 
   if (whereKeys.length === 0) {
@@ -118,7 +118,9 @@ export function createSelectQuery<Result>(schema: string, tableName: string, whe
     .map(key => `\`${key}\` = ?`) // Escaping column names with backticks
     .join(' AND ');
 
-  return `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
+  return `SELECT *
+          FROM \`${schema}\`.\`${tableName}\`
+          WHERE ${whereConditions} ${limiter ? `LIMIT ${limiter}` : ``}`;
 }
 
 export function createInsertOrUpdateQuery<Result>(schema: string, tableName: string, data: Partial<Result>): string {
@@ -134,7 +136,9 @@ export function createInsertOrUpdateQuery<Result>(schema: string, tableName: str
     .map(key => `\`${key}\` = VALUES(\`${key}\`)`)
     .join(', ');
 
-  return `INSERT INTO \`${schema}\`.\`${tableName}\` (${columns}) VALUES (${values}) ON DUPLICATE KEY UPDATE ${updates}`;
+  return `INSERT INTO \`${schema}\`.\`${tableName}\` (${columns})
+          VALUES (${values})
+          ON DUPLICATE KEY UPDATE ${updates}`;
 }
 
 export async function fetchPrimaryKey<Result>(
@@ -151,8 +155,6 @@ export async function fetchPrimaryKey<Result>(
     throw new Error(`${Object.values(whereClause).join(' ')} not found in ${table}.`);
   }
 
-  console.log(`${Object.values(whereClause).join(' ')} found in ${table}.`);
-
   // Retrieve and return the primary key value from the result
   return rows[0][primaryKeyColumn] as unknown as number;
 }
@@ -168,46 +170,62 @@ export async function handleUpsert<Result>(
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
   let id: number = 0;
-  const operation: string = '';
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
     const result = await connectionManager.executeQuery(query, Object.values(data));
-
     id = result.insertId;
 
-    // If insertId is 0, it means the row was updated, not inserted
     if (id === 0) {
-      // Try to find the existing row based on the data provided
-      const whereConditions = Object.keys(data)
+      // console.log('existing record found, updating...');
+      const fieldsToSearch = Object.keys(data).filter(field => field !== 'UserDefinedFields' && data[field as keyof Result] !== null);
+
+      const whereConditions = fieldsToSearch
         .map(field => {
           const value = data[field as keyof Result];
-          return value === null ? `\`${field}\` IS NULL` : `\`${field}\` = ?`;
+          if (value === null) {
+            return `\`${field}\` IS NULL`;
+          } else {
+            return `\`${field}\` = ?`;
+          }
         })
         .join(' AND ');
 
-      const findExistingQuery = `SELECT * FROM \`${schema}\`.\`${tableName}\` WHERE ${whereConditions}`;
-      const values = Object.values(data).filter(value => value !== null);
+      const values = fieldsToSearch.map(field => {
+        const value = data[field as keyof Result];
+        if (typeof value === 'string' && /^[+-]?\d*\.\d+$/.test(value)) {
+          return parseFloat(value); // Convert to number
+        }
+        return value;
+      });
+
+      if (Buffer.byteLength(JSON.stringify(values)) > 4194304) {
+        // 4MB
+        throw new Error('Query exceeds MySQL max_allowed_packet size.');
+      }
+
+      const findExistingQuery = `SELECT *
+                                 FROM \`${schema}\`.\`${tableName}\`
+                                 WHERE ${whereConditions}`;
+      // console.log('find existing query: ', findExistingQuery, 'values: ', values);
 
       const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
+      // console.log('find existing query search result: ', searchResult);
 
       if (searchResult.length > 0) {
-        // Return the primary key if the record is found
         id = searchResult[0][key as keyof Result] as unknown as number;
         return { id, operation: 'updated' };
       } else {
-        // More detailed error information
-        console.error(`Unknown error. InsertId was 0, and the manual search by ${String(key)} also failed. Data:`, data);
+        console.error(`Record not found after update. Data: ${JSON.stringify(data)}, Query: ${findExistingQuery}, Values: ${values}`);
         throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
       }
     }
 
     return { id, operation: 'inserted' };
   } catch (e: any) {
-    console.log('error in handleUpsert: ', e.message);
-    createError(e.message, e);
+    console.error('Error in handleUpsert:', e.message, 'Stack:', e.stack);
+    throw createError(e.message, e);
   }
-  return { id, operation }; // exiting return statement in case existing system does not trigger correctly
 }
 
 export function createError(message: string, context: any): Error {

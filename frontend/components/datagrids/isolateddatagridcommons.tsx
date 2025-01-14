@@ -24,21 +24,22 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
+  GridToolbarColumnsButton,
   GridToolbarContainer,
+  GridToolbarFilterButton,
   GridToolbarProps,
   GridToolbarQuickFilter,
   ToolbarPropsOverrides,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertProps, Button, IconButton, Snackbar } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+import { Alert, AlertProps, Button, Checkbox, IconButton, Snackbar } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
-import { Dropdown, Menu, MenuButton, MenuItem, Stack, Tooltip } from '@mui/joy';
+import { Dropdown, Menu, MenuButton, MenuItem, Stack, Tooltip, Typography } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -57,8 +58,18 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
 
 const EditToolbar = (props: EditToolbarProps) => {
-  const { handleAddNewRow, handleRefresh, handleExportAll, handleExportCSV, handleQuickFilterChange, locked, filterModel, dynamicButtons = [] } = props;
-  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll) return <></>;
+  const {
+    handleAddNewRow,
+    handleRefresh,
+    handleExportAll,
+    handleExportCSV,
+    handleQuickFilterChange,
+    handleToggleHideEmptyColumns,
+    hidingEmptyColumns,
+    filterModel,
+    dynamicButtons = []
+  } = props;
+  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll || !handleToggleHideEmptyColumns) return <></>;
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
@@ -121,9 +132,11 @@ const EditToolbar = (props: EditToolbarProps) => {
           p: 2
         }}
       >
-        <Box sx={{ display: 'flex', flex: 1 }}>
+        <Box sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
           <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
             <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarColumnsButton />
+              <GridToolbarFilterButton />
               <GridToolbarQuickFilter
                 variant={'outlined'}
                 value={inputValue}
@@ -135,6 +148,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                     endAdornment: null
                   }
                 }}
+                sx={{ ml: 2 }}
               />
               <Tooltip title={'Clear filter'} placement={'right'}>
                 <IconButton
@@ -150,9 +164,6 @@ const EditToolbar = (props: EditToolbarProps) => {
               </Tooltip>
             </Box>
           </Tooltip>
-          <Button variant={'text'} color={'primary'} startIcon={<AddIcon />} onClick={async () => await handleAddNewRow()} disabled={locked}>
-            Add Row
-          </Button>
           <Button variant={'text'} color={'primary'} startIcon={<RefreshIcon />} onClick={async () => await handleRefresh()}>
             Refresh
           </Button>
@@ -176,20 +187,36 @@ const EditToolbar = (props: EditToolbarProps) => {
                 All data as JSON
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
-                All Data as Form
+                All Data as CSV
               </MenuItem>
               <MenuItem variant={'soft'} color={'primary'} onClick={exportFilterModel}>
                 Filter Settings
               </MenuItem>
             </Menu>
           </Dropdown>
+          <Typography>
+            <Checkbox checked={hidingEmptyColumns} onChange={event => handleToggleHideEmptyColumns(event.target.checked)} />
+            <strong>{hidingEmptyColumns ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>
+          </Typography>
         </Box>
       </Box>
       <Stack direction={'row'} spacing={2}>
         {dynamicButtons.map((button: any, index: number) => (
-          <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
-            {button.label}
-          </Button>
+          <>
+            {button.tooltip ? (
+              <>
+                <Tooltip title={button.tooltip} placement={'bottom'} arrow>
+                  <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+                    {button.label}
+                  </Button>
+                </Tooltip>
+              </>
+            ) : (
+              <Button key={index} onClick={button.onClick} variant={'contained'} color={'primary'}>
+                {button.label}
+              </Button>
+            )}
+          </>
         ))}
       </Stack>
     </GridToolbarContainer>
@@ -197,7 +224,7 @@ const EditToolbar = (props: EditToolbarProps) => {
 };
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, locked = false, selectionOptions, initialRow, fieldToFocus, clusters, dynamicButtons = [] } = props;
+  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [] } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -214,6 +241,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [usingQuery, setUsingQuery] = useState('');
+  const [hidingEmpty, setHidingEmpty] = useState(true);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
@@ -274,16 +302,33 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const fetchFullData = useCallback(async () => {
     setLoading(true);
     try {
-      const reworkedQuery = usingQuery
-        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-        .trim();
+      const tempQuery = createQFFetchQuery(
+        currentSite?.schemaName ?? '',
+        gridType,
+        paginationModel.page,
+        paginationModel.pageSize,
+        currentPlot?.plotID,
+        currentCensus?.plotCensusNumber
+      );
 
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(reworkedQuery)
+          body: JSON.stringify(
+            (
+              await (
+                await fetch(tempQuery, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filterModel })
+                })
+              ).json()
+            ).finishedQuery
+              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+              .trim()
+          )
         })
       ).json();
 
@@ -310,7 +355,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     switch (gridType) {
       case 'attributes':
         const aResponse = await fetch(
-          `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}`,
+          `/api/formdownload/attributes/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(filterModel)}`,
           { method: 'GET' }
         );
         const aData = await aResponse.json();
@@ -666,8 +711,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
       if (oldRow && updatedRow) {
         setPromiseArguments({
-          resolve: (value: GridRowModel) => {},
-          reject: (reason?: any) => {},
+          resolve: (_value: GridRowModel) => {},
+          reject: (_reason?: any) => {},
           oldRow,
           newRow: updatedRow
         });
@@ -963,11 +1008,13 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   );
 
   function onQuickFilterChange(incomingValues: GridFilterModel) {
-    setFilterModel(prevFilterModel => ({
-      ...prevFilterModel,
-      items: [...(incomingValues.items || [])],
-      quickFilterValues: [...(incomingValues.quickFilterValues || [])]
-    }));
+    setFilterModel(prevFilterModel => {
+      return {
+        ...prevFilterModel,
+        items: [...(incomingValues.items || [])],
+        quickFilterValues: [...(incomingValues.quickFilterValues || [])]
+      };
+    });
   }
 
   const getEnhancedCellAction = useCallback(
@@ -1021,10 +1068,17 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   );
 
   const columns = useMemo(() => {
-    return [...applyFilterToColumns(gridColumns), getGridActionsColumn()];
+    return [...applyFilterToColumns(gridColumns), ...(locked ? [] : [getGridActionsColumn()])];
   }, [gridColumns, rowModesModel, getGridActionsColumn]);
 
-  const filteredColumns = useMemo(() => (gridType !== 'quadratpersonnel' ? filterColumns(rows, columns) : columns), [rows, columns]);
+  const filteredColumns = useMemo(() => {
+    if (hidingEmpty) return filterColumns(rows, columns);
+    return columns;
+  }, [rows, columns, hidingEmpty]);
+
+  const handleToggleHidingColumns = (checked: boolean) => {
+    setHidingEmpty(checked);
+  };
 
   const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
     if (locked) return;
@@ -1063,7 +1117,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             apiRef={apiRef}
             sx={{ width: '100%' }}
             rows={rows}
-            columns={columns}
+            columns={filteredColumns}
             editMode="row"
             rowModesModel={rowModesModel}
             disableColumnSelector
@@ -1106,8 +1160,12 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             paginationModel={paginationModel}
             rowCount={rowCount}
             pageSizeOptions={[paginationModel.pageSize]}
-            filterModel={filterModel}
-            onFilterModelChange={newFilterModel => setFilterModel(newFilterModel)}
+            onFilterModelChange={newFilterModel => {
+              setFilterModel(prevModel => ({
+                ...prevModel,
+                ...newFilterModel
+              }));
+            }}
             ignoreDiacritics
             initialState={{
               columns: {
@@ -1124,6 +1182,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
+                hidingEmptyColumns: hidingEmpty,
+                handleToggleHideEmptyColumns: handleToggleHidingColumns,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
                 dynamicButtons: dynamicButtons

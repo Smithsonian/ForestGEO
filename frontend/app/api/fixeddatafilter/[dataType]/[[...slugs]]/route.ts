@@ -25,7 +25,6 @@ export async function POST(
   // trying to ensure that system correctly retains edit/add functionality -- not necessarily needed currently but better safe than sorry
   const body = await request.json();
   if (body.newRow) {
-    console.log('newRow path');
     // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
     if (!params.slugs) throw new Error('slugs not provided');
     const [schema, gridID, plotIDParam, censusIDParam] = params.slugs;
@@ -34,12 +33,13 @@ export async function POST(
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
     const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
 
-    const connectionManager = new ConnectionManager();
+    const connectionManager = ConnectionManager.getInstance();
     const { newRow } = await request.json();
     let insertIDs: { [key: string]: number } = {};
+    let transactionID: string | undefined = undefined;
 
     try {
-      await connectionManager.beginTransaction();
+      transactionID = await connectionManager.beginTransaction();
 
       if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
 
@@ -81,17 +81,15 @@ export async function POST(
           if (results.length === 0) throw new Error('Error inserting to censusquadrats');
         }
       }
-
+      await connectionManager.commitTransaction(transactionID ?? '');
       return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
     } catch (error: any) {
-      return handleError(error, connectionManager, newRow);
+      return handleError(error, connectionManager, newRow, transactionID);
     } finally {
       await connectionManager.closeConnection();
     }
   } else {
-    console.log('non new row path');
     const filterModel: ExtendedGridFilterModel = body.filterModel;
-    console.log('filter model: ', filterModel);
     if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
     const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam] = params.slugs;
     if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
@@ -101,10 +99,11 @@ export async function POST(
     const pageSize = parseInt(pageSizeParam);
     const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
     const plotCensusNumber = plotCensusNumberParam ? parseInt(plotCensusNumberParam) : undefined;
-    const connectionManager = new ConnectionManager();
+    const connectionManager = ConnectionManager.getInstance();
     let updatedMeasurementsExist = false;
     let censusIDs;
     let pastCensusIDs: string | any[];
+    let transactionID: string | undefined = undefined;
 
     const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
       if (!filterModel.items || filterModel.items.length === 0) {
@@ -144,7 +143,7 @@ export async function POST(
         const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
         columns = results.map((row: any) => row.COLUMN_NAME);
       } catch (e: any) {
-        console.log('error: ', e);
+        console.error('error: ', e);
         throw new Error(e);
       }
       let searchStub = '';
@@ -184,6 +183,19 @@ export async function POST(
             WHERE c.PlotID = ?
               AND c.PlotCensusNumber = ? 
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
+        case 'unifiedchangelog':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} uc
+            JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
+            JOIN ${schema}.census c ON uc.CensusID = c.CensusID
+            WHERE p.PlotID = ?
+            AND c.PlotCensusNumber = ?
+            ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'quadrats':
@@ -319,13 +331,13 @@ export async function POST(
           `Mismatch between query placeholders and parameters: paginated query length: ${paginatedQuery.match(/\?/g)?.length}, parameters length: ${queryParams.length}`
         );
       }
-      console.log('completed query: ', format(paginatedQuery, queryParams));
+      transactionID = await connectionManager.beginTransaction();
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
-
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
+      console.log('total rows: ', totalRowsResult);
       const totalRows = totalRowsResult[0].totalRows;
-
+      await connectionManager.commitTransaction(transactionID ?? '');
       if (updatedMeasurementsExist) {
         const deprecated = paginatedResults.filter((row: any) => pastCensusIDs.includes(row.CensusID));
 
@@ -353,6 +365,7 @@ export async function POST(
         );
       }
     } catch (error: any) {
+      await connectionManager.rollbackTransaction(transactionID ?? '');
       throw new Error(error);
     } finally {
       await connectionManager.closeConnection();
@@ -366,13 +379,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
-  const connectionManager = new ConnectionManager();
+  const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
   let updateIDs: { [key: string]: number } = {};
+  let transactionID: string | undefined = undefined;
 
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Handle views with handleUpsertForSlices (applies to both insert and update logic)
     if (params.dataType === 'alltaxonomiesview') {
@@ -409,9 +423,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
       updateIDs = { [params.dataType]: gridIDKey };
     }
 
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    return handleError(error, connectionManager, newRow);
+    return handleError(error, connectionManager, newRow, transactionID);
   } finally {
     await connectionManager.closeConnection();
   }
@@ -423,11 +438,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
-  const connectionManager = new ConnectionManager();
+  let transactionID: string | undefined = undefined;
+  const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow } = await request.json();
   try {
-    await connectionManager.beginTransaction();
+    transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for views
     if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
@@ -445,6 +461,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
 
       // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
       await handleDeleteForSlices(connectionManager, schema, deleteRowData, queryConfig);
+      await connectionManager.commitTransaction(transactionID ?? '');
       return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
     }
 
@@ -458,10 +475,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
     }
     const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
     await connectionManager.executeQuery(deleteQuery);
+    await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      await connectionManager.rollbackTransaction();
+      await connectionManager.rollbackTransaction(transactionID ?? '');
       const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
       const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
       return NextResponse.json(
@@ -471,7 +489,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { dataT
         },
         { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
       );
-    } else return handleError(error, connectionManager, newRow);
+    } else return handleError(error, connectionManager, newRow, transactionID);
   } finally {
     await connectionManager.closeConnection();
   }

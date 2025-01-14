@@ -26,23 +26,15 @@ export function getAllTaxonomiesViewHCs(): ColumnStates {
   return {
     speciesID: false,
     familyID: false,
-    genusID: false,
-    speciesLimits: false
+    genusID: false
   };
 }
 
 export const validateMeasurementsRow: ValidationFunction = row => {
   const errors: RowValidationErrors = {};
-
-  if (row['dbhunit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['dbhunit'])) {
-    errors['dbhunit'] = 'Invalid DBH unit value.';
-  }
-  if (row['homunit'] && !['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'].includes(row['homunit'])) {
-    errors['homunit'] = 'Invalid HOM unit value.';
-  }
-
   return Object.keys(errors).length > 0 ? errors : null;
 };
+
 export type MeasurementsSummaryRDS = {
   id?: number;
   coreMeasurementID?: number;
@@ -60,12 +52,9 @@ export type MeasurementsSummaryRDS = {
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
-  coordinateUnits?: string;
   measurementDate?: any;
   measuredDBH?: number;
-  dbhUnits?: string;
   measuredHOM?: number;
-  homUnits?: string;
   isValidated?: boolean;
   description?: string;
   attributes?: string;
@@ -82,8 +71,6 @@ export function getMeasurementsSummaryViewHCs(): ColumnStates {
     treeID: false,
     stemID: false,
     personnelID: false,
-    dbhUnits: false,
-    homUnits: false,
     speciesID: false
   };
 }
@@ -95,9 +82,9 @@ export type MeasurementsSummaryStagingRDS = MeasurementsSummaryRDS & {
   submissionDate?: Date;
 };
 
-export type MeasurementsSummaryStagingResult = ResultType<MeasurementsSummaryStagingRDS>;
+export type _MeasurementsSummaryStagingResult = ResultType<MeasurementsSummaryStagingRDS>;
 
-export function getMeasurementsSummaryStagingViewHCs(): ColumnStates {
+export function _getMeasurementsSummaryStagingViewHCs(): ColumnStates {
   return {
     ...getMeasurementsSummaryViewHCs(),
     submittedBy: false,
@@ -129,17 +116,6 @@ export type StemTaxonomiesViewRDS = {
   idLevel?: string;
   fieldFamily?: string;
 };
-export type StemTaxonomiesViewResult = ResultType<StemTaxonomiesViewRDS>;
-
-export function getStemTaxonomiesViewHCs(): ColumnStates {
-  return {
-    stemID: false,
-    treeID: false,
-    speciesID: false,
-    familyID: false,
-    genusID: false
-  };
-}
 
 export type ViewFullTableRDS = {
   // datagrid
@@ -159,9 +135,7 @@ export type ViewFullTableRDS = {
   // coremeasurements
   measurementDate: any;
   measuredDBH: number;
-  dbhUnits: string;
   measuredHOM: number;
-  homUnits: string;
   description: string;
   isValidated: boolean;
 
@@ -171,15 +145,17 @@ export type ViewFullTableRDS = {
   countryName?: string;
   dimensionX?: number;
   dimensionY?: number;
-  plotDimensionUnits?: string;
   plotArea?: number;
-  plotAreaUnits?: string;
   plotGlobalX?: number;
   plotGlobalY?: number;
   plotGlobalZ?: number;
-  plotCoordinateUnits?: string;
   plotShape?: string;
   plotDescription?: string;
+  defaultDimensionUnits?: string;
+  defaultCoordinateUnits?: string;
+  defaultAreaUnits?: string;
+  defaultDBHUnits?: string;
+  defaultHOMUnits?: string;
 
   // census
   censusStartDate?: any;
@@ -191,12 +167,9 @@ export type ViewFullTableRDS = {
   quadratName?: string;
   quadratDimensionX?: number;
   quadratDimensionY?: number;
-  quadratDimensionUnits?: string;
   quadratArea?: number;
-  quadratAreaUnits?: string;
   quadratStartX?: number;
   quadratStartY?: number;
-  quadratCoordinateUnits?: string;
   quadratShape?: string;
 
   // trees
@@ -206,7 +179,6 @@ export type ViewFullTableRDS = {
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
-  stemCoordinateUnits?: string;
 
   // personnel
   firstName?: string;

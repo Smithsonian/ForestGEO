@@ -12,7 +12,7 @@ type ValidationMessages = {
 
 const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, schema }) => {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
-  const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
+  const [isValidationComplete, setIsValidationComplete] = useState(false);
   const [errorsFound, setErrorsFound] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
