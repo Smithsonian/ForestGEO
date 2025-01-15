@@ -2,7 +2,7 @@ import { ColumnStates } from '@/config/macros';
 import { createInitialObject, ResultType } from '@/config/utils';
 import { FileRow, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
-export interface CoreMeasurementsRDS {
+export type CoreMeasurementsRDS = {
   id?: number;
   coreMeasurementID?: number;
   censusID?: number;
@@ -13,11 +13,11 @@ export interface CoreMeasurementsRDS {
   measuredHOM?: number;
   description?: string;
   userDefinedFields?: string;
-}
+};
 
 export type CoreMeasurementsResult = ResultType<CoreMeasurementsRDS>;
 
-export interface FailedMeasurementsRDS {
+export type FailedMeasurementsRDS = {
   id?: number;
   failedMeasurementID?: number;
   plotID?: number;
@@ -30,20 +30,11 @@ export interface FailedMeasurementsRDS {
   y?: number;
   dbh?: number;
   hom?: number;
-  date?: Date | null;
+  date?: Date;
   codes?: string;
-  failureReasons?: string;
-}
+};
 
 export type FailedMeasurementsResult = ResultType<FailedMeasurementsRDS>;
-
-export function getFailedMeasurementsHCs(): ColumnStates {
-  return {
-    failedMeasurementID: false,
-    plotID: false,
-    censusID: false
-  };
-}
 
 export function getCoreMeasurementsHCs(): ColumnStates {
   return {
@@ -54,7 +45,7 @@ export function getCoreMeasurementsHCs(): ColumnStates {
   };
 }
 
-export interface StagingCoreMeasurementsRDS {
+export type StagingCoreMeasurementsRDS = {
   id?: number;
   stagingMeasurementID?: number;
   censusID?: number;
@@ -70,35 +61,32 @@ export interface StagingCoreMeasurementsRDS {
   submissionDate?: Date;
   reviewerID?: number; // ID --> need to pull from catalog.sites
   reviewedDate?: Date;
-}
+};
 
 export type StagingCoreMeasurementsResult = ResultType<StagingCoreMeasurementsRDS>;
 
-export interface CMAttributesRDS {
+export type CMAttributesRDS = {
   id?: number;
   cmaID?: number;
   coreMeasurementID?: number;
   code?: string;
-}
-
+};
 export type CMAttributesResult = ResultType<CMAttributesRDS>;
 
-export interface CMAttributesStagingRDS {
+export type CMAttributesStagingRDS = {
   id?: number;
   stagingMeasurementAttributeID?: number;
   stagingMeasurementID?: number;
   code?: string;
-}
+};
 
 export type CMAttributesStagingResult = ResultType<CMAttributesStagingRDS>;
-
-export interface CMVErrorRDS {
+export type CMVErrorRDS = {
   id?: number;
   cmvErrorID?: number;
   coreMeasurementID?: number;
   validationErrorID?: number;
-}
-
+};
 export type CMVErrorResult = ResultType<CMVErrorRDS>;
 const ATTRIBUTES_CODE_LIMIT = 10;
 export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
@@ -118,20 +106,17 @@ export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
-
-export interface AttributesRDS {
+export type AttributesRDS = {
   id?: number;
   code?: string;
   description?: string;
   status?: string;
-}
-
+};
 export type AttributesResult = ResultType<AttributesRDS>;
 export const initialAttributesRDSRow = createInitialObject<AttributesRDS>();
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
 export const attributesFields = ['code', 'description', 'status'];
-
-export interface UnifiedChangelogRDS {
+export type UnifiedChangelogRDS = {
   id?: number;
   changeID?: number;
   tableName?: string;
@@ -143,6 +128,5 @@ export interface UnifiedChangelogRDS {
   changedBy?: string;
   plotID?: number;
   censusID?: number;
-}
-
+};
 export type UnifiedChangelogResult = ResultType<UnifiedChangelogRDS>;
