@@ -2,7 +2,7 @@
 
 import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
-import { Box, Button, DialogActions, DialogTitle, LinearProgress, Modal, ModalDialog } from '@mui/joy';
+import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
 import React, { useEffect, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
@@ -12,10 +12,10 @@ import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 
-const ROWS_PER_BATCH = 100; // Number of rows to load per batch
+const ROWS_PER_BATCH = 10;
 
 export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
-  const { handleCloseUploadModal, errorRows } = props;
+  const { handleCloseUploadModal, errorRows, uploadForm } = props;
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
@@ -116,9 +116,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   async function uploadFailedMeasurements() {
     const result: FailedMeasurementsRDS[] = [];
 
-    // Iterate over each file in errorRows
     Object.values(errorRows).forEach(fileRowSet => {
-      // Iterate over each row in the file
       Object.values(fileRowSet).forEach(fileRow => {
         const failedMeasurement: FailedMeasurementsRDS = {
           tag: fileRow['tag'] || undefined,
@@ -132,7 +130,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           codes: fileRow['codes'] || undefined
         };
 
-        // Add the mapped object to the result array
         result.push(failedMeasurement);
       });
     });
@@ -239,29 +236,55 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           </Box>
           <Box sx={{ marginTop: 4 }}>
             <Button variant="soft" color="primary" onClick={() => setOpenUploadConfirmModal(true)}>
-              Complete Upload
+              Confirm Changes
             </Button>
           </Box>
         </>
       )}
       <Modal open={openUploadConfirmModal} onClose={() => setOpenUploadConfirmModal(false)}>
         <ModalDialog role={'alertdialog'}>
-          <DialogTitle>
-            Error rows will be uploaded to the <strong>failedmeasurements</strong> table!
-          </DialogTitle>
+          <DialogTitle>Upload Complete!</DialogTitle>
+          <DialogContent>
+            {uploadForm === 'measurements' ? (
+              <>
+                {Object.values(errorRows).length > 0 ? (
+                  <Stack direction={'column'}>
+                    <Typography level={'body-md'}>Errors were found during the upload process.</Typography>
+                    <Typography level={'body-md'}>
+                      All broken rows have been moved to the <code>failedmeasurements</code> table.
+                    </Typography>
+                  </Stack>
+                ) : (
+                  <Stack direction={'column'}>
+                    <Typography level={'body-md'}>No errors were found during the upload process.</Typography>
+                    <Typography level={'body-md'}>
+                      No changes will be made to the the <code>failedmeasurements</code> table.
+                    </Typography>
+                  </Stack>
+                )}
+              </>
+            ) : (
+              <Stack direction={'column'}>
+                <Typography level={'body-md'}>
+                  Non-measurements form used. No changes will be made to the <code>failedmeasurements</code> table.
+                </Typography>
+              </Stack>
+            )}
+            <Typography level={'body-md'}>Please confirm your changes to proceed.</Typography>
+          </DialogContent>
           <DialogActions>
-            <Button variant={'soft'} onClick={() => setOpenUploadConfirmModal(false)}>
-              Go Back
-            </Button>
             <Button
               variant={'solid'}
               onClick={async () => {
-                await uploadFailedMeasurements();
+                uploadForm === 'measurements' ? await uploadFailedMeasurements() : undefined;
                 setOpenUploadConfirmModal(false);
                 handleCloseUploadModal();
               }}
             >
               I understand
+            </Button>
+            <Button variant={'soft'} onClick={() => setOpenUploadConfirmModal(false)}>
+              Go Back
             </Button>
           </DialogActions>
         </ModalDialog>
