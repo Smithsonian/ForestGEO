@@ -551,59 +551,6 @@ create table if not exists viewfulltable
     UserDefinedFields json null
 );
 
-CREATE INDEX idx_coremeasurementid ON viewfulltable (CoreMeasurementID);
-CREATE INDEX idx_measurementdate ON viewfulltable (MeasurementDate);
-CREATE INDEX idx_measureddbh ON viewfulltable (MeasuredDBH);
-CREATE INDEX idx_measuredhom ON viewfulltable (MeasuredHOM);
-CREATE INDEX idx_description ON viewfulltable (Description);
-CREATE INDEX idx_isvalidated ON viewfulltable (IsValidated);
-CREATE INDEX idx_plotid ON viewfulltable (PlotID);
-CREATE INDEX idx_plotname ON viewfulltable (PlotName);
-CREATE INDEX idx_locationname ON viewfulltable (LocationName);
-CREATE INDEX idx_countryname ON viewfulltable (CountryName);
-CREATE INDEX idx_dimensionx ON viewfulltable (DimensionX);
-CREATE INDEX idx_dimensiony ON viewfulltable (DimensionY);
-CREATE INDEX idx_plotdimensionunits ON viewfulltable (PlotDimensionUnits);
-CREATE INDEX idx_plotarea ON viewfulltable (PlotArea);
-CREATE INDEX idx_plotareaunits ON viewfulltable (PlotAreaUnits);
-CREATE INDEX idx_plotglobalx ON viewfulltable (PlotGlobalX);
-CREATE INDEX idx_plotglobaly ON viewfulltable (PlotGlobalY);
-CREATE INDEX idx_plotglobalz ON viewfulltable (PlotGlobalZ);
-CREATE INDEX idx_plotcoordinateunits ON viewfulltable (PlotCoordinateUnits);
-CREATE INDEX idx_plotshape ON viewfulltable (PlotShape);
-CREATE INDEX idx_plotdescription ON viewfulltable (PlotDescription);
-CREATE INDEX idx_censusid ON viewfulltable (CensusID);
-CREATE INDEX idx_censusstartdate ON viewfulltable (CensusStartDate);
-CREATE INDEX idx_censusenddate ON viewfulltable (CensusEndDate);
-CREATE INDEX idx_censusdescription ON viewfulltable (CensusDescription);
-CREATE INDEX idx_plotcensusnumber ON viewfulltable (PlotCensusNumber);
-CREATE INDEX idx_quadratid ON viewfulltable (QuadratID);
-CREATE INDEX idx_quadratname ON viewfulltable (QuadratName);
-CREATE INDEX idx_quadratdimensionx ON viewfulltable (QuadratDimensionX);
-CREATE INDEX idx_quadratdimensiony ON viewfulltable (QuadratDimensionY);
-CREATE INDEX idx_quadrarea ON viewfulltable (QuadratArea);
-CREATE INDEX idx_quadratstartx ON viewfulltable (QuadratStartX);
-CREATE INDEX idx_quadratstarty ON viewfulltable (QuadratStartY);
-CREATE INDEX idx_quadratshape ON viewfulltable (QuadratShape);
-CREATE INDEX idx_treeid ON viewfulltable (TreeID);
-CREATE INDEX idx_treetag ON viewfulltable (TreeTag);
-CREATE INDEX idx_stemid ON viewfulltable (StemID);
-CREATE INDEX idx_stemtag ON viewfulltable (StemTag);
-CREATE INDEX idx_stemlocalx ON viewfulltable (StemLocalX);
-CREATE INDEX idx_stemlocaly ON viewfulltable (StemLocalY);
-CREATE INDEX idx_speciesid ON viewfulltable (SpeciesID);
-CREATE INDEX idx_speciescode ON viewfulltable (SpeciesCode);
-CREATE INDEX idx_speciesname ON viewfulltable (SpeciesName);
-CREATE INDEX idx_subspeciesname ON viewfulltable (SubspeciesName);
-CREATE INDEX idx_subspeciesauthority ON viewfulltable (SubspeciesAuthority);
-CREATE INDEX idx_speciesidlevel ON viewfulltable (SpeciesIDLevel);
-CREATE INDEX idx_genusid ON viewfulltable (GenusID);
-CREATE INDEX idx_genus ON viewfulltable (Genus);
-CREATE INDEX idx_genusauthority ON viewfulltable (GenusAuthority);
-CREATE INDEX idx_familyid ON viewfulltable (FamilyID);
-CREATE INDEX idx_family ON viewfulltable (Family);
-CREATE INDEX idx_attributes ON viewfulltable (Attributes);
-
 create table if not exists postvalidationqueries
 (
     QueryID int auto_increment primary key,
@@ -623,3 +570,19 @@ CREATE INDEX idx_isenabled ON postvalidationqueries (IsEnabled);
 CREATE INDEX idx_lastrunat ON postvalidationqueries (LastRunAt);
 CREATE INDEX idx_lastrunresult ON postvalidationqueries (LastRunResult(255));
 CREATE INDEX idx_lastrunstatus ON postvalidationqueries (LastRunStatus);
+
+create table if not exists failedmeasurements (
+    FailedMeasurementID int auto_increment primary key,
+    PlotID int null,
+    CensusID int null,
+    Tag varchar(255) null,
+    StemTag varchar(255) null,
+    SpCode varchar(255) null,
+    Quadrat varchar(255) null,
+    X decimal(10, 6) null,
+    Y decimal(10, 6) null,
+    DBH decimal(10, 6) null,
+    HOM decimal(10, 6) null,
+    Date date null,
+    Codes varchar(255) null
+);

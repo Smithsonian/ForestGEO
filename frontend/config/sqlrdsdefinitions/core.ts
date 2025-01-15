@@ -17,6 +17,25 @@ export type CoreMeasurementsRDS = {
 
 export type CoreMeasurementsResult = ResultType<CoreMeasurementsRDS>;
 
+export type FailedMeasurementsRDS = {
+  id?: number;
+  failedMeasurementID?: number;
+  plotID?: number;
+  censusID?: number;
+  tag?: string;
+  stemTag?: string;
+  spCode?: string;
+  quadrat?: string;
+  x?: number;
+  y?: number;
+  dbh?: number;
+  hom?: number;
+  date?: Date;
+  codes?: string;
+};
+
+export type FailedMeasurementsResult = ResultType<FailedMeasurementsRDS>;
+
 export function getCoreMeasurementsHCs(): ColumnStates {
   return {
     censusID: false,

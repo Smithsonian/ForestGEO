@@ -2,13 +2,15 @@
 
 import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
-import { Box, Button, LinearProgress } from '@mui/joy';
+import { Box, Button, DialogActions, DialogTitle, LinearProgress, Modal, ModalDialog } from '@mui/joy';
 import React, { useEffect, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import moment from 'moment';
 
 const ROWS_PER_BATCH = 100; // Number of rows to load per batch
 
@@ -17,6 +19,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const [progress, setProgress] = useState({ census: 0, plots: 0, quadrats: 0 });
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
+  const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
 
   const { triggerRefresh } = useDataValidityContext();
 
@@ -110,6 +113,36 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     document.body.removeChild(link);
   };
 
+  async function uploadFailedMeasurements() {
+    const result: FailedMeasurementsRDS[] = [];
+
+    // Iterate over each file in errorRows
+    Object.values(errorRows).forEach(fileRowSet => {
+      // Iterate over each row in the file
+      Object.values(fileRowSet).forEach(fileRow => {
+        const failedMeasurement: FailedMeasurementsRDS = {
+          tag: fileRow['tag'] || undefined,
+          stemTag: fileRow['stemtag'] || undefined,
+          spCode: fileRow['spcode'] || undefined,
+          x: fileRow['lx'] ? parseFloat(fileRow['lx']) : undefined,
+          y: fileRow['ly'] ? parseFloat(fileRow['ly']) : undefined,
+          dbh: fileRow['dbh'] ? parseFloat(fileRow['dbh']) : undefined,
+          hom: fileRow['hom'] ? parseFloat(fileRow['hom']) : undefined,
+          date: fileRow['date'] ? new Date(fileRow['date']) : undefined,
+          codes: fileRow['codes'] || undefined
+        };
+
+        // Add the mapped object to the result array
+        result.push(failedMeasurement);
+      });
+    });
+    await fetch(`/api/batchedupload/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(result)
+    });
+  }
+
   useEffect(() => {
     const runAsyncTasks = async () => {
       try {
@@ -151,8 +184,8 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'warning'}>
             The following rows were not uploaded due to errors:
           </Typography>
-          <Box sx={{ marginBottom: 2 }}>
-            <Button variant="outlined" onClick={downloadCSV}>
+          <Box sx={{ marginBottom: 2, display: 'flex', flex: 1, flexDirection: 'row' }}>
+            <Button variant="plain" onClick={downloadCSV}>
               Download All Errors as CSV
             </Button>
           </Box>
@@ -184,7 +217,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
                             <TableRow key={rowKey}>
                               <TableCell>{rowKey}</TableCell>
                               {headers.map(header => (
-                                <TableCell key={header}>{row[header] !== null ? row[header] : 'NULL'}</TableCell>
+                                <TableCell key={header}>
+                                  {moment.isDate(row[header]) ? moment(row[header]).format('YYYY-MM-DD HH:mm:ss') : row[header] !== null ? row[header] : 'NULL'}
+                                </TableCell>
                               ))}
                             </TableRow>
                           ))}
@@ -203,12 +238,34 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             })}
           </Box>
           <Box sx={{ marginTop: 4 }}>
-            <Button variant="outlined" color="primary" onClick={handleCloseUploadModal}>
+            <Button variant="soft" color="primary" onClick={() => setOpenUploadConfirmModal(true)}>
               Complete Upload
             </Button>
           </Box>
         </>
       )}
+      <Modal open={openUploadConfirmModal} onClose={() => setOpenUploadConfirmModal(false)}>
+        <ModalDialog role={'alertdialog'}>
+          <DialogTitle>
+            Error rows will be uploaded to the <strong>failedmeasurements</strong> table!
+          </DialogTitle>
+          <DialogActions>
+            <Button variant={'soft'} onClick={() => setOpenUploadConfirmModal(false)}>
+              Go Back
+            </Button>
+            <Button
+              variant={'solid'}
+              onClick={async () => {
+                await uploadFailedMeasurements();
+                setOpenUploadConfirmModal(false);
+                handleCloseUploadModal();
+              }}
+            >
+              I understand
+            </Button>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
     </Box>
   );
 }

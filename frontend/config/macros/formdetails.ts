@@ -92,7 +92,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
       explanation:
         'The stem tag used in the field to identify the diﬀerent stems of a tree in the case of multiple-stemmed trees. Most sites give the main stem a' +
         ' value of 0 and additional stems consecutive values 1,2 etc. Some sites have given multiple stems tags in the same series as trees.',
-      category: 'required'
+      category: 'optional'
     },
     { label: 'spcode', explanation: 'The species code for the tree', category: 'required' },
     {

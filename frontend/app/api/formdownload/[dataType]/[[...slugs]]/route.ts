@@ -37,13 +37,11 @@ const buildSearchStub = (columns: string[], quickFilter: string[], alias?: strin
 export async function GET(_request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   const { dataType, slugs } = params;
   if (!dataType || !slugs) throw new Error('data type or slugs not provided');
-  const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs; // filtration system is optional
+  const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs;
   if (!schema) throw new Error('no schema provided');
-
   const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
   const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
-
   const connectionManager = ConnectionManager.getInstance();
   let query: string = '';
   let results: any[] = [];
@@ -67,8 +65,8 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
     console.log('error: ', e);
     throw new Error(e);
   }
-  if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
-  if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+  if (filterModel !== undefined && filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+  if (filterModel !== undefined && filterModel.items) filterStub = buildFilterModelStub(filterModel);
   try {
     switch (dataType) {
       case 'attributes':

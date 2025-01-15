@@ -36,6 +36,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096;
+  const connectionLimit = 10;
+  const queue = new PQueue({ concurrency: connectionLimit });
 
   const generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -71,8 +73,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
     let activeTasks = 0;
-    const connectionLimit = 10;
-    const queue = new PQueue({ concurrency: connectionLimit });
+    queue.clear();
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
     const parsingInvalidRows: FileRow[] = [];
@@ -350,6 +351,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setCompletedOperations(prevCompleted => prevCompleted + 1);
       }
 
+      await queue.onIdle();
+
       const combinedQuery = `
         UPDATE ${schema}.census c
           JOIN (SELECT c1.PlotCensusNumber,
@@ -370,10 +373,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     if (!hasUploaded.current) {
       getUserID().then(() => {
         uploadFiles()
-          .catch(console.error)
-          .then(() => {
-            hasUploaded.current = true;
-          })
           .then(() => {
             // force download of error rows:
             Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
@@ -411,6 +410,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             });
           })
           .then(() => {
+            hasUploaded.current = true;
             // enforce timeout before continuing forward
             const timeout = setTimeout(() => {
               if (uploadForm === FormType.measurements) {
@@ -445,7 +445,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               <Typography level={'title-md'} gutterBottom>
                 Total File Progress - Completed: {completedOperations}
               </Typography>
-              <LinearProgress determinate value={(completedOperations / totalOperations) * 100} />
+              <LinearProgress size={'lg'} variant="soft" color="primary">
+                <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                  {completedOperations}/{totalOperations}
+                </Typography>
+              </LinearProgress>
             </Box>
 
             {totalChunks !== 0 && (
@@ -457,11 +461,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   determinate
                   variant="plain"
                   color="primary"
-                  thickness={32}
+                  thickness={48}
                   value={(completedChunks / totalChunks) * 100}
                   sx={{
                     '--LinearProgress-radius': '0px',
-                    '--LinearProgress-progressThickness': '24px'
+                    '--LinearProgress-progressThickness': '36px'
                   }}
                 >
                   <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
@@ -478,12 +482,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     <LinearProgress
                       determinate
                       variant="plain"
-                      color="warning"
-                      thickness={32}
+                      color="neutral"
+                      thickness={48}
                       value={(trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100}
                       sx={{
                         '--LinearProgress-radius': '0px',
-                        '--LinearProgress-progressThickness': '24px'
+                        '--LinearProgress-progressThickness': '36px'
                       }}
                     >
                       <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
