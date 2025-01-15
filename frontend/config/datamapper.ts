@@ -49,6 +49,8 @@ import {
   CMVErrorResult,
   CoreMeasurementsRDS,
   CoreMeasurementsResult,
+  FailedMeasurementsRDS,
+  FailedMeasurementsResult,
   StagingCoreMeasurementsRDS,
   StagingCoreMeasurementsResult,
   UnifiedChangelogRDS,
@@ -125,7 +127,12 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
     }
 
     // Existing transformations for DBH, HOM, CMA, and ID
-    return key.replace(/dbh/gi, 'DBH').replace(/hom/gi, 'HOM').replace(/cma/gi, 'CMA').replace(/id/gi, 'ID');
+    return key
+      .replace(/dbh/gi, 'DBH')
+      .replace(/hom/gi, 'HOM')
+      .replace(/cma/gi, 'CMA')
+      .replace(/id/gi, 'ID')
+      .replace(/spCode/gi, 'SpCode');
   }
 
   private detransformSpecialCases(key: string): string {
@@ -140,6 +147,7 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
         .replace(/measuredhom/gi, 'measuredHOM')
         .replace(/cam/gi, 'CAM')
         .replace(/Cam/gi, 'CAM')
+        .replace(/SpCode/gi, 'spCode')
     );
   }
 
@@ -205,6 +213,8 @@ class MapperFactory {
         return new GenericMapper<CMVErrorRDS, CMVErrorResult>() as unknown as IDataMapper<RDS, Result>;
       case 'cmattributes':
         return new GenericMapper<CMAttributesRDS, CMAttributesResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'failedmeasurements':
+        return new GenericMapper<FailedMeasurementsRDS, FailedMeasurementsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'measurementssummary':
       case 'measurementssummaryview':
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;

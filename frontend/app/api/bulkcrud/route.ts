@@ -23,8 +23,8 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   try {
+    transactionID = await connectionManager.beginTransaction();
     for (const rowID in rows) {
-      transactionID = await connectionManager.beginTransaction();
       const rowData = rows[rowID];
       const props: InsertUpdateProcessingProps = {
         schema,
@@ -37,8 +37,8 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
         fullName: undefined
       };
       await insertOrUpdate(props);
-      await connectionManager.commitTransaction(transactionID ?? '');
     }
+    await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (e: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
