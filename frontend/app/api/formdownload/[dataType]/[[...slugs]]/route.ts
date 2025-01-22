@@ -143,46 +143,48 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
-        query = `SELECT st.StemTag                                          AS StemTag,
-                        t.TreeTag                                           AS TreeTag,
-                        s.SpeciesCode                                       AS SpeciesCode,
-                        q.QuadratName                                       AS QuadratName,
-                        st.LocalX                                           AS StartX,
-                        st.LocalY                                           AS StartY,
-                        cm.MeasuredDBH                                      AS MeasuredDBH,
-                        cm.MeasuredHOM                                      AS MeasuredHOM,
-                        cm.MeasurementDate                                  AS MeasurementDate,
-                        (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
-                         FROM ${schema}.cmattributes ca
-                         WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes
-                 FROM ${schema}.coremeasurements cm
-                        JOIN ${schema}.stems st ON st.StemID = cm.StemID
-                        JOIN ${schema}.trees t ON t.TreeID = st.TreeID
-                        JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID
-                        JOIN ${schema}.plots p ON p.PlotID = q.PlotID
-                        JOIN ${schema}.species s ON s.SpeciesID = t.SpeciesID
-                 WHERE p.PlotID = ?
-                   AND cm.CensusID = ? ${
-                     filterModel.visible.length > 0
-                       ? ` AND (${filterModel.visible
-                           .map((v: string) => {
-                             switch (v) {
-                               case 'valid':
-                                 return `cm.IsValidated = TRUE`;
-                               case 'errors':
-                                 return `cm.IsValidated = FALSE`;
-                               case 'pending':
-                                 return `cm.IsValidated IS NULL`;
-                               default:
-                                 return null;
-                             }
-                           })
-                           .filter(Boolean)
-                           .join(' OR ')})`
-                       : ''
-                   } ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+        query = `SELECT  st.StemTag                                   AS StemTag,
+                  t.TreeTag                                           AS TreeTag,
+                  s.SpeciesCode                                       AS SpeciesCode,
+                  q.QuadratName                                       AS QuadratName,
+                  st.LocalX                                           AS StartX,
+                  st.LocalY                                           AS StartY,
+                  cm.MeasuredDBH                                      AS MeasuredDBH,
+                  cm.MeasuredHOM                                      AS MeasuredHOM,
+                  cm.MeasurementDate                                  AS MeasurementDate,
+                  (SELECT GROUP_CONCAT(ca.Code SEPARATOR '; ')
+                   FROM ${schema}.cmattributes ca
+                   WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes,
+                  (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR ';')
+                   FROM catalog.validationprocedures vp
+                   JOIN ${schema}.cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
+                   WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
+              FROM ${schema}.coremeasurements cm
+              JOIN ${schema}.stems st ON st.StemID = cm.StemID
+              JOIN ${schema}.trees t ON t.TreeID = st.TreeID
+              JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID
+              JOIN ${schema}.plots p ON p.PlotID = q.PlotID
+              JOIN ${schema}.species s ON s.SpeciesID = t.SpeciesID
+              WHERE p.PlotID = ? AND cm.CensusID = ? ${
+                filterModel.visible.length > 0
+                  ? ` AND (${filterModel.visible
+                      .map((v: string) => {
+                        switch (v) {
+                          case 'valid':
+                            return `cm.IsValidated = TRUE`;
+                          case 'errors':
+                            return `cm.IsValidated = FALSE`;
+                          case 'pending':
+                            return `cm.IsValidated IS NULL`;
+                          default:
+                            return null;
+                        }
+                      })
+                      .filter(Boolean)
+                      .join(' OR ')})`
+                  : ''
+              } ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
-        // console.log('results: ', results);
         formMappedResults = results.map((row: any) => ({
           tag: row.TreeTag,
           stemtag: row.StemTag,
@@ -193,7 +195,8 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
           dbh: row.MeasuredDBH,
           hom: row.MeasuredHOM,
           date: row.MeasurementDate,
-          codes: row.Codes
+          codes: row.Codes,
+          errors: row.Errors
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       default:

@@ -132,15 +132,17 @@ export class PoolMonitor {
     setInterval(async () => {
       try {
         const { sleeping } = await this.logAndReturnConnections();
-        console.log(chalk.cyan('Pool Health Check:'));
-        console.log(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
+        if (sleeping.length > 0) {
+          console.log(chalk.cyan('Pool Health Check:'));
+          console.log(chalk.yellow(`Sleeping connections: ${sleeping.length}`));
 
-        if (sleeping.length > 50) {
-          // Example threshold for excessive sleeping connections
-          console.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
-          await this.reinitializePool();
-        } else {
-          await this.terminateSleepingConnections();
+          if (sleeping.length > 50) {
+            // Example threshold for excessive sleeping connections
+            console.warn(chalk.red('Too many sleeping connections. Reinitializing pool.'));
+            await this.reinitializePool();
+          } else {
+            await this.terminateSleepingConnections();
+          }
         }
       } catch (error) {
         console.error(chalk.red('Error during pool health check:', error));
