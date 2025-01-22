@@ -5,9 +5,9 @@
 import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
-import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
+import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, RefObject, SetStateAction } from 'react';
+import { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
@@ -19,7 +19,11 @@ export interface FieldTemplate {
   initialValue?: string | number | boolean | any[] | null;
 }
 
-export type Templates = Record<string, Record<string, FieldTemplate>>;
+export interface Templates {
+  [gridType: string]: {
+    [fieldName: string]: FieldTemplate;
+  };
+}
 
 export type FetchQueryFunction = (
   siteSchema: string,
@@ -42,7 +46,7 @@ export type ProcessPostPatchQueryFunction = (
 ) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
-const columnVisibilityMap: Record<string, Record<string, boolean>> = {
+const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   default: {
     id: false
   },
@@ -62,10 +66,6 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   measurements: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
-  },
-  failedmeasurements: {
-    id: false,
-    ...getFailedMeasurementsHCs()
   },
   measurementssummary: {
     id: false,
@@ -98,7 +98,7 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   }
 };
 
-export const getColumnVisibilityModel = (gridType: string): Record<string, boolean> => {
+export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
   return columnVisibilityMap[gridType] || columnVisibilityMap.default;
 };
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (
@@ -168,50 +168,33 @@ export function getGridID(gridType: string): string {
       return 'speciesID';
     case 'specieslimits':
       return 'speciesLimitID';
-    case 'sitespecificvalidations':
+    case 'validationprocedures':
       return 'validationID';
-    case 'failedmeasurements':
-      return 'failedMeasurementID';
     default:
       return 'breakage';
   }
 }
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
-
 interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
-}
-
-export interface RowControl {
-  show: boolean;
-  toggle: (checked: boolean) => void;
-  count: number;
 }
 
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
   handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
-  handleExportAll?: () => Promise<void>;
-  handleExportCSV?: () => Promise<void>;
   hidingEmptyColumns?: boolean;
   handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: ExtendedGridFilterModel;
-  apiRef?: RefObject<GridApiCommunity>;
+  apiRef?: MutableRefObject<GridApiCommunity>;
   dynamicButtons?: any;
   locked?: boolean;
   currentSite?: Site;
   currentPlot?: Plot;
   currentCensus?: OrgCensus;
   gridColumns?: GridColDef[];
-  gridType?: string;
-  errorControls?: RowControl;
-  validControls?: RowControl;
-  pendingControls?: RowControl;
-  hidingEmpty?: boolean;
-  setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
 }
 
 export interface IsolatedDataGridCommonProps {
@@ -225,10 +208,8 @@ export interface IsolatedDataGridCommonProps {
   locked?: boolean;
   selectionOptions?: { value: string | number; label: string }[];
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
-  onDataUpdate?: (updatedRow: GridRowModel) => Promise<void>; // Add the onDataUpdate prop
+  onDataUpdate?: () => void; // Add the onDataUpdate prop
   clusters?: Record<string, string[]>;
-  defaultHideEmpty?: boolean;
-  apiRef?: RefObject<GridApiCommunity>;
 }
 
 export interface DataGridCommonProps {
@@ -259,11 +240,10 @@ export interface DataGridCommonProps {
 }
 
 // Define types for the new states and props
-export interface PendingAction {
+export type PendingAction = {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
-}
-
+};
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
@@ -276,7 +256,7 @@ export const CellItemContainer = styled('div')({
  * Function to determine if all entries in a column are null
  */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => field === undefined || row[field] === undefined || row[field] === null || row[field] === '');
+  return rows.length > 0 && rows.every(row => row[field] === undefined || row[field] === null || row[field] === '');
 }
 
 /**
@@ -320,21 +300,21 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: any[];
 }
 
-export const failureErrorMapping: Record<string, string[]> = {
-  'SpCode missing': ['spCode'],
-  'SpCode invalid': ['spCode'],
-  'Missing Tree Tag': ['tag'],
-  'Missing Tree and Stem Tag': ['tag', 'stemTag'],
-  'Quadrat missing': ['quadrat'],
-  'Quadrat invalid': ['quadrat'],
-  'Missing X': ['x'],
-  'Missing Y': ['y'],
-  'Missing Codes and DBH': ['codes', 'dbh'],
-  'Missing Codes and HOM': ['codes', 'hom'],
-  'Missing Date': ['date'],
-  'Invalid Codes': ['codes']
+export const errorMapping: { [key: string]: string[] } = {
+  '1': ['attributes'],
+  '2': ['measuredDBH'],
+  '3': ['measuredHOM'],
+  '4': ['treeTag', 'stemTag'],
+  '5': ['treeTag', 'stemTag', 'quadratName'],
+  '6': ['stemLocalX', 'stemLocalY'],
+  '7': ['speciesCode'],
+  '8': ['measurementDate'],
+  '9': ['treeTag', 'stemTag', 'plotCensusNumber'],
+  '10': ['treeTag', 'stemTag', 'plotCensusNumber'],
+  '11': ['quadratName'],
+  '12': ['speciesCode'],
+  '13': ['measuredDBH', 'measuredHOM']
 };
-
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
   return rows.slice().sort((a, b) => {
     const dateA = new Date(a.measurementDate).getTime();

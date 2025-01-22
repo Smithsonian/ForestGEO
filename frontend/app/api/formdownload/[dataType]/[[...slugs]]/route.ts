@@ -3,10 +3,38 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
+import { escape } from 'mysql2';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const params = await props.params;
+const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
+  if (!filterModel.items || filterModel.items.length === 0) {
+    return '';
+  }
+
+  return filterModel.items
+    .map((item: GridFilterItem) => {
+      const { field, operator, value } = item;
+      const aliasedField = `${alias ? `${alias}.` : ''}${field}`;
+      const escapedValue = escape(`%${value}%`); // Handle escaping
+      return `${aliasedField} ${operator} ${escapedValue}`;
+    })
+    .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
+};
+
+const buildSearchStub = (columns: string[], quickFilter: string[], alias?: string) => {
+  if (!quickFilter || quickFilter.length === 0) {
+    return ''; // Return empty if no quick filters
+  }
+
+  return columns
+    .map(column => {
+      const aliasedColumn = `${alias ? `${alias}.` : ''}${column}`;
+      return quickFilter.map(word => `${aliasedColumn} LIKE ${escape(`%${word}%`)}`).join(' OR ');
+    })
+    .join(' OR ');
+};
+
+export async function GET(_request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
   const { dataType, slugs } = params;
   if (!dataType || !slugs) throw new Error('data type or slugs not provided');
   const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs;
@@ -15,7 +43,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
   const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
   const connectionManager = ConnectionManager.getInstance();
-  let query = '';
+  let query: string = '';
   let results: any[] = [];
   let mappedResults: any[] = [];
   let formMappedResults: any[] = [];
@@ -82,7 +110,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                         JOIN ${schema}.trees t ON t.SpeciesID = s.SpeciesID
                         JOIN ${schema}.stems st ON st.TreeID = t.TreeID
                         JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID
-                        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
+                        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
                  WHERE q.PlotID = ?
                    AND cq.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
@@ -100,8 +128,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
       case 'quadrats':
         query = `SELECT *
                  FROM ${schema}.quadrats q
-                        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-                 WHERE q.PlotID = ? AND q.IsActive IS TRUE 
+                        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+                 WHERE q.PlotID = ?
                    AND cq.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
@@ -128,7 +156,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                    FROM ${schema}.cmattributes ca
                    WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes,
                   (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR ';')
-                   FROM ${schema}.sitespecificvalidations vp
+                   FROM catalog.validationprocedures vp
                    JOIN ${schema}.cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
                    WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
               FROM ${schema}.coremeasurements cm
