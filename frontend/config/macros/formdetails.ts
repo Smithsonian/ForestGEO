@@ -342,6 +342,10 @@ export function getTableHeaders(formType: FormType, _usesSubquadrats = false): {
   return TableHeadersByFormType[formType];
 }
 
+export function getGridHeaders(gridType: DatagridType): { label: string; explanation?: string; category?: 'required' | 'optional' }[] {
+  return HeadersByDatagridType[gridType];
+}
+
 export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[]> = {
   [FormType.attributes]: TableHeadersByFormType[FormType.attributes].filter(header => header.category === 'required'),
   [FormType.personnel]: TableHeadersByFormType[FormType.personnel].filter(header => header.category === 'required'),

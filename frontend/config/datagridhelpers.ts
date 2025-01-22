@@ -2,7 +2,7 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { getQuadratHCs } from '@/config/sqlrdsdefinitions/zones';
+import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
@@ -12,6 +12,7 @@ import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
@@ -174,19 +175,26 @@ export function getGridID(gridType: string): string {
   }
 }
 
+type VisibleFilter = 'valid' | 'errors' | 'pending';
+interface ExtendedGridFilterModel extends GridFilterModel {
+  visible: VisibleFilter[];
+}
+
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
-  handleExportAll?: () => Promise<void>;
-  handleExportCSV?: () => Promise<void>;
-  handleRunValidations?: () => Promise<void>;
+  handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
   hidingEmptyColumns?: boolean;
   handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
-  filterModel?: GridFilterModel;
+  filterModel?: ExtendedGridFilterModel;
   apiRef?: MutableRefObject<GridApiCommunity>;
   dynamicButtons?: any;
   locked?: boolean;
+  currentSite?: Site;
+  currentPlot?: Plot;
+  currentCensus?: OrgCensus;
+  gridColumns?: GridColDef[];
 }
 
 export interface IsolatedDataGridCommonProps {
