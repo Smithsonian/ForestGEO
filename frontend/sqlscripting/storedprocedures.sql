@@ -7,30 +7,34 @@ BEGIN
     SET foreign_key_checks = 0;
     TRUNCATE TABLE measurementssummary;
     INSERT INTO measurementssummary
-    SELECT COALESCE(cm.CoreMeasurementID, 0)                  AS CoreMeasurementID,
-           COALESCE(st.StemID, 0)                             AS StemID,
-           COALESCE(t.TreeID, 0)                              AS TreeID,
-           COALESCE(s.SpeciesID, 0)                           AS SpeciesID,
-           COALESCE(q.QuadratID, 0)                           AS QuadratID,
-           COALESCE(q.PlotID, 0)                              AS PlotID,
-           COALESCE(cm.CensusID, 0)                           AS CensusID,
-           s.SpeciesName                                       AS SpeciesName,
-           s.SubspeciesName                                    AS SubspeciesName,
-           s.SpeciesCode                                       AS SpeciesCode,
-           t.TreeTag                                           AS TreeTag,
-           st.StemTag                                          AS StemTag,
-           st.LocalX                                           AS StemLocalX,
-           st.LocalY                                           AS StemLocalY,
-           q.QuadratName                                       AS QuadratName,
-           cm.MeasurementDate                                  AS MeasurementDate,
-           cm.MeasuredDBH                                      AS MeasuredDBH,
-           cm.MeasuredHOM                                      AS MeasuredHOM,
-           cm.IsValidated                                      AS IsValidated,
-           cm.Description                                      AS Description,
-           (SELECT GROUP_CONCAT( DISTINCT ca.Code SEPARATOR '; ')
+    SELECT COALESCE(cm.CoreMeasurementID, 0)                    AS CoreMeasurementID,
+           COALESCE(st.StemID, 0)                               AS StemID,
+           COALESCE(t.TreeID, 0)                                AS TreeID,
+           COALESCE(s.SpeciesID, 0)                             AS SpeciesID,
+           COALESCE(q.QuadratID, 0)                             AS QuadratID,
+           COALESCE(q.PlotID, 0)                                AS PlotID,
+           COALESCE(cm.CensusID, 0)                             AS CensusID,
+           s.SpeciesName                                        AS SpeciesName,
+           s.SubspeciesName                                     AS SubspeciesName,
+           s.SpeciesCode                                        AS SpeciesCode,
+           t.TreeTag                                            AS TreeTag,
+           st.StemTag                                           AS StemTag,
+           st.LocalX                                            AS StemLocalX,
+           st.LocalY                                            AS StemLocalY,
+           q.QuadratName                                        AS QuadratName,
+           cm.MeasurementDate                                   AS MeasurementDate,
+           cm.MeasuredDBH                                       AS MeasuredDBH,
+           cm.MeasuredHOM                                       AS MeasuredHOM,
+           cm.IsValidated                                       AS IsValidated,
+           cm.Description                                       AS Description,
+           (SELECT GROUP_CONCAT(DISTINCT ca.Code SEPARATOR '; ')
             FROM cmattributes ca
-            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Attributes,
-            cm.UserDefinedFields AS UserDefinedFields
+            WHERE ca.CoreMeasurementID = cm.CoreMeasurementID)  AS Attributes,
+           cm.UserDefinedFields                                 AS UserDefinedFields,
+           (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, '->', vp.Description) SEPARATOR ';')
+            FROM catalog.validationprocedures vp
+                     JOIN cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
+            WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
     FROM coremeasurements cm
              LEFT JOIN stems st ON cm.StemID = st.StemID
              LEFT JOIN trees t ON st.TreeID = t.TreeID
@@ -40,6 +44,7 @@ BEGIN
              LEFT JOIN plots p ON p.PlotID = c.PlotID;
     SET foreign_key_checks = 1;
 END;
+
 
 create
     definer = azureroot@`%` procedure RefreshViewFullTable()
