@@ -10,7 +10,7 @@
   "scripts": {
     "preinstall": "npx npm-force-resolutions",
     "dev": "next dev --turbo",
-    "build": "next build --debug",
+    "build": "next lint --fix && prettier --write . && next build --debug",
     "start": "node build/standalone/server.js -p 3000",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",

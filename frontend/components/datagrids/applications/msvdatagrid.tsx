@@ -36,7 +36,9 @@ const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   measuredHOM: 0,
   isValidated: false,
   description: '',
-  attributes: ''
+  attributes: '',
+  userDefinedFields: '',
+  errors: ''
 };
 
 export default function MeasurementsSummaryViewDataGrid() {
@@ -133,7 +135,6 @@ export default function MeasurementsSummaryViewDataGrid() {
         formType={'measurements'}
       />
       <MeasurementsCommons
-        locked={true}
         gridType={'measurementssummary'}
         gridColumns={MeasurementsSummaryViewGridColumns}
         rows={rows}
