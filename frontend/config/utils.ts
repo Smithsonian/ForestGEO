@@ -299,3 +299,42 @@ export function getUpdatedValues<T extends Record<string, any>>(original: T, upd
 
   return changes;
 }
+
+export function mysqlEscape(value: any): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+  throw new Error('Unsupported value type');
+}
+
+export function formatQuery(query: string, values: any[]): string {
+  let valueIndex = 0; // Pointer for values
+  return query
+    .replace(/\?\?/g, () => {
+      const identifier = values[valueIndex++];
+      if (Array.isArray(identifier) && identifier.length === 2) {
+        // If identifier is [schema, table], format it as `schema`.`table`
+        const [schema, table] = identifier;
+        return `\`${schema.replace(/`/g, '``')}\`.\`${table.replace(/`/g, '``')}\``;
+      } else if (typeof identifier === 'string') {
+        // Single string identifier
+        return `\`${identifier.replace(/`/g, '``')}\``;
+      } else {
+        throw new Error(`Invalid identifier for ?? placeholder: ${JSON.stringify(identifier)}`);
+      }
+    })
+    .replace(/\?/g, () => {
+      const value = values[valueIndex++];
+      if (value === null || value === undefined) return 'NULL';
+      if (typeof value === 'number') return value.toString();
+      if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        return Object.entries(value)
+          .map(([key, val]) => `\`${key}\` = ${mysqlEscape(val)}`)
+          .join(', ');
+      }
+      if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+      throw new Error(`Unsupported value type: ${typeof value}`);
+    });
+}

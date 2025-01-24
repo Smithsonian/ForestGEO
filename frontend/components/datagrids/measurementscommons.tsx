@@ -88,7 +88,7 @@ import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
 import Divider from '@mui/joy/Divider';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
-import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
+import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -1578,8 +1578,14 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
-        {isDialogOpen && promiseArguments && (
-          <SkipReEnterDataModal gridType={gridType} row={promiseArguments.newRow} handleClose={handleCancelAction} handleSave={handleConfirmAction} />
+        {isDialogOpen && promiseArguments && !promiseArguments.oldRow.isNew && (
+          <MSVEditingModal
+            gridType={gridType}
+            oldRow={promiseArguments.oldRow}
+            newRow={promiseArguments.newRow}
+            handleClose={handleCancelAction}
+            handleSave={handleConfirmAction}
+          />
         )}
         {isDeleteDialogOpen && (
           <ConfirmationDialog
