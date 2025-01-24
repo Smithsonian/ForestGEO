@@ -2,7 +2,7 @@ import { ColumnStates } from '@/config/macros';
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
-export interface AllTaxonomiesViewRDS {
+export type AllTaxonomiesViewRDS = {
   id?: number;
   familyID?: number;
   genusID?: number;
@@ -19,8 +19,7 @@ export interface AllTaxonomiesViewRDS {
   subspeciesAuthority?: string;
   fieldFamily?: string;
   description?: string;
-}
-
+};
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
@@ -36,7 +35,7 @@ export const validateMeasurementsRow: ValidationFunction = row => {
   return Object.keys(errors).length > 0 ? errors : null;
 };
 
-export interface MeasurementsSummaryRDS {
+export type MeasurementsSummaryRDS = {
   id?: number;
   coreMeasurementID?: number;
   censusID?: number;
@@ -61,8 +60,7 @@ export interface MeasurementsSummaryRDS {
   attributes?: string;
   userDefinedFields?: string;
   errors?: string;
-}
-
+};
 export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;
 
 export function getMeasurementsSummaryViewHCs(): ColumnStates {
@@ -98,7 +96,7 @@ export function _getMeasurementsSummaryStagingViewHCs(): ColumnStates {
   };
 }
 
-export interface StemTaxonomiesViewRDS {
+export type StemTaxonomiesViewRDS = {
   id?: number;
   stemID?: number;
   treeID?: number;
@@ -119,17 +117,31 @@ export interface StemTaxonomiesViewRDS {
   subspeciesAuthority?: string;
   idLevel?: string;
   fieldFamily?: string;
-}
+};
 
-export interface ViewFullTableRDS {
+export type ViewFullTableRDS = {
+  // datagrid
   id?: number;
+  // IDs
   coreMeasurementID?: number;
-  measurementDate?: any;
-  measuredDBH?: number;
-  measuredHOM?: number;
-  description?: string;
-  isValidated?: boolean;
   plotID?: number;
+  censusID?: number;
+  quadratID?: number;
+  treeID?: number;
+  stemID?: number;
+  personnelID?: number;
+  speciesID?: number;
+  genusID?: number;
+  familyID?: number;
+
+  // coremeasurements
+  measurementDate: any;
+  measuredDBH: number;
+  measuredHOM: number;
+  description: string;
+  isValidated: boolean;
+
+  // plots
   plotName?: string;
   locationName?: string;
   countryName?: string;
@@ -141,17 +153,19 @@ export interface ViewFullTableRDS {
   plotGlobalZ?: number;
   plotShape?: string;
   plotDescription?: string;
-  plotDefaultDimensionUnits?: string;
-  plotDefaultCoordinateUnits?: string;
-  plotDefaultAreaUnits?: string;
-  plotDefaultDBHUnits?: string;
-  plotDefaultHOMUnits?: string;
-  censusID?: number;
+  defaultDimensionUnits?: string;
+  defaultCoordinateUnits?: string;
+  defaultAreaUnits?: string;
+  defaultDBHUnits?: string;
+  defaultHOMUnits?: string;
+
+  // census
   censusStartDate?: any;
   censusEndDate?: any;
   censusDescription?: string;
   plotCensusNumber?: number;
-  quadratID?: number;
+
+  // quadrats
   quadratName?: string;
   quadratDimensionX?: number;
   quadratDimensionY?: number;
@@ -159,26 +173,41 @@ export interface ViewFullTableRDS {
   quadratStartX?: number;
   quadratStartY?: number;
   quadratShape?: string;
-  treeID?: number;
+
+  // trees
   treeTag?: string;
-  stemID?: number;
+
+  // stems
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
-  speciesID?: number;
+
+  // personnel
+  firstName?: string;
+  lastName?: string;
+
+  // roles
+  personnelRoles?: string;
+
+  // species
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
   subspeciesAuthority?: string;
-  speciesIDLevel?: string;
-  genusID?: number;
+  idLevel?: string;
+
+  // genus
   genus?: string;
   genusAuthority?: string;
-  familyID?: number;
+
+  // family
   family?: string;
-  attributes?: string;
-  userDefinedFields?: string;
-}
+
+  // attributes
+  attributeCode?: string;
+  attributeDescription?: string;
+  attributeStatus?: string;
+};
 
 export type ViewFullTableResult = ResultType<ViewFullTableRDS>;
 

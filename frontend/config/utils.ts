@@ -286,3 +286,16 @@ export function getTransformedKeys<T>(): string[] {
   const exampleObject: ResultType<T> = {} as ResultType<T>;
   return Object.keys(exampleObject) as string[];
 }
+
+export function getUpdatedValues<T extends Record<string, any>>(original: T, updated: T): Partial<T> {
+  const changes: Partial<T> = {};
+
+  Object.keys(original).forEach(key => {
+    const typedKey = key as keyof T;
+    if (original[typedKey] !== updated[typedKey]) {
+      changes[typedKey] = updated[typedKey];
+    }
+  });
+
+  return changes;
+}
