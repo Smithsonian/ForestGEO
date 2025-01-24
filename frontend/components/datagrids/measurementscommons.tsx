@@ -76,7 +76,6 @@ import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
 import ConfirmationDialog from './confirmationdialog';
-import ReEnterDataModal from './reentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
@@ -89,6 +88,7 @@ import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
 import Divider from '@mui/joy/Divider';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
+import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -728,7 +728,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
-
+    newRow.measurementDate = moment(newRow.measurementDate).format('YYYY-MM-DD');
+    newRow.userDefinedFields = JSON.stringify(newRow.userDefinedFields);
     try {
       const response = await fetch(fetchProcessQuery, {
         method: oldRow.isNew ? 'POST' : 'PATCH',
@@ -833,14 +834,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setLoading(true, 'Refreshing Measurements Summary View...');
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setLoading(true, 'Re-fetching paginated data...');
+      await fetchPaginatedData(paginationModel.page);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setLoading(true, 'Reloading validation errors');
+      await fetchValidationErrors();
+      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (e: any) {
       console.error(e);
     } finally {
+      await new Promise(resolve => setTimeout(resolve, 1000));
       setLoading(false);
+      setRefresh(true);
     }
-    await new Promise(resolve => setTimeout(resolve, 1000)); // forced delay
-    await runFetchPaginated();
   };
 
   const performDeleteAction = async (id: GridRowId) => {
@@ -1048,7 +1055,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   };
 
   const handleRowCountChange = (newRowCountChange: number) => {
-    setRowCount(rowCount);
+    setRowCount(newRowCountChange);
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -1323,7 +1330,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       return [validationStatusColumn, measurementDateColumn, ...commonColumns];
     }
     return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
-  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors]);
+  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors, rowModesModel]);
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);
@@ -1491,6 +1498,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             </Stack>
           </Stack>
           <StyledDataGrid
+            apiRef={apiRef}
             sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
@@ -1571,14 +1579,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           </Snackbar>
         )}
         {isDialogOpen && promiseArguments && (
-          <ReEnterDataModal
-            gridType={gridType}
-            row={promiseArguments.oldRow}
-            reEnterData={promiseArguments.newRow}
-            handleClose={handleCancelAction}
-            handleSave={handleConfirmAction}
-            columns={gridColumns}
-          />
+          <SkipReEnterDataModal gridType={gridType} row={promiseArguments.newRow} handleClose={handleCancelAction} handleSave={handleConfirmAction} />
         )}
         {isDeleteDialogOpen && (
           <ConfirmationDialog

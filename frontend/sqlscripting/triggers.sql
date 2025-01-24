@@ -1627,213 +1627,207 @@ END //
 
 DELIMITER ;
 
-CREATE TRIGGER trg_measurementssummary_coremeasurements_update
-    AFTER UPDATE
-    ON measurementssummary
-    FOR EACH ROW
-BEGIN
-    DECLARE changes_json JSON DEFAULT NULL;
-    IF NEW.MeasuredDBH != OLD.MeasuredDBH THEN
-        SET changes_json = JSON_SET(changes_json, '$.MeasuredDBH', NEW.MeasuredDBH);
-    end if;
-    IF NEW.MeasuredHOM != OLD.MeasuredHOM THEN
-        SET changes_json = JSON_SET(changes_json, '$.MeasuredHOM', NEW.MeasuredHOM);
-    end if;
-    IF NEW.MeasurementDate != OLD.MeasurementDate THEN
-        SET changes_json = JSON_SET(changes_json, '$.MeasurementDate', NEW.MeasurementDate);
-    end if;
-
-    IF changes_json IS NOT NULL THEN
-        UPDATE coremeasurements
-        SET MeasuredDBH     = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.MeasuredDBH'), NEW.MeasuredDBH,
-                                 MeasuredDBH),
-            MeasuredHOM     = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.MeasuredHOM'), NEW.MeasuredHOM,
-                                 MeasuredHOM),
-            MeasurementDate = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.MeasurementDate'), NEW.MeasurementDate,
-                                 MeasurementDate),
-            IsValidated     = NULL
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-        INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
-                                      ChangedBy)
-        VALUES ('coremeasurements', NEW.CoreMeasurementID, 'UPDATE', changes_json, NOW(), 'User');
-        CALL RefreshMeasurementsSummary();
-    end if;
-end;
-
-
-CREATE TRIGGER trg_measurementssummary_quadrats_update
-    AFTER UPDATE
-    ON measurementssummary
-    FOR EACH ROW
-BEGIN
-    DECLARE changes_json JSON DEFAULT NULL;
-    IF NEW.QuadratName != OLD.QuadratName THEN
-        SET changes_json = JSON_SET(changes_json, '$.QuadratName', NEW.QuadratName);
-    end if;
-    IF changes_json IS NOT NULL THEN
-        UPDATE quadrats
-        SET QuadratName = NEW.QuadratName
-        WHERE QuadratID = NEW.QuadratID;
-        UPDATE coremeasurements
-        SET IsValidated = NULL
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-        INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
-                                      ChangedBy)
-        VALUES ('quadrats', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
-        CALL RefreshMeasurementsSummary();
-    end if;
-end;
-
-CREATE TRIGGER trg_measurementssummary_trees_update
-    AFTER UPDATE
-    ON measurementssummary
-    FOR EACH ROW
-BEGIN
-    DECLARE changes_json JSON DEFAULT NULL;
-    IF NEW.TreeTag != OLD.TreeTag THEN
-        SET changes_json = JSON_SET(changes_json, '$.TreeTag', NEW.TreeTag);
-    end if;
-    IF changes_json IS NOT NULL THEN
-        UPDATE trees
-        SET TreeTag = NEW.TreeTag
-        WHERE TreeID = NEW.TreeID;
-        UPDATE coremeasurements
-        SET IsValidated = NULL
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-        INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
-                                      ChangedBy)
-        VALUES ('trees', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
-        CALL RefreshMeasurementsSummary();
-    end if;
-end;
-
-CREATE TRIGGER trg_measurementssummary_stems_update
-    AFTER UPDATE
-    ON measurementssummary
-    FOR EACH ROW
-BEGIN
-    DECLARE changes_json JSON DEFAULT NULL;
-    IF NEW.StemTag != OLD.StemTag THEN
-        SET changes_json = JSON_SET(changes_json, '$.StemTag', NEW.StemTag);
-    end if;
-    IF NEW.StemLocalX != OLD.StemLocalX THEN
-        SET changes_json = JSON_SET(changes_json, '$.StemLocalX', NEW.StemLocalX);
-    end if;
-    IF NEW.StemLocalY != OLD.StemLocalY THEN
-        SET changes_json = JSON_SET(changes_json, '$.StemLocalY', NEW.StemLocalY);
-    end if;
-
-    IF changes_json IS NOT NULL THEN
-        UPDATE stems
-        SET StemTag    = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.StemTag'), NEW.StemTag,
-                            StemTag),
-            StemLocalX = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.StemLocalX'), NEW.StemLocalX,
-                            StemLocalX),
-            StemLocalY = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.StemLocalY'), NEW.StemLocalY,
-                            StemLocalY)
-        WHERE StemID = NEW.StemID;
-        UPDATE coremeasurements
-        SET IsValidated = NULL
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-        INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
-                                      ChangedBy)
-        VALUES ('stems', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
-        CALL RefreshMeasurementsSummary();
-    end if;
-end;
-
-CREATE TRIGGER trg_measurementssummary_species_update
-    AFTER UPDATE
-    ON measurementssummary
-    FOR EACH ROW
-BEGIN
-    DECLARE changes_json JSON DEFAULT NULL;
-    IF NEW.SpeciesName != OLD.SpeciesName THEN
-        SET changes_json = JSON_SET(changes_json, '$.SpeciesName', NEW.SpeciesName);
-    end if;
-    IF NEW.SubspeciesName != OLD.SubspeciesName THEN
-        SET changes_json = JSON_SET(changes_json, '$.SubspeciesName', NEW.SubspeciesName);
-    end if;
-    IF NEW.SpeciesCode != OLD.SpeciesCode THEN
-        SET changes_json = JSON_SET(changes_json, '$.SpeciesCode', NEW.SpeciesCode);
-    end if;
-
-    IF changes_json IS NOT NULL THEN
-        UPDATE species
-        SET SpeciesName    = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.SpeciesName'), NEW.SpeciesName,
-                                SpeciesName),
-            SubspeciesName = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.SubspeciesName'), NEW.SubspeciesName,
-                                SubspeciesName),
-            SpeciesCode    = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.SpeciesCode'), NEW.SpeciesCode,
-                                SpeciesCode)
-        WHERE SpeciesID = NEW.SpeciesID;
-        UPDATE coremeasurements
-        SET IsValidated = NULL
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-        INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
-                                      ChangedBy)
-        VALUES ('species', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
-    end if;
-end;
-
-CREATE TRIGGER trg_measurementssummary_attributes_update
-    AFTER UPDATE
-    ON measurementssummary
-    FOR EACH ROW
-BEGIN
-    DECLARE attr_list TEXT;
-    DECLARE attr_item VARCHAR(255);
-    DECLARE pos INT;
-    DECLARE changes_json JSON DEFAULT NULL;
-
-    -- Check if the Attributes column has changed
-    IF NEW.Attributes != OLD.Attributes THEN
-        -- Delete existing attributes for the CoreMeasurementID
-        DELETE
-        FROM cmattributes
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-
-        -- If the new Attributes column is not empty, process the new values
-        IF NEW.Attributes IS NOT NULL AND NEW.Attributes != '' THEN
-            SET attr_list = NEW.Attributes;
-
-            -- Initialize changes_json as an empty JSON array
-            SET changes_json = JSON_ARRAY();
-
-            -- Loop through the semicolon-separated attributes
-            WHILE LENGTH(attr_list) > 0
-                DO
-                    SET pos = LOCATE(';', attr_list);
-
-                    IF pos = 0 THEN
-                        -- No semicolon found, take the whole string
-                        SET attr_item = TRIM(attr_list);
-                        SET attr_list = '';
-                    ELSE
-                        -- Extract the attribute and update the list
-                        SET attr_item = TRIM(SUBSTRING(attr_list, 1, pos - 1));
-                        SET attr_list = SUBSTRING(attr_list, pos + 1);
-                    END IF;
-
-                    -- Insert the attribute into the cmattributes table
-                    INSERT INTO cmattributes (CoreMeasurementID, Code)
-                    VALUES (NEW.CoreMeasurementID, attr_item)
-                    ON DUPLICATE KEY UPDATE Code = VALUES(Code);
-
-                    -- Add the attribute to the changes_json array
-                    SET changes_json = JSON_ARRAY_APPEND(changes_json, '$', attr_item);
-                END WHILE;
-        END IF;
-
-        -- Update the coremeasurements table to invalidate validation status
-        UPDATE coremeasurements
-        SET IsValidated = NULL
-        WHERE CoreMeasurementID = NEW.CoreMeasurementID;
-
-        -- Log the changes to unifiedchangelog
-        INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
-        VALUES ('cmattributes', NEW.CoreMeasurementID, 'UPDATE', changes_json, NOW(), 'User');
-
-        CALL RefreshMeasurementsSummary();
-    END IF;
-END;
+# CREATE TRIGGER trg_measurementssummary_coremeasurements_update
+#     AFTER UPDATE
+#     ON measurementssummary
+#     FOR EACH ROW
+# BEGIN
+#     DECLARE changes_json JSON DEFAULT NULL;
+#     IF NEW.MeasuredDBH != OLD.MeasuredDBH THEN
+#         SET changes_json = JSON_SET(changes_json, '$.MeasuredDBH', NEW.MeasuredDBH);
+#     end if;
+#     IF NEW.MeasuredHOM != OLD.MeasuredHOM THEN
+#         SET changes_json = JSON_SET(changes_json, '$.MeasuredHOM', NEW.MeasuredHOM);
+#     end if;
+#     IF NEW.MeasurementDate != OLD.MeasurementDate THEN
+#         SET changes_json = JSON_SET(changes_json, '$.MeasurementDate', NEW.MeasurementDate);
+#     end if;
+#
+#     IF changes_json IS NOT NULL THEN
+#         UPDATE coremeasurements
+#         SET MeasuredDBH     = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.MeasuredDBH'), NEW.MeasuredDBH,
+#                                  MeasuredDBH),
+#             MeasuredHOM     = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.MeasuredHOM'), NEW.MeasuredHOM,
+#                                  MeasuredHOM),
+#             MeasurementDate = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.MeasurementDate'), NEW.MeasurementDate,
+#                                  MeasurementDate),
+#             IsValidated     = NULL
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
+#                                       ChangedBy)
+#         VALUES ('coremeasurements', NEW.CoreMeasurementID, 'UPDATE', changes_json, NOW(), 'User');
+#     end if;
+# end;
+#
+#
+# CREATE TRIGGER trg_measurementssummary_quadrats_update
+#     AFTER UPDATE
+#     ON measurementssummary
+#     FOR EACH ROW
+# BEGIN
+#     DECLARE changes_json JSON DEFAULT NULL;
+#     IF NEW.QuadratName != OLD.QuadratName THEN
+#         SET changes_json = JSON_SET(changes_json, '$.QuadratName', NEW.QuadratName);
+#     end if;
+#     IF changes_json IS NOT NULL THEN
+#         UPDATE quadrats
+#         SET QuadratName = NEW.QuadratName
+#         WHERE QuadratID = NEW.QuadratID;
+#         UPDATE coremeasurements
+#         SET IsValidated = NULL
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
+#                                       ChangedBy)
+#         VALUES ('quadrats', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
+#     end if;
+# end;
+#
+# CREATE TRIGGER trg_measurementssummary_trees_update
+#     AFTER UPDATE
+#     ON measurementssummary
+#     FOR EACH ROW
+# BEGIN
+#     DECLARE changes_json JSON DEFAULT NULL;
+#     IF NEW.TreeTag != OLD.TreeTag THEN
+#         SET changes_json = JSON_SET(changes_json, '$.TreeTag', NEW.TreeTag);
+#     end if;
+#     IF changes_json IS NOT NULL THEN
+#         UPDATE trees
+#         SET TreeTag = NEW.TreeTag
+#         WHERE TreeID = NEW.TreeID;
+#         UPDATE coremeasurements
+#         SET IsValidated = NULL
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
+#                                       ChangedBy)
+#         VALUES ('trees', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
+#     end if;
+# end;
+#
+# CREATE TRIGGER trg_measurementssummary_stems_update
+#     AFTER UPDATE
+#     ON measurementssummary
+#     FOR EACH ROW
+# BEGIN
+#     DECLARE changes_json JSON DEFAULT NULL;
+#     IF NEW.StemTag != OLD.StemTag THEN
+#         SET changes_json = JSON_SET(changes_json, '$.StemTag', NEW.StemTag);
+#     end if;
+#     IF NEW.StemLocalX != OLD.StemLocalX THEN
+#         SET changes_json = JSON_SET(changes_json, '$.StemLocalX', NEW.StemLocalX);
+#     end if;
+#     IF NEW.StemLocalY != OLD.StemLocalY THEN
+#         SET changes_json = JSON_SET(changes_json, '$.StemLocalY', NEW.StemLocalY);
+#     end if;
+#
+#     IF changes_json IS NOT NULL THEN
+#         UPDATE stems
+#         SET StemTag    = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.StemTag'), NEW.StemTag,
+#                             StemTag),
+#             StemLocalX = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.StemLocalX'), NEW.StemLocalX,
+#                             StemLocalX),
+#             StemLocalY = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.StemLocalY'), NEW.StemLocalY,
+#                             StemLocalY)
+#         WHERE StemID = NEW.StemID;
+#         UPDATE coremeasurements
+#         SET IsValidated = NULL
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
+#                                       ChangedBy)
+#         VALUES ('stems', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
+#     end if;
+# end;
+#
+# CREATE TRIGGER trg_measurementssummary_species_update
+#     AFTER UPDATE
+#     ON measurementssummary
+#     FOR EACH ROW
+# BEGIN
+#     DECLARE changes_json JSON DEFAULT NULL;
+#     IF NEW.SpeciesName != OLD.SpeciesName THEN
+#         SET changes_json = JSON_SET(changes_json, '$.SpeciesName', NEW.SpeciesName);
+#     end if;
+#     IF NEW.SubspeciesName != OLD.SubspeciesName THEN
+#         SET changes_json = JSON_SET(changes_json, '$.SubspeciesName', NEW.SubspeciesName);
+#     end if;
+#     IF NEW.SpeciesCode != OLD.SpeciesCode THEN
+#         SET changes_json = JSON_SET(changes_json, '$.SpeciesCode', NEW.SpeciesCode);
+#     end if;
+#
+#     IF changes_json IS NOT NULL THEN
+#         UPDATE species
+#         SET SpeciesName    = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.SpeciesName'), NEW.SpeciesName,
+#                                 SpeciesName),
+#             SubspeciesName = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.SubspeciesName'), NEW.SubspeciesName,
+#                                 SubspeciesName),
+#             SpeciesCode    = IF(JSON_CONTAINS_PATH(changes_json, 'one', '$.SpeciesCode'), NEW.SpeciesCode,
+#                                 SpeciesCode)
+#         WHERE SpeciesID = NEW.SpeciesID;
+#         UPDATE coremeasurements
+#         SET IsValidated = NULL
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp,
+#                                       ChangedBy)
+#         VALUES ('species', NEW.QuadratID, 'UPDATE', changes_json, NOW(), 'User');
+#     end if;
+# end;
+#
+# CREATE TRIGGER trg_measurementssummary_attributes_update
+#     AFTER UPDATE
+#     ON measurementssummary
+#     FOR EACH ROW
+# BEGIN
+#     DECLARE attr_list TEXT;
+#     DECLARE attr_item VARCHAR(255);
+#     DECLARE pos INT;
+#     DECLARE changes_json JSON DEFAULT NULL;
+#
+#     -- Check if the Attributes column has changed
+#     IF NEW.Attributes != OLD.Attributes THEN
+#         -- Delete existing attributes for the CoreMeasurementID
+#         DELETE
+#         FROM cmattributes
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#
+#         -- If the new Attributes column is not empty, process the new values
+#         IF NEW.Attributes IS NOT NULL AND NEW.Attributes != '' THEN
+#             SET attr_list = NEW.Attributes;
+#
+#             -- Initialize changes_json as an empty JSON array
+#             SET changes_json = JSON_ARRAY();
+#
+#             -- Loop through the semicolon-separated attributes
+#             WHILE LENGTH(attr_list) > 0
+#                 DO
+#                     SET pos = LOCATE(';', attr_list);
+#
+#                     IF pos = 0 THEN
+#                         -- No semicolon found, take the whole string
+#                         SET attr_item = TRIM(attr_list);
+#                         SET attr_list = '';
+#                     ELSE
+#                         -- Extract the attribute and update the list
+#                         SET attr_item = TRIM(SUBSTRING(attr_list, 1, pos - 1));
+#                         SET attr_list = SUBSTRING(attr_list, pos + 1);
+#                     END IF;
+#
+#                     -- Insert the attribute into the cmattributes table
+#                     INSERT INTO cmattributes (CoreMeasurementID, Code)
+#                     VALUES (NEW.CoreMeasurementID, attr_item)
+#                     ON DUPLICATE KEY UPDATE Code = VALUES(Code);
+#
+#                     -- Add the attribute to the changes_json array
+#                     SET changes_json = JSON_ARRAY_APPEND(changes_json, '$', attr_item);
+#                 END WHILE;
+#         END IF;
+#
+#         -- Update the coremeasurements table to invalidate validation status
+#         UPDATE coremeasurements
+#         SET IsValidated = NULL
+#         WHERE CoreMeasurementID = NEW.CoreMeasurementID;
+#
+#         -- Log the changes to unifiedchangelog
+#         INSERT INTO unifiedchangelog (TableName, RecordID, Operation, NewRowState, ChangeTimestamp, ChangedBy)
+#         VALUES ('cmattributes', NEW.CoreMeasurementID, 'UPDATE', changes_json, NOW(), 'User');
+#     END IF;
+# END;

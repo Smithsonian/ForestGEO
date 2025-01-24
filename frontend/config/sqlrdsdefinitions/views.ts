@@ -58,6 +58,8 @@ export type MeasurementsSummaryRDS = {
   isValidated?: boolean;
   description?: string;
   attributes?: string;
+  userDefinedFields?: string;
+  errors?: string;
 };
 export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;
 

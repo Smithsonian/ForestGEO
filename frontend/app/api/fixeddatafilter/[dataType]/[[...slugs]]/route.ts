@@ -381,7 +381,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
 
   const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow, oldRow } = await request.json();
+  const { newRow } = await request.json();
   let updateIDs: { [key: string]: number } = {};
   let transactionID: string | undefined = undefined;
 
