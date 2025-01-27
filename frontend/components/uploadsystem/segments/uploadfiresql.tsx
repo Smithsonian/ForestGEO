@@ -8,6 +8,8 @@ import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 import PQueue from 'p-queue';
+import Divider from '@mui/joy/Divider';
+import 'moment-duration-format';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -30,10 +32,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const { data: session } = useSession();
   const [totalChunks, setTotalChunks] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
-  const [handlingChunkError, setHandlingChunkError] = useState(false);
-  const [trackChunkReloadRowCount, setTrackChunkReloadRowCount] = useState<number>(0);
-  const [trackChunkReloadTotalRows, setTrackChunkReloadTotalRows] = useState<number>(0);
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
+  const [etc, setETC] = useState('');
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096;
   const connectionLimit = 10;
@@ -141,6 +141,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       return value;
     };
 
+    const startTime = performance.now();
+    let totalProcessingTime = 0;
+
+    const updateETC = () => {
+      if (completedChunks === 0) return 'Calculating...';
+      const avgTimePerChunk = totalProcessingTime / completedChunks; // Average time per chunk
+      const remainingChunks = totalChunks - completedChunks;
+      const estimatedTimeLeft = avgTimePerChunk * remainingChunks;
+      return moment.duration(estimatedTimeLeft, 'milliseconds').format('HH:mm:ss');
+    };
+
     await new Promise<void>((resolve, reject) => {
       Papa.parse<FileRow>(file, {
         delimiter: delimiter,
@@ -150,6 +161,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
+          const chunkStartTime = performance.now();
           try {
             if (activeTasks >= connectionLimit) {
               parser.pause();
@@ -185,57 +197,36 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 await uploadToSql(fileCollectionRowSet, file.name);
               } catch (error) {
                 console.error('Chunk rollback triggered. Error uploading to SQL:', error);
-                setFailedChunks(prev => {
-                  const updatedSet = new Set(prev);
-                  updatedSet.add(completedChunks);
-                  return updatedSet;
-                });
+                if (failedChunks.has(completedChunks)) {
+                  return;
+                }
+
                 try {
                   try {
                     parser.pause();
                     queue.pause();
                   } catch (e: any) {
-                    console.error('Error pausing parser:', e.message);
+                    console.error('Error pausing parser or queue:', e.message);
+                  } finally {
+                    await queue.onIdle(); // Ensure all pending tasks finish before proceeding
                   }
 
-                  await queue.onIdle();
-                  setHandlingChunkError(true);
-                  setTrackChunkReloadRowCount(0);
-                  setTrackChunkReloadTotalRows(Object.values(fileRowSet).length);
+                  const batchErrorRows = await processFailedChunk(fileRowSet, file.name);
 
-                  const batchErrorRows: FileRowSet = {};
-                  for (const [rowId, row] of Object.entries(fileRowSet)) {
-                    if (errorRows[file.name]?.[rowId]) {
-                      setTrackChunkReloadRowCount(prev => Math.min(prev + 1, trackChunkReloadTotalRows));
-                      continue;
-                    }
-                    const singleRowSet: FileCollectionRowSet = { [file.name]: { [rowId]: row } as FileRowSet };
-                    try {
-                      await uploadToSql(singleRowSet, file.name);
-                    } catch (rowError) {
-                      console.error(`Row ${rowId} failed during retry:`, rowError);
-                      batchErrorRows[generateErrorRowId(row)] = row;
-                    } finally {
-                      setTrackChunkReloadRowCount(prev => Math.min(prev + 1, trackChunkReloadTotalRows));
-                    }
-                  }
                   setErrorRows(prev => ({
                     ...prev,
                     [file.name]: {
                       ...prev[file.name],
-                      ...Object.fromEntries(Object.entries(batchErrorRows).map(([_, value]) => [generateErrorRowId(value), value]))
+                      ...batchErrorRows
                     }
                   }));
+
+                  setFailedChunks(prev => new Set(prev).add(completedChunks));
                 } catch (error) {
                   console.error('Critical error during chunk error handling:', error);
                 } finally {
-                  setHandlingChunkError(false);
-                  try {
-                    parser.resume();
-                    queue.start();
-                  } catch (e: any) {
-                    console.error('Error resuming parser:', e.message);
-                  }
+                  parser.resume();
+                  queue.start();
                 }
               } finally {
                 activeTasks--;
@@ -249,6 +240,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   parser.resume();
                   queue.start();
                 }
+                totalProcessingTime += performance.now() - chunkStartTime;
+                const etc = updateETC();
+                console.log(`Estimated Time to Completion: ${etc}`);
+                setETC(etc); // Assuming `setETC` updates a state or display
               }
             });
           } catch (err) {
@@ -282,6 +277,25 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       });
     });
+  };
+
+  const processFailedChunk = async (fileRowSet: FileRowSet, fileName: string) => {
+    const batchErrorRows: FileRowSet = {};
+    for (const [rowId, row] of Object.entries(fileRowSet)) {
+      if (errorRows[fileName]?.[rowId]) {
+        continue;
+      }
+      const singleRowSet: FileCollectionRowSet = {
+        [fileName]: { [rowId]: row }
+      };
+      try {
+        await uploadToSql(singleRowSet, fileName);
+      } catch (rowError) {
+        console.error(`Row ${rowId} failed during retry:`, rowError);
+        batchErrorRows[rowId] = row;
+      }
+    }
+    return batchErrorRows;
   };
 
   const uploadToSql = useCallback(
@@ -474,30 +488,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     {completedChunks} completed out of {totalChunks}: {totalChunks - completedChunks} remaining
                   </Typography>
                 </LinearProgress>
-                {failedChunks.has(completedChunks) && (
-                  <Box sx={{ width: '100%', mb: 2 }}>
-                    <Typography level={'body-md'} color={'warning'}>
-                      Row-by-row processing for chunk {completedChunks + 1}/{totalChunks}
-                    </Typography>
-                    <LinearProgress
-                      determinate
-                      variant="plain"
-                      color="neutral"
-                      thickness={48}
-                      value={(trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100}
-                      sx={{
-                        '--LinearProgress-radius': '0px',
-                        '--LinearProgress-progressThickness': '36px'
-                      }}
-                    >
-                      <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                        Retrying: {`${((trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100).toFixed(2)}%`}
-                        <br />
-                        {trackChunkReloadRowCount}/{trackChunkReloadTotalRows} rows retried
-                      </Typography>
-                    </LinearProgress>
-                  </Box>
-                )}
+                <Divider sx={{ my: 2 }} />
                 {failedChunks.size > 0 &&
                   Array.from(failedChunks).map(chunk => (
                     <Box key={chunk} sx={{ width: '100%', mb: 2 }}>
@@ -508,13 +499,17 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                         determinate
                         variant="plain"
                         color="success"
-                        thickness={32}
+                        thickness={48}
                         value={100}
                         sx={{
                           '--LinearProgress-radius': '0px',
-                          '--LinearProgress-progressThickness': '24px'
+                          '--LinearProgress-progressThickness': '36px'
                         }}
-                      />
+                      >
+                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                          Failed Chunk: {chunk}
+                        </Typography>
+                      </LinearProgress>
                     </Box>
                   ))}
               </Box>
