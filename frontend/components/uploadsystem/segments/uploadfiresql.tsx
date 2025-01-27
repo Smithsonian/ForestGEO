@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
-import { Box, LinearProgress, Stack, Typography } from '@mui/joy';
+import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
@@ -10,6 +10,7 @@ import moment from 'moment';
 import PQueue from 'p-queue';
 import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -34,6 +35,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [etc, setETC] = useState('');
+  const [totalProcessingTime, setTotalProcessingTime] = useState(0);
+  const [chunkStartTime, setChunkStartTime] = useState<number>(0);
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096;
   const connectionLimit = 10;
@@ -70,6 +73,32 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       });
     });
   };
+
+  useEffect(() => {
+    if (completedChunks < 3) {
+      setETC('Calculating...');
+      return;
+    }
+
+    // Track cumulative processing time
+    setTotalProcessingTime(prev => prev + (performance.now() - chunkStartTime));
+
+    // Calculate exponential moving average for smoother chunk time estimation
+    const smoothingFactor = 0.2; // Adjust between 0 and 1 for desired smoothing (higher = more reactive)
+    const lastChunkTime = performance.now() - chunkStartTime;
+    const smoothedAvgTimePerChunk = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalProcessingTime / completedChunks);
+
+    // Calculate remaining chunks and ETC
+    const remainingChunks = totalChunks - completedChunks;
+    const estimatedTimeLeft = smoothedAvgTimePerChunk * remainingChunks;
+
+    setETC(
+      moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[0] +
+        ' minutes and ' +
+        moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[1] +
+        ' seconds remaining...'
+    );
+  }, [completedChunks, totalChunks]);
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
     let activeTasks = 0;
@@ -141,17 +170,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       return value;
     };
 
-    const startTime = performance.now();
-    let totalProcessingTime = 0;
-
-    const updateETC = () => {
-      if (completedChunks === 0) return 'Calculating...';
-      const avgTimePerChunk = totalProcessingTime / completedChunks; // Average time per chunk
-      const remainingChunks = totalChunks - completedChunks;
-      const estimatedTimeLeft = avgTimePerChunk * remainingChunks;
-      return moment.duration(estimatedTimeLeft, 'milliseconds').format('HH:mm:ss');
-    };
-
     await new Promise<void>((resolve, reject) => {
       Papa.parse<FileRow>(file, {
         delimiter: delimiter,
@@ -161,7 +179,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
-          const chunkStartTime = performance.now();
+          setChunkStartTime(performance.now());
           try {
             if (activeTasks >= connectionLimit) {
               parser.pause();
@@ -240,10 +258,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   parser.resume();
                   queue.start();
                 }
-                totalProcessingTime += performance.now() - chunkStartTime;
-                const etc = updateETC();
-                console.log(`Estimated Time to Completion: ${etc}`);
-                setETC(etc); // Assuming `setETC` updates a state or display
               }
             });
           } catch (err) {
@@ -440,6 +454,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     }
   }, [hasUploaded.current, errorRows]);
 
+  const { palette } = useTheme();
+
   return (
     <>
       {!hasUploaded.current ? (
@@ -483,35 +499,39 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   }}
                 >
                   <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`}
+                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
+                    {totalChunks - completedChunks} remaining
                     <br />
-                    {completedChunks} completed out of {totalChunks}: {totalChunks - completedChunks} remaining
+                    Estimated time to completion: {etc}
                   </Typography>
                 </LinearProgress>
                 <Divider sx={{ my: 2 }} />
-                {failedChunks.size > 0 &&
-                  Array.from(failedChunks).map(chunk => (
-                    <Box key={chunk} sx={{ width: '100%', mb: 2 }}>
-                      <Typography level={'body-md'} color={'success'}>
-                        Completed retry for chunk {chunk + 1}/{totalChunks}
-                      </Typography>
-                      <LinearProgress
-                        determinate
-                        variant="plain"
-                        color="success"
-                        thickness={48}
-                        value={100}
-                        sx={{
-                          '--LinearProgress-radius': '0px',
-                          '--LinearProgress-progressThickness': '36px'
-                        }}
-                      >
-                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                          Failed Chunk: {chunk}
-                        </Typography>
-                      </LinearProgress>
-                    </Box>
-                  ))}
+
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '100%',
+                    height: '100%',
+                    textAlign: 'center'
+                  }}
+                >
+                  <Typography level="title-lg" fontWeight="bold" sx={{ mb: 2 }}>
+                    Please do not exit this page! The upload will take some time to complete.
+                  </Typography>
+                  <DotLottieReact
+                    src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
+                    loop
+                    autoplay
+                    themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                    style={{
+                      width: '25%',
+                      height: '25%'
+                    }}
+                  />
+                </Box>
               </Box>
             )}
           </Stack>
