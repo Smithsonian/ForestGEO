@@ -391,7 +391,9 @@ const EditToolbar = (props: EditToolbarProps) => {
               >
                 <Chip
                   color={'success'}
-                  variant={'soft'}
+                  size={'lg'}
+                  variant={exportVisibility.includes('valid') ? 'soft' : 'outlined'}
+                  startDecorator={exportVisibility.includes('valid') ? <CheckIcon /> : undefined}
                   sx={{
                     flex: 1,
                     textAlign: 'center',
@@ -400,11 +402,13 @@ const EditToolbar = (props: EditToolbarProps) => {
                   }}
                   onClick={() => handleChipToggle('valid')}
                 >
-                  Rows that have passed validation
+                  Rows passing validation
                 </Chip>
                 <Chip
                   color={'danger'}
-                  variant={'soft'}
+                  size={'lg'}
+                  variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
+                  startDecorator={exportVisibility.includes('errors') ? <CheckIcon /> : undefined}
                   sx={{
                     flex: 1,
                     textAlign: 'center',
@@ -413,11 +417,13 @@ const EditToolbar = (props: EditToolbarProps) => {
                   }}
                   onClick={() => handleChipToggle('errors')}
                 >
-                  Rows that have failed validation
+                  Rows failing validation
                 </Chip>
                 <Chip
                   color={'primary'}
-                  variant={'soft'}
+                  size={'lg'}
+                  variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}
+                  startDecorator={exportVisibility.includes('pending') ? <CheckIcon /> : undefined}
                   sx={{
                     flex: 1,
                     textAlign: 'center',
@@ -426,12 +432,19 @@ const EditToolbar = (props: EditToolbarProps) => {
                   }}
                   onClick={() => handleChipToggle('pending')}
                 >
-                  Rows that have not yet been validated
+                  Rows pending validation
                 </Chip>
               </Stack>
             </DialogContent>
             <DialogActions>
-              <Button onClick={downloadExportedData}>Export</Button>
+              <Button
+                onClick={async () => {
+                  await downloadExportedData();
+                  setOpenExportModal(false);
+                }}
+              >
+                Export
+              </Button>
               <Button onClick={() => setOpenExportModal(false)}>Cancel</Button>
             </DialogActions>
           </ModalDialog>
