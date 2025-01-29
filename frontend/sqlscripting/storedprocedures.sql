@@ -6,6 +6,7 @@ CREATE
     PROCEDURE RefreshMeasurementsSummary()
 BEGIN
     SET foreign_key_checks = 0;
+    TRUNCATE measurementssummary;
     INSERT INTO measurementssummary (CoreMeasurementID,
                                      StemID,
                                      TreeID,
@@ -91,7 +92,7 @@ CREATE
 BEGIN
     -- Disable foreign key checks temporarily
     SET foreign_key_checks = 0;
-
+    TRUNCATE viewfulltable;
     -- Insert data with ON DUPLICATE KEY UPDATE to resolve conflicts
     INSERT INTO viewfulltable (CoreMeasurementID,
                                MeasurementDate,
