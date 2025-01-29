@@ -195,6 +195,7 @@ export interface EditToolbarCustomProps {
   currentPlot?: Plot;
   currentCensus?: OrgCensus;
   gridColumns?: GridColDef[];
+  gridType?: string;
 }
 
 export interface IsolatedDataGridCommonProps {

@@ -48,8 +48,7 @@ import {
   Stack,
   Switch,
   Tooltip,
-  Typography,
-  useTheme
+  Typography
 } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
@@ -106,27 +105,6 @@ interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
 }
 
-const rowCategories = [
-  {
-    type: 'valid',
-    color: '#7fc180', // Dark mode
-    lightModeColor: '#4d814d', // Light mode (darker green for contrast)
-    label: 'Valid Rows'
-  },
-  {
-    type: 'pending',
-    color: '#5570e1', // Dark mode
-    lightModeColor: '#2e4abf', // Light mode (darker blue for contrast)
-    label: 'Pending Rows'
-  },
-  {
-    type: 'errors',
-    color: '#b10d01', // Dark mode
-    lightModeColor: '#8a0000', // Light mode (darker red for contrast)
-    label: 'Error Rows'
-  }
-];
-
 const EditToolbar = (props: EditToolbarProps) => {
   const {
     handleAddNewRow,
@@ -146,8 +124,6 @@ const EditToolbar = (props: EditToolbarProps) => {
   const [openExportModal, setOpenExportModal] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
   const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel.visible);
-  const dataset = ['valid', 'pending', 'errors', 'pending', 'errors', 'valid', 'errors', 'pending', 'pending', 'valid', 'errors', 'errors', 'pending'];
-  const { palette } = useTheme();
   const apiRef = useGridApiContext();
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -422,6 +398,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                     whiteSpace: 'normal',
                     wordBreak: 'break-word'
                   }}
+                  onClick={() => handleChipToggle('valid')}
                 >
                   Rows that have passed validation
                 </Chip>
@@ -434,6 +411,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                     whiteSpace: 'normal',
                     wordBreak: 'break-word'
                   }}
+                  onClick={() => handleChipToggle('errors')}
                 >
                   Rows that have failed validation
                 </Chip>
@@ -446,37 +424,11 @@ const EditToolbar = (props: EditToolbarProps) => {
                     whiteSpace: 'normal',
                     wordBreak: 'break-word'
                   }}
+                  onClick={() => handleChipToggle('pending')}
                 >
                   Rows that have not yet been validated
                 </Chip>
               </Stack>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, m: 1 }}>
-                {dataset.map((row, index) => {
-                  const rowType = rowCategories.find(rowC => rowC.type === row);
-                  const isHighlighted = exportVisibility.includes(row as VisibleFilter);
-                  const rowColor = palette.mode === 'dark' ? rowType?.color : rowType?.lightModeColor;
-
-                  return (
-                    <Box
-                      key={index}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: 25,
-                        borderRadius: 'md',
-                        bgcolor: isHighlighted ? `${rowColor}33` : palette.neutral.softBg,
-                        border: '1px solid',
-                        borderColor: isHighlighted ? rowColor : palette.neutral.outlinedBorder,
-                        transition: 'background-color 0.3s, border-color 0.3s'
-                      }}
-                      onClick={() => handleChipToggle(rowType?.type ?? '')}
-                    >
-                      <Skeleton variant="rectangular" width="100%" height={20} animation={'wave'} sx={{ bgcolor: 'transparent', cursor: 'pointer' }} />
-                    </Box>
-                  );
-                })}
-              </Box>
             </DialogContent>
             <DialogActions>
               <Button onClick={downloadExportedData}>Export</Button>
