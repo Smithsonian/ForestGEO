@@ -24,16 +24,39 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
+  GridToolbarColumnsButton,
+  GridToolbarContainer,
+  GridToolbarFilterButton,
   GridToolbarProps,
+  GridToolbarQuickFilter,
+  ToolbarPropsOverrides,
+  useGridApiContext,
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
-import { Tooltip } from '@mui/joy';
+import {
+  Button,
+  Checkbox,
+  Chip,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormLabel,
+  IconButton,
+  Modal,
+  ModalDialog,
+  Skeleton,
+  Stack,
+  Switch,
+  Tooltip,
+  Typography
+} from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -41,28 +64,295 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import { redirect } from 'next/navigation';
 import Box from '@mui/joy/Box';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
+import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
-import moment from 'moment/moment';
-import { EditToolbar } from '@/components/client/datagridelements';
-import ResetViewModal from '@/components/client/modals/resetviewmodal';
+import { ClearIcon } from '@mui/x-date-pickers';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import Divider from '@mui/joy/Divider';
+
+type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
+
+const EditToolbar = (props: EditToolbarProps) => {
+  const {
+    handleAddNewRow,
+    handleRefresh,
+    handleExportAll,
+    handleExportCSV,
+    handleQuickFilterChange,
+    handleToggleHideEmptyColumns,
+    hidingEmptyColumns,
+    filterModel,
+    dynamicButtons = [],
+    gridColumns,
+    gridType
+  } = props;
+  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll || !handleToggleHideEmptyColumns) return <></>;
+  const [inputValue, setInputValue] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [openExportModal, setOpenExportModal] = useState(false);
+  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(event.target.value);
+    setIsTyping(true);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      handleQuickFilterChange({
+        ...filterModel,
+        items: filterModel?.items || [],
+        quickFilterValues: inputValue.split(' ') || []
+      });
+      setIsTyping(false);
+    }
+  };
+
+  const handleClearInput = () => {
+    setInputValue('');
+    handleQuickFilterChange({
+      ...filterModel,
+      items: filterModel?.items || [],
+      quickFilterValues: []
+    });
+    setIsTyping(false);
+  };
+
+  useEffect(() => {
+    if (isTyping) {
+      const timeout = setTimeout(() => setIsTyping(false), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [isTyping, inputValue]);
+
+  function exportFilterModel() {
+    const jsonData = JSON.stringify(filterModel, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'results.json';
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  const apiRef = useGridApiContext();
+  const csvHeaders = gridColumns
+    ?.filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
+    .map(column => column.field);
+
+  let formHeaders: string[];
+  if (gridType === 'alltaxonomiesview') {
+    formHeaders = getTableHeaders(FormType.species).map(header => header.label);
+  } else formHeaders = getTableHeaders(gridType as FormType).map(header => header.label);
+
+  return (
+    <GridToolbarContainer>
+      <Box
+        sx={{
+          display: 'flex',
+          flex: 1,
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: 'warning.main',
+          borderRadius: '4px',
+          p: 2
+        }}
+      >
+        <Box sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
+          <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
+            <Box display={'flex'} alignItems={'center'}>
+              <GridToolbarColumnsButton />
+              <GridToolbarFilterButton />
+              <GridToolbarQuickFilter
+                variant={'outlined'}
+                value={inputValue}
+                onKeyDown={handleKeyDown}
+                onChange={handleInputChange}
+                placeholder={'Search All Fields...'}
+                slotProps={{
+                  input: {
+                    endAdornment: null
+                  }
+                }}
+                sx={{ ml: 2 }}
+              />
+              <Tooltip title={'Clear filter'} placement={'right'}>
+                <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
+                  <ClearIcon fontSize={'small'} />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Tooltip>
+          <Button variant={'plain'} color={'primary'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+            Refresh
+          </Button>
+          <Button
+            variant={'plain'}
+            color={'primary'}
+            endDecorator={
+              <CloudDownloadIcon
+                sx={{
+                  fontSize: '1.5rem',
+                  verticalAlign: 'middle'
+                }}
+              />
+            }
+            onClick={() => setOpenExportModal(true)}
+          >
+            Export as CSV...
+          </Button>
+          <Typography>
+            <Checkbox checked={hidingEmptyColumns} onChange={(event: { target: { checked: boolean } }) => handleToggleHideEmptyColumns(event.target.checked)} />
+            <strong>{hidingEmptyColumns ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>
+          </Typography>
+        </Box>
+      </Box>
+      <Stack direction={'row'} spacing={2}>
+        {dynamicButtons.map((button: any, index: number) => (
+          <>
+            {button.tooltip ? (
+              <>
+                <Tooltip title={button.tooltip} placement={'bottom'} arrow>
+                  <Button key={index} onClick={button.onClick} variant={'outlined'} color={'neutral'}>
+                    {button.label}
+                  </Button>
+                </Tooltip>
+              </>
+            ) : (
+              <Button key={index} onClick={button.onClick} variant={'outlined'} color={'neutral'}>
+                {button.label}
+              </Button>
+            )}
+          </>
+        ))}
+      </Stack>
+      <Modal
+        open={openExportModal}
+        onClose={() => setOpenExportModal(false)}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+      >
+        <ModalDialog
+          role={'alertdialog'}
+          sx={{
+            width: '90%',
+            maxWidth: '60vh',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            p: 3
+          }}
+        >
+          <DialogTitle>
+            <Typography level={'h3'}>Exporting Data</Typography>
+          </DialogTitle>
+          <DialogContent
+            sx={{
+              mt: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              flexGrow: 1,
+              overflowY: 'auto'
+            }}
+          >
+            <Stack direction={'row'} sx={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Stack direction={'column'}>
+                <Typography level={'body-md'}>Desired Format Type:</Typography>
+                <Typography level={'body-sm'}>You can export data in either of these formats:</Typography>
+                <Stack direction={'row'}>
+                  <Chip>
+                    <strong>Table CSV</strong>
+                  </Chip>
+                  <Chip>
+                    <strong>Form CSV</strong>
+                  </Chip>
+                </Stack>
+              </Stack>
+              <Switch
+                size={'lg'}
+                checked={exportType === 'csv'}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
+                endDecorator={
+                  <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+                    <Skeleton loading={exportType !== 'csv'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
+                      <GridOnIcon />
+                    </Skeleton>
+                    <Typography level={'body-sm'}>
+                      <Skeleton loading={exportType !== 'csv'}>CSV</Skeleton>
+                    </Typography>
+                  </Stack>
+                }
+                startDecorator={
+                  <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+                    <Skeleton loading={exportType !== 'form'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
+                      <PictureAsPdfIcon />
+                    </Skeleton>
+                    <Typography level={'body-sm'}>
+                      <Skeleton loading={exportType !== 'form'}>Form</Skeleton>
+                    </Typography>
+                  </Stack>
+                }
+                sx={{
+                  marginRight: '1.5em',
+                  transform: 'scale(1.25)',
+                  transformOrigin: 'center'
+                }}
+              />
+            </Stack>
+            <Divider sx={{ my: 1 }} />
+            <FormLabel>Export Headers:</FormLabel>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
+                gap: '0.5rem',
+                mb: 1,
+                width: '100%',
+                boxSizing: 'border-box'
+              }}
+            >
+              {exportType === 'csv'
+                ? csvHeaders?.map((header, index) => (
+                    <Chip key={index} variant={'soft'} color={'primary'}>
+                      {header}
+                    </Chip>
+                  ))
+                : formHeaders.map((label, index) => (
+                    <Chip key={index} variant={'soft'} color={'primary'}>
+                      {label}
+                    </Chip>
+                  ))}
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={async () => {
+                exportType === 'csv' ? await handleExportCSV() : await handleExportAll();
+                setOpenExportModal(false);
+              }}
+            >
+              Export
+            </Button>
+            <Button onClick={() => setOpenExportModal(false)}>Cancel</Button>
+          </DialogActions>
+        </ModalDialog>
+      </Modal>
+    </GridToolbarContainer>
+  );
+};
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const {
-    gridColumns,
-    gridType,
-    refresh,
-    setRefresh,
-    locked = false,
-    initialRow,
-    fieldToFocus,
-    dynamicButtons = [],
-    defaultHideEmpty = false,
-    apiRef = undefined
-  } = props;
+  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [] } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -78,9 +368,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [usingQuery, setUsingQuery] = useState('');
-  const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
+  const [hidingEmpty, setHidingEmpty] = useState(true);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
@@ -105,11 +394,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   useSession();
 
-  const localApiRef = apiRef === undefined ? useGridApiRef() : apiRef;
-
-  useEffect(() => {
-    console.log('updated rows: ', rows);
-  }, [rows]);
+  const apiRef = useGridApiRef();
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
@@ -153,28 +438,27 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber
       );
-      console.log('temp query: ', tempQuery);
-      const tempBody = await (
-        await fetch(tempQuery, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterModel })
-        })
-      ).json();
-      console.log('tempBody', tempBody);
-      const tempFQuery = tempBody.finishedQuery
-        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-        .trim();
-      console.log('tempfquery: ', tempFQuery);
+
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tempFQuery)
+          body: JSON.stringify(
+            (
+              await (
+                await fetch(tempQuery, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filterModel })
+                })
+              ).json()
+            ).finishedQuery
+              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+              .trim()
+          )
         })
       ).json();
-      console.log('export results: ', results);
 
       const jsonData = JSON.stringify(results, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
@@ -378,9 +662,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         sLink.click();
         document.body.removeChild(sLink);
         break;
-      case 'viewfulltable':
-        await fetchFullData();
-        break;
     }
     setLoading(false);
   }, [currentPlot, currentCensus, currentSite, gridType]);
@@ -460,10 +741,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         promiseArguments.resolve(updatedRow);
 
         if (props.onDataUpdate) {
-          await props.onDataUpdate({
-            ...Object.fromEntries(Object.entries(promiseArguments.oldRow).filter(([, val]) => val !== undefined)),
-            ...Object.fromEntries(Object.entries(updatedRow).filter(([, val]) => val !== undefined))
-          });
+          props.onDataUpdate();
         }
       } catch (error) {
         promiseArguments.reject(error);
@@ -553,11 +831,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      localApiRef.current?.stopRowEditMode({ id, ignoreModifications: true });
+      apiRef.current.stopRowEditMode({ id, ignoreModifications: true });
 
       const oldRow = rows.find(row => String(row.id) === String(id));
 
-      const updatedRow = localApiRef.current?.getRowWithUpdatedValues(id, 'anyField');
+      const updatedRow = apiRef.current.getRowWithUpdatedValues(id, 'anyField');
 
       if (oldRow && updatedRow) {
         setPromiseArguments({
@@ -570,7 +848,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         openConfirmationDialog('save', id);
       }
     },
-    [locked, rowModesModel, rows, localApiRef, openConfirmationDialog]
+    [locked, rowModesModel, rows, apiRef, openConfirmationDialog]
   );
 
   const handleDeleteClick = useCallback(
@@ -588,7 +866,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     [locked, gridType, currentCensus, rows, openConfirmationDialog]
   );
 
-  const handleAddNewRow = useCallback(async () => {
+  const handleAddNewRow = useCallback(() => {
     if (locked) return;
     if (isNewRowAdded) return;
     const newRowCount = rowCount + 1;
@@ -682,7 +960,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     paginationModel: { page: number }
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
-    if ('date' in newRow) newRow.date = moment(newRow.date).format('YYYY-MM-DD');
     const fetchProcessQuery =
       gridType !== 'quadrats'
         ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
@@ -695,12 +972,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
       });
-      let responseJSON;
-      try {
-        responseJSON = await response.json();
-      } catch (e) {
-        console.error(e);
-      }
+
+      const responseJSON = await response.json();
 
       if (!response.ok) {
         throw new Error(responseJSON.message || 'An unknown error occurred');
@@ -828,11 +1101,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setTimeout(() => {
         const firstEditableColumn = filteredColumns.find(col => col.editable);
         if (firstEditableColumn) {
-          localApiRef.current?.setCellFocus(id, firstEditableColumn.field);
+          apiRef.current.setCellFocus(id, firstEditableColumn.field);
         }
       });
     },
-    [locked, localApiRef]
+    [locked, apiRef]
   );
 
   const handleCancelClick = useCallback(
@@ -928,8 +1201,12 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);
-    else return columns;
+    return columns;
   }, [rows, columns, hidingEmpty]);
+
+  const handleToggleHidingColumns = (checked: boolean) => {
+    setHidingEmpty(checked);
+  };
 
   const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
     if (locked) return;
@@ -965,7 +1242,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
           <StyledDataGrid
-            apiRef={localApiRef}
+            apiRef={apiRef}
             sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
@@ -1028,20 +1305,20 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             }}
             slotProps={{
               toolbar: {
+                locked: locked,
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
+                hidingEmptyColumns: hidingEmpty,
+                handleToggleHideEmptyColumns: handleToggleHidingColumns,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
                 dynamicButtons: dynamicButtons,
                 gridColumns: gridColumns,
-                gridType: gridType,
-                hidingEmpty: hidingEmpty,
-                setHidingEmpty: setHidingEmpty
-              } as GridToolbarProps & Partial<EditToolbarCustomProps>
+                gridType: gridType
+              }
             }}
-            showToolbar
             getRowHeight={() => 'auto'}
           />
         </Box>
@@ -1062,7 +1339,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             content="Are you sure you want to delete this row? This action cannot be undone."
           />
         )}
-        {isResetDialogOpen && <ResetViewModal open={isResetDialogOpen} setOpen={setIsResetDialogOpen} triggerResetView={async () => {}} />}
       </Box>
     );
   }
