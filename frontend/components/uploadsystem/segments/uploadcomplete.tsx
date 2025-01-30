@@ -81,7 +81,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     setProgressText(prev => ({ ...prev, quadrats: 'Quadrat list information loaded.' }));
   };
 
-  const [visibleRows, setVisibleRows] = useState<{ [filename: string]: number }>({});
+  const [visibleRows, setVisibleRows] = useState<Record<string, number>>({});
 
   const loadMoreRows = (filename: string, totalRows: number) => {
     setVisibleRows(prev => ({

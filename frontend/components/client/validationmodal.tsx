@@ -6,9 +6,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { Modal, ModalDialog } from '@mui/joy';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 
-type ValidationMessages = {
-  [key: string]: { id: number; description: string; definition: string };
-};
+type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
 interface VMProps {
   isValidationModalOpen: boolean;

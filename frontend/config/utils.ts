@@ -74,7 +74,7 @@ export type InitialValue<T> = T extends string
               : undefined;
 
 export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> } {
-  const typeMap: { [key: string]: any } = {
+  const typeMap: Record<string, any> = {
     string: '',
     number: 0,
     boolean: false,
@@ -169,7 +169,7 @@ export async function handleUpsert<Result>(
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
-  let id: number = 0;
+  let id = 0;
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);

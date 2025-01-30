@@ -6,9 +6,7 @@ import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 
-type ValidationMessages = {
-  [key: string]: { id: number; description: string; definition: string };
-};
+type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
 const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, schema }) => {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});

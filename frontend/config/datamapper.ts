@@ -80,7 +80,7 @@ export interface IDataMapper<RDS, Result> {
 }
 
 export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
-  mapData(results: Result[], indexOffset: number = 1): RDS[] {
+  mapData(results: Result[], indexOffset = 1): RDS[] {
     return results.map((item, index) => {
       const rds: any = {};
       for (const key in item) {
