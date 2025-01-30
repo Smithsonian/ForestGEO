@@ -449,7 +449,9 @@ const EditToolbar = (props: EditToolbarProps) => {
               >
                 Export
               </Button>
-              <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)}>Cancel</Button>
+              <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)}>
+                Cancel
+              </Button>
             </DialogActions>
           </ModalDialog>
         </Modal>

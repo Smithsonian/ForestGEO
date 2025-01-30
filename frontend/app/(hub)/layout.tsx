@@ -449,10 +449,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
           </IconButton>
         </Box>
       </Box>
-      <GithubFeedbackModal
-        open={isFeedbackModalOpen}
-        onClose={() => setIsFeedbackModalOpen(false)}
-      />
+      <GithubFeedbackModal open={isFeedbackModalOpen} onClose={() => setIsFeedbackModalOpen(false)} />
     </>
   );
 }
