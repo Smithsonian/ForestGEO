@@ -638,6 +638,7 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <Select
         className="site-select sidebar-item"
+        aria-label={'Select a Site'}
         placeholder="Select a Site"
         name="None"
         required

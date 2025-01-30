@@ -95,6 +95,7 @@
     "stream": false
   },
   "devDependencies": {
+    "@axe-core/react": "^4.10.1",
     "@monaco-editor/react": "^4.6.0",
     "monaco-editor": "^0.52.0",
     "monaco-editor-webpack-plugin": "^7.1.0"

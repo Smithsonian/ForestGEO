@@ -217,21 +217,19 @@ const EditToolbar = (props: EditToolbarProps) => {
       </Box>
       <Stack direction={'row'} spacing={2}>
         {dynamicButtons.map((button: any, index: number) => (
-          <>
+          <React.Fragment key={index}>
             {button.tooltip ? (
-              <>
-                <Tooltip title={button.tooltip} placement={'bottom'} arrow>
-                  <Button key={index} onClick={button.onClick} variant={'outlined'} color={'neutral'}>
-                    {button.label}
-                  </Button>
-                </Tooltip>
-              </>
+              <Tooltip title={button.tooltip} placement={'bottom'} arrow>
+                <Button onClick={button.onClick} variant={'outlined'} color={'neutral'}>
+                  {button.label}
+                </Button>
+              </Tooltip>
             ) : (
-              <Button key={index} onClick={button.onClick} variant={'outlined'} color={'neutral'}>
+              <Button onClick={button.onClick} variant={'outlined'} color={'neutral'}>
                 {button.label}
               </Button>
             )}
-          </>
+          </React.Fragment>
         ))}
       </Stack>
       <Modal
