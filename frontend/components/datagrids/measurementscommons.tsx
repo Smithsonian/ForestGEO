@@ -392,6 +392,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                 <Chip
                   color={'success'}
                   size={'lg'}
+                  aria-label={exportVisibility.includes('valid') ? 'Rows passing validation will be exported' : "Rows passing validation won't be exported"}
                   variant={exportVisibility.includes('valid') ? 'soft' : 'outlined'}
                   startDecorator={exportVisibility.includes('valid') ? <CheckIcon /> : undefined}
                   sx={{
@@ -408,6 +409,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                   color={'danger'}
                   size={'lg'}
                   variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
+                  aria-label={exportVisibility.includes('errors') ? 'Rows failing validation will be exported' : "Rows failing validation won't be exported"}
                   startDecorator={exportVisibility.includes('errors') ? <CheckIcon /> : undefined}
                   sx={{
                     flex: 1,
@@ -423,6 +425,7 @@ const EditToolbar = (props: EditToolbarProps) => {
                   color={'primary'}
                   size={'lg'}
                   variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}
+                  aria-label={exportVisibility.includes('pending') ? 'Rows pending validation will be exported' : "Rows pending validation won't be exported"}
                   startDecorator={exportVisibility.includes('pending') ? <CheckIcon /> : undefined}
                   sx={{
                     flex: 1,
@@ -442,10 +445,11 @@ const EditToolbar = (props: EditToolbarProps) => {
                   await downloadExportedData();
                   setOpenExportModal(false);
                 }}
+                aria-label={'Export selected data/visibility and close the modal'}
               >
                 Export
               </Button>
-              <Button onClick={() => setOpenExportModal(false)}>Cancel</Button>
+              <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)}>Cancel</Button>
             </DialogActions>
           </ModalDialog>
         </Modal>
@@ -524,7 +528,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const currentCensus = useOrgCensusContext();
   const { setLoading } = useLoading();
   // use the session
-  useSession();
+  const { data: session } = useSession();
 
   const apiRef = useGridApiRef();
 
@@ -1291,8 +1295,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       };
     });
-    if (locked) {
-      return [validationStatusColumn, measurementDateColumn, ...commonColumns];
+    if (locked || (session?.user.userStatus !== 'global' && session?.user.userStatus !== 'db admin')) {
+      // permissions locking measurements view actions
+      return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns)];
     }
     return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
   }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors, rowModesModel]);
