@@ -11,7 +11,6 @@ export interface PostValidationQueriesRDS {
   lastRunResult?: string;
   lastRunStatus?: string;
 }
-
 export type PostValidationQueriesResult = ResultType<PostValidationQueriesRDS>;
 
 export interface ValidationProceduresRDS {
@@ -25,10 +24,8 @@ export interface ValidationProceduresRDS {
   createdAt?: Date;
   updatedAt?: Date;
 }
-
 export type ValidationProceduresResult = ResultType<ValidationProceduresRDS>;
 export const initialValidationProcedure = createInitialObject<ValidationProceduresRDS>();
-
 export interface ValidationChangelogRDS {
   id?: number;
   validationRunID?: number;
@@ -42,5 +39,14 @@ export interface ValidationChangelogRDS {
   expectedValueRange?: string;
   additionalDetails?: string;
 }
-
 export type ValidationChangelogResult = ResultType<ValidationChangelogRDS>;
+export interface SiteSpecificValidationsRDS {
+  id?: number;
+  validationProcedureID?: number;
+  name?: string;
+  definition?: string;
+  description?: string;
+  isEnabled?: boolean;
+}
+export type SiteSpecificValidationsResult = ResultType<SiteSpecificValidationsRDS>;
+export const initialSiteSpecificValidation = createInitialObject<SiteSpecificValidationsRDS>();

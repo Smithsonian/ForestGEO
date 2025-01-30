@@ -11,7 +11,6 @@ export interface SitesRDS {
   subquadratDimY?: number;
   doubleDataEntry?: boolean;
 }
-
 export type Site = SitesRDS | undefined;
 
 export interface SitesResult {
@@ -74,10 +73,8 @@ export interface PlotRDS {
   numQuadrats?: number;
   usesSubquadrats?: boolean;
 }
-
 export type Plot = PlotRDS | undefined;
 export type PlotsResult = ResultType<PlotRDS>;
-
 export interface QuadratRDS {
   id?: number;
   quadratID?: number;
@@ -90,7 +87,6 @@ export interface QuadratRDS {
   area?: number;
   quadratShape?: string;
 }
-
 export type QuadratResult = ResultType<QuadratRDS>;
 export type Quadrat = QuadratRDS | undefined;
 export const validateQuadratsRow: ValidationFunction = row => {
@@ -112,32 +108,4 @@ export interface CensusQuadratRDS {
   quadratID?: number;
   censusID?: number;
 }
-
 export type CensusQuadratResult = ResultType<CensusQuadratRDS>;
-
-export interface CensusAttributesRDS {
-  id?: number;
-  caID?: number;
-  quadratID?: number;
-  code?: string;
-}
-
-export type CensusAttributesResult = ResultType<CensusAttributesRDS>;
-
-export interface CensusPersonnelRDS {
-  id?: number;
-  cpID?: number;
-  personnelID?: number;
-  censusID?: number;
-}
-
-export type CensusPersonnelResult = ResultType<CensusPersonnelRDS>;
-
-export interface CensusSpeciesRDS {
-  id?: number;
-  csID?: number;
-  speciesID?: number;
-  censusID?: number;
-}
-
-export type CensusSpeciesResult = ResultType<CensusSpeciesRDS>;

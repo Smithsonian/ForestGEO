@@ -16,8 +16,7 @@
       "options": {
         "singleQuote": false
       }
-    },
-    {
+    },  {
       "files": "*.html",
       "options": {
         "printWidth": 120

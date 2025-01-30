@@ -20,7 +20,6 @@ export interface SpeciesRDS {
 
 export type SpeciesResult = ResultType<SpeciesRDS>;
 export const initialSpeciesRDSRow = createInitialObject<SpeciesRDS>();
-
 export interface SpeciesLimitsRDS {
   id?: number;
   speciesLimitID?: number;
@@ -31,7 +30,6 @@ export interface SpeciesLimitsRDS {
   upperBound?: number;
   lowerBound?: number;
 }
-
 export type SpeciesLimitsResult = ResultType<SpeciesLimitsRDS>;
 
 export function getSpeciesLimitsHCs(): ColumnStates {
@@ -79,16 +77,13 @@ export const validateSpeciesFormRow: ValidationFunction = row => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
-
 export interface FamilyRDS {
   id?: number;
   familyID?: number;
   family?: string;
   referenceID?: number;
 }
-
 export type FamilyResult = ResultType<FamilyRDS>;
-
 export interface GenusRDS {
   id?: number;
   genusID?: number;
@@ -97,9 +92,7 @@ export interface GenusRDS {
   referenceID?: number;
   genusAuthority?: string;
 }
-
 export type GenusResult = ResultType<GenusRDS>;
-
 export interface ReferenceRDS {
   id?: number;
   referenceID?: number;
@@ -107,9 +100,7 @@ export interface ReferenceRDS {
   fullReference?: string;
   dateOfPublication?: Date;
 }
-
 export type ReferenceResult = ResultType<ReferenceRDS>;
-
 export interface StemRDS {
   id?: number;
   stemID?: number;
@@ -122,18 +113,14 @@ export interface StemRDS {
   moved?: boolean;
   stemDescription?: string;
 }
-
 export type StemResult = ResultType<StemRDS>;
-
 export interface TreeRDS {
   id?: number;
   treeID?: number;
   treeTag?: string;
   speciesID?: number;
 }
-
 export type TreeResult = ResultType<TreeRDS>;
-
 export interface SpecimensRDS {
   id?: number;
   specimenID?: number;
@@ -147,9 +134,7 @@ export interface SpecimensRDS {
   determinedBy?: string;
   description?: string;
 }
-
 export type SpecimensResult = ResultType<SpecimensRDS>;
-
 export interface SpeciesInventoryRDS {
   id: number;
   speciesInventoryID: number;
@@ -158,5 +143,4 @@ export interface SpeciesInventoryRDS {
   speciesID: number | null;
   subSpeciesID: number | null;
 }
-
 export type SpeciesInventoryResult = ResultType<SpeciesInventoryRDS>;

@@ -9,6 +9,13 @@ interface ValidationProcedure {
   Definition: string;
 }
 
+interface SiteSpecificValidations {
+  ValidationProcedureID: number;
+  Name: string;
+  Description: string;
+  Definition: string;
+}
+
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
 export async function GET(request: NextRequest): Promise<NextResponse<ValidationMessages>> {
@@ -16,16 +23,22 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('No schema variable provided!');
   try {
-    const siteQuery = `SELECT ValidationID, ProcedureName, Description, Definition FROM ${schema}.sitespecificvalidations WHERE IsEnabled = 1;`;
+    const query = `SELECT ValidationID, ProcedureName, Description, Definition FROM catalog.validationprocedures WHERE IsEnabled IS TRUE;`;
+    const results: ValidationProcedure[] = await conn.executeQuery(query);
 
-    const results: ValidationProcedure[] = await conn.executeQuery(siteQuery);
+    const customQuery = `SELECT ValidationProcedureID, Name, Description, Definition FROM ${schema}.sitespecificvalidations WHERE IsEnabled IS TRUE;`;
+    const customResults: SiteSpecificValidations[] = await conn.executeQuery(customQuery);
 
     const validationMessages: ValidationMessages = results.reduce((acc, { ValidationID, ProcedureName, Description, Definition }) => {
       acc[ProcedureName] = { id: ValidationID, description: Description, definition: Definition };
       return acc;
     }, {} as ValidationMessages);
 
-    return new NextResponse(JSON.stringify({ coreValidations: validationMessages }), {
+    const siteValidationMessages: ValidationMessages = customResults.reduce((acc, { ValidationProcedureID, Name, Description, Definition }) => {
+      acc[Name] = { id: ValidationProcedureID, description: Description, definition: Definition };
+      return acc;
+    }, {} as ValidationMessages);
+    return new NextResponse(JSON.stringify({ coreValidations: validationMessages, siteValidations: siteValidationMessages }), {
       status: HTTPResponses.OK,
       headers: { 'Content-Type': 'application/json' }
     });
@@ -34,5 +47,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });
+  } finally {
+    await conn.closeConnection();
   }
 }

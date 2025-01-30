@@ -5,11 +5,11 @@ import { ColumnStates } from '@/config/macros';
 export interface PersonnelRDS {
   id?: number;
   personnelID?: number;
+  censusID?: number;
   firstName?: string;
   lastName?: string;
   roleID?: number;
 }
-
 export type PersonnelResult = ResultType<PersonnelRDS>;
 // personnel table column character limits
 const PERSONNEL_FIRSTNAME_LIMIT = 50;
@@ -47,12 +47,10 @@ export interface QuadratPersonnelRDS {
 }
 
 export type QuadratPersonnelResult = ResultType<QuadratPersonnelRDS>;
-
 export interface RoleRDS {
   id?: number;
   roleID?: number;
   roleName?: string;
   roleDescription?: string;
 }
-
 export type RoleResult = ResultType<RoleRDS>;

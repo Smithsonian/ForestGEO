@@ -1,16 +1,22 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
-import { ReviewStates, UploadValidationProps } from '@/config/macros/uploadsystemmacros';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { Modal, ModalDialog } from '@mui/joy';
 import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
-const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, schema }) => {
+interface VMProps {
+  isValidationModalOpen: boolean;
+  handleCloseValidationModal: () => Promise<void>;
+}
+
+function ValidationModal(props: VMProps) {
+  const { isValidationModalOpen, handleCloseValidationModal } = props;
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
-  const [isValidationComplete, setIsValidationComplete] = useState(false);
+  const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
   const [errorsFound, setErrorsFound] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
@@ -106,6 +112,7 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
       } finally {
         setIsUpdatingRows(false);
         setIsValidationComplete(true);
+        await handleCloseValidationModal();
       }
     } catch (error) {
       console.error('Error during validation process:', error);
@@ -122,78 +129,87 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
     ));
   };
 
-  useEffect(() => {
-    if (isValidationComplete) setReviewState(ReviewStates.UPLOAD_AZURE);
-  }, [isValidationComplete]);
-
   return (
-    <>
-      {Object.keys(validationMessages).length > 0 && (
-        <Box
-          sx={{
-            width: '100%',
-            p: 2,
-            display: 'flex',
-            flex: 1,
-            flexDirection: 'column'
-          }}
-        >
-          {!isValidationComplete ? (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <Typography variant="h6">Validating data...</Typography>
-              {renderProgressBars()}
-            </Box>
-          ) : isUpdatingRows ? ( // Show updating message when update is in progress
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <CircularProgress />
-              <Typography variant="h6">Updating validated rows...</Typography>
-            </Box>
-          ) : (
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <Typography variant="h6">Validation Results</Typography>
-              {apiErrors.length > 0 && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography color="error">Some validations could not be performed:</Typography>
-                  {apiErrors.map(error => (
-                    <Typography key={error} color="error">
-                      - {error}
-                    </Typography>
-                  ))}
-                </Box>
-              )}
-              {rowsPassed.length > 0 &&
-                rowsPassed.map(row => (
-                  <Box key={row.id} sx={{ mb: 2 }}>
-                    <Typography>Updated Row: {row.coreMeasurementID}</Typography>
+    <Modal open={isValidationModalOpen} onClose={handleCloseValidationModal}>
+      <ModalDialog
+        sx={{
+          width: '80%',
+          borderRadius: 'md',
+          p: 2,
+          boxShadow: 'lg',
+          display: 'flex',
+          flex: 1,
+          flexDirection: 'column',
+          alignItems: 'center'
+        }}
+      >
+        {Object.keys(validationMessages).length > 0 && (
+          <Box
+            sx={{
+              width: '100%',
+              p: 2,
+              display: 'flex',
+              flex: 1,
+              flexDirection: 'column'
+            }}
+          >
+            {!isValidationComplete ? (
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Typography variant="h6">Validating data...</Typography>
+                {renderProgressBars()}
+              </Box>
+            ) : isUpdatingRows ? (
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <CircularProgress />
+                <Typography variant="h6">Updating validated rows...</Typography>
+              </Box>
+            ) : (
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Typography variant="h6">Validation Results</Typography>
+                {apiErrors.length > 0 && (
+                  <Box sx={{ mb: 2 }}>
+                    <Typography color="error">Some validations could not be performed:</Typography>
+                    {apiErrors.map(error => (
+                      <Typography key={error} color="error">
+                        - {error}
+                      </Typography>
+                    ))}
                   </Box>
-                ))}
-            </Box>
-          )}
-        </Box>
-      )}
-    </>
+                )}
+                {rowsPassed.length > 0 &&
+                  rowsPassed.map(row => (
+                    <Box key={row.id} sx={{ mb: 2 }}>
+                      <Typography>Updated Row: {row.coreMeasurementID}</Typography>
+                    </Box>
+                  ))}
+              </Box>
+            )}
+          </Box>
+        )}
+      </ModalDialog>
+    </Modal>
   );
-};
+}
 
-export default UploadValidation;
+export default ValidationModal;

@@ -19,11 +19,7 @@ export interface FieldTemplate {
   initialValue?: string | number | boolean | any[] | null;
 }
 
-export interface Templates {
-  [gridType: string]: {
-    [fieldName: string]: FieldTemplate;
-  };
-}
+export type Templates = Record<string, Record<string, FieldTemplate>>;
 
 export type FetchQueryFunction = (
   siteSchema: string,
@@ -46,7 +42,7 @@ export type ProcessPostPatchQueryFunction = (
 ) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
-const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
+const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   default: {
     id: false
   },
@@ -98,7 +94,7 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   }
 };
 
-export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
+export const getColumnVisibilityModel = (gridType: string): Record<string, boolean> => {
   return columnVisibilityMap[gridType] || columnVisibilityMap.default;
 };
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (
@@ -241,10 +237,10 @@ export interface DataGridCommonProps {
 }
 
 // Define types for the new states and props
-export type PendingAction = {
+export interface PendingAction {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
-};
+}
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
@@ -301,7 +297,7 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: any[];
 }
 
-export const errorMapping: { [key: string]: string[] } = {
+export const errorMapping: Record<string, string[]> = {
   '1': ['attributes'],
   '2': ['measuredDBH'],
   '3': ['measuredHOM'],

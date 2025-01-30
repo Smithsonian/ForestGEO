@@ -6,9 +6,10 @@
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
 import ConnectionManager from '@/config/connectionmanager';
-import { FileRow, FileRowSet } from '@/config/macros/formdetails';
+import { FileRow } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
+import { processQuadrats } from '@/components/processors/processquadrats';
 import { processCensus } from '@/components/processors/processcensus';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -102,12 +103,12 @@ export const booleanToBit = (value: boolean | undefined): number => (value ? 1 :
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
-
 export interface UnifiedValidityFlags {
   attributes: boolean;
   personnel: boolean;
   species: boolean;
   quadrats: boolean;
+  quadratpersonnel: boolean;
 }
 
 export interface GridSelections {
@@ -127,16 +128,6 @@ export interface SpecialProcessingProps {
   fullName?: string;
 }
 
-export interface SpecialBulkProcessingProps {
-  connectionManager: ConnectionManager;
-  rowDataSet: FileRowSet;
-  schema: string;
-  plot?: Plot;
-  census?: OrgCensus;
-  quadratID?: number;
-  fullName?: string;
-}
-
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
   formType: string;
 }
@@ -146,7 +137,6 @@ export interface FileMapping {
   columnMappings: Record<string, string>;
   specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
 }
-
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
   attributes: {
@@ -175,7 +165,7 @@ export const fileMappings: Record<string, FileMapping> = {
       genus: 'Genus.GenusName',
       species: 'Species.SpeciesName',
       subspecies: 'Species.SubspeciesName', // optional
-      idlevel: 'Species.IDLevel',
+      IDLevel: 'Species.IDLevel',
       authority: 'Species.Authority',
       subauthority: 'Species.SubspeciesAuthority' // optional
     },
@@ -193,7 +183,8 @@ export const fileMappings: Record<string, FileMapping> = {
       dimy: 'DimensionY',
       dimensionunit: 'DimensionUnits',
       quadratshape: 'QuadratShape'
-    }
+    },
+    specialProcessing: processQuadrats
   },
   measurements: {
     tableName: '', // Multiple tables involved
@@ -201,7 +192,6 @@ export const fileMappings: Record<string, FileMapping> = {
     specialProcessing: processCensus
   }
 };
-
 export interface ValidationResponse {
   totalRows: number;
   failedRows: number;

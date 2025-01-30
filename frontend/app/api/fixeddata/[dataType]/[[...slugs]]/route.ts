@@ -146,7 +146,7 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
 
   const connectionManager = ConnectionManager.getInstance();
   const { newRow } = await request.json();
-  let insertIDs: { [key: string]: number } = {};
+  let insertIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
@@ -209,7 +209,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
   const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
   const { newRow, oldRow } = await request.json();
-  let updateIDs: { [key: string]: number } = {};
+  let updateIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
 
   try {
