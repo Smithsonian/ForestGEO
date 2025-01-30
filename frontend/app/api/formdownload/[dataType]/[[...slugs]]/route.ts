@@ -43,7 +43,7 @@ export async function GET(_request: NextRequest, { params }: { params: { dataTyp
   const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
   const filterModel = filterModelParam ? JSON.parse(filterModelParam) : undefined;
   const connectionManager = ConnectionManager.getInstance();
-  let query: string = '';
+  let query = '';
   let results: any[] = [];
   let mappedResults: any[] = [];
   let formMappedResults: any[] = [];

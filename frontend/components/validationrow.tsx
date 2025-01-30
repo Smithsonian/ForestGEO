@@ -18,7 +18,7 @@ function useDebouncedCallback(callback: (...args: any[]) => void, delay: number)
   };
 }
 
-type ValidationRowProps = {
+interface ValidationRowProps {
   validation: ValidationProceduresRDS;
   onSaveChanges: (validation: ValidationProceduresRDS) => Promise<void>;
   isDarkMode: boolean;
@@ -26,7 +26,7 @@ type ValidationRowProps = {
   replacements: { schema: string | undefined; currentPlotID: number | undefined; currentCensusID: number | undefined };
   handleExpandClick: (validationID: number) => void;
   schemaDetails: { table_name: string; column_name: string }[];
-};
+}
 
 const ValidationRow: React.FC<ValidationRowProps> = ({
   validation,

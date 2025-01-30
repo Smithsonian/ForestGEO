@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
         name: blob.name,
         user: blob.metadata?.user,
         formType: blob.metadata?.FormType,
-        fileErrors: blob.metadata?.FileErrorState ? JSON.parse(<string>blob.metadata?.FileErrorState) : '',
+        fileErrors: blob.metadata?.FileErrorState ? JSON.parse(blob.metadata?.FileErrorState as string) : '',
         date: blob.properties.lastModified
       });
     }

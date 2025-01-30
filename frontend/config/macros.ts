@@ -14,9 +14,7 @@ import { processCensus } from '@/components/processors/processcensus';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
-export type ColumnStates = {
-  [key: string]: boolean;
-};
+export type ColumnStates = Record<string, boolean>;
 
 export type ValidationErrorID = number;
 
@@ -105,18 +103,18 @@ export const booleanToBit = (value: boolean | undefined): number => (value ? 1 :
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
-export type UnifiedValidityFlags = {
+export interface UnifiedValidityFlags {
   attributes: boolean;
   personnel: boolean;
   species: boolean;
   quadrats: boolean;
   quadratpersonnel: boolean;
-};
+}
 
-export type GridSelections = {
+export interface GridSelections {
   label: string;
   value: number;
-};
+}
 
 export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field crew';
 
@@ -134,11 +132,11 @@ export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
   formType: string;
 }
 
-export type FileMapping = {
+export interface FileMapping {
   tableName: string;
-  columnMappings: { [fileColumn: string]: string };
+  columnMappings: Record<string, string>;
   specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
-};
+}
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
   attributes: {
@@ -194,12 +192,12 @@ export const fileMappings: Record<string, FileMapping> = {
     specialProcessing: processCensus
   }
 };
-export type ValidationResponse = {
+export interface ValidationResponse {
   totalRows: number;
   failedRows: number;
   message: string;
   failedCoreMeasurementIDs?: number[];
-};
+}
 
 export const HEADER_ALIGN = 'center';
 export const CELL_ALIGN = 'center';

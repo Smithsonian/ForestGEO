@@ -1,6 +1,6 @@
 import { createInitialObject, ResultType } from '@/config/utils';
 
-export type PostValidationQueriesRDS = {
+export interface PostValidationQueriesRDS {
   id?: number;
   queryID?: number;
   queryName?: string;
@@ -10,10 +10,10 @@ export type PostValidationQueriesRDS = {
   lastRunAt?: Date;
   lastRunResult?: string;
   lastRunStatus?: string;
-};
+}
 export type PostValidationQueriesResult = ResultType<PostValidationQueriesRDS>;
 
-export type ValidationProceduresRDS = {
+export interface ValidationProceduresRDS {
   id?: number;
   validationID?: number;
   procedureName?: string;
@@ -23,10 +23,10 @@ export type ValidationProceduresRDS = {
   isEnabled?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
-};
+}
 export type ValidationProceduresResult = ResultType<ValidationProceduresRDS>;
 export const initialValidationProcedure = createInitialObject<ValidationProceduresRDS>();
-export type ValidationChangelogRDS = {
+export interface ValidationChangelogRDS {
   id?: number;
   validationRunID?: number;
   procedureName?: string;
@@ -38,15 +38,15 @@ export type ValidationChangelogRDS = {
   measuredValue?: string;
   expectedValueRange?: string;
   additionalDetails?: string;
-};
+}
 export type ValidationChangelogResult = ResultType<ValidationChangelogRDS>;
-export type SiteSpecificValidationsRDS = {
+export interface SiteSpecificValidationsRDS {
   id?: number;
   validationProcedureID?: number;
   name?: string;
   definition?: string;
   description?: string;
   isEnabled?: boolean;
-};
+}
 export type SiteSpecificValidationsResult = ResultType<SiteSpecificValidationsRDS>;
 export const initialSiteSpecificValidation = createInitialObject<SiteSpecificValidationsRDS>();

@@ -5,9 +5,9 @@ import { RolesGridColumns } from '@/components/client/datagridcolumns';
 import { RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 
-type IsolatedRolesDataGridProps = {
+interface IsolatedRolesDataGridProps {
   onRolesUpdated: () => void;
-};
+}
 
 export default function IsolatedRolesDataGrid(props: IsolatedRolesDataGridProps) {
   const { onRolesUpdated } = props;
