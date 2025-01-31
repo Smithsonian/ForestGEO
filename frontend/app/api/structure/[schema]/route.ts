@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function GET(_request: NextRequest, { params }: { params: { schema: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string }> }) {
+  const params = await props.params;
   const schema = params.schema;
   if (!schema) throw new Error('no schema variable provided!');
   const query = `SELECT table_name, column_name 

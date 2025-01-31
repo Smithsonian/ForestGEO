@@ -251,9 +251,7 @@ const EditToolbar = (props: EditToolbarProps) => {
             p: 3
           }}
         >
-          <DialogTitle>
-            <Typography level={'h3'}>Exporting Data</Typography>
-          </DialogTitle>
+          <DialogTitle>Exporting Data</DialogTitle>
           <DialogContent
             sx={{
               mt: 1,
@@ -1303,7 +1301,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             }}
             slotProps={{
               toolbar: {
-                locked: locked,
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
@@ -1315,7 +1312,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 dynamicButtons: dynamicButtons,
                 gridColumns: gridColumns,
                 gridType: gridType
-              }
+              } as EditToolbarProps
             }}
             getRowHeight={() => 'auto'}
           />

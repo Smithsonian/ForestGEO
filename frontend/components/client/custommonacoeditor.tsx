@@ -1,11 +1,8 @@
 'use client';
 
-import { useMonaco } from '@monaco-editor/react';
-import dynamic from 'next/dynamic';
-import React, { Dispatch, memo, SetStateAction, useEffect, useState } from 'react';
+import * as monaco from 'monaco-editor';
+import React, { Dispatch, memo, SetStateAction, useEffect, useRef, useState } from 'react';
 import { Box, Button, Snackbar } from '@mui/joy';
-
-const Editor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 type CustomMonacoEditorProps = {
   schemaDetails: {
@@ -14,9 +11,10 @@ type CustomMonacoEditorProps = {
   }[];
   setContent?: Dispatch<SetStateAction<string | undefined>>;
   content?: string;
-  height?: any;
+  height?: string | number;
   isDarkMode?: boolean;
-} & React.ComponentPropsWithoutRef<typeof Editor>;
+  options?: monaco.editor.IStandaloneEditorConstructionOptions;
+};
 
 function processExplainOutput(explainRows: any[]): { valid: boolean; message: string } {
   for (const row of explainRows) {
@@ -36,9 +34,9 @@ function processExplainOutput(explainRows: any[]): { valid: boolean; message: st
   return { valid: true, message: 'The query is valid.' };
 }
 
-function CustomMonacoEditor(broadProps: CustomMonacoEditorProps) {
-  const { schemaDetails, setContent = () => {}, content, height, options = {}, isDarkMode, ...props } = broadProps;
-  const monaco = useMonaco();
+function CustomMonacoEditor({ schemaDetails, setContent = () => {}, content = '', height = '60vh', options = {}, isDarkMode }: CustomMonacoEditorProps) {
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement | null>(null);
   const [snackbarContent, setSnackbarContent] = useState<{ valid: boolean; message: string } | undefined>();
   const [openSnackbar, setOpenSnackbar] = useState(false);
 
@@ -52,10 +50,21 @@ function CustomMonacoEditor(broadProps: CustomMonacoEditorProps) {
   }
 
   useEffect(() => {
-    if (monaco) {
+    if (editorContainerRef.current) {
+      editorRef.current = monaco.editor.create(editorContainerRef.current, {
+        value: content,
+        language: 'mysql',
+        theme: isDarkMode ? 'vs-dark' : 'light',
+        ...options
+      });
+
+      editorRef.current.onDidChangeModelContent(() => {
+        setContent(editorRef.current?.getValue() ?? '');
+      });
+
       monaco.languages.registerCompletionItemProvider('mysql', {
         provideCompletionItems: (model, position) => {
-          const suggestions: any[] = [];
+          const suggestions: monaco.languages.CompletionItem[] = [];
           const word = model.getWordUntilPosition(position);
           const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
 
@@ -84,24 +93,17 @@ function CustomMonacoEditor(broadProps: CustomMonacoEditorProps) {
         }
       });
     }
-  }, [monaco]);
+
+    return () => {
+      editorRef.current?.dispose();
+    };
+  }, [schemaDetails, isDarkMode]);
 
   return (
     <>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <Button onClick={validateQuery}>Validate Query</Button>
-        <Editor
-          height={height ?? '60vh'}
-          language="mysql"
-          value={content}
-          onChange={value => setContent(value ?? '')}
-          theme={isDarkMode ? 'vs-dark' : 'light'}
-          options={{
-            ...options,
-            readOnly: options.readOnly ?? false
-          }}
-          {...props}
-        />
+        <div ref={editorContainerRef} style={{ height }} />
       </Box>
       <Snackbar
         variant={'soft'}

@@ -1,14 +1,13 @@
-// tailwind.config.js
-const colors = require('tailwindcss/colors');
-const plugin = require('tailwindcss/plugin');
+// tailwind.config.mjs
+import colors from 'tailwindcss/colors';
 
 /** @type {import('tailwindcss').Config} */
-module.exports = {
+export default {
   content: [
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
-    './app/**/*.{js,ts,jsx,tsx,mdx}',
-    './config/**/*.{js,ts,jsx,tsx,mdx}',
-    './types/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx,css}',
+    './app/**/*.{js,ts,jsx,tsx,mdx,css}',
+    './config/**/*.{js,ts,jsx,tsx,mdx,css}',
+    './types/**/*.{js,ts,jsx,tsx,mdx,css}',
     './styles/**/*.{js,ts,jsx,tsx,mdx,css}'
   ],
   theme: {
