@@ -4,10 +4,7 @@ import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import connectionmanager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
 
-export async function POST(
-  request: NextRequest,
-  props: { params: Promise<{ schema: string; slugs?: string[] }> }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ schema: string; slugs?: string[] }> }) {
   const params = await props.params;
   let errorRows: FailedMeasurementsRDS[] = await request.json();
   const schema = params.schema;

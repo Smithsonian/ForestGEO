@@ -1,39 +1,33 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
+/** @type {import('next').NextConfig} */
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
 
-/** @type {import('next').NextConfig} */
 const nextConfig = withBundleAnalyzer({
   experimental: {
-    serverMinification: false
+    serverMinification: false,
+    turbo: {
+      resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
+    }
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      config.resolve.fallback = { fs: false };
+      config.resolve.fallback = { fs: false }; // ✅ Fixes 'fs' module issue in client builds
     }
-    config.module.rules.push({
-      test: /\.cy.(js|ts|tsx|jsx)$/,
-      exclude: /node_modules/
-    });
 
     return config;
   },
-  turbopack: {
-    resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
-  },
-  eslint: {
-    ignoreDuringBuilds: true
-  },
-  typescript: {
-    ignoreBuildErrors: true
-  },
-  images: {
-    unoptimized: true
+  logging: {
+    fetches: {
+      fullUrl: true
+    }
   },
   output: 'standalone',
   reactStrictMode: true,
   distDir: 'build',
+  images: {
+    unoptimized: true // since images are served from the public directory
+  },
   env: {
     AZURE_SQL_USER: process.env.AZURE_SQL_USER,
     AZURE_SQL_PASSWORD: process.env.AZURE_SQL_PASSWORD,
