@@ -29,7 +29,6 @@ import {
   GridToolbarFilterButton,
   GridToolbarProps,
   GridToolbarQuickFilter,
-  ToolbarPropsOverrides,
   useGridApiContext,
   useGridApiRef
 } from '@mui/x-data-grid';
@@ -75,9 +74,7 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import Divider from '@mui/joy/Divider';
 
-type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
-
-const EditToolbar = (props: EditToolbarProps) => {
+const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) => {
   const {
     handleAddNewRow,
     handleRefresh,
@@ -89,9 +86,11 @@ const EditToolbar = (props: EditToolbarProps) => {
     filterModel,
     dynamicButtons = [],
     gridColumns,
-    gridType
+    gridType,
+    className,
+    ...other
   } = props;
-  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll || !handleToggleHideEmptyColumns) return <></>;
+  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll || !handleToggleHideEmptyColumns || !handleExportCSV) return <></>;
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [openExportModal, setOpenExportModal] = useState(false);
@@ -154,7 +153,7 @@ const EditToolbar = (props: EditToolbarProps) => {
   } else formHeaders = getTableHeaders(gridType as FormType).map(header => header.label);
 
   return (
-    <GridToolbarContainer>
+    <GridToolbarContainer className={className} {...other}>
       <Box
         sx={{
           display: 'flex',
@@ -1312,7 +1311,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 dynamicButtons: dynamicButtons,
                 gridColumns: gridColumns,
                 gridType: gridType
-              } as EditToolbarProps
+              } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
             getRowHeight={() => 'auto'}
           />

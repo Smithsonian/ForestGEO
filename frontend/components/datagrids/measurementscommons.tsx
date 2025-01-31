@@ -1538,7 +1538,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                     ? [{ label: 'Reset Validation Results?', onClick: () => setIsResetValidationModalOpen(true) }]
                     : [])
                 ]
-              }
+              } as EditToolbarProps
             }}
             getRowHeight={() => 'auto'}
             getRowClassName={getRowClassName}

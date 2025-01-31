@@ -7,7 +7,7 @@ import ConnectionManager from '@/config/connectionmanager';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
-export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function POST(request: NextRequest) {
   const body = await request.json();
   const dataType: string = body.gridType;
   const schema: string = body.schema;

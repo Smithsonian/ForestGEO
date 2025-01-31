@@ -9,10 +9,7 @@ import ConnectionManager from '@/config/connectionmanager';
  * @param params - The route parameters, including the `dataType` (either 'quadrats' or 'personnel') and the `slugs` (an array containing the schema, plotID, sourceCensusID, and newCensusID).
  * @returns A NextResponse with a success message or an error message, along with the appropriate HTTP status code.
  */
-export async function POST(
-  request: NextRequest,
-  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, plotID, sourceCensusID, newCensusID] = params.slugs;
