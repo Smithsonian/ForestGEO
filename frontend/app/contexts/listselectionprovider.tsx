@@ -1,6 +1,6 @@
 // ListSelectionProvider.tsx
 'use client';
-import React, { createContext, Dispatch, useContext, useReducer } from 'react';
+import React, { createContext, Dispatch, Reducer, useContext, useReducer } from 'react';
 import { createEnhancedDispatch, EnhancedDispatch, genericLoadReducer, LoadAction } from '@/config/macros/contextreducers';
 import { PlotRDS, QuadratRDS, SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -19,13 +19,18 @@ export const SiteListDispatchContext = createContext<EnhancedDispatch<SitesRDS[]
 export const FirstLoadDispatchContext = createContext<Dispatch<{ firstLoad: boolean }> | undefined>(undefined);
 
 export function ListSelectionProvider({ children }: Readonly<{ children: React.ReactNode }>) {
-  const [plotList, plotListDispatch] = useReducer<React.Reducer<PlotRDS[] | undefined, LoadAction<PlotRDS[]>>>(genericLoadReducer, []);
+  const plotListReducer: Reducer<PlotRDS[] | undefined, LoadAction<PlotRDS[]>> = genericLoadReducer<PlotRDS[]>;
+  const orgCensusListReducer: Reducer<OrgCensus[] | undefined, LoadAction<OrgCensus[]>> = genericLoadReducer<OrgCensus[]>;
+  const quadratListReducer: Reducer<QuadratRDS[] | undefined, LoadAction<QuadratRDS[]>> = genericLoadReducer<QuadratRDS[]>;
+  const siteListReducer: Reducer<SitesRDS[] | undefined, LoadAction<SitesRDS[]>> = genericLoadReducer<SitesRDS[]>;
 
-  const [orgCensusList, orgCensusListDispatch] = useReducer<React.Reducer<OrgCensus[] | undefined, LoadAction<OrgCensus[]>>>(genericLoadReducer, []);
+  const [plotList, plotListDispatch] = useReducer(plotListReducer, []);
 
-  const [quadratList, quadratListDispatch] = useReducer<React.Reducer<QuadratRDS[] | undefined, LoadAction<QuadratRDS[]>>>(genericLoadReducer, []);
+  const [orgCensusList, orgCensusListDispatch] = useReducer(orgCensusListReducer, []);
 
-  const [siteList, siteListDispatch] = useReducer<React.Reducer<SitesRDS[] | undefined, LoadAction<SitesRDS[]>>>(genericLoadReducer, []);
+  const [quadratList, quadratListDispatch] = useReducer(quadratListReducer, []);
+
+  const [siteList, siteListDispatch] = useReducer(siteListReducer, []);
 
   const [firstLoad, firstLoadDispatch] = useReducer(firstLoadReducer, true);
 

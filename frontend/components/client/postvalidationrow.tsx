@@ -9,6 +9,7 @@ import { Done } from '@mui/icons-material';
 import moment from 'moment/moment';
 import { darken } from '@mui/system';
 import dynamic from 'next/dynamic';
+import CodeEditor from '@/components/client/codeeditor';
 
 interface PostValidationRowProps {
   postValidation: PostValidationQueriesRDS;
@@ -36,7 +37,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
   schemaDetails
 }) => {
   const formattedResults = JSON.stringify(JSON.parse(postValidation.lastRunResult ?? '{}'), null, 2);
-  const CustomMonacoEditor = dynamic(() => import('@/components/client/custommonacoeditor'), { ssr: false });
+  const CustomMonacoEditor = dynamic(() => import('@/components/client/codeeditor'), { ssr: false });
 
   const successColor = !isDarkMode ? 'rgba(54, 163, 46, 0.3)' : darken('rgba(54,163,46,0.6)', 0.7);
   const failureColor = !isDarkMode ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.7);
@@ -120,21 +121,15 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
             }}
           >
             {expandedQuery === postValidation.queryID ? (
-              <CustomMonacoEditor
+              <CodeEditor
                 schemaDetails={schemaDetails}
-                content={postValidation.queryDefinition!.replace(/\${(.*?)}/g, (_match: any, p1: string) =>
+                value={postValidation.queryDefinition!.replace(/\${(.*?)}/g, (_match: any, p1: string) =>
                   String(replacements[p1 as keyof typeof replacements] ?? '')
                 )}
-                setContent={undefined}
+                setValue={undefined}
                 height={`${Math.min(300, 20 * (postValidation?.queryDefinition ?? '').split('\n').length)}px`}
                 isDarkMode={isDarkMode}
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                  wordWrap: 'off',
-                  lineNumbers: 'off'
-                }}
+                readOnly={true}
               />
             ) : (
               <Textarea
@@ -196,20 +191,13 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
               <Typography variant="h6" gutterBottom>
                 Last Run Results
               </Typography>
-              <CustomMonacoEditor
+              <CodeEditor
+                value={formattedResults ?? ''}
+                setValue={undefined}
                 schemaDetails={schemaDetails}
-                content={formattedResults}
-                setContent={undefined}
                 height={formattedResults ? `${Math.min(300, 20 * formattedResults.split('\n').length)}px` : undefined}
                 isDarkMode={isDarkMode}
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                  wordWrap: 'on'
-                }}
-                width={'75vw'}
-                defaultLanguage={'json'}
+                readOnly={true}
               />
             </Box>
           </TableCell>

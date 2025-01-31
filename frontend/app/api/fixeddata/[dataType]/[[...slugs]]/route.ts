@@ -136,10 +136,7 @@ export async function GET(
 }
 
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
-export async function POST(
-  request: NextRequest,
-  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID, _plotIDParam, censusIDParam] = params.slugs;
@@ -204,10 +201,7 @@ export async function POST(
 }
 
 // slugs: schema, gridID
-export async function PATCH(
-  request: NextRequest,
-  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
@@ -345,10 +339,7 @@ export async function PATCH(
 
 // slugs: schema, gridID
 // body: full data row, only need first item from it this time though
-export async function DELETE(
-  request: NextRequest,
-  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
-) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
