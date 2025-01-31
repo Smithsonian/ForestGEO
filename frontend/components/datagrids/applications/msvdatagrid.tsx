@@ -45,7 +45,6 @@ export default function MeasurementsSummaryViewDataGrid() {
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
   const currentSite = useSiteContext();
-  const { setLoading } = useLoading();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
@@ -63,6 +62,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+  const { setLoading } = useLoading();
 
   const addNewRowToGrid = () => {
     const id = randomId();

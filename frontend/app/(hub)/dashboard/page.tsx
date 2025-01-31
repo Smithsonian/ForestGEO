@@ -31,6 +31,7 @@ import { useEffect, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
+import { useLoading } from '@/app/contexts/loadingprovider';
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();
@@ -42,6 +43,8 @@ export default function DashboardPage() {
   const userEmail = session?.user?.email;
   const userRole = session?.user?.userStatus;
   const allowedSites = session?.user?.sites;
+
+  const { setLoading } = useLoading();
 
   const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
   const [isLoading, setIsLoading] = useState(false);
