@@ -7,7 +7,8 @@ import ConnectionManager from '@/config/connectionmanager';
 // slugs: schema, columnName, value ONLY
 // needs to match dynamic format established by other slug routes!
 // refit to match entire rows, using dataType convention to determine what columns need testing?
-export async function GET(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
+  const params = await props.params;
   // simple dynamic validation to confirm table input values:
   if (!params.slugs || params.slugs.length !== 3) throw new Error('slugs missing -- formvalidation');
   if (!params.dataType || params.dataType === 'undefined') throw new Error('no schema provided');

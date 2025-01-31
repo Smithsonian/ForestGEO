@@ -2,7 +2,7 @@ import { ColumnStates } from '@/config/macros';
 import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
-export type AllTaxonomiesViewRDS = {
+export interface AllTaxonomiesViewRDS {
   id?: number;
   familyID?: number;
   genusID?: number;
@@ -19,7 +19,7 @@ export type AllTaxonomiesViewRDS = {
   subspeciesAuthority?: string;
   fieldFamily?: string;
   description?: string;
-};
+}
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
@@ -35,7 +35,7 @@ export const validateMeasurementsRow: ValidationFunction = row => {
   return Object.keys(errors).length > 0 ? errors : null;
 };
 
-export type MeasurementsSummaryRDS = {
+export interface MeasurementsSummaryRDS {
   id?: number;
   coreMeasurementID?: number;
   censusID?: number;
@@ -58,7 +58,9 @@ export type MeasurementsSummaryRDS = {
   isValidated?: boolean;
   description?: string;
   attributes?: string;
-};
+  userDefinedFields?: string;
+  errors?: string;
+}
 export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;
 
 export function getMeasurementsSummaryViewHCs(): ColumnStates {
@@ -94,7 +96,7 @@ export function _getMeasurementsSummaryStagingViewHCs(): ColumnStates {
   };
 }
 
-export type StemTaxonomiesViewRDS = {
+export interface StemTaxonomiesViewRDS {
   id?: number;
   stemID?: number;
   treeID?: number;
@@ -115,9 +117,9 @@ export type StemTaxonomiesViewRDS = {
   subspeciesAuthority?: string;
   idLevel?: string;
   fieldFamily?: string;
-};
+}
 
-export type ViewFullTableRDS = {
+export interface ViewFullTableRDS {
   // datagrid
   id?: number;
   // IDs
@@ -205,7 +207,7 @@ export type ViewFullTableRDS = {
   attributeCode?: string;
   attributeDescription?: string;
   attributeStatus?: string;
-};
+}
 
 export type ViewFullTableResult = ResultType<ViewFullTableRDS>;
 

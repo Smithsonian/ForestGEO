@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid'; // For generating unique transaction IDs
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
-  private transactionConnections: Map<string, PoolConnection> = new Map(); // Store transaction-specific connections
+  private transactionConnections = new Map<string, PoolConnection>(); // Store transaction-specific connections
 
   // Private constructor
   private constructor() {

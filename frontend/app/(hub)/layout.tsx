@@ -22,6 +22,7 @@ import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
+import ReactDOM from 'react-dom';
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -320,6 +321,14 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   const theme = useTheme();
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') {
+      import('@axe-core/react').then(axe => {
+        axe.default(React, ReactDOM, 1000);
+      });
+    }
+  }, []);
+
   return (
     <>
       <Box
@@ -414,6 +423,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             </Typography>
           </Stack>
           <IconButton
+            aria-label={'Click here to open the feedback modal and create a Github issue for developer review'}
             onClick={() => setIsFeedbackModalOpen(true)}
             className={isPulsing ? 'animate-pulse-no-opacity' : ''}
             sx={{

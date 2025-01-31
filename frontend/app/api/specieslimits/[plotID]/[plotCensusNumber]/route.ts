@@ -4,7 +4,8 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
 // pulls everything
-export async function GET(request: NextRequest, { params }: { params: { plotID: string; plotCensusNumber: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ plotID: string; plotCensusNumber: string }> }) {
+  const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('Schema not provided');
   if (isNaN(parseInt(params.plotID)) || isNaN(parseInt(params.plotCensusNumber))) throw new Error('required slugs were not provided');

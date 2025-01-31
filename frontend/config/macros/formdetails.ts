@@ -1,7 +1,7 @@
 import { Dispatch, SetStateAction } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 
-const arcgisHeaderString: string =
+const arcgisHeaderString =
   'OBJECTID Q20 P5 Lx Ly Px Py SPP TAG STEMTAG DBH Viejo HOM Viejo Códigos Viejos Tallo Principal DBH HOM Tipo Arbol Estado Censo STEMTAG GlobalID Códigos D - Dead N - Tag and tree missing L - Leaning CYL - Trunk cylindrical for B trees R - Resprout B - Buttressed tree Q - Broken above 1.3 m M - Multiple-stemmed P - Problem A - Needs checking Ss - Dead stem still standing Cs - Dead stem fallen Ns - Stemtag and stem missing Ts - Stemtag found, stem missing Ascender DBH a 1.30 DOS - Dos placas EM - Error de medida ID - Problema identificación MED - Problema medida NC - No califica NUM - Número Equivocado PP - Placa Perdida Placa Repuesta POSIBLE - Placa/Planta dudosa VIVO - Posiblemente muerto MAP - Problema mapeo Problemas Comentarios Censado Por UTM X (m) UTM Y (m) Fecha Captura Mensaje DBH Equipo x y';
 const arcgisHeaderArr: string[] = arcgisHeaderString.split(/\s+/);
 
@@ -92,7 +92,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
       explanation:
         'The stem tag used in the field to identify the diﬀerent stems of a tree in the case of multiple-stemmed trees. Most sites give the main stem a' +
         ' value of 0 and additional stems consecutive values 1,2 etc. Some sites have given multiple stems tags in the same series as trees.',
-      category: 'required'
+      category: 'optional'
     },
     { label: 'spcode', explanation: 'The species code for the tree', category: 'required' },
     {
@@ -342,6 +342,10 @@ export function getTableHeaders(formType: FormType, _usesSubquadrats = false): {
   return TableHeadersByFormType[formType];
 }
 
+export function getGridHeaders(gridType: DatagridType): { label: string; explanation?: string; category?: 'required' | 'optional' }[] {
+  return HeadersByDatagridType[gridType];
+}
+
 export const RequiredTableHeadersByFormType: Record<FormType, { label: string }[]> = {
   [FormType.attributes]: TableHeadersByFormType[FormType.attributes].filter(header => header.category === 'required'),
   [FormType.personnel]: TableHeadersByFormType[FormType.personnel].filter(header => header.category === 'required'),
@@ -377,21 +381,13 @@ export interface FileListProps {
   setDataViewActive: Dispatch<SetStateAction<number>>;
 }
 
-export interface FileErrors {
-  [fileName: string]: { [currentRow: string]: string };
-}
+export type FileErrors = Record<string, Record<string, string>>;
 
-export type FileRow = {
-  [header: string]: string | null; // {header --> value}
-};
+export type FileRow = Record<string, string | null>;
 
-export type FileRowSet = {
-  [row: string]: FileRow; // {row --> FileRow}
-};
+export type FileRowSet = Record<string, FileRow>;
 
-export type FileCollectionRowSet = {
-  [filename: string]: FileRowSet; // {filename --> FileRowSet}
-};
+export type FileCollectionRowSet = Record<string, FileRowSet>;
 
 export interface UploadedFileData {
   key: number;
@@ -418,8 +414,6 @@ export const fileColumns = [
   // {key: 'isCurrentVersion', label: 'Is Current Version?'},
 ];
 
-export type RowValidationErrors = {
-  [key: string]: string;
-};
+export type RowValidationErrors = Record<string, string>;
 
 export type ValidationFunction = (row: FileRow) => RowValidationErrors | null;

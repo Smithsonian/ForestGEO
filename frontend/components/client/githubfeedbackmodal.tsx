@@ -69,14 +69,12 @@ const issueTypes = [
 
 type IssueType = (typeof issueTypes)[number]['value'];
 
-type GithubFeedbackModalProps = {
+interface GithubFeedbackModalProps {
   open: boolean;
   onClose: () => void;
-};
+}
 
-type Issue = {
-  [key: string]: any;
-};
+type Issue = Record<string, any>;
 
 const formatHeaders = (headers: any) => {
   const importantHeaders = ['content-type', 'etag', 'x-github-request-id'];

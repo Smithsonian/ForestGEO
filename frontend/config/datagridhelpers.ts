@@ -2,27 +2,24 @@
  * Defines templates for new rows in data grids
  */
 // datagridhelpers.ts
-import { getQuadratHCs } from '@/config/sqlrdsdefinitions/zones';
+import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
+import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 
 export interface FieldTemplate {
   type: 'string' | 'number' | 'boolean' | 'array' | 'date' | 'unknown';
   initialValue?: string | number | boolean | any[] | null;
 }
 
-export interface Templates {
-  [gridType: string]: {
-    [fieldName: string]: FieldTemplate;
-  };
-}
+export type Templates = Record<string, Record<string, FieldTemplate>>;
 
 export type FetchQueryFunction = (
   siteSchema: string,
@@ -45,7 +42,7 @@ export type ProcessPostPatchQueryFunction = (
 ) => string;
 export type ProcessDeletionQueryFunction = (siteSchema: string, dataType: string, gridID: string, deletionID: number | string) => string;
 
-const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
+const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   default: {
     id: false
   },
@@ -97,7 +94,7 @@ const columnVisibilityMap: { [key: string]: { [key: string]: boolean } } = {
   }
 };
 
-export const getColumnVisibilityModel = (gridType: string): { [key: string]: boolean } => {
+export const getColumnVisibilityModel = (gridType: string): Record<string, boolean> => {
   return columnVisibilityMap[gridType] || columnVisibilityMap.default;
 };
 export const createPostPatchQuery: ProcessPostPatchQueryFunction = (
@@ -174,19 +171,29 @@ export function getGridID(gridType: string): string {
   }
 }
 
+type VisibleFilter = 'valid' | 'errors' | 'pending';
+interface ExtendedGridFilterModel extends GridFilterModel {
+  visible: VisibleFilter[];
+}
+
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
+  handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
   handleExportAll?: () => Promise<void>;
   handleExportCSV?: () => Promise<void>;
-  handleRunValidations?: () => Promise<void>;
   hidingEmptyColumns?: boolean;
   handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
-  filterModel?: GridFilterModel;
-  apiRef?: MutableRefObject<GridApiCommunity>;
+  filterModel?: ExtendedGridFilterModel;
+  apiRef?: RefObject<GridApiCommunity>;
   dynamicButtons?: any;
   locked?: boolean;
+  currentSite?: Site;
+  currentPlot?: Plot;
+  currentCensus?: OrgCensus;
+  gridColumns?: GridColDef[];
+  gridType?: string;
 }
 
 export interface IsolatedDataGridCommonProps {
@@ -232,10 +239,10 @@ export interface DataGridCommonProps {
 }
 
 // Define types for the new states and props
-export type PendingAction = {
+export interface PendingAction {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
-};
+}
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
@@ -292,7 +299,7 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: any[];
 }
 
-export const errorMapping: { [key: string]: string[] } = {
+export const errorMapping: Record<string, string[]> = {
   '1': ['attributes'],
   '2': ['measuredDBH'],
   '3': ['measuredHOM'],

@@ -180,20 +180,20 @@ export interface CMError {
   criteria: string[];
 }
 
-export type ValidationPair = {
+export interface ValidationPair {
   description: string;
   criterion: string;
-};
+}
 
-export type ErrorDetail = {
+export interface ErrorDetail {
   id: number;
   validationPairs: ValidationPair[];
-};
+}
 
-export type CoreMeasurementError = {
+export interface CoreMeasurementError {
   coreMeasurementID: number;
   errors: ErrorDetail[];
-};
+}
 
 export type ErrorMap = Record<number, CoreMeasurementError>;
 

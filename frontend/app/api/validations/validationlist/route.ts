@@ -2,23 +2,21 @@ import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 
-type ValidationProcedure = {
+interface ValidationProcedure {
   ValidationID: number;
   ProcedureName: string;
   Description: string;
   Definition: string;
-};
+}
 
-type SiteSpecificValidations = {
+interface SiteSpecificValidations {
   ValidationProcedureID: number;
   Name: string;
   Description: string;
   Definition: string;
-};
+}
 
-type ValidationMessages = {
-  [key: string]: { id: number; description: string; definition: string };
-};
+type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
 export async function GET(request: NextRequest): Promise<NextResponse<ValidationMessages>> {
   const conn = ConnectionManager.getInstance();

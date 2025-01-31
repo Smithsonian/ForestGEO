@@ -3,7 +3,8 @@ import { HTTPResponses } from '@/config/macros';
 import moment from 'moment';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function GET(_request: NextRequest, { params }: { params: { schema: string; plotID: string; censusID: string; queryID: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string; plotID: string; censusID: string; queryID: string }> }) {
+  const params = await props.params;
   const { schema } = params;
   const plotID = parseInt(params.plotID);
   const censusID = parseInt(params.censusID);

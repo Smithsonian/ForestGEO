@@ -5,9 +5,9 @@ import { Box, TableCell, TableRow } from '@mui/material';
 import { Cancel, Edit, Save } from '@mui/icons-material';
 import { ValidationProceduresRDS } from '@/config/sqlrdsdefinitions/validations';
 import { Chip, IconButton, List, ListItem, Switch, Textarea, Tooltip } from '@mui/joy';
-import dynamic from 'next/dynamic';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import CodeEditor from '@/components/client/codeeditor';
 
 function useDebouncedCallback(callback: (...args: any[]) => void, delay: number) {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -18,7 +18,7 @@ function useDebouncedCallback(callback: (...args: any[]) => void, delay: number)
   };
 }
 
-type ValidationRowProps = {
+interface ValidationRowProps {
   validation: ValidationProceduresRDS;
   onSaveChanges: (validation: ValidationProceduresRDS) => Promise<void>;
   isDarkMode: boolean;
@@ -26,7 +26,7 @@ type ValidationRowProps = {
   replacements: { schema: string | undefined; currentPlotID: number | undefined; currentCensusID: number | undefined };
   handleExpandClick: (validationID: number) => void;
   schemaDetails: { table_name: string; column_name: string }[];
-};
+}
 
 const ValidationRow: React.FC<ValidationRowProps> = ({
   validation,
@@ -43,11 +43,10 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const originalScriptContent = useRef<string>(validation.definition ?? '');
 
-  const CustomMonacoEditor = dynamic(() => import('@/components/client/custommonacoeditor'), { ssr: false });
-
   const handleEditClick = () => {
     originalScriptContent.current = scriptContent ?? '';
     setIsEditing(true);
+    handleExpandClick(validation.validationID!); // Ensure expansion happens
   };
 
   const handleCancelChanges = () => {
@@ -62,13 +61,10 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
   };
 
   const formattedDescription = validation.description?.replace(/(DBH|HOM)([A-Z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2');
+
   return (
     <TableRow sx={{ borderBottom: 'unset' }}>
-      <TableCell
-        sx={{
-          alignSelf: 'left'
-        }}
-      >
+      <TableCell sx={{ alignSelf: 'left' }}>
         <Tooltip title="Toggle Enabled State">
           <Switch
             checked={validation.isEnabled}
@@ -80,155 +76,66 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
           />
         </Tooltip>
       </TableCell>
-      <TableCell
-        sx={{
-          flexGrow: 0,
-          flexShrink: 1,
-          flexBasis: '20%',
-          whiteSpace: 'normal',
-          wordBreak: 'break-word'
-        }}
-      >
+
+      <TableCell sx={{ flexGrow: 0, flexShrink: 1, flexBasis: '20%', whiteSpace: 'normal', wordBreak: 'break-word' }}>
         {validation.procedureName?.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).join(' ')}
       </TableCell>
-      <TableCell
-        sx={{
-          textAlign: 'left',
-          verticalAlign: 'top'
-        }}
-      >
-        <List
-          marker={'disc'}
-          sx={{
-            padding: 0,
-            margin: 0,
-            listStylePosition: 'inside'
-          }}
-        >
+
+      <TableCell sx={{ textAlign: 'left', verticalAlign: 'top' }}>
+        <List marker="disc" sx={{ padding: 0, margin: 0, listStylePosition: 'inside' }}>
           {formattedDescription?.split(';').map((snippet, index) => (
-            <ListItem
-              key={index}
-              sx={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                padding: 0
-              }}
-            >
-              <Chip
-                sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  paddingLeft: '0.5rem',
-                  whiteSpace: 'normal',
-                  wordBreak: 'break-word'
-                }}
-              >
-                <Box
-                  component="span"
-                  sx={{
-                    display: 'inline-block',
-                    width: '0.5rem',
-                    height: '0.5rem',
-                    borderRadius: '50%',
-                    backgroundColor: 'currentColor',
-                    marginRight: '0.5rem'
-                  }}
-                />
+            <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', padding: 0 }}>
+              <Chip sx={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                 {snippet}
               </Chip>
             </ListItem>
           ))}
         </List>
       </TableCell>
-      <TableCell
-        sx={{
-          textAlign: 'left',
-          verticalAlign: 'top'
-        }}
-      >
-        <List
-          marker={'disc'}
-          sx={{
-            padding: 0,
-            margin: 0,
-            listStylePosition: 'inside'
-          }}
-        >
-          {validation.criteria?.split(';').map((c, index) => (
-            <ListItem
-              key={index}
-              sx={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                padding: 0
-              }}
-            >
-              <Chip
-                sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  paddingLeft: '0.5rem',
-                  whiteSpace: 'normal',
-                  wordBreak: 'break-word'
-                }}
-              >
-                <Box
-                  component="span"
-                  sx={{
-                    display: 'inline-block',
-                    width: '0.5rem',
-                    height: '0.5rem',
-                    borderRadius: '50%',
-                    backgroundColor: 'currentColor',
-                    marginRight: '0.5rem'
-                  }}
-                />
-                {c
-                  .split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/)
-                  .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                  .join(' ')}
+
+      <TableCell sx={{ textAlign: 'left', verticalAlign: 'top' }}>
+        <List marker="disc" sx={{ padding: 0, margin: 0, listStylePosition: 'inside' }}>
+          {validation.criteria?.split(';').map((snippet, index) => (
+            <ListItem key={index} sx={{ display: 'flex', alignItems: 'flex-start', padding: 0 }}>
+              <Chip sx={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                {snippet}
               </Chip>
             </ListItem>
           ))}
         </List>
       </TableCell>
+
       <TableCell
         sx={{
           flexGrow: 1,
           flexShrink: 0,
-          flexBasis: '35%',
+          flexBasis: '70%',
           whiteSpace: 'normal',
-          wordBreak: 'break-word'
+          wordBreak: 'break-word',
+          position: 'relative'
         }}
       >
         <Box
           sx={{
-            maxWidth: expandedValidationID === validation.validationID ? '60vw' : '100%',
+            width: '100%',
             maxHeight: expandedValidationID === validation.validationID ? '300px' : '60px',
-            overflowX: expandedValidationID === validation.validationID ? 'auto' : 'hidden',
-            overflowY: expandedValidationID === validation.validationID ? 'auto' : 'hidden',
-            transition: 'all 0.3s ease',
-            whiteSpace: expandedValidationID === validation.validationID ? 'pre-wrap' : 'nowrap',
-            position: 'relative'
+            transition: 'height 0.3s ease-in-out',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
           }}
         >
           {expandedValidationID === validation.validationID ? (
-            <CustomMonacoEditor
-              schemaDetails={memoizedSchemaDetails}
-              content={scriptContent}
-              setContent={debouncedSetScriptContent}
-              height={`${Math.min(300, 20 * (validation?.definition ?? '').split('\n').length)}px`}
-              isDarkMode={isDarkMode}
-              options={{
-                readOnly: !isEditing,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                wordWrap: 'off',
-                lineNumbers: 'off'
-              }}
-            />
+            <Box sx={{ width: '100%', height: '300px', flexGrow: 1 }}>
+              <CodeEditor
+                value={scriptContent ?? ''}
+                setValue={debouncedSetScriptContent}
+                schemaDetails={memoizedSchemaDetails}
+                height="300px"
+                isDarkMode={isDarkMode}
+                readOnly={!isEditing}
+              />
+            </Box>
           ) : (
             <Textarea
               minRows={1}
@@ -244,45 +151,36 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
               }}
             />
           )}
-          <Box
-            sx={{
-              position: 'absolute',
-              bottom: '4px',
-              right: '4px'
-            }}
-          >
-            <IconButton onClick={() => handleExpandClick(validation.validationID!)} size="sm">
-              {expandedValidationID === validation.validationID ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </IconButton>
-          </Box>
+        </Box>
+
+        <Box sx={{ position: 'absolute', bottom: '4px', right: '4px' }}>
+          <IconButton onClick={() => handleExpandClick(validation.validationID!)} size="sm">
+            {expandedValidationID === validation.validationID ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          </IconButton>
         </Box>
       </TableCell>
-      <TableCell
-        sx={{
-          alignSelf: 'center',
-          whiteSpace: 'normal',
-          wordBreak: 'break-word',
-          width: '10%'
-        }}
-      >
+
+      <TableCell sx={{ alignSelf: 'center', whiteSpace: 'normal', wordBreak: 'break-word', width: '10%' }}>
         {isEditing ? (
-          <Tooltip title={'Save Changes'}>
-            <IconButton variant="solid" onClick={handleSaveChanges}>
-              <Save />
-            </IconButton>
-          </Tooltip>
+          <>
+            <Tooltip title="Save Changes">
+              <IconButton variant="solid" onClick={handleSaveChanges}>
+                <Save />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Cancel Changes">
+              <IconButton variant="solid" onClick={handleCancelChanges}>
+                <Cancel />
+              </IconButton>
+            </Tooltip>
+          </>
         ) : (
-          <Tooltip title={'Edit Validation'}>
+          <Tooltip title="Edit Validation">
             <IconButton variant="solid" onClick={handleEditClick}>
               <Edit />
             </IconButton>
           </Tooltip>
         )}
-        <Tooltip title={'Cancel Changes'}>
-          <IconButton disabled={!isEditing} variant="solid" onClick={handleCancelChanges}>
-            <Cancel />
-          </IconButton>
-        </Tooltip>
       </TableCell>
     </TableRow>
   );

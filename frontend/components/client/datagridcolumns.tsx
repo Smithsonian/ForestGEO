@@ -1,7 +1,7 @@
-import { HEADER_ALIGN, unitSelectionOptions } from '@/config/macros';
-import { Box, FormHelperText, Input, Option, Select, Stack, Typography } from '@mui/joy';
-import { GridColDef, useGridApiRef } from '@mui/x-data-grid';
-import React, { useEffect, useState } from 'react';
+import { HEADER_ALIGN } from '@/config/macros';
+import { Box, Stack, Typography } from '@mui/joy';
+import { GridColDef } from '@mui/x-data-grid';
+import React from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
@@ -224,89 +224,89 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
 
 // note --> originally attempted to use GridValueFormatterParams, but this isn't exported by MUI X DataGrid anymore. replaced with <any> for now.
 
-const renderValueCell = (params: any, valueKey: string, unitKey: string) => {
-  const value = params.row[valueKey] ? Number(params.row[valueKey]).toFixed(2) : 'null';
-  const units = params.row[unitKey] ? (params.row[valueKey] !== null ? params.row[unitKey] : '') : '';
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      {value && <Typography level="body-sm">{value}</Typography>}
-      {units && <Typography level="body-sm">{units}</Typography>}
-    </Box>
-  );
-};
-
-const renderEditValueCell = (params: any, valueKey: string, unitKey: string, placeholder: string) => {
-  const apiRef = useGridApiRef();
-  const { id, row } = params;
-  const [error, setError] = useState(false);
-  const [value, setValue] = useState(row[valueKey]);
-
-  const handleValueChange = (event: any) => {
-    const inputValue = event.target.value;
-    const isValid = /^\d*\.?\d{0,2}$/.test(inputValue);
-    setError(!isValid);
-    if (isValid) {
-      setValue(inputValue);
-    }
-  };
-
-  const handleValueBlur = () => {
-    const truncatedValue = Number(value).toFixed(2);
-    apiRef.current.setEditCellValue({ id, field: valueKey, value: truncatedValue });
-  };
-
-  const handleUnitsChange = (_event: any, newValue: any) => {
-    if (newValue !== null) {
-      apiRef.current.setEditCellValue({ id, field: unitKey, value: newValue });
-    }
-  };
-
-  useEffect(() => {
-    setValue(row[valueKey]);
-  }, [row[valueKey]]);
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
-      <Stack direction="column">
-        <Input
-          value={value}
-          onChange={handleValueChange}
-          onBlur={handleValueBlur}
-          error={error}
-          placeholder={placeholder}
-          required
-          slotProps={{
-            input: {
-              'aria-invalid': error
-            }
-          }}
-        />
-        {error && (
-          <FormHelperText>
-            <Typography color="danger">Only numbers with up to 2 decimal places accepted!</Typography>
-          </FormHelperText>
-        )}
-      </Stack>
-      <Select value={row[unitKey]} onChange={handleUnitsChange} placeholder={'Units'} required>
-        {unitSelectionOptions.map(option => (
-          <Option key={option} value={option}>
-            {option}
-          </Option>
-        ))}
-      </Select>
-    </Box>
-  );
-};
-
-export const renderDBHCell = (params: any) => renderValueCell(params, 'measuredDBH', '');
-export const renderEditDBHCell = (params: any) => renderEditValueCell(params, 'measuredDBH', '', 'Diameter at breast height (DBH)');
-export const renderHOMCell = (params: any) => renderValueCell(params, 'measuredHOM', '');
-export const renderEditHOMCell = (params: any) => renderEditValueCell(params, 'measuredHOM', '', 'Height of Measure (HOM)');
-export const renderStemXCell = (params: any) => renderValueCell(params, 'localStemX', '');
-export const renderEditStemXCell = (params: any) => renderEditValueCell(params, 'localStemX', '', 'Stem Local X Coordinates');
-export const renderStemYCell = (params: any) => renderValueCell(params, 'localStemY', '');
-export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');
+// const renderValueCell = (params: any, valueKey: string, unitKey: string) => {
+//   const value = params.row[valueKey] ? Number(params.row[valueKey]).toFixed(2) : 'null';
+//   const units = params.row[unitKey] ? (params.row[valueKey] !== null ? params.row[unitKey] : '') : '';
+//
+//   return (
+//     <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+//       {value && <Typography level="body-sm">{value}</Typography>}
+//       {units && <Typography level="body-sm">{units}</Typography>}
+//     </Box>
+//   );
+// };
+//
+// const renderEditValueCell = (params: any, valueKey: string, unitKey: string, placeholder: string) => {
+//   const apiRef = useGridApiContext();
+//   const { id, row } = params;
+//   const [error, setError] = useState(false);
+//   const [value, setValue] = useState(row[valueKey]);
+//
+//   const handleValueChange = (event: any) => {
+//     const inputValue = event.target.value;
+//     const isValid = /^\d*\.?\d{0,2}$/.test(inputValue);
+//     setError(!isValid);
+//     if (isValid) {
+//       setValue(inputValue);
+//     }
+//   };
+//
+//   const handleValueBlur = () => {
+//     const truncatedValue = Number(value).toFixed(2);
+//     apiRef.current.setEditCellValue({ id, field: valueKey, value: truncatedValue });
+//   };
+//
+//   const handleUnitsChange = (_event: any, newValue: any) => {
+//     if (newValue !== null) {
+//       apiRef.current.setEditCellValue({ id, field: unitKey, value: newValue });
+//     }
+//   };
+//
+//   useEffect(() => {
+//     setValue(row[valueKey]);
+//   }, [row[valueKey]]);
+//
+//   return (
+//     <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>
+//       <Stack direction="column">
+//         <Input
+//           value={value}
+//           onChange={handleValueChange}
+//           onBlur={handleValueBlur}
+//           error={error}
+//           placeholder={placeholder}
+//           required
+//           slotProps={{
+//             input: {
+//               'aria-invalid': error
+//             }
+//           }}
+//         />
+//         {error && (
+//           <FormHelperText>
+//             <Typography color="danger">Only numbers with up to 2 decimal places accepted!</Typography>
+//           </FormHelperText>
+//         )}
+//       </Stack>
+//       <Select value={row[unitKey]} onChange={handleUnitsChange} placeholder={'Units'} required>
+//         {unitSelectionOptions.map(option => (
+//           <Option key={option} value={option}>
+//             {option}
+//           </Option>
+//         ))}
+//       </Select>
+//     </Box>
+//   );
+// };
+//
+// export const renderDBHCell = (params: any) => renderValueCell(params, 'measuredDBH', '');
+// export const renderEditDBHCell = (params: any) => renderEditValueCell(params, 'measuredDBH', '', 'Diameter at breast height (DBH)');
+// export const renderHOMCell = (params: any) => renderValueCell(params, 'measuredHOM', '');
+// export const renderEditHOMCell = (params: any) => renderEditValueCell(params, 'measuredHOM', '', 'Height of Measure (HOM)');
+// export const renderStemXCell = (params: any) => renderValueCell(params, 'localStemX', '');
+// export const renderEditStemXCell = (params: any) => renderEditValueCell(params, 'localStemX', '', 'Stem Local X Coordinates');
+// export const renderStemYCell = (params: any) => renderValueCell(params, 'localStemY', '');
+// export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');
 
 export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridColumns([
   {
@@ -376,8 +376,6 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
       return Number(value).toFixed(2);
     },
     maxWidth: 100,
-    renderCell: renderStemXCell,
-    renderEditCell: renderEditStemXCell,
     editable: true,
     filterOperators: customNumericOperators
   },
@@ -387,12 +385,10 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     renderHeader: () => formatHeader('Y', 'Stem'),
     flex: 0.7,
     type: 'number',
+    maxWidth: 100,
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    maxWidth: 100,
-    renderCell: renderStemYCell,
-    renderEditCell: renderEditStemYCell,
     editable: true,
     filterOperators: customNumericOperators
   },
@@ -401,8 +397,9 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'DBH',
     flex: 0.5,
     editable: true,
-    renderCell: renderDBHCell,
-    renderEditCell: renderEditDBHCell,
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     filterOperators: customNumericOperators
   },
   {
@@ -410,8 +407,9 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'HOM',
     flex: 0.5,
     editable: true,
-    renderCell: renderHOMCell,
-    renderEditCell: renderEditHOMCell,
+    valueFormatter: (value: any) => {
+      return Number(value).toFixed(2);
+    },
     filterOperators: customNumericOperators
   },
   {

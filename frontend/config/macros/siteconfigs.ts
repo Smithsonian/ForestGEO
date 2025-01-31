@@ -14,7 +14,7 @@ import TrackChangesIcon from '@mui/icons-material/TrackChanges';
 import React from 'react';
 import { UnifiedValidityFlags } from '../macros';
 
-export type SiteConfigProps = {
+export interface SiteConfigProps {
   label: string;
   href: string;
   tip: string;
@@ -25,7 +25,7 @@ export type SiteConfigProps = {
     tip: string;
     icon: React.ElementType;
   }[];
-};
+}
 export const siteConfig = {
   name: 'ForestGEO',
   description: 'Census data entry and storage',
@@ -35,9 +35,7 @@ export const siteConfig = {
 type DataValidityKey = keyof UnifiedValidityFlags;
 
 // Define a mapping type that restricts keys to strings and values to keys of DataValidity
-type ValidityMapping = {
-  [key: string]: DataValidityKey;
-};
+type ValidityMapping = Record<string, DataValidityKey>;
 
 export const validityMapping: ValidityMapping = {
   '/attributes': 'attributes',

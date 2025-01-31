@@ -2,12 +2,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacros';
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
-import { Box, LinearProgress, Stack, Typography } from '@mui/joy';
+import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 import PQueue from 'p-queue';
+import Divider from '@mui/joy/Divider';
+import 'moment-duration-format';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -30,12 +33,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const { data: session } = useSession();
   const [totalChunks, setTotalChunks] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
-  const [handlingChunkError, setHandlingChunkError] = useState(false);
-  const [trackChunkReloadRowCount, setTrackChunkReloadRowCount] = useState<number>(0);
-  const [trackChunkReloadTotalRows, setTrackChunkReloadTotalRows] = useState<number>(0);
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
+  const [etc, setETC] = useState('');
+  const [totalProcessingTime, setTotalProcessingTime] = useState(0);
+  const [chunkStartTime, setChunkStartTime] = useState<number>(0);
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096;
+  const connectionLimit = 10;
+  const queue = new PQueue({ concurrency: connectionLimit });
 
   const generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -69,10 +74,35 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     });
   };
 
+  useEffect(() => {
+    if (completedChunks < 3) {
+      setETC('Calculating...');
+      return;
+    }
+
+    // Track cumulative processing time
+    setTotalProcessingTime(prev => prev + (performance.now() - chunkStartTime));
+
+    // Calculate exponential moving average for smoother chunk time estimation
+    const smoothingFactor = 0.2; // Adjust between 0 and 1 for desired smoothing (higher = more reactive)
+    const lastChunkTime = performance.now() - chunkStartTime;
+    const smoothedAvgTimePerChunk = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalProcessingTime / completedChunks);
+
+    // Calculate remaining chunks and ETC
+    const remainingChunks = totalChunks - completedChunks;
+    const estimatedTimeLeft = smoothedAvgTimePerChunk * remainingChunks;
+
+    setETC(
+      moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[0] +
+        ' minutes and ' +
+        moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[1] +
+        ' seconds remaining...'
+    );
+  }, [completedChunks, totalChunks]);
+
   const parseFileInChunks = async (file: File, delimiter: string) => {
     let activeTasks = 0;
-    const connectionLimit = 10;
-    const queue = new PQueue({ concurrency: connectionLimit });
+    queue.clear();
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
     const parsingInvalidRows: FileRow[] = [];
@@ -149,6 +179,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
+          setChunkStartTime(performance.now());
           try {
             if (activeTasks >= connectionLimit) {
               parser.pause();
@@ -184,57 +215,36 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 await uploadToSql(fileCollectionRowSet, file.name);
               } catch (error) {
                 console.error('Chunk rollback triggered. Error uploading to SQL:', error);
-                setFailedChunks(prev => {
-                  const updatedSet = new Set(prev);
-                  updatedSet.add(completedChunks);
-                  return updatedSet;
-                });
+                if (failedChunks.has(completedChunks)) {
+                  return;
+                }
+
                 try {
                   try {
                     parser.pause();
                     queue.pause();
                   } catch (e: any) {
-                    console.error('Error pausing parser:', e.message);
+                    console.error('Error pausing parser or queue:', e.message);
+                  } finally {
+                    await queue.onIdle(); // Ensure all pending tasks finish before proceeding
                   }
 
-                  await queue.onIdle();
-                  setHandlingChunkError(true);
-                  setTrackChunkReloadRowCount(0);
-                  setTrackChunkReloadTotalRows(Object.values(fileRowSet).length);
+                  const batchErrorRows = await processFailedChunk(fileRowSet, file.name);
 
-                  const batchErrorRows: FileRowSet = {};
-                  for (const [rowId, row] of Object.entries(fileRowSet)) {
-                    if (errorRows[file.name]?.[rowId]) {
-                      setTrackChunkReloadRowCount(prev => Math.min(prev + 1, trackChunkReloadTotalRows));
-                      continue;
-                    }
-                    const singleRowSet: FileCollectionRowSet = { [file.name]: { [rowId]: row } as FileRowSet };
-                    try {
-                      await uploadToSql(singleRowSet, file.name);
-                    } catch (rowError) {
-                      console.error(`Row ${rowId} failed during retry:`, rowError);
-                      batchErrorRows[generateErrorRowId(row)] = row;
-                    } finally {
-                      setTrackChunkReloadRowCount(prev => Math.min(prev + 1, trackChunkReloadTotalRows));
-                    }
-                  }
                   setErrorRows(prev => ({
                     ...prev,
                     [file.name]: {
                       ...prev[file.name],
-                      ...Object.fromEntries(Object.entries(batchErrorRows).map(([_, value]) => [generateErrorRowId(value), value]))
+                      ...batchErrorRows
                     }
                   }));
+
+                  setFailedChunks(prev => new Set(prev).add(completedChunks));
                 } catch (error) {
                   console.error('Critical error during chunk error handling:', error);
                 } finally {
-                  setHandlingChunkError(false);
-                  try {
-                    parser.resume();
-                    queue.start();
-                  } catch (e: any) {
-                    console.error('Error resuming parser:', e.message);
-                  }
+                  parser.resume();
+                  queue.start();
                 }
               } finally {
                 activeTasks--;
@@ -281,6 +291,25 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       });
     });
+  };
+
+  const processFailedChunk = async (fileRowSet: FileRowSet, fileName: string) => {
+    const batchErrorRows: FileRowSet = {};
+    for (const [rowId, row] of Object.entries(fileRowSet)) {
+      if (errorRows[fileName]?.[rowId]) {
+        continue;
+      }
+      const singleRowSet: FileCollectionRowSet = {
+        [fileName]: { [rowId]: row }
+      };
+      try {
+        await uploadToSql(singleRowSet, fileName);
+      } catch (rowError) {
+        console.error(`Row ${rowId} failed during retry:`, rowError);
+        batchErrorRows[rowId] = row;
+      }
+    }
+    return batchErrorRows;
   };
 
   const uploadToSql = useCallback(
@@ -350,6 +379,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setCompletedOperations(prevCompleted => prevCompleted + 1);
       }
 
+      await queue.onIdle();
+
       const combinedQuery = `
         UPDATE ${schema}.census c
           JOIN (SELECT c1.PlotCensusNumber,
@@ -370,10 +401,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     if (!hasUploaded.current) {
       getUserID().then(() => {
         uploadFiles()
-          .catch(console.error)
-          .then(() => {
-            hasUploaded.current = true;
-          })
           .then(() => {
             // force download of error rows:
             Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
@@ -411,6 +438,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             });
           })
           .then(() => {
+            hasUploaded.current = true;
             // enforce timeout before continuing forward
             const timeout = setTimeout(() => {
               if (uploadForm === FormType.measurements) {
@@ -425,6 +453,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       });
     }
   }, [hasUploaded.current, errorRows]);
+
+  const { palette } = useTheme();
 
   return (
     <>
@@ -445,7 +475,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               <Typography level={'title-md'} gutterBottom>
                 Total File Progress - Completed: {completedOperations}
               </Typography>
-              <LinearProgress determinate value={(completedOperations / totalOperations) * 100} />
+              <LinearProgress size={'lg'} variant="soft" color="primary">
+                <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                  {completedOperations}/{totalOperations}
+                </Typography>
+              </LinearProgress>
             </Box>
 
             {totalChunks !== 0 && (
@@ -457,62 +491,47 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   determinate
                   variant="plain"
                   color="primary"
-                  thickness={32}
+                  thickness={48}
                   value={(completedChunks / totalChunks) * 100}
                   sx={{
                     '--LinearProgress-radius': '0px',
-                    '--LinearProgress-progressThickness': '24px'
+                    '--LinearProgress-progressThickness': '36px'
                   }}
                 >
                   <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`}
+                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
+                    {totalChunks - completedChunks} remaining
                     <br />
-                    {completedChunks} completed out of {totalChunks}: {totalChunks - completedChunks} remaining
+                    Estimated time to completion: {etc}
                   </Typography>
                 </LinearProgress>
-                {failedChunks.has(completedChunks) && (
-                  <Box sx={{ width: '100%', mb: 2 }}>
-                    <Typography level={'body-md'} color={'warning'}>
-                      Row-by-row processing for chunk {completedChunks + 1}/{totalChunks}
-                    </Typography>
-                    <LinearProgress
-                      determinate
-                      variant="plain"
-                      color="warning"
-                      thickness={32}
-                      value={(trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100}
-                      sx={{
-                        '--LinearProgress-radius': '0px',
-                        '--LinearProgress-progressThickness': '24px'
-                      }}
-                    >
-                      <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                        Retrying: {`${((trackChunkReloadRowCount / trackChunkReloadTotalRows) * 100).toFixed(2)}%`}
-                        <br />
-                        {trackChunkReloadRowCount}/{trackChunkReloadTotalRows} rows retried
-                      </Typography>
-                    </LinearProgress>
-                  </Box>
-                )}
-                {failedChunks.size > 0 &&
-                  Array.from(failedChunks).map(chunk => (
-                    <Box key={chunk} sx={{ width: '100%', mb: 2 }}>
-                      <Typography level={'body-md'} color={'success'}>
-                        Completed retry for chunk {chunk + 1}/{totalChunks}
-                      </Typography>
-                      <LinearProgress
-                        determinate
-                        variant="plain"
-                        color="success"
-                        thickness={32}
-                        value={100}
-                        sx={{
-                          '--LinearProgress-radius': '0px',
-                          '--LinearProgress-progressThickness': '24px'
-                        }}
-                      />
-                    </Box>
-                  ))}
+                <Divider sx={{ my: 2 }} />
+
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '100%',
+                    height: '100%',
+                    textAlign: 'center'
+                  }}
+                >
+                  <Typography level="title-lg" fontWeight="bold" sx={{ mb: 2 }}>
+                    Please do not exit this page! The upload will take some time to complete.
+                  </Typography>
+                  <DotLottieReact
+                    src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
+                    loop
+                    autoplay
+                    themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                    style={{
+                      width: '25%',
+                      height: '25%'
+                    }}
+                  />
+                </Box>
               </Box>
             )}
           </Stack>

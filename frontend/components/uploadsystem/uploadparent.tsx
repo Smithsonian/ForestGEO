@@ -58,9 +58,7 @@ export default function UploadParent(props: UploadParentProps) {
   const [currentFileHeaders, setCurrentFileHeaders] = useState<string[]>([]);
   const [expectedHeaders, setExpectedHeaders] = useState<string[]>([]);
   const [uploadCompleteMessage, setUploadCompleteMessage] = useState('');
-  const [allFileHeaders, setAllFileHeaders] = useState<{
-    [key: string]: string[];
-  }>({});
+  const [allFileHeaders, setAllFileHeaders] = useState<Record<string, string[]>>({});
   const [isDataUnsaved, setIsDataUnsaved] = useState(false);
   const [uploadError, setUploadError] = useState<any>();
   const [errorComponent, setErrorComponent] = useState('');

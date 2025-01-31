@@ -438,10 +438,10 @@ export default function Sidebar(props: SidebarProps) {
     );
   };
 
-  type ToggleObject = {
+  interface ToggleObject {
     toggle?: boolean;
     setToggle?: Dispatch<SetStateAction<boolean>>;
-  };
+  }
 
   type ToggleArray = ToggleObject[];
   const toggleArray: ToggleArray = [
@@ -638,6 +638,7 @@ export default function Sidebar(props: SidebarProps) {
     return (
       <Select
         className="site-select sidebar-item"
+        aria-label={'Select a Site'}
         placeholder="Select a Site"
         name="None"
         required

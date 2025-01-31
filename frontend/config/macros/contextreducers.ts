@@ -2,10 +2,10 @@
 import { Dispatch } from 'react';
 
 // Define a type for the enhanced dispatch function
-export type EnhancedDispatch<T> = (payload: { [key: string]: T | undefined }) => Promise<void>;
+export type EnhancedDispatch<T> = (payload: Record<string, T | undefined>) => Promise<void>;
 
 export function createEnhancedDispatch<T>(dispatch: Dispatch<LoadAction<T>>, actionType: string): EnhancedDispatch<T> {
-  return async (payload: { [key: string]: T | undefined }) => {
+  return async (payload: Record<string, T | undefined>) => {
     // Save to IndexedDB only if payload is not undefined
     // await setData(actionType, payload[actionType] !== undefined ? payload[actionType] : undefined); // gonna comment this out temporarily, it seems to be causing issues
     // Dispatch the action
@@ -13,10 +13,10 @@ export function createEnhancedDispatch<T>(dispatch: Dispatch<LoadAction<T>>, act
   };
 }
 
-export type LoadAction<T> = {
+export interface LoadAction<T> {
   type: string;
-  payload: { [key: string]: T | undefined };
-};
+  payload: Record<string, T | undefined>;
+}
 
 // Generic reducer function
 export function genericLoadReducer<T>(state: T | undefined, action: LoadAction<T>): T | undefined {

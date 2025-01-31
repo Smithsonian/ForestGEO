@@ -31,7 +31,7 @@ export const LoginLogout = () => {
           <Typography level="title-sm">Login to access</Typography>
           <Typography level="body-xs">your information</Typography>
         </Box>
-        <IconButton size="sm" variant="plain" color="neutral" onClick={handleRetryLogin}>
+        <IconButton size="sm" variant="plain" color="neutral" onClick={handleRetryLogin} aria-label={'Login button'}>
           <LoginRoundedIcon />
         </IconButton>
       </Box>
@@ -57,7 +57,7 @@ export const LoginLogout = () => {
             <Skeleton loading={status == 'loading'}>{session?.user?.email ? session?.user?.email : ''}</Skeleton>
           </Typography>
         </Box>
-        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({ callbackUrl: '/login' })}>
+        <IconButton size="sm" variant="plain" color="neutral" onClick={() => void signOut({ callbackUrl: '/login' })} aria-label={'Logout button'}>
           {status == 'loading' ? <CircularProgress size={'lg'} /> : <LogoutRoundedIcon />}
         </IconButton>
       </Box>

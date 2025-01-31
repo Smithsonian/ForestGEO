@@ -19,9 +19,10 @@ import {
   GridToolbarProps,
   GridToolbarQuickFilter,
   ToolbarPropsOverrides,
+  useGridApiContext,
   useGridApiRef
 } from '@mui/x-data-grid';
-import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Checkbox, Snackbar } from '@mui/material';
+import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Snackbar } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
@@ -30,17 +31,22 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from '@mui/joy/Box';
 import {
   Button,
+  Checkbox,
+  Chip,
   DialogActions,
   DialogContent,
   DialogTitle,
   Dropdown,
+  FormLabel,
   IconButton,
   Menu,
   MenuButton,
   MenuItem,
   Modal,
   ModalDialog,
+  Skeleton,
   Stack,
+  Switch,
   Tooltip,
   Typography
 } from '@mui/joy';
@@ -59,17 +65,16 @@ import {
   sortRowsByMeasurementDate
 } from '@/config/datagridhelpers';
 import { CMError, CoreMeasurementError, ErrorMap, ValidationPair } from '@/config/macros/uploadsystemmacros';
-import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { redirect } from 'next/navigation';
 import moment from 'moment';
 import CheckIcon from '@mui/icons-material/Check';
 import ErrorIcon from '@mui/icons-material/Error';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
-import { HTTPResponses } from '@/config/macros';
+import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
 import ConfirmationDialog from './confirmationdialog';
-import ReEnterDataModal from './reentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
@@ -78,6 +83,11 @@ import ValidationModal from '@/components/client/validationmodal';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/validationoverridemodal';
+import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
+import Divider from '@mui/joy/Divider';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import GridOnIcon from '@mui/icons-material/GridOn';
+import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -98,17 +108,23 @@ interface ExtendedGridFilterModel extends GridFilterModel {
 const EditToolbar = (props: EditToolbarProps) => {
   const {
     handleAddNewRow,
-    handleExportErrors,
     handleRefresh,
-    handleExportAll,
-    handleExportCSV,
+    handleExport,
     handleQuickFilterChange,
     filterModel,
-    dynamicButtons = []
+    dynamicButtons = [],
+    currentSite,
+    currentPlot,
+    currentCensus,
+    gridColumns
   } = props;
-  if (!handleAddNewRow || !handleExportErrors || !handleRefresh || !handleQuickFilterChange || !handleExportAll) return <></>;
+  if (!handleAddNewRow || !handleExport || !handleRefresh || !handleQuickFilterChange || !filterModel || !gridColumns) return <></>;
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [openExportModal, setOpenExportModal] = useState(false);
+  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
+  const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel.visible);
+  const apiRef = useGridApiContext();
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(event.target.value);
@@ -156,64 +172,71 @@ const EditToolbar = (props: EditToolbarProps) => {
     URL.revokeObjectURL(url);
   }
 
-  const handleExportErrorsClick = async () => {
-    if (!handleExportErrors) return;
-    const errorData = await handleExportErrors(filterModel);
-    const blob = new Blob([JSON.stringify(errorData, null, 2)], {
-      type: 'application/json'
+  const downloadExportedData = async () => {
+    const blob = new Blob([await handleExport(exportVisibility, exportType)], {
+      type: 'text/csv;charset=utf-8;'
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'error_data.json';
+    link.download = `measurements_${exportType}_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
+  const handleChipToggle = (type: string) => {
+    console.log('handle chip toggle: ', type);
+    setExportVisibility(prev => (prev.includes(type as VisibleFilter) ? prev.filter(t => t !== (type as VisibleFilter)) : [...prev, type as VisibleFilter]));
+  };
+
+  const csvHeaders = gridColumns
+    .filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
+    .map(column => column.field);
+
   return (
-    <GridToolbarContainer>
-      <Box
-        sx={{
-          display: 'flex',
-          flex: 1,
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backgroundColor: 'warning.main',
-          borderRadius: '4px',
-          p: 2
-        }}
-      >
-        <Box sx={{ display: 'flex', flex: 1 }}>
-          <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-            <Box display={'flex'} alignItems={'center'}>
-              <GridToolbarColumnsButton />
-              <GridToolbarFilterButton />
-              <GridToolbarQuickFilter
-                sx={{ ml: 2 }}
-                variant={'outlined'}
-                value={inputValue}
-                onKeyDown={handleKeyDown}
-                onChange={handleInputChange}
-                placeholder={'Search All Fields...'}
-                slotProps={{
-                  input: {
-                    endAdornment: null
-                  }
-                }}
-              />
-              <Tooltip title={'Clear filter'} placement={'right'}>
-                <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
-                  <ClearIcon fontSize={'small'} />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Tooltip>
-          <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
-            Refresh
-          </Button>
-          <Dropdown>
-            <MenuButton
+    <>
+      <GridToolbarContainer>
+        <Box
+          sx={{
+            display: 'flex',
+            flex: 1,
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: 'warning.main',
+            borderRadius: '4px',
+            p: 2
+          }}
+        >
+          <Box sx={{ display: 'flex', flex: 1 }}>
+            <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
+              <Box display={'flex'} alignItems={'center'}>
+                <GridToolbarColumnsButton />
+                <GridToolbarFilterButton />
+                <GridToolbarQuickFilter
+                  sx={{ ml: 2 }}
+                  variant={'outlined'}
+                  value={inputValue}
+                  onKeyDown={handleKeyDown}
+                  onChange={handleInputChange}
+                  placeholder={'Search All Fields...'}
+                  slotProps={{
+                    input: {
+                      endAdornment: null
+                    }
+                  }}
+                />
+                <Tooltip title={'Clear filter'} placement={'bottom'}>
+                  <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
+                    <ClearIcon fontSize={'small'} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </Tooltip>
+            <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+              Refresh
+            </Button>
+            <Button
               variant={'plain'}
               color={'primary'}
               endDecorator={
@@ -224,51 +247,216 @@ const EditToolbar = (props: EditToolbarProps) => {
                   }}
                 />
               }
+              onClick={() => setOpenExportModal(true)}
             >
-              Export...
-            </MenuButton>
-            <Menu variant={'soft'} color={'primary'} placement={'bottom-start'}>
-              <MenuItem variant={'soft'} color={'primary'} onClick={async () => await handleExportAll()}>
-                All data as JSON
-              </MenuItem>
-              <MenuItem variant={'soft'} color={'primary'} onClick={handleExportCSV}>
-                All Data as CSV
-              </MenuItem>
-              <MenuItem variant={'soft'} color={'primary'} onClick={handleExportErrorsClick}>
-                All errors as JSON
-              </MenuItem>
-              <MenuItem variant={'soft'} color={'primary'} onClick={exportFilterModel}>
-                Filter Settings
-              </MenuItem>
-            </Menu>
-          </Dropdown>
+              Export as CSV...
+            </Button>
+            <Stack direction={'row'} spacing={2}>
+              <Dropdown>
+                <MenuButton>Other</MenuButton>
+                <Menu>
+                  {dynamicButtons.map((button: any, index: number) => (
+                    <>
+                      {button.tooltip ? (
+                        <>
+                          <Tooltip title={button.tooltip} placement={'left'} arrow>
+                            <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
+                              {button.label}
+                            </MenuItem>
+                          </Tooltip>
+                        </>
+                      ) : (
+                        <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
+                          {button.label}
+                        </MenuItem>
+                      )}
+                    </>
+                  ))}
+                </Menu>
+              </Dropdown>
+            </Stack>
+          </Box>
         </Box>
-      </Box>
-      <Stack direction={'row'} spacing={2}>
-        <Dropdown>
-          <MenuButton>Other</MenuButton>
-          <Menu>
-            {dynamicButtons.map((button: any, index: number) => (
-              <>
-                {button.tooltip ? (
-                  <>
-                    <Tooltip title={button.tooltip} placement={'bottom'} arrow>
-                      <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
-                        {button.label}
-                      </MenuItem>
-                    </Tooltip>
-                  </>
-                ) : (
-                  <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
-                    {button.label}
-                  </MenuItem>
-                )}
-              </>
-            ))}
-          </Menu>
-        </Dropdown>
-      </Stack>
-    </GridToolbarContainer>
+        <Modal
+          open={openExportModal}
+          onClose={() => setOpenExportModal(false)}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <ModalDialog
+            role={'alertdialog'}
+            sx={{
+              width: '90%',
+              maxWidth: '60vh',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              p: 3
+            }}
+          >
+            <DialogTitle>
+              <Typography level={'h3'}>Exporting Data</Typography>
+            </DialogTitle>
+            <DialogContent
+              sx={{
+                mt: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                flexGrow: 1,
+                overflowY: 'auto'
+              }}
+            >
+              <Stack direction={'row'} sx={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Stack direction={'column'}>
+                  <Typography level={'body-md'}>Desired Format Type:</Typography>
+                  <Typography level={'body-sm'}>You can export data in either of these formats:</Typography>
+                  <Stack direction={'row'}>
+                    <Chip>
+                      <strong>Table CSV</strong>
+                    </Chip>
+                    <Chip>
+                      <strong>Form CSV</strong>
+                    </Chip>
+                  </Stack>
+                </Stack>
+                <Switch
+                  size={'lg'}
+                  checked={exportType === 'csv'}
+                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
+                  endDecorator={
+                    <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+                      <Skeleton loading={exportType !== 'csv'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
+                        <GridOnIcon />
+                      </Skeleton>
+                      <Typography level={'body-sm'}>
+                        <Skeleton loading={exportType !== 'csv'}>CSV</Skeleton>
+                      </Typography>
+                    </Stack>
+                  }
+                  startDecorator={
+                    <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+                      <Skeleton loading={exportType !== 'form'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
+                        <PictureAsPdfIcon />
+                      </Skeleton>
+                      <Typography level={'body-sm'}>
+                        <Skeleton loading={exportType !== 'form'}>Form</Skeleton>
+                      </Typography>
+                    </Stack>
+                  }
+                  sx={{
+                    marginRight: '1.5em',
+                    transform: 'scale(1.25)',
+                    transformOrigin: 'center'
+                  }}
+                />
+              </Stack>
+              <Divider sx={{ my: 1 }} />
+              <FormLabel>Export Headers:</FormLabel>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
+                  gap: '0.5rem',
+                  mb: 1,
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {exportType === 'csv'
+                  ? csvHeaders.map((header, index) => (
+                      <Chip key={index} variant={'soft'} color={'primary'}>
+                        {header}
+                      </Chip>
+                    ))
+                  : getTableHeaders(FormType.measurements)
+                      .map(header => header.label)
+                      .map((label, index) => (
+                        <Chip key={index} variant={'soft'} color={'primary'}>
+                          {label}
+                        </Chip>
+                      ))}
+              </Box>
+              <Divider sx={{ my: 1 }} />
+              <Typography level={'title-md'}>Please choose your desired visibility settings using the provided legend:</Typography>
+              <Stack
+                direction={'row'}
+                sx={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  justifyContent: 'space-between',
+                  gap: 1
+                }}
+              >
+                <Chip
+                  color={'success'}
+                  size={'lg'}
+                  aria-label={exportVisibility.includes('valid') ? 'Rows passing validation will be exported' : "Rows passing validation won't be exported"}
+                  variant={exportVisibility.includes('valid') ? 'soft' : 'outlined'}
+                  startDecorator={exportVisibility.includes('valid') ? <CheckIcon /> : undefined}
+                  sx={{
+                    flex: 1,
+                    textAlign: 'center',
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-word'
+                  }}
+                  onClick={() => handleChipToggle('valid')}
+                >
+                  Rows passing validation
+                </Chip>
+                <Chip
+                  color={'danger'}
+                  size={'lg'}
+                  variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
+                  aria-label={exportVisibility.includes('errors') ? 'Rows failing validation will be exported' : "Rows failing validation won't be exported"}
+                  startDecorator={exportVisibility.includes('errors') ? <CheckIcon /> : undefined}
+                  sx={{
+                    flex: 1,
+                    textAlign: 'center',
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-word'
+                  }}
+                  onClick={() => handleChipToggle('errors')}
+                >
+                  Rows failing validation
+                </Chip>
+                <Chip
+                  color={'primary'}
+                  size={'lg'}
+                  variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}
+                  aria-label={exportVisibility.includes('pending') ? 'Rows pending validation will be exported' : "Rows pending validation won't be exported"}
+                  startDecorator={exportVisibility.includes('pending') ? <CheckIcon /> : undefined}
+                  sx={{
+                    flex: 1,
+                    textAlign: 'center',
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-word'
+                  }}
+                  onClick={() => handleChipToggle('pending')}
+                >
+                  Rows pending validation
+                </Chip>
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={async () => {
+                  await downloadExportedData();
+                  setOpenExportModal(false);
+                }}
+                aria-label={'Export selected data/visibility and close the modal'}
+              >
+                Export
+              </Button>
+              <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)}>
+                Cancel
+              </Button>
+            </DialogActions>
+          </ModalDialog>
+        </Modal>
+      </GridToolbarContainer>
+    </>
   );
 };
 
@@ -340,10 +528,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
-  const currentQuadrat = useQuadratContext();
   const { setLoading } = useLoading();
   // use the session
-  useSession();
+  const { data: session } = useSession();
 
   const apiRef = useGridApiRef();
 
@@ -363,68 +550,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       runFetchPaginated().then(() => setRefresh(false));
     }
   }, [refresh]);
-
-  const exportAllCSV = useCallback(async () => {
-    const response = await fetch(
-      `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(filterModel)}`,
-      { method: 'GET' }
-    );
-    const data = await response.json();
-    let csvRows =
-      getTableHeaders(FormType.measurements)
-        .map(row => row.label)
-        .join(',') + '\n';
-    data.forEach((row: any) => {
-      const values = getTableHeaders(FormType.measurements)
-        .map(rowHeader => rowHeader.label)
-        .map(header => row[header])
-        .map(value => {
-          if (value === undefined || value === null || value === '') {
-            return null;
-          }
-          const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
-
-          if (match) {
-            let normalizedDate;
-            if (match[1]) {
-              normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-            } else {
-              normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
-            }
-
-            const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
-            if (parsedDate.isValid()) {
-              return parsedDate.format('YYYY-MM-DD');
-            }
-          }
-          if (/^0[0-9]+$/.test(value)) {
-            return value; // Return as a string if it has leading zeroes
-          }
-          // Attempt to parse as a float
-          const parsedValue = parseFloat(value);
-          if (!isNaN(parsedValue)) {
-            return parsedValue;
-          }
-          if (typeof value === 'string') {
-            value = value.replace(/"/g, '""');
-            value = `"${value}"`;
-          }
-
-          return value;
-        });
-      csvRows += values.join(',') + '\n';
-    });
-    const blob = new Blob([csvRows], {
-      type: 'text/csv;charset=utf-8;'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `measurementsform_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [currentPlot, currentCensus, currentSite, gridType]);
 
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
@@ -455,9 +580,110 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     return gridColumns.some(column => cellHasError(column.field, rowId));
   };
 
-  const fetchErrorRows = async () => {
-    if (!rows || rows.length === 0 || !validationErrors) return [];
-    return rows.filter(row => rowHasError(row.id));
+  const fetchRowsForExport = async (visibility: VisibleFilter[], exportType: 'csv' | 'form') => {
+    const tempFilter: ExtendedGridFilterModel = {
+      ...filterModel,
+      visible: visibility
+    };
+    if (exportType === 'form') {
+      const response = await fetch(
+        `/api/formdownload/measurements/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}/${JSON.stringify(tempFilter)}`,
+        { method: 'GET' }
+      );
+      const data = await response.json();
+      let csvRows =
+        getTableHeaders(FormType.measurements)
+          .map(row => row.label)
+          .join(',') + '\n';
+      data.forEach((row: any) => {
+        const values = getTableHeaders(FormType.measurements)
+          .map(rowHeader => rowHeader.label)
+          .map(header => row[header])
+          .map(value => {
+            if (value === undefined || value === null || value === '') {
+              return null;
+            }
+            const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+
+            if (match) {
+              let normalizedDate;
+              if (match[1]) {
+                normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+              } else {
+                normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
+              }
+
+              const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
+              if (parsedDate.isValid()) {
+                return parsedDate.format('YYYY-MM-DD');
+              }
+            }
+            if (/^0[0-9]+$/.test(value)) {
+              return value; // Return as a string if it has leading zeroes
+            }
+            // Attempt to parse as a float
+            const parsedValue = parseFloat(value);
+            if (!isNaN(parsedValue)) {
+              return parsedValue;
+            }
+            if (typeof value === 'string') {
+              value = value.replace(/"/g, '""');
+              value = `"${value}"`;
+            }
+
+            return value;
+          });
+        csvRows += values.join(',') + '\n';
+      });
+      return csvRows;
+    } else {
+      const tempQuery = createQFFetchQuery(
+        currentSite?.schemaName ?? '',
+        gridType,
+        paginationModel.page,
+        paginationModel.pageSize,
+        currentPlot?.plotID,
+        currentCensus?.plotCensusNumber
+      );
+
+      const results: MeasurementsSummaryResult[] = await (
+        await fetch(`/api/runquery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            (
+              await (
+                await fetch(tempQuery, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ filterModel: tempFilter })
+                })
+              ).json()
+            ).finishedQuery
+              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+              .trim()
+          )
+        })
+      ).json();
+      const headers = Object.keys(results[0]).filter(
+        header => !['CoreMeasurementID', 'StemID', 'TreeID', 'SpeciesID', 'QuadratID', 'PlotID', 'CensusID'].includes(header)
+      );
+      let csvRows = headers.join(',') + '\n';
+      Object.entries(results).forEach(([_, row]) => {
+        const rowValues = headers.map(header => {
+          if (header === 'IsValidated') return bitToBoolean(row[header]);
+          if (header === 'MeasurementDate') return moment(new Date(row[header as keyof MeasurementsSummaryResult])).format('YYYY-MM-DD');
+          if (Object.prototype.toString.call(row[header as keyof MeasurementsSummaryResult]) === '[object Object]')
+            return `"${JSON.stringify(row[header as keyof MeasurementsSummaryResult]).replace(/"/g, '""')}"`;
+          const value = row[header as keyof MeasurementsSummaryResult];
+          if (typeof value === 'string' && value.includes(',')) return `"${value.replace(/"/g, '""')}"`;
+          return value ?? 'NULL';
+        });
+        csvRows += rowValues.join(',') + '\n';
+      });
+      return csvRows;
+    }
   };
 
   const updateRow = async (
@@ -473,7 +699,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     const fetchProcessQuery = createPostPatchQuery(schemaName ?? '', gridType, gridID);
-
+    newRow.measurementDate = moment(newRow.measurementDate).format('YYYY-MM-DD');
+    newRow.userDefinedFields = JSON.stringify(newRow.userDefinedFields);
     try {
       const response = await fetch(fetchProcessQuery, {
         method: oldRow.isNew ? 'POST' : 'PATCH',
@@ -578,14 +805,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       setLoading(true, 'Refreshing Measurements Summary View...');
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setLoading(true, 'Re-fetching paginated data...');
+      await fetchPaginatedData(paginationModel.page);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setLoading(true, 'Reloading validation errors');
+      await fetchValidationErrors();
+      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (e: any) {
       console.error(e);
     } finally {
+      await new Promise(resolve => setTimeout(resolve, 1000));
       setLoading(false);
+      setRefresh(true);
     }
-    await new Promise(resolve => setTimeout(resolve, 1000)); // forced delay
-    await runFetchPaginated();
   };
 
   const performDeleteAction = async (id: GridRowId) => {
@@ -793,7 +1026,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   };
 
   const handleRowCountChange = (newRowCountChange: number) => {
-    setRowCount(rowCount);
+    setRowCount(newRowCountChange);
   };
 
   const handleCloseSnackbar = () => setSnackbar(null);
@@ -928,64 +1161,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       console.error('Error fetching validation errors:', error);
     }
   }, [currentSite?.schemaName]);
-
-  const fetchFullData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const tempQuery = createQFFetchQuery(
-        currentSite?.schemaName ?? '',
-        gridType,
-        paginationModel.page,
-        paginationModel.pageSize,
-        currentPlot?.plotID,
-        currentCensus?.plotCensusNumber
-      );
-
-      const results = await (
-        await fetch(`/api/runquery`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            (
-              await (
-                await fetch(tempQuery, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filterModel })
-                })
-              ).json()
-            ).finishedQuery
-              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-              .trim()
-          )
-        })
-      ).json();
-
-      const jsonData = JSON.stringify(results, null, 2);
-      const blob = new Blob([jsonData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'results.json';
-      link.click();
-
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error fetching full data:', error);
-      setSnackbar({ children: 'Error fetching full data', severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  }, [usingQuery, filterModel, currentPlot, currentCensus, currentQuadrat, currentSite, gridType, setLoading]);
-
-  const handleExportErrors = async () => {
-    const errorRows = await fetchErrorRows();
-    return errorRows.map(row => {
-      return { ...row, errors: validationErrors[Number(row.coreMeasurementID)].errors ?? [] };
-    });
-  };
 
   // custom column formatting:
   const validationStatusColumn: GridColDef = useMemo(
@@ -1122,11 +1297,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       };
     });
-    if (locked) {
-      return [validationStatusColumn, measurementDateColumn, ...commonColumns];
+    if (locked || (session?.user.userStatus !== 'global' && session?.user.userStatus !== 'db admin')) {
+      // permissions locking measurements view actions
+      return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns)];
     }
     return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
-  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors]);
+  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors, rowModesModel]);
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);
@@ -1264,24 +1440,37 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           <Stack direction={'row'} justifyContent="space-between">
             <Stack direction="row" spacing={2}>
               <Typography>
-                <Checkbox checked={showErrorRows} onChange={event => setShowErrorRows(event.target.checked)} />
-                Show rows failing validation: ({errorCount})
+                <Checkbox
+                  checked={showErrorRows}
+                  onChange={event => setShowErrorRows(event.target.checked)}
+                  label={`Show rows failing validation: (${errorCount})`}
+                />
               </Typography>
               <Typography>
-                <Checkbox checked={showValidRows} onChange={event => setShowValidRows(event.target.checked)} />
-                Show rows passing validation: ({validCount})
+                <Checkbox
+                  checked={showValidRows}
+                  onChange={event => setShowValidRows(event.target.checked)}
+                  label={`Show rows passing validation: (${validCount})`}
+                />
               </Typography>
               <Typography>
-                <Checkbox checked={showPendingRows} onChange={event => setShowPendingRows(event.target.checked)} />
-                Show rows pending validation: ({pendingCount})
+                <Checkbox
+                  checked={showPendingRows}
+                  onChange={event => setShowPendingRows(event.target.checked)}
+                  label={`Show rows pending validation: (${pendingCount})`}
+                />
               </Typography>
               <Typography>
-                <Checkbox checked={hidingEmpty} onChange={event => setHidingEmpty(event.target.checked)} />
-                <strong>{hidingEmpty ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>
+                <Checkbox
+                  checked={hidingEmpty}
+                  onChange={event => setHidingEmpty(event.target.checked)}
+                  label={<strong>{hidingEmpty ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>}
+                />
               </Typography>
             </Stack>
           </Stack>
           <StyledDataGrid
+            apiRef={apiRef}
             sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
@@ -1335,11 +1524,10 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
                 handleRefresh: () => setRefresh(true),
-                handleExportAll: fetchFullData,
-                handleExportCSV: exportAllCSV,
-                handleExportErrors: handleExportErrors,
+                handleExport: fetchRowsForExport,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
+                gridColumns: gridColumns,
                 dynamicButtons: [
                   ...dynamicButtons,
                   { label: 'Run Validations', onClick: () => setIsValidationModalOpen(true) },
@@ -1350,7 +1538,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                     ? [{ label: 'Reset Validation Results?', onClick: () => setIsResetValidationModalOpen(true) }]
                     : [])
                 ]
-              }
+              } as EditToolbarProps
             }}
             getRowHeight={() => 'auto'}
             getRowClassName={getRowClassName}
@@ -1362,14 +1550,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
-        {isDialogOpen && promiseArguments && (
-          <ReEnterDataModal
+        {isDialogOpen && promiseArguments && !promiseArguments.oldRow.isNew && (
+          <MSVEditingModal
             gridType={gridType}
-            row={promiseArguments.oldRow}
-            reEnterData={promiseArguments.newRow}
+            oldRow={promiseArguments.oldRow}
+            newRow={promiseArguments.newRow}
             handleClose={handleCancelAction}
             handleSave={handleConfirmAction}
-            columns={gridColumns}
           />
         )}
         {isDeleteDialogOpen && (
