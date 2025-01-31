@@ -7,7 +7,7 @@ import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSu
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
@@ -180,11 +180,13 @@ export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
   handleExport?: (visibility: VisibleFilter[], exportType: 'csv' | 'form') => Promise<string>;
+  handleExportAll?: () => Promise<void>;
+  handleExportCSV?: () => Promise<void>;
   hidingEmptyColumns?: boolean;
   handleToggleHideEmptyColumns?: (checked: boolean) => void;
   handleQuickFilterChange?: (incomingFilterModel: GridFilterModel) => void;
   filterModel?: ExtendedGridFilterModel;
-  apiRef?: MutableRefObject<GridApiCommunity>;
+  apiRef?: RefObject<GridApiCommunity>;
   dynamicButtons?: any;
   locked?: boolean;
   currentSite?: Site;

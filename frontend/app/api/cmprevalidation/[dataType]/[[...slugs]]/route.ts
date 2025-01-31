@@ -4,7 +4,11 @@ import ConnectionManager from '@/config/connectionmanager';
 
 // datatype: table name
 // expecting 1) schema 2) plotID 3) plotCensusNumber
-export async function GET(_request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function GET(
+  _request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   if (!params.slugs || !params.dataType) throw new Error('missing slugs');
   const [schema, plotID, plotCensusNumber] = params.slugs;
   if (

@@ -247,7 +247,13 @@ export default function DashboardPage() {
                           </Box>
                         </AccordionSummary>
                         <AccordionDetails>
-                          <Box>
+                          <Box
+                            aria-label={
+                              changelog.changeTimestamp
+                                ? `Details of change at index ${index}. The changelog timestamp is ${changelog.changeTimestamp}`
+                                : 'No change details present.'
+                            }
+                          >
                             <Typography level={'body-md'}>Updating:</Typography>
                             <Stack direction={'row'}>
                               <Card>

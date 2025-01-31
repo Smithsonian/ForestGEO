@@ -16,12 +16,11 @@ interface ExtendedGridFilterModel extends GridFilterModel {
 
 export async function POST(
   request: NextRequest,
-  {
-    params
-  }: {
-    params: { dataType: string; slugs?: string[] };
+  props: {
+    params: Promise<{ dataType: string; slugs?: string[] }>;
   }
 ) {
+  const params = await props.params;
   // trying to ensure that system correctly retains edit/add functionality -- not necessarily needed currently but better safe than sorry
   const body = await request.json();
   if (body.newRow) {
@@ -374,7 +373,11 @@ export async function POST(
 }
 
 // slugs: schema, gridID
-export async function PATCH(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function PATCH(
+  request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
@@ -434,7 +437,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
 
 // slugs: schema, gridID
 // body: full data row, only need first item from it this time though
-export async function DELETE(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function DELETE(
+  request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');

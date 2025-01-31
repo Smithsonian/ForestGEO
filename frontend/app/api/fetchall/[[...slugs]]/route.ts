@@ -45,7 +45,8 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
 };
 
 // ordering: PCQ
-export async function GET(request: NextRequest, { params }: { params: { slugs?: string[] } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
+  const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema || schema === 'undefined') {
     throw new Error('Schema selection was not provided to API endpoint');

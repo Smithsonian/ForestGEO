@@ -76,10 +76,8 @@ export default function MultilineModal(props: MultilineModalProps) {
         <IconButton aria-label="close" onClick={handleCloseManualEntryForm} sx={{ position: 'absolute', top: 8, right: 8 }}>
           <CloseIcon />
         </IconButton>
-        <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }}>
-          <Typography level={'h2'} color={'primary'}>
-            Manual Input Form - {formType.charAt(0).toUpperCase() + formType.slice(1)}
-          </Typography>
+        <DialogTitle sx={{ alignSelf: 'center', justifyContent: 'center' }} level={'h3'} color={'primary'}>
+          Manual Input Form - {formType.charAt(0).toUpperCase() + formType.slice(1)}
         </DialogTitle>
         <Divider orientation={'horizontal'} sx={{ my: 2 }} />
         {openValidations && !openUpdateValidations && <UploadValidation schema={currentSite?.schemaName ?? ''} setReviewState={setTempReviewState} />}
