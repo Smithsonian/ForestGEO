@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runValidation } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 
-export async function POST(request: NextRequest, props: { params: Promise<{ validationType: string }> }) {
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ validationType: string }> }
+) {
   const params = await props.params;
   try {
     if (!params.validationType) throw new Error('validationProcedureName not provided');

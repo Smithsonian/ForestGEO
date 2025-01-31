@@ -3,7 +3,10 @@ import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function GET(request: NextRequest, props: { params: Promise<{ changelogType: string; options?: string[] }> }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ changelogType: string; options?: string[] }> }
+) {
   const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('schema not found');
@@ -22,7 +25,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
         SELECT * FROM ${schema}.unifiedchangelog
         WHERE 
           (PlotID = ? OR PlotID IS NULL) AND 
-          (CensusID IN (SELECT CensusID FROM ${schema}.census WHERE PlotID = ? AND PlotCensusNumber = ? AND IsActive IS TRUE) OR CensusID IS NULL)
+          (CensusID IN (SELECT CensusID FROM ${schema}.census WHERE PlotID = ? AND PlotCensusNumber = ?) OR CensusID IS NULL)
         ORDER BY ChangeTimestamp DESC 
         LIMIT 5;`;
         break;

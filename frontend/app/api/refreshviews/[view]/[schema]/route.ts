@@ -2,7 +2,10 @@ import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function POST(_request: NextRequest, props: { params: Promise<{ view: string; schema: string }> }) {
+export async function POST(
+  _request: NextRequest,
+  props: { params: Promise<{ view: string; schema: string }> }
+) {
   const params = await props.params;
   if (!params.schema || params.schema === 'undefined' || !params.view || params.view === 'undefined' || !params) throw new Error('schema not provided');
   const { view, schema } = params;

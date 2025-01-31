@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import styles from '@/styles/styles.module.css';
 import Box from '@mui/joy/Box';
 import UnauthenticatedSidebar from '@/components/unauthenticatedsidebar';

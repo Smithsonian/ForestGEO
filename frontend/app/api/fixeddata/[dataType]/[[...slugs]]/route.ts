@@ -10,12 +10,11 @@ import { getUpdatedValues } from '@/config/utils'; // slugs SHOULD CONTAIN AT MI
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
   request: NextRequest,
-  {
-    params
-  }: {
-    params: { dataType: string; slugs?: string[] };
+  props: {
+    params: Promise<{ dataType: string; slugs?: string[] }>;
   }
 ): Promise<NextResponse<{ output: any[]; deprecated?: any[]; totalCount: number; finishedQuery: string }>> {
+  const params = await props.params;
   if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
   const [schema, pageParam, pageSizeParam, plotIDParam, plotCensusNumberParam, speciesIDParam] = params.slugs;
   if (!schema || schema === 'undefined' || !pageParam || pageParam === 'undefined' || !pageSizeParam || pageSizeParam === 'undefined')
@@ -137,7 +136,11 @@ export async function GET(
 }
 
 // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
-export async function POST(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function POST(
+  request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID, _plotIDParam, censusIDParam] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
@@ -201,7 +204,11 @@ export async function POST(request: NextRequest, { params }: { params: { dataTyp
 }
 
 // slugs: schema, gridID
-export async function PATCH(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function PATCH(
+  request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
@@ -338,7 +345,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { dataTy
 
 // slugs: schema, gridID
 // body: full data row, only need first item from it this time though
-export async function DELETE(request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function DELETE(
+  request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, gridID] = params.slugs;
   if (!schema || !gridID) throw new Error('no schema or gridID provided');

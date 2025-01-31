@@ -34,7 +34,11 @@ const buildSearchStub = (columns: string[], quickFilter: string[], alias?: strin
     .join(' OR ');
 };
 
-export async function GET(_request: NextRequest, { params }: { params: { dataType: string; slugs?: string[] } }) {
+export async function GET(
+  _request: NextRequest,
+  props: { params: Promise<{ dataType: string; slugs?: string[] }> }
+) {
+  const params = await props.params;
   const { dataType, slugs } = params;
   if (!dataType || !slugs) throw new Error('data type or slugs not provided');
   const [schema, plotIDParam, censusIDParam, filterModelParam] = slugs;
