@@ -2,10 +2,13 @@ import { defineConfig } from 'cypress';
 
 export default defineConfig({
   e2e: {
+    experimentalRunAllSpecs: true,
+    experimentalInteractiveRunEvents: false,
+    supportFile: false,
     specPattern: 'cypress/e2e/**/*.cy.{js,ts,jsx,tsx}', // E2E tests location
     baseUrl: 'http://localhost:3000', // Define the base URL for tests
     setupNodeEvents(on, config) {
-      // Add node event listeners here if needed
+      return config;
     }
   },
   component: {
