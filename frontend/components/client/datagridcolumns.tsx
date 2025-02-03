@@ -367,7 +367,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true
   },
   {
-    field: 'stemLocalX',
+    field: 'localX',
     headerName: 'X',
     renderHeader: () => formatHeader('X', 'Stem'),
     flex: 0.7,
@@ -380,7 +380,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     filterOperators: customNumericOperators
   },
   {
-    field: 'stemLocalY',
+    field: 'localY',
     headerName: 'Y',
     renderHeader: () => formatHeader('Y', 'Stem'),
     flex: 0.7,
