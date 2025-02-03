@@ -19,7 +19,8 @@
     "cleanwin": "del /S /Q node_modules build; npm install",
     "test": "vitest run --pool=forks",
     "lint": "next lint --fix && prettier --write .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "cypress:open": "npx cypress open && node cypress/utils/renamecypresstests.ts"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.26.0",
@@ -55,9 +56,11 @@
     "@typescript-eslint/parser": "^8.22.0",
     "@uiw/react-codemirror": "^4.23.7",
     "@vitejs/plugin-react-swc": "^3.7.2",
+    "babel-loader": "^9.2.1",
     "chalk": "^5.4.1",
     "codemirror": "^6.0.1",
     "css-loader": "^7.1.2",
+    "cypress": "^14.0.1",
     "date-fns": "^4.1.0",
     "fast-levenshtein": "^3.0.0",
     "framer-motion": "^12.0.6",
