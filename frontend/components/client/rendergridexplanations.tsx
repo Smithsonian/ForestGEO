@@ -2,10 +2,10 @@
 
 import { DatagridType, HeadersByDatagridType } from '@/config/macros/formdetails';
 import {
-  AccordionGroup,
   Accordion,
-  AccordionSummary,
   AccordionDetails,
+  AccordionGroup,
+  AccordionSummary,
   Alert,
   Box,
   Card,

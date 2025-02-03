@@ -20,19 +20,6 @@ class ConnectionManager {
     return ConnectionManager.instance;
   }
 
-  // Acquire a connection for the current operation
-  private async acquireConnectionInternal(): Promise<PoolConnection> {
-    try {
-      const connection = await getConn(); // Reuse getConn from processormacros
-      await connection.ping(); // Validate connection
-      // console.log(chalk.green('Connection validated.'));
-      return connection;
-    } catch (error) {
-      console.error(chalk.red('Error acquiring or validating connection:', error));
-      throw error;
-    }
-  }
-
   // Execute a query using the acquired connection
   public async executeQuery(query: string, params?: any[], transactionId?: string): Promise<any> {
     const connection = transactionId ? this.transactionConnections.get(transactionId) : await this.acquireConnectionInternal();
@@ -115,6 +102,19 @@ class ConnectionManager {
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
+  }
+
+  // Acquire a connection for the current operation
+  private async acquireConnectionInternal(): Promise<PoolConnection> {
+    try {
+      const connection = await getConn(); // Reuse getConn from processormacros
+      await connection.ping(); // Validate connection
+      // console.log(chalk.green('Connection validated.'));
+      return connection;
+    } catch (error) {
+      console.error(chalk.red('Error acquiring or validating connection:', error));
+      throw error;
+    }
   }
 }
 
