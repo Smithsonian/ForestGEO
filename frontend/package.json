@@ -22,7 +22,8 @@
     "e2e": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
     "e2e:headless": "start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
     "component": "cypress open --component",
-    "component:headless": "cypress run --component"
+    "component:headless": "cypress run --component",
+    "test": "npm run e2e:headless && npm run component:headless"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.26.0",
