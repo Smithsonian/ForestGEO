@@ -1,5 +1,5 @@
 import React from 'react';
-import LoginFailedPage from '../../app/loginfailed/page';
+import LoginFailedPage from '../../../../../app/loginfailed/page';
 
 describe('<LoginFailedPage />', () => {
   it('renders', () => {

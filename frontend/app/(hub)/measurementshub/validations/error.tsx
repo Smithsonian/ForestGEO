@@ -7,7 +7,8 @@ import { Warning } from '@mui/icons-material';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 
-export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function Error(props: { error: Error & { digest?: string }; reset: () => void }) {
+  const { error, reset } = props;
   const { data: session } = useSession();
   useEffect(() => {
     // Log the error to an error reporting service
@@ -78,7 +79,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
                 <Typography level={'body-md'} fontWeight={'bold'}>
                   Error Message:{' '}
                 </Typography>
-                <Typography level={'body-md'}>{error.message}</Typography>
+                <Typography level={'body-md'}>{error?.message ?? 'No error message received'}</Typography>
               </Stack>
             </CardContent>
           </Card>
