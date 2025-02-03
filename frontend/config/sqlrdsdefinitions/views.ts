@@ -20,6 +20,7 @@ export interface AllTaxonomiesViewRDS {
   fieldFamily?: string;
   description?: string;
 }
+
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
@@ -61,6 +62,7 @@ export interface MeasurementsSummaryRDS {
   userDefinedFields?: string;
   errors?: string;
 }
+
 export type MeasurementsSummaryResult = ResultType<MeasurementsSummaryRDS>;
 
 export function getMeasurementsSummaryViewHCs(): ColumnStates {

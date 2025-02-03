@@ -7,7 +7,7 @@ import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSu
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
 import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
-import { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
+import { Dispatch, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
 import styled from '@emotion/styled';
 import { getSpeciesLimitsHCs } from '@/config/sqlrdsdefinitions/taxonomies';
@@ -172,6 +172,7 @@ export function getGridID(gridType: string): string {
 }
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
+
 interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
 }
@@ -243,6 +244,7 @@ export interface PendingAction {
   actionType: 'save' | 'delete' | '';
   actionId: GridRowId | null;
 }
+
 export const CellItemContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
