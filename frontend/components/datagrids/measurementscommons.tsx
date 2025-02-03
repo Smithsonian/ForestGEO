@@ -186,7 +186,6 @@ const EditToolbar = (props: EditToolbarProps) => {
   };
 
   const handleChipToggle = (type: string) => {
-    console.log('handle chip toggle: ', type);
     setExportVisibility(prev => (prev.includes(type as VisibleFilter) ? prev.filter(t => t !== (type as VisibleFilter)) : [...prev, type as VisibleFilter]));
   };
 
@@ -933,7 +932,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Error fetching data');
-        console.log('data: ', data);
 
         setRows(data.output);
         setRowCount(data.totalCount);

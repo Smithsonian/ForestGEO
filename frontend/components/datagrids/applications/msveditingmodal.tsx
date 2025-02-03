@@ -2,7 +2,7 @@
 
 import { GridRowModel } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
-import { Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog } from '@mui/joy';
+import { Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Typography } from '@mui/joy';
 import { getUpdatedValues } from '@/config/utils';
 import MapperFactory from '@/config/datamapper';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -19,7 +19,7 @@ interface MSVEditingProps {
 
 export default function MSVEditingModal(props: MSVEditingProps) {
   const currentSite = useSiteContext();
-  const { gridType, handleClose, oldRow, newRow, handleSave } = props;
+  const { handleClose, oldRow, newRow, handleSave } = props;
   const updatedFields = getUpdatedValues(oldRow, newRow);
   const { coreMeasurementID, quadratID, treeID, stemID, speciesID } = newRow;
   const fieldGroups = {
@@ -73,11 +73,29 @@ export default function MSVEditingModal(props: MSVEditingProps) {
       }
       try {
         const demappedData = MapperFactory.getMapper<any, any>(groupName).demapData([matchingFields])[0];
+        const searchExisting = `SELECT * FROM ?? WHERE ?? = ?`;
+        const searchResponse = (
+          await (
+            await fetch(`/api/formatrunquery`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: searchExisting, params: [`${currentSite?.schemaName}.${tableName}`, idColumn, idValue] })
+            })
+          ).json()
+        )[0];
         const query = `UPDATE ?? SET ? WHERE ?? = ?`;
         const response = await fetch(`/api/formatrunquery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: query, params: [`${currentSite?.schemaName}.${tableName}`, demappedData, idColumn, idValue] })
+          body: JSON.stringify({
+            query: query,
+            params: [
+              `${currentSite?.schemaName}.${tableName}`,
+              demappedData,
+              idColumn,
+              searchResponse[idColumn] !== undefined || searchResponse[idColumn] !== null ? searchResponse[idColumn] : idValue
+            ]
+          })
         });
         if (response.ok)
           setUploadStatus(prev => ({
@@ -120,7 +138,7 @@ export default function MSVEditingModal(props: MSVEditingProps) {
   };
 
   useEffect(() => {
-    handleBeginUpload();
+    handleBeginUpload().then(() => {});
   }, []);
 
   return (
@@ -139,6 +157,7 @@ export default function MSVEditingModal(props: MSVEditingProps) {
         <DialogTitle>Saving Changes...</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <LinearProgress determinate value={loadingProgress} title={'Processing changes. Please wait... '} size={'lg'} sx={{ width: '100%' }} />
+          {loadingProgress === 100 && <Typography level={'title-md'}>Update complete!</Typography>}
         </DialogContent>
         <DialogActions>
           <Button
