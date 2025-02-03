@@ -420,7 +420,7 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
 
     // Clean up temporary table
     await connectionManager.executeQuery(dropTemp);
-
+    await connectionManager.commitTransaction(transactionID ?? '');
     return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
     // Roll back on error
