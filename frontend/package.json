@@ -19,11 +19,11 @@
     "lint": "next lint --fix && prettier --write .",
     "format": "prettier --write .",
     "cypress:open": "cypress open",
+    "test": "npm run component:headless && npm run e2e:headless",
     "e2e": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
-    "e2e:headless": "start-server-and-test dev http://localhost:3000 \"cypress run --e2e\"",
+    "e2e:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
     "component": "cypress open --component",
-    "component:headless": "cypress run --component",
-    "test": "npm run e2e:headless && npm run component:headless"
+    "component:headless": "cypress run --component"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.26.0",
@@ -63,7 +63,6 @@
     "chalk": "^5.4.1",
     "codemirror": "^6.0.1",
     "css-loader": "^7.1.2",
-    "cypress": "^14.0.1",
     "date-fns": "^4.1.0",
     "fast-levenshtein": "^3.0.0",
     "framer-motion": "^12.0.11",
@@ -103,6 +102,7 @@
     "@tailwindcss/postcss": "^4.0.3",
     "@types/cypress": "^0.1.6",
     "@types/jest": "^29.5.14",
+    "cypress": "^14.0.1",
     "eslint": "^9.19.0",
     "eslint-config-next": "^15.1.6",
     "eslint-config-prettier": "^10.0.1",
@@ -111,6 +111,7 @@
     "eslint-plugin-react": "^7.37.4",
     "prettier": "^3.4.2",
     "prettier-eslint": "^16.3.0",
+    "start-server-and-test": "^2.0.10",
     "tailwindcss": "^4.0.3",
     "typescript-eslint": "^8.23.0"
   }
