@@ -21,8 +21,8 @@ Again, let's use the stem codes page as an example:
 1. Click on the **Manual Entry Form** button to open the bulk data input interface
 2. This will open a popup with a new grid, with buttons to add new rows, save, and submit.
 3. Add rows as needed and ensure that you save your changes before submitting.
-   1. Note: Bulk data input follows the same header format as file upload. Please ensure you
-      correctly enter your data.
+    1. Note: Bulk data input follows the same header format as file upload. Please ensure you
+       correctly enter your data.
 4. The grid will reload and you should see your new rows.
 
 ### File upload
@@ -31,8 +31,8 @@ Again, let's use the stem codes page as an example:
 
 1. Click on the **Upload** button to open the file upload interface
 2. Follow the prompts to upload, review, and submit your file.
-   1. Note: your file should be in CSV format and correctly match the header format outlined in
-      the first page of the interface.
+    1. Note: your file should be in CSV format and correctly match the header format outlined in
+       the first page of the interface.
 3. After the upload completes, you should see your new rows in the grid.
 
 ### Editing Existing Data
