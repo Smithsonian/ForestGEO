@@ -445,37 +445,27 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   try {
     transactionID = await connectionManager.beginTransaction();
-
-    // Handle deletion for views
-    if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
-      const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-
-      // Prepare query configuration based on view
-      let queryConfig;
-      switch (params.dataType) {
-        case 'alltaxonomiesview':
-          queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        default:
-          throw new Error('Incorrect view call');
-      }
-
-      // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
-      await handleDeleteForSlices(connectionManager, schema, deleteRowData, queryConfig);
-      await connectionManager.commitTransaction(transactionID ?? '');
-      return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
-    }
-
-    // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
-    // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
-    if (params.dataType === 'quadrats') {
-      const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(qDeleteQuery);
+    // Handle deletion for views
+    if (params.dataType === 'alltaxonomiesview') {
+      // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
+      await handleDeleteForSlices(connectionManager, schema, deleteRowData, AllTaxonomiesViewQueryConfig);
+    } else if (params.dataType === 'measurementssummary') {
+      // start with surrounding data
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmattributes WHERE ${demappedGridID} = ${gridIDKey}`);
+      // finally, perform core deletion
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.coremeasurements WHERE ${demappedGridID} = ${gridIDKey}`);
+    } else {
+      // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
+      if (params.dataType === 'quadrats') {
+        const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
+        await connectionManager.executeQuery(qDeleteQuery);
+      }
+      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+      await connectionManager.executeQuery(deleteQuery);
     }
-    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-    await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {

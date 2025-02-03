@@ -78,11 +78,9 @@ export async function handleUpsertForSlices<Result>(
 
   // Convert newRow from RDS to Result upfront
   const mappedNewRow = mapper.demapData([newRow as any])[0];
-  console.log('mappedNewRow: ', mappedNewRow);
 
   for (const sliceKey in config.slices) {
     const { range, primaryKey } = config.slices[sliceKey];
-    console.log('range: ', range, ' primaryKey: ', primaryKey);
 
     // Extract fields relevant to the current slice from the already transformed newRow
     const rowData: Partial<Result> = {};
@@ -94,24 +92,16 @@ export async function handleUpsertForSlices<Result>(
         rowData[field as keyof Result] = mappedNewRow[field as keyof typeof mappedNewRow];
       }
     });
-    console.log('after fields in slice rowData: ', rowData);
 
     // Check if we need to propagate a foreign key from a prior slice
     const prevSlice = getPreviousSlice(sliceKey, config.slices);
-    console.log('prevSlice: ', prevSlice);
     if (prevSlice && insertedIds[prevSlice]) {
       const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
-      console.log('prevPrimaryKey: ', prevPrimaryKey);
       (rowData as any)[prevPrimaryKey] = insertedIds[prevSlice]; // Set the foreign key in the current row
-      console.log('updated rowdata: ', rowData);
     }
-
-    if ((mappedNewRow as any)[primaryKey] !== undefined) (rowData as any)[primaryKey] = (mappedNewRow as any)[primaryKey];
-    console.log('inserting rowData: ', rowData);
 
     // Perform the upsert and store the resulting ID
     insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
-    console.log(insertedIds[sliceKey]);
   }
 
   return insertedIds;
@@ -273,10 +263,6 @@ export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   }
 };
 
-function isDeadlockError(error: any) {
-  return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213;
-}
-
 // Generalized runValidation function
 export async function runValidation(
   validationProcedureID: number,
@@ -291,49 +277,36 @@ export async function runValidation(
   } = {}
 ): Promise<boolean> {
   const connectionManager = ConnectionManager.getInstance();
-  let attempt = 0;
-  let delay = 100;
+  let transactionID: string | undefined = undefined;
 
-  while (true) {
-    let transactionID: string = '';
+  try {
+    transactionID = await connectionManager.beginTransaction();
 
-    try {
-      attempt++;
-      transactionID = await connectionManager.beginTransaction();
+    // Dynamically replace SQL variables with actual TypeScript input values
+    const formattedCursorQuery = cursorQuery
+      .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
+      .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
+      // .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
+      // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
+      .replace(/@validationProcedureID/g, validationProcedureID.toString())
+      .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
+      .replace(/coremeasurements/g, `${schema}.coremeasurements`)
+      .replace(/stems/g, `${schema}.stems`)
+      .replace(/trees/g, `${schema}.trees`)
+      .replace(/quadrats/g, `${schema}.quadrats`)
+      .replace(/cmverrors/g, `${schema}.cmverrors`)
+      .replace(/species/g, `${schema}.species`)
+      .replace(/genus/g, `${schema}.genus`)
+      .replace(/family/g, `${schema}.family`)
+      .replace(/plots/g, `${schema}.plots`)
+      .replace(/census/g, `${schema}.census`)
+      .replace(/personnel/g, `${schema}.personnel`)
+      .replace(/attributes/g, `${schema}.attributes`)
+      .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
 
-      // Dynamically replace SQL variables with actual TypeScript input values
-      const formattedCursorQuery = cursorQuery
-        .replace(/@p_CensusID/g, params.p_CensusID !== null && params.p_CensusID !== undefined ? params.p_CensusID.toString() : 'NULL')
-        .replace(/@p_PlotID/g, params.p_PlotID !== null && params.p_PlotID !== undefined ? params.p_PlotID.toString() : 'NULL')
-        // .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
-        // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
-        .replace(/@validationProcedureID/g, validationProcedureID.toString())
-        .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-        .replace(/censusquadrats/g, 'TEMP_CQ_PLACEHOLDER')
-        .replace(/censusspecies/g, 'TEMP_CS_PLACEHOLDER')
-        .replace(/censusattributes/g, 'TEMP_CA_PLACEHOLDER')
-        .replace(/censuspersonnel/g, 'TEMP_CP_PLACEHOLDER')
-        .replace(/coremeasurements/g, `${schema}.coremeasurements`)
-        .replace(/stems/g, `${schema}.stems`)
-        .replace(/trees/g, `${schema}.trees`)
-        .replace(/quadrats/g, `${schema}.quadrats`)
-        .replace(/cmverrors/g, `${schema}.cmverrors`)
-        .replace(/species/g, `${schema}.species`)
-        .replace(/genus/g, `${schema}.genus`)
-        .replace(/family/g, `${schema}.family`)
-        .replace(/plots/g, `${schema}.plots`)
-        .replace(/census/g, `${schema}.census`)
-        .replace(/personnel/g, `${schema}.personnel`)
-        .replace(/attributes/g, `${schema}.attributes`)
-        .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
-        .replace(/TEMP_CQ_PLACEHOLDER/g, `${schema}.censusquadrats`)
-        .replace(/TEMP_CS_PLACEHOLDER/g, `${schema}.censusspecies`)
-        .replace(/TEMP_CA_PLACEHOLDER/g, `${schema}.censusattributes`)
-        .replace(/TEMP_CP_PLACEHOLDER/g, `${schema}.censuspersonnel`);
-
-      // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
-      if (params.minDBH === null || params.maxDBH === null) {
-        const speciesLimitsQuery = `
+    // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
+    if (params.minDBH === null || params.maxDBH === null) {
+      const speciesLimitsQuery = `
         SELECT sp.SpeciesID, sl.LimitType,
           IF(sl.LimitType = 'DBH', sl.LowerBound, NULL) AS minDBH,
           IF(sl.LimitType = 'DBH', sl.UpperBound, NULL) AS maxDBH
@@ -345,7 +318,7 @@ export async function runValidation(
                JOIN
              ${schema}.stems st ON st.TreeID = t.TreeID
                JOIN
-             ${schema}.quadrats q ON st.QuadratID = q.QuadratID AND q.IsActive IS TRUE
+             ${schema}.quadrats q ON st.QuadratID = q.QuadratID
                JOIN
              ${schema}.coremeasurements cm ON cm.StemID = st.StemID
         WHERE cm.IsValidated IS NULL
@@ -353,74 +326,102 @@ export async function runValidation(
           AND (${params.p_PlotID !== null ? `sl.PlotID = ${params.p_PlotID}` : '1 = 1'})
         LIMIT 1;
       `;
-        const speciesLimits = await connectionManager.executeQuery(speciesLimitsQuery);
-        if (speciesLimits.length > 0) {
-          // If any species-specific limits were fetched, update the variables
-          params.minDBH = speciesLimits[0].minDBH || params.minDBH;
-          params.maxDBH = speciesLimits[0].maxDBH || params.maxDBH;
-        }
-      }
+      console.log('completed speciesLimits query: ', speciesLimitsQuery);
+      const speciesLimits = await connectionManager.executeQuery(speciesLimitsQuery);
+      console.log('RESULTS: specieslimits query: ', speciesLimits);
 
-      // Reformat the query after potentially updating the parameters with species-specific limits
-      const reformattedCursorQuery = formattedCursorQuery
-        .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
-        .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL');
-
-      // Execute the cursor query to get the rows that need validation
-      console.log('running validation: ', validationProcedureName);
-      await connectionManager.executeQuery(reformattedCursorQuery);
-      await connectionManager.commitTransaction(transactionID ?? '');
-      console.log('validation executed.');
-      return true;
-    } catch (e: any) {
-      if (isDeadlockError(e)) {
-        console.log(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
-        try {
-          await connectionManager.rollbackTransaction(transactionID);
-        } catch (rollbackError) {
-          console.error('Rollback error:', rollbackError);
-        }
-        // Wait for an exponentially increasing delay before retrying
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // exponential backoff
-      } else {
-        try {
-          await connectionManager.rollbackTransaction(transactionID);
-        } catch (rollbackError) {
-          console.error('Rollback error:', rollbackError);
-        }
-        return false;
+      if (speciesLimits.length > 0) {
+        // If any species-specific limits were fetched, update the variables
+        params.minDBH = speciesLimits[0].minDBH || params.minDBH;
+        params.maxDBH = speciesLimits[0].maxDBH || params.maxDBH;
       }
     }
+
+    console.log('updated params? ', params);
+
+    // Reformat the query after potentially updating the parameters with species-specific limits
+    const reformattedCursorQuery = formattedCursorQuery
+      .replace(/@minDBH/g, params.minDBH !== null && params.minDBH !== undefined ? params.minDBH.toString() : 'NULL')
+      .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL');
+
+    // Execute the cursor query to get the rows that need validation
+    console.log('running validation: ', validationProcedureName);
+    console.log('running query: ', reformattedCursorQuery);
+    console.log('running query: ', await connectionManager.executeQuery(reformattedCursorQuery));
+    await connectionManager.commitTransaction(transactionID ?? '');
+    return true;
+  } catch (error: any) {
+    await connectionManager.rollbackTransaction(transactionID ?? '');
+    console.error(`Error during ${validationProcedureName} or ${validationProcedureID} validation:`, error.message);
+    return false;
+  } finally {
+    await connectionManager.closeConnection();
   }
 }
 
-export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
+export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
-  const updateQuery = `
-  UPDATE ${schema}.coremeasurements cm
-  JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-  SET cm.IsValidated = CASE
-    WHEN NOT EXISTS (
-      SELECT 1
-      FROM ${schema}.cmverrors cme
-      WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
-    ) THEN TRUE
-    ELSE FALSE
-  END
-  WHERE cm.IsValidated IS NULL
-    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
-    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
-    `;
+  const tempTable = `CREATE TEMPORARY TABLE UpdatedRows
+                     (
+                       CoreMeasurementID INT
+                     );`;
+
+  const insertTemp = `
+    INSERT INTO UpdatedRows (CoreMeasurementID)
+    SELECT cm.CoreMeasurementID
+    FROM ${schema}.coremeasurements cm
+           JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+    WHERE cm.IsValidated IS NULL
+      AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
+      AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+  `;
+
+  const updateValidation = `
+    UPDATE ${schema}.coremeasurements cm
+    SET cm.IsValidated = (
+      CASE
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM ${schema}.cmverrors cme
+          WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
+        ) THEN TRUE  -- No validation errors exist
+        ELSE FALSE   -- Validation errors exist
+      END
+    )
+    WHERE cm.IsValidated IS NULL
+      AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
+  `;
+
+  const getUpdatedRows = `
+    SELECT cm.*
+    FROM ${schema}.coremeasurements cm
+    WHERE cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
+  `;
+
+  const dropTemp = `DROP TEMPORARY TABLE IF EXISTS UpdatedRows;`;
 
   try {
     // Begin transaction
     transactionID = await connectionManager.beginTransaction();
 
-    await connectionManager.executeQuery(updateQuery);
+    // Ensure any leftover temporary table is cleared
+    await connectionManager.executeQuery(dropTemp);
 
+    // Create temporary table and populate it
+    await connectionManager.executeQuery(tempTable);
+    await connectionManager.executeQuery(insertTemp);
+
+    // Update validation states
+    await connectionManager.executeQuery(updateValidation);
+
+    // Fetch and return the updated rows
+    const results = await connectionManager.executeQuery(getUpdatedRows);
+
+    // Clean up temporary table
+    await connectionManager.executeQuery(dropTemp);
     await connectionManager.commitTransaction(transactionID ?? '');
+    return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
     // Roll back on error
     await connectionManager.rollbackTransaction(transactionID ?? '');
