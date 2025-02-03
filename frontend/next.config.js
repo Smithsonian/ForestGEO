@@ -10,7 +10,6 @@ const nextConfig = withBundleAnalyzer({
       resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
     }
   },
-  transpilePackages: ['@mui/material', '@mui/utils'],
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = { fs: false };
@@ -20,7 +19,11 @@ const nextConfig = withBundleAnalyzer({
       if (rule.use && (rule.use.loader === 'next-swc-loader' || rule.use.loader?.includes('next-swc-loader'))) {
         rule.exclude = [
           ...(rule.exclude || []),
-          /node_modules[\\/]@mui[\\/]/ // Exclude MUI packages
+          /node_modules[\\/]@mui[\\/]/, // Exclude MUI packages
+          /node_modules[\\/]@mui[\\/]material[\\/]/, // Exclude MUI Material
+          /node_modules[\\/]@mui[\\/]utils[\\/]/, // Exclude MUI Utils
+          /node_modules[\\/]@mui[\\/]system[\\/]/, // Exclude MUI System
+          /node_modules[\\/]@mui[\\/]private-theming[\\/]/ // Exclude MUI Private Theming
         ];
       }
     });
