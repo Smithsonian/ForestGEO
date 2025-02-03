@@ -71,7 +71,13 @@ jobs:
           cd frontend/
           npm install
           npm run build
-          npm run test --if-present
+
+      - name: Cypress run
+        uses: cypress-io/github-action@v6
+        with:
+          build: npm run build
+          start: npm start
+          browser: chrome
 
       - name: Move directories into build/standalone to reduce app load
         run: |
