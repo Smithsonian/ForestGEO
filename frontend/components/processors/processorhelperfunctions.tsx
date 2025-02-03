@@ -55,12 +55,13 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
 type FieldList = string[];
 
 interface UpdateQueryConfig {
-  slices: {
-    [key: string]: {
+  slices: Record<
+    string,
+    {
       range: [number, number];
       primaryKey: string;
-    };
-  };
+    }
+  >;
   fieldList: FieldList;
 }
 
@@ -69,8 +70,8 @@ export async function handleUpsertForSlices<Result>(
   schema: string,
   newRow: Partial<Result>,
   config: UpdateQueryConfig
-): Promise<{ [key: string]: number }> {
-  const insertedIds: { [key: string]: number } = {};
+): Promise<Record<string, number>> {
+  const insertedIds: Record<string, number> = {};
 
   // Get the correct mapper for the view you're working with
   const mapper = MapperFactory.getMapper<AllTaxonomiesViewRDS, AllTaxonomiesViewResult>('alltaxonomiesview');
@@ -107,7 +108,7 @@ export async function handleUpsertForSlices<Result>(
 }
 
 // Helper function to get the immediate previous slice based on dependencies
-function getPreviousSlice(currentSlice: string, slices: { [key: string]: any }): string | null {
+function getPreviousSlice(currentSlice: string, slices: Record<string, any>): string | null {
   const dependencyOrder = ['family', 'genus', 'species', 'trees', 'stems']; // Order based on dependencies
   const currentIndex = dependencyOrder.indexOf(currentSlice);
 

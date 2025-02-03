@@ -229,9 +229,19 @@ export default function DashboardPage() {
                     }
                   >
                     <AccordionGroup>
-                      <Accordion disabled={isLoading || changelog.id === undefined}>
-                        <AccordionSummary>
-                          <Box sx={{ display: 'flex', flex: 1, width: '100%', alignItems: 'center', flexDirection: 'row' }}>
+                      <Accordion
+                        disabled={isLoading || changelog.id === undefined}
+                        aria-label={'The 5 most recent changes found in the changelog (if they exist)'}
+                      >
+                        <AccordionSummary role={'none'}>
+                          <Box
+                            sx={{ display: 'flex', flex: 1, width: '100%', alignItems: 'center', flexDirection: 'row' }}
+                            aria-label={
+                              changelog.changeTimestamp
+                                ? `Change at index ${index}. The changelog timestamp is ${changelog.changeTimestamp}`
+                                : 'No change found'
+                            }
+                          >
                             <Skeleton loading={changelog.operation === undefined} sx={{ width: '95%' }} animation={'wave'}>
                               <Typography level={'title-md'} fontWeight={'bold'} sx={{ width: '100%' }}>
                                 {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).format('YYYY-MM-DD HH:mm:ss')}
@@ -240,7 +250,13 @@ export default function DashboardPage() {
                           </Box>
                         </AccordionSummary>
                         <AccordionDetails>
-                          <Box>
+                          <Box
+                            aria-label={
+                              changelog.changeTimestamp
+                                ? `Details of change at index ${index}. The changelog timestamp is ${changelog.changeTimestamp}`
+                                : 'No change details present.'
+                            }
+                          >
                             <Typography level={'body-md'}>Updating:</Typography>
                             <Stack direction={'row'}>
                               <Card>

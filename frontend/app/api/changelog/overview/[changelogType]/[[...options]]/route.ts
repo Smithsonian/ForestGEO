@@ -3,7 +3,8 @@ import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function GET(request: NextRequest, { params }: { params: { changelogType: string; options?: string[] } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ changelogType: string; options?: string[] }> }) {
+  const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('schema not found');
   if (!params.changelogType) throw new Error('changelogType not provided');

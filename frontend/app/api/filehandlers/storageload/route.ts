@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   const user = request.nextUrl.searchParams.get('user');
   const formType = request.nextUrl.searchParams.get('formType');
   const file = formData.get(fileName ?? 'file') as File | null;
-  const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(<string>formData.get('fileRowErrors')) : [];
+  const fileRowErrors = formData.get('fileRowErrors') ? JSON.parse(formData.get('fileRowErrors') as string) : [];
 
   if (
     file === null ||

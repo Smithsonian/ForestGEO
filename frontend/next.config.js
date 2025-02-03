@@ -10,6 +10,13 @@ const nextConfig = withBundleAnalyzer({
       resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
     }
   },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = { fs: false }; // ✅ Fixes 'fs' module issue in client builds
+    }
+
+    return config;
+  },
   logging: {
     fetches: {
       fullUrl: true
@@ -19,7 +26,7 @@ const nextConfig = withBundleAnalyzer({
   reactStrictMode: true,
   distDir: 'build',
   images: {
-    unoptimized: true // since images are served from public directory
+    unoptimized: true // since images are served from the public directory
   },
   env: {
     AZURE_SQL_USER: process.env.AZURE_SQL_USER,

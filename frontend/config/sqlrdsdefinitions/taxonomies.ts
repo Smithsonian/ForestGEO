@@ -2,7 +2,7 @@ import { createInitialObject, ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { ColumnStates } from '@/config/macros';
 
-export type SpeciesRDS = {
+export interface SpeciesRDS {
   id?: number;
   speciesID?: number;
   genusID?: number;
@@ -16,11 +16,11 @@ export type SpeciesRDS = {
   description?: string;
   validCode?: string;
   referenceID?: number;
-};
+}
 
 export type SpeciesResult = ResultType<SpeciesRDS>;
 export const initialSpeciesRDSRow = createInitialObject<SpeciesRDS>();
-export type SpeciesLimitsRDS = {
+export interface SpeciesLimitsRDS {
   id?: number;
   speciesLimitID?: number;
   speciesID?: number;
@@ -29,7 +29,7 @@ export type SpeciesLimitsRDS = {
   limitType?: string;
   upperBound?: number;
   lowerBound?: number;
-};
+}
 export type SpeciesLimitsResult = ResultType<SpeciesLimitsRDS>;
 
 export function getSpeciesLimitsHCs(): ColumnStates {
@@ -77,31 +77,31 @@ export const validateSpeciesFormRow: ValidationFunction = row => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
-export type FamilyRDS = {
+export interface FamilyRDS {
   id?: number;
   familyID?: number;
   family?: string;
   referenceID?: number;
-};
+}
 export type FamilyResult = ResultType<FamilyRDS>;
-export type GenusRDS = {
+export interface GenusRDS {
   id?: number;
   genusID?: number;
   familyID?: number;
   genus?: string;
   referenceID?: number;
   genusAuthority?: string;
-};
+}
 export type GenusResult = ResultType<GenusRDS>;
-export type ReferenceRDS = {
+export interface ReferenceRDS {
   id?: number;
   referenceID?: number;
   publicationTitle?: string;
   fullReference?: string;
   dateOfPublication?: Date;
-};
+}
 export type ReferenceResult = ResultType<ReferenceRDS>;
-export type StemRDS = {
+export interface StemRDS {
   id?: number;
   stemID?: number;
   treeID?: number;
@@ -112,16 +112,16 @@ export type StemRDS = {
   localY?: number;
   moved?: boolean;
   stemDescription?: string;
-};
+}
 export type StemResult = ResultType<StemRDS>;
-export type TreeRDS = {
+export interface TreeRDS {
   id?: number;
   treeID?: number;
   treeTag?: string;
   speciesID?: number;
-};
+}
 export type TreeResult = ResultType<TreeRDS>;
-export type SpecimensRDS = {
+export interface SpecimensRDS {
   id?: number;
   specimenID?: number;
   stemID?: number;
@@ -133,14 +133,14 @@ export type SpecimensRDS = {
   collectionDate?: Date;
   determinedBy?: string;
   description?: string;
-};
+}
 export type SpecimensResult = ResultType<SpecimensRDS>;
-export type SpeciesInventoryRDS = {
+export interface SpeciesInventoryRDS {
   id: number;
   speciesInventoryID: number;
   censusID: number | null;
   plotID: number | null;
   speciesID: number | null;
   subSpeciesID: number | null;
-};
+}
 export type SpeciesInventoryResult = ResultType<SpeciesInventoryRDS>;

@@ -74,7 +74,7 @@ export type InitialValue<T> = T extends string
               : undefined;
 
 export function createInitialObject<T>(): { [K in keyof T]: InitialValue<T[K]> } {
-  const typeMap: { [key: string]: any } = {
+  const typeMap: Record<string, any> = {
     string: '',
     number: 0,
     boolean: false,
@@ -169,7 +169,7 @@ export async function handleUpsert<Result>(
   if (!Object.keys(data).length) {
     throw new Error(`No data provided for upsert operation on table ${tableName}`);
   }
-  let id: number = 0;
+  let id = 0;
 
   try {
     const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
@@ -287,51 +287,54 @@ export function getTransformedKeys<T>(): string[] {
   return Object.keys(exampleObject) as string[];
 }
 
-type FilterItem = {
-  field: string;
-  operator: string;
-  value: any;
-};
+export function getUpdatedValues<T extends Record<string, any>>(original: T, updated: T): Partial<T> {
+  const changes: Partial<T> = {};
 
-type FilterModel = {
-  items: FilterItem[];
-  logicOperator: 'and' | 'or';
-};
-
-function buildWhereClause(filterModel: FilterModel): string {
-  const operatorMap: { [key: string]: string } = {
-    contains: 'LIKE',
-    equals: '=',
-    startsWith: 'LIKE',
-    endsWith: 'LIKE',
-    '>': '>',
-    '<': '<',
-    '>=': '>=',
-    '<=': '<='
-  };
-
-  const conditions = filterModel.items.map(item => {
-    const sqlOperator = operatorMap[item.operator];
-    const field = capitalizeAndTransformField(item.field);
-    let condition = '';
-
-    switch (item.operator) {
-      case 'contains':
-        condition = `${field} ${sqlOperator} '%${item.value}%'`;
-        break;
-      case 'startsWith':
-        condition = `${field} ${sqlOperator} '${item.value}%'`;
-        break;
-      case 'endsWith':
-        condition = `${field} ${sqlOperator} '%${item.value}'`;
-        break;
-      default:
-        condition = `${field} ${sqlOperator} '${item.value}'`;
+  Object.keys(original).forEach(key => {
+    const typedKey = key as keyof T;
+    if (original[typedKey] !== updated[typedKey]) {
+      changes[typedKey] = updated[typedKey];
     }
-
-    return condition;
   });
 
-  const combinedConditions = conditions.join(` ${filterModel.logicOperator.toUpperCase()} `);
-  return combinedConditions ? `WHERE ${combinedConditions}` : '';
+  return changes;
+}
+
+export function mysqlEscape(value: any): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+  throw new Error('Unsupported value type');
+}
+
+export function formatQuery(query: string, values: any[]): string {
+  let valueIndex = 0; // Pointer for values
+  return query
+    .replace(/\?\?/g, () => {
+      const identifier = values[valueIndex++];
+      if (Array.isArray(identifier) && identifier.length === 2) {
+        // If identifier is [schema, table], format it as `schema`.`table`
+        const [schema, table] = identifier;
+        return `\`${schema.replace(/`/g, '``')}\`.\`${table.replace(/`/g, '``')}\``;
+      } else if (typeof identifier === 'string') {
+        // Single string identifier
+        return `\`${identifier.replace(/`/g, '``')}\``;
+      } else {
+        throw new Error(`Invalid identifier for ?? placeholder: ${JSON.stringify(identifier)}`);
+      }
+    })
+    .replace(/\?/g, () => {
+      const value = values[valueIndex++];
+      if (value === null || value === undefined) return 'NULL';
+      if (typeof value === 'number') return value.toString();
+      if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        return Object.entries(value)
+          .map(([key, val]) => `\`${key}\` = ${mysqlEscape(val)}`)
+          .join(', ');
+      }
+      if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
+      throw new Error(`Unsupported value type: ${typeof value}`);
+    });
 }

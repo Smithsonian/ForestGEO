@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function GET(_request: NextRequest, { params }: { params: { firstName: string; lastName: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ firstName: string; lastName: string }> }) {
+  const params = await props.params;
   const { firstName, lastName } = params;
   if (!firstName || !lastName) throw new Error('no first or last name provided!');
 

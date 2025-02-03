@@ -12,28 +12,29 @@ create index idx_attributes_status on attributes (Status);
 
 create table if not exists measurementssummary
 (
-    CoreMeasurementID int                                                          not null,
-    StemID            int                                                          not null,
-    TreeID            int                                                          not null,
-    SpeciesID         int                                                          not null,
-    QuadratID         int                                                          not null,
-    PlotID            int                                                          not null,
-    CensusID          int                                                          not null,
-    SpeciesName       varchar(64)                                                  null,
-    SubspeciesName    varchar(64)                                                  null,
-    SpeciesCode       varchar(25)                                                  null,
-    TreeTag           varchar(10)                                                  null,
-    StemTag           varchar(10)                                                  null,
-    StemLocalX        decimal(10, 6)                                               null,
-    StemLocalY        decimal(10, 6)                                               null,
-    QuadratName       varchar(255)                                                 null,
-    MeasurementDate   date                                                         null,
-    MeasuredDBH       decimal(10, 6)                                               null,
-    MeasuredHOM       decimal(10, 6)                                               null,
-    IsValidated       bit                                             default b'0' null,
-    Description       varchar(255)                                                 null,
-    Attributes        varchar(255)                                                 null,
-    UserDefinedFields json                                                         null,
+    CoreMeasurementID int              not null,
+    StemID            int              not null,
+    TreeID            int              not null,
+    SpeciesID         int              not null,
+    QuadratID         int              not null,
+    PlotID            int              not null,
+    CensusID          int              not null,
+    SpeciesName       varchar(64)      null,
+    SubspeciesName    varchar(64)      null,
+    SpeciesCode       varchar(25)      null,
+    TreeTag           varchar(10)      null,
+    StemTag           varchar(10)      null,
+    StemLocalX        decimal(10, 6)   null,
+    StemLocalY        decimal(10, 6)   null,
+    QuadratName       varchar(255)     null,
+    MeasurementDate   date             null,
+    MeasuredDBH       decimal(10, 6)   null,
+    MeasuredHOM       decimal(10, 6)   null,
+    IsValidated       bit default b'0' null,
+    Description       varchar(255)     null,
+    Attributes        varchar(255)     null,
+    UserDefinedFields json             null,
+    Errors            text             null,
     primary key (CoreMeasurementID, StemID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
 );
 
@@ -120,16 +121,16 @@ CREATE INDEX idx_plotcensusnumber ON census (PlotCensusNumber);
 
 create table if not exists quadrats
 (
-    QuadratID       int auto_increment
+    QuadratID    int auto_increment
         primary key,
-    PlotID          int                                                                 null,
-    QuadratName     varchar(255)                                                        null,
-    StartX          decimal(10, 6)                                                      null,
-    StartY          decimal(10, 6)                                                      null,
-    DimensionX      int                                                                 null,
-    DimensionY      int                                                                 null,
-    Area            decimal(10, 6)                                                      null,
-    QuadratShape    varchar(255)                                                        null,
+    PlotID       int            null,
+    QuadratName  varchar(255)   null,
+    StartX       decimal(10, 6) null,
+    StartY       decimal(10, 6) null,
+    DimensionX   int            null,
+    DimensionY   int            null,
+    Area         decimal(10, 6) null,
+    QuadratShape varchar(255)   null,
     constraint unique_quadrat_name_per_plot
         unique (PlotID, QuadratName),
     constraint Quadrats_Plots_FK
@@ -147,8 +148,8 @@ CREATE INDEX idx_quadratshape ON quadrats (QuadratShape);
 
 create table if not exists censusquadrat
 (
-    CQID int auto_increment primary key ,
-    CensusID int null,
+    CQID      int auto_increment primary key,
+    CensusID  int null,
     QuadratID int null,
     constraint cq_census_censusid_fk
         foreign key (CensusID) references census (CensusID),
@@ -351,14 +352,14 @@ create table if not exists stems
 (
     StemID          int auto_increment
         primary key,
-    TreeID          int                                                         null,
-    QuadratID       int                                                         null,
-    StemNumber      int                                                         null,
-    StemTag         varchar(10)                                                 null,
-    LocalX          decimal(10, 6)                                              null,
-    LocalY          decimal(10, 6)                                              null,
-    Moved           bit                                                         null,
-    StemDescription varchar(255)                                                null,
+    TreeID          int            null,
+    QuadratID       int            null,
+    StemNumber      int            null,
+    StemTag         varchar(10)    null,
+    LocalX          decimal(10, 6) null,
+    LocalY          decimal(10, 6) null,
+    Moved           bit            null,
+    StemDescription varchar(255)   null,
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID),
     constraint stems_quadrats_QuadratID_fk
@@ -382,14 +383,14 @@ create table if not exists coremeasurements
 (
     CoreMeasurementID int auto_increment
         primary key,
-    CensusID          int                                                          null,
-    StemID            int                                                          null,
-    IsValidated       bit                                             default b'0' null,
-    MeasurementDate   date                                                         null,
-    MeasuredDBH       decimal(10, 6)                                               null,
-    MeasuredHOM       decimal(10, 6)                                               null,
-    Description       varchar(255)                                                 null,
-    UserDefinedFields json                                                         null,
+    CensusID          int              null,
+    StemID            int              null,
+    IsValidated       bit default b'0' null,
+    MeasurementDate   date             null,
+    MeasuredDBH       decimal(10, 6)   null,
+    MeasuredHOM       decimal(10, 6)   null,
+    Description       varchar(255)     null,
+    UserDefinedFields json             null,
     constraint FK_CoreMeasurements_Stems
         foreign key (StemID) references stems (StemID),
     constraint coremeasurements_census_CensusID_fk
@@ -494,126 +495,73 @@ create table if not exists validationchangelog
 
 create table if not exists viewfulltable
 (
-    CoreMeasurementID         int                                                                                                             null,
-    MeasurementDate           date                                                                                                            null,
-    MeasuredDBH               decimal(10, 6)                                                                                                  null,
-    MeasuredHOM               decimal(10, 6)                                                                                                  null,
-    Description               varchar(255)                                                                                                    null,
-    IsValidated               bit                                                                                             default b'0'    null,
-    PlotID                    int                                                                                                             null,
-    PlotName                  varchar(255)                                                                                                    null,
-    LocationName              varchar(255)                                                                                                    null,
-    CountryName               varchar(255)                                                                                                    null,
-    DimensionX                int                                                                                                             null,
-    DimensionY                int                                                                                                             null,
-    PlotArea                  decimal(10, 6)                                                                                                  null,
-    PlotGlobalX               decimal(10, 6)                                                                                                  null,
-    PlotGlobalY               decimal(10, 6)                                                                                                  null,
-    PlotGlobalZ               decimal(10, 6)                                                                                                  null,
-    PlotShape                 varchar(255)                                                                                                    null,
-    PlotDescription           varchar(255)                                                                                                    null,
+    CoreMeasurementID          int                                                                 null,
+    MeasurementDate            date                                                                null,
+    MeasuredDBH                decimal(10, 6)                                                      null,
+    MeasuredHOM                decimal(10, 6)                                                      null,
+    Description                varchar(255)                                                        null,
+    IsValidated                bit                                                    default b'0' null,
+    PlotID                     int                                                                 null,
+    PlotName                   varchar(255)                                                        null,
+    LocationName               varchar(255)                                                        null,
+    CountryName                varchar(255)                                                        null,
+    DimensionX                 int                                                                 null,
+    DimensionY                 int                                                                 null,
+    PlotArea                   decimal(10, 6)                                                      null,
+    PlotGlobalX                decimal(10, 6)                                                      null,
+    PlotGlobalY                decimal(10, 6)                                                      null,
+    PlotGlobalZ                decimal(10, 6)                                                      null,
+    PlotShape                  varchar(255)                                                        null,
+    PlotDescription            varchar(255)                                                        null,
     PlotDefaultDimensionUnits  enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
     PlotDefaultCoordinateUnits enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
     PlotDefaultAreaUnits       enum ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') default 'm2' not null,
     PlotDefaultDBHUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'mm' not null,
     PlotDefaultHOMUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null,
-    CensusID                  int                                                                                                             null,
-    CensusStartDate           date                                                                                                            null,
-    CensusEndDate             date                                                                                                            null,
-    CensusDescription         varchar(255)                                                                                                    null,
-    PlotCensusNumber          int                                                                                                             null,
-    QuadratID                 int                                                                                                             null,
-    QuadratName               varchar(255)                                                                                                    null,
-    QuadratDimensionX         int                                                                                                             null,
-    QuadratDimensionY         int                                                                                                             null,
-    QuadratArea               decimal(10, 6)                                                                                                  null,
-    QuadratStartX             decimal(10, 6)                                                                                                  null,
-    QuadratStartY             decimal(10, 6)                                                                                                  null,
-    QuadratShape              varchar(255)                                                                                                    null,
-    TreeID                    int                                                                                                             null,
-    TreeTag                   varchar(10)                                                                                                     null,
-    StemID                    int                                                                                                             null,
-    StemTag                   varchar(10)                                                                                                     null,
-    StemLocalX                decimal(10, 6)                                                                                                  null,
-    StemLocalY                decimal(10, 6)                                                                                                  null,
-    SpeciesID                 int                                                                                                             null,
-    SpeciesCode               varchar(25)                                                                                                     null,
-    SpeciesName               varchar(64)                                                                                                     null,
-    SubspeciesName            varchar(64)                                                                                                     null,
-    SubspeciesAuthority       varchar(128)                                                                                                    null,
-    SpeciesIDLevel            varchar(20)                                                                                                     null,
-    GenusID                   int                                                                                                             null,
-    Genus                     varchar(32)                                                                                                     null,
-    GenusAuthority            varchar(32)                                                                                                     null,
-    FamilyID                  int                                                                                                             null,
-    Family                    varchar(32)                                                                                                     null,
-    Attributes                varchar(255)                                                                                                    null,
-    UserDefinedFields json null
+    CensusID                   int                                                                 null,
+    CensusStartDate            date                                                                null,
+    CensusEndDate              date                                                                null,
+    CensusDescription          varchar(255)                                                        null,
+    PlotCensusNumber           int                                                                 null,
+    QuadratID                  int                                                                 null,
+    QuadratName                varchar(255)                                                        null,
+    QuadratDimensionX          int                                                                 null,
+    QuadratDimensionY          int                                                                 null,
+    QuadratArea                decimal(10, 6)                                                      null,
+    QuadratStartX              decimal(10, 6)                                                      null,
+    QuadratStartY              decimal(10, 6)                                                      null,
+    QuadratShape               varchar(255)                                                        null,
+    TreeID                     int                                                                 null,
+    TreeTag                    varchar(10)                                                         null,
+    StemID                     int                                                                 null,
+    StemTag                    varchar(10)                                                         null,
+    StemLocalX                 decimal(10, 6)                                                      null,
+    StemLocalY                 decimal(10, 6)                                                      null,
+    SpeciesID                  int                                                                 null,
+    SpeciesCode                varchar(25)                                                         null,
+    SpeciesName                varchar(64)                                                         null,
+    SubspeciesName             varchar(64)                                                         null,
+    SubspeciesAuthority        varchar(128)                                                        null,
+    SpeciesIDLevel             varchar(20)                                                         null,
+    GenusID                    int                                                                 null,
+    Genus                      varchar(32)                                                         null,
+    GenusAuthority             varchar(32)                                                         null,
+    FamilyID                   int                                                                 null,
+    Family                     varchar(32)                                                         null,
+    Attributes                 varchar(255)                                                        null,
+    UserDefinedFields          json                                                                null
 );
-
-CREATE INDEX idx_coremeasurementid ON viewfulltable (CoreMeasurementID);
-CREATE INDEX idx_measurementdate ON viewfulltable (MeasurementDate);
-CREATE INDEX idx_measureddbh ON viewfulltable (MeasuredDBH);
-CREATE INDEX idx_measuredhom ON viewfulltable (MeasuredHOM);
-CREATE INDEX idx_description ON viewfulltable (Description);
-CREATE INDEX idx_isvalidated ON viewfulltable (IsValidated);
-CREATE INDEX idx_plotid ON viewfulltable (PlotID);
-CREATE INDEX idx_plotname ON viewfulltable (PlotName);
-CREATE INDEX idx_locationname ON viewfulltable (LocationName);
-CREATE INDEX idx_countryname ON viewfulltable (CountryName);
-CREATE INDEX idx_dimensionx ON viewfulltable (DimensionX);
-CREATE INDEX idx_dimensiony ON viewfulltable (DimensionY);
-CREATE INDEX idx_plotdimensionunits ON viewfulltable (PlotDimensionUnits);
-CREATE INDEX idx_plotarea ON viewfulltable (PlotArea);
-CREATE INDEX idx_plotareaunits ON viewfulltable (PlotAreaUnits);
-CREATE INDEX idx_plotglobalx ON viewfulltable (PlotGlobalX);
-CREATE INDEX idx_plotglobaly ON viewfulltable (PlotGlobalY);
-CREATE INDEX idx_plotglobalz ON viewfulltable (PlotGlobalZ);
-CREATE INDEX idx_plotcoordinateunits ON viewfulltable (PlotCoordinateUnits);
-CREATE INDEX idx_plotshape ON viewfulltable (PlotShape);
-CREATE INDEX idx_plotdescription ON viewfulltable (PlotDescription);
-CREATE INDEX idx_censusid ON viewfulltable (CensusID);
-CREATE INDEX idx_censusstartdate ON viewfulltable (CensusStartDate);
-CREATE INDEX idx_censusenddate ON viewfulltable (CensusEndDate);
-CREATE INDEX idx_censusdescription ON viewfulltable (CensusDescription);
-CREATE INDEX idx_plotcensusnumber ON viewfulltable (PlotCensusNumber);
-CREATE INDEX idx_quadratid ON viewfulltable (QuadratID);
-CREATE INDEX idx_quadratname ON viewfulltable (QuadratName);
-CREATE INDEX idx_quadratdimensionx ON viewfulltable (QuadratDimensionX);
-CREATE INDEX idx_quadratdimensiony ON viewfulltable (QuadratDimensionY);
-CREATE INDEX idx_quadrarea ON viewfulltable (QuadratArea);
-CREATE INDEX idx_quadratstartx ON viewfulltable (QuadratStartX);
-CREATE INDEX idx_quadratstarty ON viewfulltable (QuadratStartY);
-CREATE INDEX idx_quadratshape ON viewfulltable (QuadratShape);
-CREATE INDEX idx_treeid ON viewfulltable (TreeID);
-CREATE INDEX idx_treetag ON viewfulltable (TreeTag);
-CREATE INDEX idx_stemid ON viewfulltable (StemID);
-CREATE INDEX idx_stemtag ON viewfulltable (StemTag);
-CREATE INDEX idx_stemlocalx ON viewfulltable (StemLocalX);
-CREATE INDEX idx_stemlocaly ON viewfulltable (StemLocalY);
-CREATE INDEX idx_speciesid ON viewfulltable (SpeciesID);
-CREATE INDEX idx_speciescode ON viewfulltable (SpeciesCode);
-CREATE INDEX idx_speciesname ON viewfulltable (SpeciesName);
-CREATE INDEX idx_subspeciesname ON viewfulltable (SubspeciesName);
-CREATE INDEX idx_subspeciesauthority ON viewfulltable (SubspeciesAuthority);
-CREATE INDEX idx_speciesidlevel ON viewfulltable (SpeciesIDLevel);
-CREATE INDEX idx_genusid ON viewfulltable (GenusID);
-CREATE INDEX idx_genus ON viewfulltable (Genus);
-CREATE INDEX idx_genusauthority ON viewfulltable (GenusAuthority);
-CREATE INDEX idx_familyid ON viewfulltable (FamilyID);
-CREATE INDEX idx_family ON viewfulltable (Family);
-CREATE INDEX idx_attributes ON viewfulltable (Attributes);
 
 create table if not exists postvalidationqueries
 (
-    QueryID int auto_increment primary key,
-    QueryName varchar(255) null,
-    QueryDefinition text null,
-    Description text null,
-    IsEnabled bit default b'0' not null,
-    LastRunAt DATETIME NULL,
-    LastRunResult LONGTEXT NULL,
-    LastRunStatus ENUM('success', 'failure') NULL
+    QueryID         int auto_increment primary key,
+    QueryName       varchar(255)                null,
+    QueryDefinition text                        null,
+    Description     text                        null,
+    IsEnabled       bit default b'0'            not null,
+    LastRunAt       DATETIME                    NULL,
+    LastRunResult   LONGTEXT                    NULL,
+    LastRunStatus   ENUM ('success', 'failure') NULL
 );
 
 CREATE INDEX idx_queryname ON postvalidationqueries (QueryName);
@@ -623,3 +571,20 @@ CREATE INDEX idx_isenabled ON postvalidationqueries (IsEnabled);
 CREATE INDEX idx_lastrunat ON postvalidationqueries (LastRunAt);
 CREATE INDEX idx_lastrunresult ON postvalidationqueries (LastRunResult(255));
 CREATE INDEX idx_lastrunstatus ON postvalidationqueries (LastRunStatus);
+
+create table if not exists failedmeasurements
+(
+    FailedMeasurementID int auto_increment primary key,
+    PlotID              int            null,
+    CensusID            int            null,
+    Tag                 varchar(255)   null,
+    StemTag             varchar(255)   null,
+    SpCode              varchar(255)   null,
+    Quadrat             varchar(255)   null,
+    X                   decimal(10, 6) null,
+    Y                   decimal(10, 6) null,
+    DBH                 decimal(10, 6) null,
+    HOM                 decimal(10, 6) null,
+    Date                date           null,
+    Codes               varchar(255)   null
+);
