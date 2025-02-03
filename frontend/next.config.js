@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
@@ -14,23 +15,8 @@ const nextConfig = withBundleAnalyzer({
     if (!isServer) {
       config.resolve.fallback = { fs: false };
     }
-
-    config.module.rules.forEach(rule => {
-      if (rule.use && (rule.use.loader === 'next-swc-loader' || rule.use.loader?.includes('next-swc-loader'))) {
-        rule.exclude = [
-          ...(rule.exclude || []),
-          /node_modules[\\/]@mui[\\/]/, // Exclude MUI packages
-          /node_modules[\\/]@mui[\\/]material[\\/]/, // Exclude MUI Material
-          /node_modules[\\/]@mui[\\/]utils[\\/]/, // Exclude MUI Utils
-          /node_modules[\\/]@mui[\\/]system[\\/]/, // Exclude MUI System
-          /node_modules[\\/]@mui[\\/]private-theming[\\/]/ // Exclude MUI Private Theming
-        ];
-      }
-    });
-
-    // Your existing rules
     config.module.rules.push({
-      test: /\.(js|ts|tsx|jsx)$/,
+      test: /\.cy.(js|ts|tsx|jsx)$/,
       exclude: /node_modules/
     });
 

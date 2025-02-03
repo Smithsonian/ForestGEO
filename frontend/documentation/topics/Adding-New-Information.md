@@ -14,18 +14,18 @@ respective table. There are several different ways you can interact with the vie
 At the top of each data view, you should see a toolbar with a variety of options:
 
 1. Filters
-    1. Allows you to filter the view by placing constraints on the columns in the view.
-    2. These filters will ONLY apply to the page you're currently viewing!
+   1. Allows you to filter the view by placing constraints on the columns in the view.
+   2. These filters will ONLY apply to the page you're currently viewing!
 2. Density
-    1. Allows you to change the height of the headers
+   1. Allows you to change the height of the headers
 3. Export
-    1. Allows you to export the current page you're viewing
+   1. Allows you to export the current page you're viewing
 4. Add Row
-    1. Allows you to add new rows. Please see below for more guidance on how exactly that works!
+   1. Allows you to add new rows. Please see below for more guidance on how exactly that works!
 5. Refresh
-    1. Reloads data from the table.
+   1. Reloads data from the table.
 6. Export Full Data
-    1. Exports all data in the table to JSON
+   1. Exports all data in the table to JSON
 
 > Row Actions:
 >
@@ -85,7 +85,7 @@ data en masse by directly uploading a file (or form) of data.
 There are five types of forms currently accepted, along with the headers that they accept:
 
 | Form           | Headers                                                                                          |
-|----------------|--------------------------------------------------------------------------------------------------|
+| -------------- | ------------------------------------------------------------------------------------------------ |
 | `attributes`   | code, description, status                                                                        |
 | `personnel`    | firstname, lastname, role                                                                        |
 | `species`      | spcode, family, genus, species, subspecies, idlevel, authority, subspeciesauthority              |
