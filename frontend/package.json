@@ -73,7 +73,7 @@
     "next-auth": "^4.24.11",
     "node": "^20.9.0",
     "npm-force-resolutions": "^0.0.10",
-    "octokit": "^4.1.0",
+    "octokit": "^3.2.1",
     "p-queue": "^8.1.0",
     "papaparse": "^5.5.2",
     "postcss-import": "^16.1.0",
