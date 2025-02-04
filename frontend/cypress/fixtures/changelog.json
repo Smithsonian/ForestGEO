@@ -1,0 +1,10 @@
+[
+  {
+    "id": 1,
+    "operation": "UPDATE",
+    "tableName": "measurements",
+    "changeTimestamp": "2024-01-01T12:00:00Z",
+    "oldRowState": { "columnA": "oldValue" },
+    "newRowState": { "columnA": "newValue" }
+  }
+]
