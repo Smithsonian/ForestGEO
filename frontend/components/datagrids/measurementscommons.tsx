@@ -28,6 +28,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import UploadIcon from '@mui/icons-material/Upload';
 import Box from '@mui/joy/Box';
 import {
   Button,
@@ -193,6 +194,9 @@ const EditToolbar = (props: EditToolbarProps) => {
     .filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
     .map(column => column.field);
 
+  const uploadButton = dynamicButtons.find((button: any) => button.label === 'Upload');
+  const otherButtons = dynamicButtons.filter((button: any) => button.label !== 'Upload');
+
   return (
     <>
       <GridToolbarContainer>
@@ -250,11 +254,18 @@ const EditToolbar = (props: EditToolbarProps) => {
             >
               Export as CSV...
             </Button>
+            {uploadButton && (
+              <Tooltip title={uploadButton.tooltip} placement="bottom">
+                <Button variant="plain" color="primary" onClick={uploadButton.onClick} startDecorator={<UploadIcon />}>
+                  {uploadButton.label}
+                </Button>
+              </Tooltip>
+            )}
             <Stack direction={'row'} spacing={2}>
               <Dropdown>
                 <MenuButton>Other</MenuButton>
                 <Menu>
-                  {dynamicButtons.map((button: any, index: number) => (
+                  {otherButtons.map((button: any, index: number) => (
                     <>
                       {button.tooltip ? (
                         <>

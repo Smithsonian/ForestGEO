@@ -19,7 +19,6 @@
     "lint": "next lint --fix && prettier --write .",
     "format": "prettier --write .",
     "cypress:open": "cypress open",
-    "test": "npm run component:headless && npm run e2e:headless",
     "e2e": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
     "e2e:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
     "component": "cypress open --component",

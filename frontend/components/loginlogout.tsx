@@ -33,13 +33,7 @@ export const LoginLogout = () => {
           <Typography level="title-sm">Login to access</Typography>
           <Typography level="body-xs">your information</Typography>
         </Box>
-        <IconButton
-          size="sm"
-          variant="plain"
-          color="neutral"
-          onClick={() => handleRetryLogin()}
-          aria-label={'Login' + ' button'}
-        >
+        <IconButton size="sm" variant="plain" color="neutral" onClick={() => handleRetryLogin()} aria-label={'Login' + ' button'}>
           <LoginRoundedIcon />
         </IconButton>
       </Box>
