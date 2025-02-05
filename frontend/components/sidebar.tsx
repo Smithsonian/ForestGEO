@@ -950,8 +950,8 @@ export default function Sidebar(props: SidebarProps) {
                                 {
                                   plotSelectionRequired: plot === undefined,
                                   censusSelectionRequired: census === undefined,
-                                  pathname,
-                                  isParentDataIncomplete
+                                  pathname: pathname ?? '',
+                                  isParentDataIncomplete: isParentDataIncomplete
                                 },
                                 item,
                                 toggle,
