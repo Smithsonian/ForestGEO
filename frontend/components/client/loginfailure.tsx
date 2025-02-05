@@ -13,7 +13,7 @@ const LoginFailed = () => {
   const handleTryAgain = () => {
     sessionStorage.clear();
     localStorage.clear();
-    signOut({ callbackUrl: '/login' }).catch(console.error);
+    signOut({ redirectTo: '/login' }).catch(console.error);
   };
 
   return (
