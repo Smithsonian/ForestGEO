@@ -11,6 +11,7 @@ import { Providers } from './providers';
 import { LockAnimationProvider } from './contexts/lockanimationcontext';
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  console.log('root layout encountered. loading...');
   return (
     <html lang="en" suppressContentEditableWarning suppressHydrationWarning className={'dark'}>
       <head>
