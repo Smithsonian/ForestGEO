@@ -35,12 +35,12 @@ import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 
-import RolloverModal from './client/modals/rollovermodal';
-import RolloverStemsModal from './client/modals/rolloverstemsmodal';
+import RolloverModal from './client/rollovermodal';
+import RolloverStemsModal from './client/rolloverstemsmodal';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
-import { DeleteForever, MoreHoriz } from '@mui/icons-material';
-import PlotCardModal from '@/components/client/modals/plotcardmodal';
+import { MoreHoriz } from '@mui/icons-material';
+import PlotCardModal from '@/components/client/plotcardmodal';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
@@ -141,12 +141,19 @@ export default function Sidebar(props: SidebarProps) {
     .filter(([key]) => key !== 'subquadrats')
     .every(([, value]) => value);
 
+  const [plot, setPlot] = useState<Plot>(currentPlot);
+  const [census, setCensus] = useState<OrgCensus>(currentCensus);
+  const [site, setSite] = useState<Site>(currentSite);
   const router = useRouter();
   const pathname = usePathname();
 
   const [measurementsToggle, setMeasurementsToggle] = useState(true);
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
+
+  const [storedPlot, setStoredPlot] = useState<Plot>();
+  const [storedCensus, setStoredCensus] = useState<OrgCensus>();
+  const [storedSite, setStoredSite] = useState<Site>();
 
   const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
   const [isRolloverStemsModalOpen, setIsRolloverStemsModalOpen] = useState(false);
@@ -237,9 +244,9 @@ export default function Sidebar(props: SidebarProps) {
     return () => {
       resizeObserver.disconnect();
     };
-  }, [currentSite, currentPlot, currentCensus]);
+  }, [site, plot, census]);
   const handleOpenNewCensus = async () => {
-    if (currentSite === undefined || currentSite.schemaName === undefined || currentPlot === undefined || currentPlot.plotID === undefined)
+    if (site === undefined || site.schemaName === undefined || plot === undefined || plot.plotID === undefined)
       throw new Error('new census start date was not set OR plot is undefined');
     setIsRolloverModalOpen(true);
   };
@@ -283,7 +290,25 @@ export default function Sidebar(props: SidebarProps) {
     setCensusListLoaded(false);
   };
 
+  useEffect(() => {
+    setPlot(currentPlot);
+    setCensus(currentCensus);
+    setSite(currentSite);
+  }, [currentPlot, currentCensus, currentSite]);
+
+  useEffect(() => {
+    if (storedSite && session) {
+      const allowedSiteIDs = new Set(session.user.sites.map(site => site.siteID));
+      if (allowedSiteIDs.has(storedSite.siteID)) {
+        handleResumeSession().catch(console.error);
+      } else {
+        handleSiteSelection(undefined).catch(console.error);
+      }
+    }
+  }, [storedSite, storedPlot, storedCensus, siteListLoaded]);
+
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
+    setSite(selectedSite);
     if (siteDispatch) {
       await siteDispatch({ site: selectedSite });
     }
@@ -293,6 +318,7 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   const handlePlotSelection = async (selectedPlot: Plot) => {
+    setPlot(selectedPlot);
     if (plotDispatch) {
       await plotDispatch({ plot: selectedPlot });
     }
@@ -302,10 +328,16 @@ export default function Sidebar(props: SidebarProps) {
   };
 
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
+    setCensus(selectedCensus);
     if (censusDispatch) {
       await censusDispatch({ census: selectedCensus });
-      console.log(`await census dispatch completed for ${selectedCensus}`);
     }
+  };
+
+  const handleResumeSession = async () => {
+    storedSite ? await handleSiteSelection(storedSite) : undefined;
+    storedPlot ? await handlePlotSelection(storedPlot) : undefined;
+    storedCensus ? await handleCensusSelection(storedCensus) : undefined;
   };
 
   const renderSiteValue = (option: SelectOption<string> | null) => {
@@ -375,8 +407,8 @@ export default function Sidebar(props: SidebarProps) {
       return <Typography className="sidebar-item">Select a Census</Typography>;
     }
 
-    const startDate = currentCensus?.dateRanges[0]?.startDate;
-    const endDate = currentCensus?.dateRanges[0]?.endDate;
+    const startDate = census?.dateRanges[0]?.startDate;
+    const endDate = census?.dateRanges[0]?.endDate;
 
     const hasStartDate = startDate !== undefined && startDate !== null;
     const hasEndDate = endDate !== undefined && endDate !== null;
@@ -392,12 +424,14 @@ export default function Sidebar(props: SidebarProps) {
 
     return (
       <Stack direction={'column'} alignItems={'start'}>
-        <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
-          {`Census: ${selectedCensus?.plotCensusNumber}`}
-        </Typography>
+        <Typography
+          level="body-md"
+          className="sidebar-item"
+          data-testid={'selected-census-plotcensusnumber'}
+        >{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
         <Stack direction={'column'} alignItems={'start'}>
-          <Typography color={!currentCensus ? 'danger' : 'primary'} level="body-sm" className="sidebar-item" data-testid={'selected-census-dates'}>
-            {currentCensus !== undefined && dateMessage}
+          <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item" data-testid={'selected-census-dates'}>
+            {census !== undefined && dateMessage}
           </Typography>
         </Stack>
       </Stack>
@@ -481,8 +515,7 @@ export default function Sidebar(props: SidebarProps) {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                width: '100%',
-                gap: 1
+                width: '100%'
               }}
               className="sidebar-item"
             >
@@ -508,17 +541,6 @@ export default function Sidebar(props: SidebarProps) {
                   </React.Fragment>
                 ))}
               </Box>
-              <IconButton
-                variant={'soft'}
-                color={'danger'}
-                onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${item?.dateRanges[0].censusID}`);
-                  setManualReset(true);
-                }}
-                disabled={(item?.plotCensusNumber ?? 0) < censusListContext?.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)}
-              >
-                <DeleteForever />
-              </IconButton>
             </Box>
           </Option>
         ))}
@@ -535,7 +557,7 @@ export default function Sidebar(props: SidebarProps) {
       size={'md'}
       data-testid={'plot-select-component'}
       renderValue={renderPlotValue}
-      value={currentPlot?.plotName || ''}
+      value={plot?.plotName || ''}
       listboxOpen={isPlotDropdownOpen}
       onListboxOpenChange={() => {
         setSiteDropdownOpen(false);
@@ -625,7 +647,7 @@ export default function Sidebar(props: SidebarProps) {
         size={'md'}
         renderValue={renderSiteValue}
         data-testid={'site-select-component'}
-        value={currentSite ? siteListContext?.find(i => i.siteName === currentSite.siteName)?.siteName : ''}
+        value={site ? siteListContext?.find(i => i.siteName === site.siteName)?.siteName : ''}
         listboxOpen={isSiteDropdownOpen}
         onListboxOpenChange={() => {
           setSiteDropdownOpen(true);
@@ -758,7 +780,7 @@ export default function Sidebar(props: SidebarProps) {
                 </Avatar>
                 <Box sx={{ flexGrow: 1 }}>{renderSiteOptions()}</Box>
               </Box>
-              {currentSite !== undefined && (
+              {site !== undefined && (
                 <>
                   <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'plot-selection-box'}>
                     <Avatar size={'sm'} sx={{ marginRight: 1 }}>
@@ -766,7 +788,7 @@ export default function Sidebar(props: SidebarProps) {
                     </Avatar>
                     <Box sx={{ flexGrow: 1, marginLeft: '0.5em', alignItems: 'center', marginRight: '1em' }}>{renderPlotOptions()}</Box>
                   </Box>
-                  {currentPlot !== undefined && (
+                  {plot !== undefined && (
                     <>
                       <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 2 }} data-testid={'census-selection-box'}>
                         <Avatar size={'sm'} sx={{ marginRight: 1 }}>
@@ -852,12 +874,12 @@ export default function Sidebar(props: SidebarProps) {
                       return (
                         <TransitionComponent
                           key={item.href}
-                          in={currentSite !== undefined && currentPlot !== undefined}
+                          in={site !== undefined && plot !== undefined}
                           // style={{ transitionDelay: `${delay}ms` }}
                           direction="down"
                         >
                           <ListItem data-testid={`navigate-list-item-nonexpanding-${item.label}`}>
-                            {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
+                            {site !== undefined && plot !== undefined && census !== undefined ? (
                               <Tooltip title={isDataIncomplete ? 'Missing Core Data!' : ''} arrow disableHoverListener={!isDataIncomplete}>
                                 <Box sx={{ display: 'flex', flex: 1 }} data-testid={'conditional-site-plot-census-defined-box-wrapper'}>
                                   <ListItemButton
@@ -891,7 +913,7 @@ export default function Sidebar(props: SidebarProps) {
                                 <ListItemButton
                                   selected={pathname === item.href}
                                   sx={{ flex: 1, width: '100%' }}
-                                  disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
+                                  disabled={plot === undefined || census === undefined || isLinkDisabled}
                                   color={pathname === item.href ? 'primary' : undefined}
                                   onClick={() => {
                                     if (!isLinkDisabled) {
@@ -918,7 +940,7 @@ export default function Sidebar(props: SidebarProps) {
                       return (
                         <TransitionComponent
                           key={item.href}
-                          in={currentSite !== undefined && currentPlot !== undefined}
+                          in={site !== undefined && plot !== undefined}
                           // style={{ transitionDelay: `${delay}ms` }}
                           direction="down"
                         >
@@ -926,8 +948,8 @@ export default function Sidebar(props: SidebarProps) {
                             <SimpleToggler
                               renderToggle={MenuRenderToggle(
                                 {
-                                  plotSelectionRequired: currentPlot === undefined,
-                                  censusSelectionRequired: currentCensus === undefined,
+                                  plotSelectionRequired: plot === undefined,
+                                  censusSelectionRequired: census === undefined,
                                   pathname: pathname ?? '',
                                   isParentDataIncomplete: isParentDataIncomplete
                                 },
@@ -954,7 +976,7 @@ export default function Sidebar(props: SidebarProps) {
                                       direction="down"
                                     >
                                       <ListItem data-testid={`navigate-list-item-expanded-${item.label}-${link.label}`}>
-                                        {currentSite !== undefined && currentPlot !== undefined && currentCensus !== undefined ? (
+                                        {site !== undefined && plot !== undefined && census !== undefined ? (
                                           <Tooltip title={tooltipMessage} arrow disableHoverListener={!isDataIncomplete}>
                                             <Box sx={{ display: 'flex', flex: 1 }} data-testid={'expanding-conditional-site-plot-census-defined-box-wrapper'}>
                                               <ListItemButton
@@ -1005,7 +1027,7 @@ export default function Sidebar(props: SidebarProps) {
                                               sx={{ flex: 1, width: '100%' }}
                                               selected={pathname == item.href + link.href}
                                               color={pathname === item.href ? 'primary' : undefined}
-                                              disabled={currentPlot === undefined || currentCensus === undefined || isLinkDisabled}
+                                              disabled={plot === undefined || census === undefined || isLinkDisabled}
                                               onClick={() => {
                                                 if (!isLinkDisabled) {
                                                   router.push(item.href + link.href);
