@@ -42,8 +42,9 @@ export default function MSVEditingModal(props: MSVEditingProps) {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const stepIcons = [<PrecisionManufacturing key={v4()} />, <GridView key={v4()} />, <Forest key={v4()} />, <Grass key={v4()} />, <Diversity2 key={v4()} />];
 
-  const handleUpdate = async (groupName: keyof typeof fieldGroups, tableName: string, idColumn: string, idValue: any) => {
-    console.log('handle update entered for group name: ', groupName);
+  async function handleAttributes(tableName: string, idColumn: string, idValue: any) {}
+
+  async function handleUpdate(groupName: keyof typeof fieldGroups, tableName: string, idColumn: string, idValue: any) {
     setUploadStatus(prev => ({
       ...prev,
       [groupName]: 'in-progress'
@@ -116,7 +117,7 @@ export default function MSVEditingModal(props: MSVEditingProps) {
         [groupName]: 'completed'
       }));
     }
-  };
+  }
 
   const handleBeginUpload = async () => {
     setLoadingProgress(0);
