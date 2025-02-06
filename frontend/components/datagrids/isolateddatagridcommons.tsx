@@ -148,10 +148,13 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
     .map(column => column.field);
 
   let formHeaders: string[];
-  if (gridType === 'alltaxonomiesview') {
-    formHeaders = getTableHeaders(FormType.species).map(header => header.label);
-  } else formHeaders = getTableHeaders(gridType as FormType).map(header => header.label);
-
+  gridType === 'alltaxonomiesview'
+    ? (formHeaders = getTableHeaders(FormType.species).map(header => header.label))
+    : gridType !== 'unifiedchangelog'
+      ? (formHeaders = getTableHeaders(Object.values(FormType).includes(gridType as FormType) ? (gridType as FormType) : FormType.arcgis_xlsx).map(
+          header => header.label
+        ))
+      : (formHeaders = []);
   return (
     <GridToolbarContainer className={className} {...other}>
       <Box
@@ -205,6 +208,7 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
               />
             }
             onClick={() => setOpenExportModal(true)}
+            disabled={gridType === 'unifiedchangelog'}
           >
             Export as CSV...
           </Button>

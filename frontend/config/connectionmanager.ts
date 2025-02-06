@@ -1,7 +1,8 @@
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
-import { v4 as uuidv4 } from 'uuid'; // For generating unique transaction IDs
+import { v4 as uuidv4 } from 'uuid';
+import { auth } from '@/auth'; // For generating unique transaction IDs
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
@@ -26,6 +27,12 @@ class ConnectionManager {
 
     if (!connection) {
       throw new Error(transactionId ? `No connection found for transaction: ${transactionId}` : 'Unable to acquire connection.');
+    }
+
+    const session = await auth();
+
+    if (session?.user.email) {
+      await runQuery(connection, 'SET SESSION @user_email = ?', [session.user.email]);
     }
 
     try {
