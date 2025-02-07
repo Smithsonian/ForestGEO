@@ -7,6 +7,7 @@ import {
   GridColDef,
   GridEventListener,
   GridFilterModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -81,7 +82,7 @@ import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ValidationModal from '@/components/client/validationmodal';
-import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { InputChip, MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/validationoverridemodal';
 import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
@@ -89,6 +90,8 @@ import Divider from '@mui/joy/Divider';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
+import MapperFactory from '@/config/datamapper';
+import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -533,6 +536,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [errorCount, setErrorCount] = useState<number | null>(null);
   const [validCount, setValidCount] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
+  const [reloadAttrs, setReloadAttrs] = useState(true);
 
   // context pulls and definitions
   const currentSite = useSiteContext();
@@ -561,6 +566,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   }, [refresh]);
 
+  useEffect(() => {
+    async function reloadAttributes() {
+      const response = await fetch(`/api/runquery`, {
+        method: 'POST',
+        body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
+      });
+      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+      setReloadAttrs(false);
+    }
+
+    reloadAttributes().catch(console.error);
+  }, []);
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
     setSortModel(newModel);
@@ -811,6 +829,15 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
     setLoading(false);
+    if (reloadAttrs) {
+      const response = await fetch(`/api/runquery`, {
+        method: 'POST',
+        body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
+      });
+      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+      setReloadAttrs(false);
+    }
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
@@ -1255,9 +1282,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, Number(params.row.coreMeasurementID)) : '';
 
           const isMeasurementField = column.field === 'measuredDBH' || column.field === 'measuredHOM';
+          const isAttributeField = column.field === 'attributes';
+          const attributeValues = column.field === 'attributes' && typeof params.value === 'string' ? params.value.replace(/\s+/g, '').split(';') : [];
 
-          const renderMeasurementDetails = () => (
-            <>
+          function renderMeasurementDetails() {
+            return (
               <Typography level="body-sm">
                 {column.field === 'measuredDBH'
                   ? params.row.measuredDBH
@@ -1267,8 +1296,16 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                     ? Number(params.row.measuredHOM).toFixed(2)
                     : 'null'}
               </Typography>
-            </>
-          );
+            );
+          }
+
+          function renderAttributeDetails() {
+            return attributeValues.map((value: string, index: number) => (
+              <Chip key={index} size={'sm'}>
+                {value}
+              </Chip>
+            ));
+          }
 
           return (
             <Box
@@ -1283,6 +1320,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             >
               {isMeasurementField ? (
                 <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderMeasurementDetails()}</Box>
+              ) : isAttributeField ? (
+                <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderAttributeDetails()}</Box>
               ) : (
                 <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedValue}</Typography>
               )}
@@ -1303,7 +1342,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               )}
             </Box>
           );
-        }
+        },
+        renderEditCell: (params: GridRenderEditCellParams) =>
+          column.field === 'attributes' && selectableAttributes.length > 0 ? (
+            <InputChip params={params} selectableAttributes={selectableAttributes} setReloadAttributes={setReloadAttrs} />
+          ) : undefined
       };
     });
     if (locked || (session?.user.userStatus !== 'global' && session?.user.userStatus !== 'db admin')) {

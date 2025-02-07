@@ -1,10 +1,11 @@
 import { HEADER_ALIGN } from '@/config/macros';
-import { Box, Stack, Typography } from '@mui/joy';
-import { GridColDef } from '@mui/x-data-grid';
-import React from 'react';
+import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
+import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
+import React, { Dispatch, SetStateAction, useState } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
+import CloseIcon from '@mui/icons-material/Close';
 
 export const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -306,7 +307,67 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
 // export const renderStemXCell = (params: any) => renderValueCell(params, 'localStemX', '');
 // export const renderEditStemXCell = (params: any) => renderEditValueCell(params, 'localStemX', '', 'Stem Local X Coordinates');
 // export const renderStemYCell = (params: any) => renderValueCell(params, 'localStemY', '');
-// export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');
+// export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');\
+
+export function InputChip({
+  params,
+  selectableAttributes,
+  setReloadAttributes
+}: {
+  params: GridRenderEditCellParams;
+  selectableAttributes: string[];
+  setReloadAttributes: Dispatch<SetStateAction<boolean>>;
+}) {
+  const [selectedValues, setSelectedValues] = useState<string[]>(params.value?.replace(/\s+/g, '').split(';') ?? []);
+
+  const handleDelete = (valueToRemove: string) => {
+    const updatedValues = selectedValues.filter(value => value !== valueToRemove);
+    setSelectedValues(updatedValues);
+    params.api.setEditCellValue({ id: params.id, field: 'attributes', value: updatedValues.join(';') });
+    setReloadAttributes(true);
+  };
+
+  return (
+    <Box sx={{ width: '100%', minHeight: '32px' }}>
+      <Autocomplete
+        multiple
+        size="sm"
+        options={selectableAttributes}
+        autoHighlight
+        autoComplete
+        value={selectedValues}
+        filterSelectedOptions
+        onChange={(_, newValues) => {
+          setSelectedValues(newValues);
+          params.api.setEditCellValue({ id: params.id, field: 'attributes', value: newValues.join(';') });
+          setReloadAttributes(true);
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            event.stopPropagation();
+          }
+        }}
+        sx={{ width: '100%' }}
+        renderTags={(values, getTagProps) =>
+          values.map((option, index) => (
+            <Chip
+              {...getTagProps({ index })}
+              key={index}
+              size="sm"
+              endDecorator={
+                <IconButton onClick={() => handleDelete(option)} size="sm" sx={{ padding: 0 }}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              }
+            >
+              {option}
+            </Chip>
+          ))
+        }
+      />
+    </Box>
+  );
+}
 
 export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridColumns([
   {
