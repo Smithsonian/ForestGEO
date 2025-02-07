@@ -1,6 +1,6 @@
 import { HEADER_ALIGN } from '@/config/macros';
 import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
-import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
+import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
 import React, { Dispatch, SetStateAction, useState } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
@@ -369,6 +369,20 @@ export function InputChip({
   );
 }
 
+function preprocessor(params: GridPreProcessEditCellProps) {
+  const { props } = params;
+  let newValue = props.value;
+
+  if (typeof newValue === 'string' && newValue.trim() !== '') {
+    const parsedValue = parseFloat(newValue);
+    if (!isNaN(parsedValue)) {
+      newValue = parseFloat(parsedValue.toFixed(2));
+    }
+  }
+
+  return { ...props, value: newValue };
+}
+
 export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -432,13 +446,13 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'X',
     renderHeader: () => formatHeader('X', 'Stem'),
     flex: 0.7,
-    type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
     maxWidth: 100,
     editable: true,
-    filterOperators: customNumericOperators
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'stemLocalY',
@@ -451,17 +465,17 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
       return Number(value).toFixed(2);
     },
     editable: true,
-    filterOperators: customNumericOperators
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'measuredDBH',
     headerName: 'DBH',
     flex: 0.5,
     editable: true,
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
-    },
-    filterOperators: customNumericOperators
+    valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'measuredHOM',
@@ -471,7 +485,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    filterOperators: customNumericOperators
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'description',
