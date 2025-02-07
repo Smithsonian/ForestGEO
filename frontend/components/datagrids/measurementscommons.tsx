@@ -41,6 +41,7 @@ import {
   Dropdown,
   FormLabel,
   IconButton,
+  Input,
   Menu,
   MenuButton,
   MenuItem,
@@ -472,6 +473,26 @@ const EditToolbar = (props: EditToolbarProps) => {
     </>
   );
 };
+
+function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
+  const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
+  const [value, setValue] = useState(initialValue);
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = event.target.value;
+
+    if (/^\d*\.?\d{0,2}$/.test(newValue) || newValue === '') {
+      setValue(newValue);
+    }
+  };
+
+  const handleBlur = () => {
+    const formattedValue = parseFloat(value).toFixed(2);
+    params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(formattedValue) });
+  };
+
+  return <Input autoFocus value={value} onChange={handleChange} onBlur={handleBlur} size="sm" sx={{ width: '100%', height: '100%' }} type="text" />;
+}
 
 export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
   const {
@@ -1273,6 +1294,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const columns = useMemo(() => {
     const commonColumns = gridColumns.map(column => {
+      if (column.field === 'attributes') {
+        column = {
+          ...column,
+          renderEditCell: (params: GridRenderEditCellParams) => (
+            <InputChip params={params} selectableAttributes={selectableAttributes} setReloadAttributes={setReloadAttrs} />
+          )
+        };
+      }
+      if (['measuredDBH', 'measuredHOM', 'stemLocalX', 'stemLocalY'].includes(column.field)) {
+        column = {
+          ...column,
+          renderEditCell: (params: GridRenderEditCellParams) => <EditMeasurements params={params} />
+        };
+      }
       return {
         ...column,
         renderCell: (params: GridCellParams) => {
@@ -1281,21 +1316,14 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           const rowError = rowHasError(params.id);
           const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, Number(params.row.coreMeasurementID)) : '';
 
-          const isMeasurementField = column.field === 'measuredDBH' || column.field === 'measuredHOM';
+          const isMeasurementField =
+            column.field === 'measuredDBH' || column.field === 'measuredHOM' || column.field.includes('X') || column.field.includes('Y');
           const isAttributeField = column.field === 'attributes';
           const attributeValues = column.field === 'attributes' && typeof params.value === 'string' ? params.value.replace(/\s+/g, '').split(';') : [];
 
           function renderMeasurementDetails() {
             return (
-              <Typography level="body-sm">
-                {column.field === 'measuredDBH'
-                  ? params.row.measuredDBH
-                    ? Number(params.row.measuredDBH).toFixed(2)
-                    : 'null'
-                  : params.row.measuredHOM
-                    ? Number(params.row.measuredHOM).toFixed(2)
-                    : 'null'}
-              </Typography>
+              <Typography level="body-sm">{isMeasurementField && params.row[column.field] ? Number(params.row[column.field]).toFixed(2) : 'null'}</Typography>
             );
           }
 
@@ -1342,11 +1370,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               )}
             </Box>
           );
-        },
-        renderEditCell: (params: GridRenderEditCellParams) =>
-          column.field === 'attributes' && selectableAttributes.length > 0 ? (
-            <InputChip params={params} selectableAttributes={selectableAttributes} setReloadAttributes={setReloadAttrs} />
-          ) : undefined
+        }
       };
     });
     if (locked || (session?.user.userStatus !== 'global' && session?.user.userStatus !== 'db admin')) {
