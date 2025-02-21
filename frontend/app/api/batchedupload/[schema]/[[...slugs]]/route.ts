@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
   const columns = Object.keys(errorRows[0]).filter(col => col !== 'id' && col !== 'failedMeasurementID');
   const values = errorRows.map(row => columns.map(col => row[col as keyof FailedMeasurementsRDS]));
 
-  const insertQuery = format(`INSERT INTO ?? (${columns.map(() => '??').join(', ')}) VALUES ?`, [`${schema}.failedmeasurements`, ...columns, values]);
+  const insertQuery = format(`INSERT INTO ?? (${columns.map(() => '??').join(', ')}) VALUES ?`, [`${schema}.ingest_failedmeasurements`, ...columns, values]);
 
   try {
     await connectionManager.executeQuery(insertQuery);

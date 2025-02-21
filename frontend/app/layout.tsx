@@ -9,6 +9,7 @@ import { DataValidityProvider } from '@/app/contexts/datavalidityprovider';
 
 import { Providers } from './providers';
 import { LockAnimationProvider } from './contexts/lockanimationcontext';
+import { UploadProgressProvider } from '@/app/contexts/uploadprogressprovider';
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -25,7 +26,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <UserSelectionProvider>
                 <DataValidityProvider>
                   <LockAnimationProvider>
-                    <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>{children}</Box>
+                    <UploadProgressProvider>
+                      <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>{children}</Box>
+                    </UploadProgressProvider>
                   </LockAnimationProvider>
                 </DataValidityProvider>
               </UserSelectionProvider>

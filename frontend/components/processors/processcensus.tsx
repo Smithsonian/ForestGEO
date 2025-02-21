@@ -12,7 +12,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     throw new Error('Process Census: Missing plotID or censusID');
   }
   const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
-
+  // rework -- need to submit with {..., plot, census}
   try {
     // Fetch species
     const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connectionManager, 'SpeciesID');

@@ -26,6 +26,7 @@ export function genericLoadReducer<T>(state: T | undefined, action: LoadAction<T
     case 'quadratList':
     case 'subquadratList':
     case 'siteList':
+    case 'uploadProgress':
       if (action.payload && action.type in action.payload) {
         return action.payload[action.type];
       } else {

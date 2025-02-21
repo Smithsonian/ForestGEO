@@ -80,8 +80,15 @@ class ConnectionManager {
       console.error(chalk.red('Error committing transaction:', error));
       throw error;
     } finally {
-      connection.release();
-      this.transactionConnections.delete(transactionId); // Cleanup
+      try {
+        connection.release();
+        this.transactionConnections.delete(transactionId);
+      } catch (e) {
+        console.log(chalk.red('Error releasing connection:', e));
+        console.log(chalk.red('Attempting connection destruction instead...'));
+        connection.destroy();
+        this.transactionConnections.has(transactionId) ? this.transactionConnections.delete(transactionId) : null;
+      }
     }
   }
 
@@ -101,8 +108,15 @@ class ConnectionManager {
       console.error(chalk.red('Error rolling back transaction:', error));
       throw error;
     } finally {
-      connection.release();
-      this.transactionConnections.delete(transactionId); // Cleanup
+      try {
+        connection.release();
+        this.transactionConnections.delete(transactionId);
+      } catch (e) {
+        console.log(chalk.red('Error releasing connection:', e));
+        console.log(chalk.red('Attempting connection destruction instead...'));
+        connection.destroy();
+        this.transactionConnections.has(transactionId) ? this.transactionConnections.delete(transactionId) : null;
+      }
     }
   }
 

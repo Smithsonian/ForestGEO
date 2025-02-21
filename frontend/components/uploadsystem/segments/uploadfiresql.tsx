@@ -11,6 +11,8 @@ import PQueue from 'p-queue';
 import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
+import { v4 } from 'uuid';
+import { useUploadProgress } from '@/app/contexts/uploadprogressprovider';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -35,28 +37,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [etc, setETC] = useState('');
-  const [totalProcessingTime, setTotalProcessingTime] = useState(0);
-  const [chunkStartTime, setChunkStartTime] = useState<number>(0);
+  const [uploadStartTime, setUploadStartTime] = useState<number | null>(null);
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096;
+  const [uploadingChunks, setUploadingChunks] = useState<'idle' | 'uploading' | 'completed'>('idle');
+  const [uploadingBatches, setUploadingBatches] = useState<'idle' | 'uploading' | 'completed'>('idle');
+  const [activeTasks, setActiveTasks] = useState(0);
+  const chunkSize = 40960;
   const connectionLimit = 10;
   const queue = new PQueue({ concurrency: connectionLimit });
+  const { fileID, progress, isRunning, startPolling } = useUploadProgress();
 
   const generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
       .join('-')
       .replace(/[^a-zA-Z0-9-]/g, '')}`;
 
-  const fetchWithTimeout = async (url: string | URL | Request, options: RequestInit | undefined, timeout = 60000) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-
-    try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-  };
   // Usage:
   const countTotalChunks = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
@@ -75,33 +70,42 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   };
 
   useEffect(() => {
-    if (completedChunks < 3) {
+    // If not enough chunks completed or upload hasn't started, show a placeholder
+    if (completedChunks === 0 || !uploadStartTime) {
       setETC('Calculating...');
       return;
     }
 
-    // Track cumulative processing time
-    setTotalProcessingTime(prev => prev + (performance.now() - chunkStartTime));
-
-    // Calculate exponential moving average for smoother chunk time estimation
-    const smoothingFactor = 0.2; // Adjust between 0 and 1 for desired smoothing (higher = more reactive)
-    const lastChunkTime = performance.now() - chunkStartTime;
-    const smoothedAvgTimePerChunk = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalProcessingTime / completedChunks);
-
-    // Calculate remaining chunks and ETC
+    const elapsedTime = performance.now() - uploadStartTime;
+    const averageChunkTime = elapsedTime / completedChunks;
     const remainingChunks = totalChunks - completedChunks;
-    const estimatedTimeLeft = smoothedAvgTimePerChunk * remainingChunks;
+    const estimatedTimeLeft = averageChunkTime * remainingChunks;
 
-    setETC(
-      moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[0] +
-        ' minutes and ' +
-        moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[1] +
-        ' seconds remaining...'
-    );
-  }, [completedChunks, totalChunks]);
+    const duration = moment.duration(estimatedTimeLeft);
+    const minutes = duration.minutes();
+    const seconds = duration.seconds();
+
+    setETC(`${minutes} minutes and ${seconds} seconds remaining...`);
+  }, [completedChunks, totalChunks, uploadStartTime]);
+
+  useEffect(() => {
+    if (progress === 0 || !fileID || !isRunning || !uploadStartTime) {
+      setETC('Calculating...');
+      return;
+    }
+
+    const elapsedProcessingTime = performance.now() - uploadStartTime;
+    const avgProcessingTime = elapsedProcessingTime / progress;
+    const estimatedProcessingTimeLeft = avgProcessingTime * (100 - progress);
+
+    const processingDuration = moment.duration(estimatedProcessingTimeLeft);
+    const processingMinutes = processingDuration.minutes();
+    const processingSeconds = processingDuration.seconds();
+
+    setETC(`${processingMinutes} minutes and ${processingSeconds} seconds remaining...`);
+  }, [progress, uploadStartTime, isRunning, fileID]);
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
-    let activeTasks = 0;
     queue.clear();
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
@@ -179,9 +183,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
-          setChunkStartTime(performance.now());
           try {
             if (activeTasks >= connectionLimit) {
+              console.log('pausing upload. active tasks > connection limit');
               parser.pause();
               queue.pause();
             }
@@ -208,7 +212,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               [file.name]: fileRowSet
             };
 
-            activeTasks++;
+            setActiveTasks(prev => prev + 1);
 
             await queue.add(async () => {
               try {
@@ -247,7 +251,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   queue.start();
                 }
               } finally {
-                activeTasks--;
+                setActiveTasks(prev => prev - 1);
                 setCompletedChunks(prev => {
                   if (!failedChunks.has(prev)) {
                     return prev + 1;
@@ -315,7 +319,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
-        const response = await fetchWithTimeout(`/api/sqlpacketload`, {
+        const response = await fetch(`/api/sqlpacketload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -351,10 +355,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   useEffect(() => {
+    if (hasUploaded.current) return;
     const calculateTotalOperations = () => {
       const totalOps = acceptedFiles.length;
 
-      setTotalOperations(totalOps);
+      setTotalOperations(totalOps * 2); // two ops per file
     };
 
     async function getUserID() {
@@ -363,6 +368,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     }
 
     const uploadFiles = async () => {
+      if (!uploadStartTime) {
+        setUploadStartTime(performance.now());
+      }
+      setUploadingChunks('uploading');
       calculateTotalOperations();
 
       for (const file of acceptedFiles) {
@@ -375,12 +384,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         const delimiter = isCSV ? ',' : '\t';
 
         await parseFileInChunks(file as File, delimiter);
-
         setCompletedOperations(prevCompleted => prevCompleted + 1);
       }
 
       await queue.onIdle();
+      setUploadingChunks('completed');
+    };
 
+    const processBatches = async () => {
+      setUploadingBatches('uploading');
+      setUploadStartTime(performance.now());
+      for (const file of acceptedFiles) {
+        const response = await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`SELECT COUNT(*) AS TempCount FROM ${schema}.ingest_temporarymeasurements`)});
+        const data = await response.json();
+        if (data[0].TempCount === 0) console.log('NO DATA IN TEMP TABLE/UPLOAD FAILED');
+        console.log(`processBatches started for file: ${file}`);
+        await fetch(`/api/backgroundupload?schema=${schema}`, { method: 'GET'});
+        startPolling(file.name, schema);
+        console.log('polling start function triggered.');
+        while (progress < 100) {
+          console.log(`Polling Status: isRunning=${isRunning}, progress=${progress}`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
       const combinedQuery = `
         UPDATE ${schema}.census c
           JOIN (SELECT c1.PlotCensusNumber,
@@ -396,63 +422,38 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
 
       setIsDataUnsaved(false);
+      setCompletedOperations(prevCompleted => prevCompleted + 1);
+      setUploadingBatches('completed');
+    };
+
+    let timeout: NodeJS.Timeout;
+    let isMounted = true; // prevent state updates if component unmounts
+
+    const runUpload = async () => {
+      try {
+        await getUserID();
+        await uploadFiles();
+        await processBatches();
+        if (isMounted) {
+          hasUploaded.current = true;
+          timeout = setTimeout(() => {
+            setReviewState(uploadForm === FormType.measurements ? ReviewStates.VALIDATE : ReviewStates.UPLOAD_AZURE);
+          }, 500);
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+      }
     };
 
     if (!hasUploaded.current) {
-      getUserID().then(() => {
-        uploadFiles()
-          .then(() => {
-            // force download of error rows:
-            Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
-              const rows: string[] = [];
-
-              // Collect headers from the FileRowSet
-              const headers = new Set<string>();
-              Object.values(fileRowSet).forEach(fileRow => {
-                Object.keys(fileRow).forEach(header => headers.add(header));
-              });
-              rows.push(Array.from(headers).join(',')); // Convert headers to a CSV row
-
-              // Add data rows
-              Object.values(fileRowSet).forEach(fileRow => {
-                const row = Array.from(headers).map(header => {
-                  const value = fileRow[header];
-                  return value !== null && value !== undefined ? `"${value}"` : ''; // Wrap value in quotes and handle null/undefined
-                });
-                rows.push(row.join(',')); // Convert row array to a CSV row
-              });
-
-              // Convert rows array to a single CSV string
-              const csvContent = rows.join('\n');
-
-              // Create and download the CSV file for the current FileRowSet
-              const blob = new Blob([csvContent], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-
-              // Name the file based on the original file name (with `.csv` extension)
-              a.download = `${fileName.replace(/\.[^/.]+$/, '')}_errors.csv`; // Replace extension with `_errors.csv`
-              a.click();
-              URL.revokeObjectURL(url);
-            });
-          })
-          .then(() => {
-            hasUploaded.current = true;
-            // enforce timeout before continuing forward
-            const timeout = setTimeout(() => {
-              if (uploadForm === FormType.measurements) {
-                setReviewState(ReviewStates.VALIDATE);
-              } else {
-                setReviewState(ReviewStates.UPLOAD_AZURE);
-              }
-            }, 500);
-
-            return () => clearTimeout(timeout);
-          });
-      });
+      runUpload().catch(console.error);
     }
-  }, [hasUploaded.current, errorRows]);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+    };
+  }, [acceptedFiles]);
 
   const { palette } = useTheme();
 
@@ -482,7 +483,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               </LinearProgress>
             </Box>
 
-            {totalChunks !== 0 && (
+            {uploadingChunks === 'uploading' && (
               <Box sx={{ width: '100%', mb: 2 }}>
                 <Typography level={'title-md'} gutterBottom>
                   Total Parsing Progress - Completed: {completedChunks}
@@ -526,6 +527,55 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     loop
                     autoplay
                     themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                    style={{
+                      width: '25%',
+                      height: '25%'
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+            {uploadingChunks === 'completed' && uploadingBatches === 'uploading' && isRunning && progress < 100 && (
+              <Box sx={{ width: '100%', mb: 2 }}>
+                <Typography level={'title-md'} gutterBottom>
+                  Processing Uploaded Batches...
+                </Typography>
+                <LinearProgress
+                  determinate
+                  variant="plain"
+                  color="primary"
+                  thickness={48}
+                  value={progress}
+                  sx={{
+                    '--LinearProgress-radius': '0px',
+                    '--LinearProgress-progressThickness': '36px'
+                  }}
+                >
+                  <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                    LOADING: {progress}%
+                    <br />
+                    Estimated time to completion: {etc}
+                  </Typography>
+                </LinearProgress>
+                <Divider sx={{ my: 2 }} />
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '100%',
+                    height: '100%',
+                    textAlign: 'center'
+                  }}
+                >
+                  <Typography level="title-lg" fontWeight="bold" sx={{ mb: 2 }}>
+                    Please do not exit this page! The upload will take some time to complete.
+                  </Typography>
+                  <DotLottieReact
+                    src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
+                    loop
+                    autoplay
                     style={{
                       width: '25%',
                       height: '25%'

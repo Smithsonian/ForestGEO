@@ -95,7 +95,6 @@ export default function MeasurementsSummaryViewDataGrid() {
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements View Refresh failure');
       setLoading(true, 'Processing data...');
-      await response.json();
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       console.error(e);

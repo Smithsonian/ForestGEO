@@ -13,7 +13,7 @@ const sqlConfig: PoolOptions = {
   queueLimit: 0, // unlimited queue size
   keepAliveInitialDelay: 10000, // 0 by default.
   enableKeepAlive: true, // false by default.
-  connectTimeout: 30000 // 10 seconds by default.
+  connectTimeout: 60000 // 60 seconds by default.
 };
 export const poolMonitor = new PoolMonitor(sqlConfig);
 
@@ -58,7 +58,6 @@ export async function getConn() {
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
   const timeout = 60000; // 60 seconds
   const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
-  const startTime = Date.now();
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
@@ -69,7 +68,7 @@ export async function runQuery(connection: PoolConnection, query: string, params
     //   console.log(chalk.gray(`Query params: ${JSON.stringify(params)}`));
     // }
     if (query.trim().startsWith('CALL')) {
-      const [rows] = await Promise.race([connection.query(query, params), timer]);
+      const [rows] = await connection.query(query, params);
       // console.log(chalk.magenta(`CALL Query completed in ${Date.now() - startTime}ms`));
       return rows;
     } else {
