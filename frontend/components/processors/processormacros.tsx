@@ -56,8 +56,6 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const timeout = 60000; // 60 seconds
-  const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
@@ -72,6 +70,8 @@ export async function runQuery(connection: PoolConnection, query: string, params
       // console.log(chalk.magenta(`CALL Query completed in ${Date.now() - startTime}ms`));
       return rows;
     } else {
+      const timeout = 60000; // 60 seconds
+      const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
       const [rows, _fields] = await Promise.race([connection.execute(query, params), timer]);
       // console.log(chalk.magenta(`STANDARD Query completed in ${Date.now() - startTime}ms`));
 

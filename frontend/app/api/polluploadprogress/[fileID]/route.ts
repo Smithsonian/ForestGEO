@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 
 export async function GET(request: NextRequest, props: { params: Promise<{ fileID: string }> }) {
   const { fileID } = await props.params;
+  console.log('polling upload progress....');
   if (!fileID) throw new Error('fileID not provided');
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('schema not provided');

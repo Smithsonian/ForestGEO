@@ -11,7 +11,6 @@ import PQueue from 'p-queue';
 import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
-import { v4 } from 'uuid';
 import { useUploadProgress } from '@/app/contexts/uploadprogressprovider';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
@@ -395,11 +394,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       setUploadingBatches('uploading');
       setUploadStartTime(performance.now());
       for (const file of acceptedFiles) {
-        const response = await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`SELECT COUNT(*) AS TempCount FROM ${schema}.ingest_temporarymeasurements`)});
+        const response = await fetch(`/api/runquery`, {
+          method: 'POST',
+          body: JSON.stringify(`SELECT COUNT(*) AS TempCount FROM ${schema}.ingest_temporarymeasurements`)
+        });
         const data = await response.json();
         if (data[0].TempCount === 0) console.log('NO DATA IN TEMP TABLE/UPLOAD FAILED');
-        console.log(`processBatches started for file: ${file}`);
-        await fetch(`/api/backgroundupload?schema=${schema}`, { method: 'GET'});
+        console.log(`processBatches started for file: ${file.name}`);
+        await fetch(`/api/backgroundupload?schema=${schema}&fileID=${file.name}`, { method: 'GET' });
         startPolling(file.name, schema);
         console.log('polling start function triggered.');
         while (progress < 100) {

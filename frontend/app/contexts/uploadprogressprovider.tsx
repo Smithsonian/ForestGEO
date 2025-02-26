@@ -17,6 +17,11 @@ export function UploadProgressProvider({ children }: { children: React.ReactNode
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
+  const isRunningRef = useRef(isRunning);
+  useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
   const startPolling = useCallback((newFileID: string, newSchema: string) => {
     if (pollingRef.current) {
       console.warn('Polling is already active! Stopping previous polling before starting a new one.');
@@ -41,11 +46,11 @@ export function UploadProgressProvider({ children }: { children: React.ReactNode
   }, []);
 
   useEffect(() => {
-    if (isRunning && fileID && schema) {
+    if (isRunningRef.current && fileID && schema) {
       pollingRef.current = setInterval(async () => {
         console.log(`Polling API call for fileID: ${fileID}`);
         try {
-          const response = await fetch(`/api/polluploadprogress/${fileID}?schema=${schema}`);
+          const response = await fetch(`/api/polluploadprogress/${fileID}?schema=${schema}`, { cache: 'no-store' });
           const { progress: newProgress } = await response.json();
 
           setProgress(newProgress);
