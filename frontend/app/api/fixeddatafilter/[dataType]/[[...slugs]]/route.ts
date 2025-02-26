@@ -7,6 +7,8 @@ import { HTTPResponses } from '@/config/macros';
 import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
 import { handleError } from '@/utils/errorhandler';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
+import { buildCondition, buildFilterModelStub, buildSearchStub, Operator } from '@/config/macros/formdetails';
+import { capitalizeAndTransformField } from '@/config/utils';
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
 
@@ -103,34 +105,6 @@ export async function POST(
     let censusIDs;
     let pastCensusIDs: string | any[];
     let transactionID: string | undefined = undefined;
-
-    const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
-      if (!filterModel.items || filterModel.items.length === 0) {
-        return '';
-      }
-
-      return filterModel.items
-        .map((item: GridFilterItem) => {
-          const { field, operator, value } = item;
-          const aliasedField = `${alias ? `${alias}.` : ''}${field}`;
-          const escapedValue = escape(`%${value}%`); // Handle escaping
-          return `${aliasedField} ${operator} ${escapedValue}`;
-        })
-        .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
-    };
-
-    const buildSearchStub = (columns: string[], quickFilter: string[], alias?: string) => {
-      if (!quickFilter || quickFilter.length === 0) {
-        return ''; // Return empty if no quick filters
-      }
-
-      return columns
-        .map(column => {
-          const aliasedColumn = `${alias ? `${alias}.` : ''}${column}`;
-          return quickFilter.map(word => `${aliasedColumn} LIKE ${escape(`%${word}%`)}`).join(' OR ');
-        })
-        .join(' OR ');
-    };
 
     try {
       let paginatedQuery = ``;
@@ -331,6 +305,7 @@ export async function POST(
         );
       }
       transactionID = await connectionManager.beginTransaction();
+      console.log('formatted query: ', format(paginatedQuery, queryParams));
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
