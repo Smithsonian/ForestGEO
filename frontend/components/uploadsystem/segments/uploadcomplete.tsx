@@ -112,34 +112,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     link.click();
     document.body.removeChild(link);
   };
-
-  async function uploadFailedMeasurements() {
-    const result: FailedMeasurementsRDS[] = [];
-
-    Object.values(errorRows).forEach(fileRowSet => {
-      Object.values(fileRowSet).forEach(fileRow => {
-        const failedMeasurement: FailedMeasurementsRDS = {
-          tag: fileRow['tag'] || undefined,
-          stemTag: fileRow['stemtag'] || undefined,
-          spCode: fileRow['spcode'] || undefined,
-          x: fileRow['lx'] ? parseFloat(fileRow['lx']) : undefined,
-          y: fileRow['ly'] ? parseFloat(fileRow['ly']) : undefined,
-          dbh: fileRow['dbh'] ? parseFloat(fileRow['dbh']) : undefined,
-          hom: fileRow['hom'] ? parseFloat(fileRow['hom']) : undefined,
-          date: fileRow['date'] ? new Date(fileRow['date']) : undefined,
-          codes: fileRow['codes'] || undefined
-        };
-
-        result.push(failedMeasurement);
-      });
-    });
-    await fetch(`/api/batchedupload/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(result)
-    });
-  }
-
   useEffect(() => {
     const runAsyncTasks = async () => {
       try {
@@ -276,7 +248,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             <Button
               variant={'solid'}
               onClick={async () => {
-                uploadForm === 'measurements' ? await uploadFailedMeasurements() : undefined;
+                // uploadForm === 'measurements' ? await uploadFailedMeasurements() : undefined;
                 setOpenUploadConfirmModal(false);
                 handleCloseUploadModal();
               }}

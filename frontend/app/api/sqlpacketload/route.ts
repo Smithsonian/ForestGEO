@@ -1,6 +1,6 @@
 import ConnectionManager from '@/config/connectionmanager';
 import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
-import { FileRowSet } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
   const fileRowSet: FileRowSet = body.fileRowSet;
   const fileName: string = body.fileName;
   let transactionID: string | undefined = undefined;
+  const failingRows: Set<FileRow> = new Set<FileRow>();
 
   const connectionManager = ConnectionManager.getInstance();
   transactionID = await connectionManager.beginTransaction();
@@ -47,21 +48,26 @@ export async function POST(request: NextRequest) {
         census,
         fullName: user
       };
-      await insertOrUpdate(props);
-      // console.log(chalk.magenta(`Row ${rowId} processed successfully`));
+      try {
+        await insertOrUpdate(props);
+      } catch (e: any) {
+        console.error(`Error processing row for file ${fileName}:`, e.message);
+        failingRows.add(row); // saving this for future processing
+      }
     }
     await connectionManager.commitTransaction(transactionID ?? '');
     console.log('sqlpacketload: transaction committed');
   } catch (error: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
-    console.log('sqlpacketload: transation rolled back.');
+    console.log('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
     console.log(`Row ${rowId} failed processing:`, error);
     if (error instanceof Error) {
       console.error(`Error processing row for file ${fileName}:`, error.message);
       return new NextResponse(
         JSON.stringify({
           responseMessage: `Error processing row in file ${fileName}`,
-          error: error.message
+          error: error.message,
+          failingRows: Array.from(failingRows)
         }),
         { status: HTTPResponses.SERVICE_UNAVAILABLE }
       );
@@ -69,7 +75,8 @@ export async function POST(request: NextRequest) {
       console.error('Unknown error processing row:', error);
       return new NextResponse(
         JSON.stringify({
-          responseMessage: `Unknown processing error at row, in file ${fileName}`
+          responseMessage: `Unknown processing error at row, in file ${fileName}`,
+          failingRows: Array.from(failingRows)
         }),
         { status: HTTPResponses.SERVICE_UNAVAILABLE }
       );
@@ -77,7 +84,8 @@ export async function POST(request: NextRequest) {
   }
   return new NextResponse(
     JSON.stringify({
-      responseMessage: `Bulk insert to SQL completed`
+      responseMessage: `Bulk insert to SQL completed`,
+      failingRows: Array.from(failingRows)
     }),
     { status: HTTPResponses.OK }
   );
