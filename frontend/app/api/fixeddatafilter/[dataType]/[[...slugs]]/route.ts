@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
-import { escape } from 'mysql2';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
+import { GridFilterModel } from '@mui/x-data-grid';
 import { handleError } from '@/utils/errorhandler';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
-import { buildCondition, buildFilterModelStub, buildSearchStub, Operator } from '@/config/macros/formdetails';
-import { capitalizeAndTransformField } from '@/config/utils';
+import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
 
