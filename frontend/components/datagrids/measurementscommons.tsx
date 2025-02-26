@@ -552,7 +552,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
     ]
   });
-
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [errorCount, setErrorCount] = useState<number | null>(null);
   const [validCount, setValidCount] = useState<number | null>(null);
@@ -983,10 +982,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       );
 
       try {
+        const { items, ...rest } = filterModel;
         const response = await fetch(paginatedQuery, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterModel })
+          body: filterModel.items.every(item => item.value && item.operator && item.field && item.operator !== '' && item.field !== '')
+            ? JSON.stringify({ filterModel })
+            : JSON.stringify({ filterModel: rest })
         });
 
         const data = await response.json();
@@ -1227,6 +1229,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       headerAlign: 'center',
       align: 'center',
       width: 50,
+      filterable: false,
       renderCell: (params: GridCellParams) => {
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
           const validationStrings =
@@ -1441,7 +1444,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setFilterModel(prevFilterModel => {
       return {
         ...prevFilterModel,
-        items: [...(incomingValues.items || [])],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
       };
     });

@@ -3,9 +3,7 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
-import { escape } from 'mysql2';
-import { buildFilterModelStub, buildSearchStub } from '@/config/macros/formdetails';
+import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
