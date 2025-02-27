@@ -14,7 +14,6 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   callbacks: {
     async signIn({ user, profile, email: signInEmail }) {
       console.log('url: ', process.env.AUTH_URL);
-      console.log('nextauth url: ', process.env.NEXTAUTH_URL);
       const userEmail = user.email || signInEmail || profile?.preferred_username;
       if (!userEmail) {
         return false; // No email, reject sign-in
