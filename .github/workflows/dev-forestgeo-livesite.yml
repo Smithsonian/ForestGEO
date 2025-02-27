@@ -13,7 +13,7 @@ jobs:
   build-app-development:
     if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
     runs-on: ubuntu-latest
-    environment: development_temp
+    environment: development
 
     steps:
       - uses: actions/checkout@v4
@@ -27,12 +27,11 @@ jobs:
         id: create-env-file-dev
         run: |
           touch frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ID_SECRET=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_SECRET }} >> frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ID_ID=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_ID }} >> frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ID_ISSUER=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_ISSUER }} >> frontend/.env
-          echo AUTH_SECRET=${{ secrets.AUTH_SECRET }} >> frontend/.env
-          echo AUTH_URL=${{ secrets.AUTH_URL }} >> frontend/.env
-          echo AUTH_FUNCTIONS_POLL_URL=${{ secrets.AUTH_FUNCTIONS_POLL_URL }} >> frontend/.env
+          echo AZURE_AD_CLIENT_SECRET=${{ secrets.AZURE_AD_CLIENT_SECRET || secrets.AUTH_MICROSOFT_ENTRA_ID_SECRET }} >> frontend/.env
+          echo AZURE_AD_CLIENT_ID=${{ secrets.AZURE_AD_CLIENT_ID || secrets.AUTH_MICROSOFT_ENTRA_ID_ID }} >> frontend/.env
+          echo AZURE_AD_TENANT_ID=${{ secrets.AZURE_AD_TENANT_ID || secrets.AUTH_MICROSOFT_ENTRA_ISSUER }} >> frontend/.env
+          echo NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET || secrets.AUTH_SECRET }} >> frontend/.env
+          echo NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL_DEV }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
           echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
@@ -87,7 +86,7 @@ jobs:
   deploy-app-development:
     needs: build-app-development
     runs-on: ubuntu-latest
-    environment: development_temp
+    environment: development
 
     steps:
       - name: Download build artifact
@@ -105,68 +104,3 @@ jobs:
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_DEVELOPMENT }}
           package: frontend/build/standalone
-
-      - name: Install MySQL client
-        run: sudo apt-get update && sudo apt-get install -y mysql-client
-          
-      - name: Fetch notification recipients
-        id: get_recipients
-        env:
-          DB_HOST: ${{ secrets.AZURE_SQL_SERVER }}
-          DB_USER: ${{ secrets.AZURE_SQL_USER }}
-          DB_PASS: ${{ secrets.AZURE_SQL_PASSWORD }}
-          DB_NAME: ${{ secrets.AZURE_SQL_DATABASE }}
-        run: |
-          # grab only the email column, one per line, no headers
-          EMAILS=$(mysql --batch --skip-column-names \
-            -h "$DB_HOST" \
-            -u "$DB_USER" \
-            -p"$DB_PASS" \
-            -D "$DB_NAME" \
-            -e "SELECT Email FROM catalog.users WHERE IsAdmin IS TRUE;" \
-            | paste -sd "," -)
-          echo "emails=$EMAILS" >> $GITHUB_OUTPUT
-
-      - name: Checkout code (full history)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Collect merged commit messages
-        id: collect_messages
-        run: |
-          MESSAGES=$(git log --no-merges \
-          --format='- %s' \
-          ${{ github.event.before }}..${{ github.sha }})
-          
-          echo "messages<<EOF" >> $GITHUB_OUTPUT
-          echo "$MESSAGES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Send deployment notification
-        if: ${{ success() }}
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.NOTIFS_EMAIL_SOURCE }}
-          password: ${{ secrets.NOTIFS_EMAIL_PWD }}
-          secure: false
-
-          from: "ForestGEO Automated Notifications <${{ secrets.NOTIFS_EMAIL_SOURCE }}>"
-          to: ${{ steps.get_recipients.outputs.emails }}
-
-          # subject & body
-          subject: "🚀 Deployment to ${{ github.ref_name }} succeeded"
-          body: |
-            Hello ForestGEO Users,
-
-            The branch `${{ github.ref_name }}` was just deployed successfully! 
-            Please review the following commit details for more information:
-
-            • Commit SHA: `${{ github.sha }}`
-            • Commit message:
-              > ${{ steps.collect_messages.outputs.messages }}
-
-            Cheers,
-            GitHub Actions

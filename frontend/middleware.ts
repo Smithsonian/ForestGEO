@@ -6,11 +6,15 @@
  * Allows the request to continue if no redirect conditions are met.
  */
 
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
+import NextAuth from 'next-auth';
+import authConfig from './auth.config';
+
+const { auth: nextAuthMiddleware } = NextAuth(authConfig);
 
 export default auth(async function middleware(request: NextRequest) {
-  const session = await auth(); // Fetch session once
+  const session = await nextAuthMiddleware(); // Fetch session once
   const url = request.nextUrl.clone();
 
   const isAuthenticated = !!session;

@@ -2,17 +2,11 @@
 import NextAuth from 'next-auth';
 import { UserAuthRoles } from '@/config/macros';
 import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
-import MicrosoftEntraID from '@auth/core/providers/microsoft-entra-id';
+import authConfig from '@/auth.config';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
-  providers: [
-    MicrosoftEntraID({
-      clientId: process.env.AZURE_AD_CLIENT_ID,
-      clientSecret: process.env.AZURE_AD_CLIENT_SECRET,
-      issuer: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}/v2.0`
-    })
-  ],
+  ...authConfig,
   session: {
     strategy: 'jwt',
     maxAge: 24 * 60 * 60 // 24 hours
@@ -20,12 +14,14 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   callbacks: {
     async signIn({ user, profile, email: signInEmail }) {
       console.log('url: ', process.env.AUTH_URL);
+      console.log('nextauth url: ', process.env.NEXTAUTH_URL);
       const userEmail = user.email || signInEmail || profile?.preferred_username;
       if (!userEmail) {
         return false; // No email, reject sign-in
       }
+      const coreURL = (process.env.NEXTAUTH_URL || process.env.AUTH_URL) + `/api/customsignin`;
       try {
-        const response = await fetch(`${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/api/customsignin`, {
+        const response = await fetch(coreURL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: userEmail })
