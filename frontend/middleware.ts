@@ -14,8 +14,11 @@ import authConfig from './auth.config';
 const { auth: nextAuthMiddleware } = NextAuth(authConfig);
 
 export default auth(async function middleware(request: NextRequest) {
-  const session = await nextAuthMiddleware(); // Fetch session once
+  const { pathname } = request.nextUrl;
+  if (pathname.includes('/api/customsignin')) return NextResponse.next();
+
   const url = request.nextUrl.clone();
+  const session = await nextAuthMiddleware(); // Fetch session once
 
   const isAuthenticated = !!session;
   const isProtectedRoute = ['/dashboard', '/measurementshub', '/fixeddatainput'].some(route => url.pathname.startsWith(route));
