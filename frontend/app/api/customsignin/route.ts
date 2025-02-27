@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 
-export async function POST(req: Request) {
-  const { email } = await req.json();
+export async function GET(req: NextRequest) {
+  const email = req.nextUrl.searchParams.get('email');
   const connectionManager = ConnectionManager.getInstance();
 
   try {

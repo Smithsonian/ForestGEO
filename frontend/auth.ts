@@ -14,16 +14,14 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   callbacks: {
     async signIn({ user, profile, email: signInEmail }) {
       console.log('url: ', process.env.AUTH_URL);
-      const userEmail = user.email || signInEmail || profile?.preferred_username;
+      const userEmail = user.email || profile?.preferred_username;
       if (!userEmail) {
         return false; // No email, reject sign-in
       }
-      const coreURL = (process.env.NEXTAUTH_URL || process.env.AUTH_URL) + `/api/customsignin`;
+      const coreURL = `${process.env.AUTH_URL}/api/customsignin?email=${encodeURIComponent(userEmail)}`;
       try {
         const response = await fetch(coreURL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: userEmail })
+          method: 'GET'
         });
 
         if (!response.ok) {
