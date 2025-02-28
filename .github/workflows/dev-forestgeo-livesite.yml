@@ -29,7 +29,7 @@ jobs:
           touch frontend/.env
           echo AUTH_MICROSOFT_ENTRA_ID_SECRET=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_SECRET }} >> frontend/.env
           echo AUTH_MICROSOFT_ENTRA_ID_ID=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_ID }} >> frontend/.env
-          echo AUTH_MICROSOFT_ENTRA_ISSUER=${{ secrets.AUTH_MICROSOFT_ENTRA_ISSUER }} >> frontend/.env
+          echo AUTH_MICROSOFT_ENTRA_ID_ISSUER=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_ISSUER }} >> frontend/.env
           echo AUTH_SECRET=${{ secrets.AUTH_SECRET }} >> frontend/.env
           echo AUTH_URL=${{ secrets.AUTH_URL }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
