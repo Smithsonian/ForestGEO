@@ -13,7 +13,7 @@ jobs:
   build-app-development:
     if: startsWith(github.ref, 'refs/heads/forestgeo-app-')
     runs-on: ubuntu-latest
-    environment: development_temp
+    environment: development
 
     steps:
       - uses: actions/checkout@v4
