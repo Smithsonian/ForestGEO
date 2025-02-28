@@ -1,3 +1,4 @@
+// next-auth.d.ts
 import 'next-auth';
 import { Profile } from 'next-auth';
 import { UserAuthRoles } from '@/config/macros';
@@ -13,8 +14,8 @@ declare module 'next-auth' {
       name?: string;
       email?: string;
       image?: string;
-      sites: SitesRDS[];
-      allsites: SitesRDS[];
+      sites?: SitesRDS[];
+      allsites?: SitesRDS[];
     };
   }
 
@@ -26,15 +27,15 @@ declare module 'next-auth' {
    * Extends the built-in user types to include the userStatus property.
    */
   interface User {
-    userStatus: UserAuthRoles;
-    sites: SitesRDS[];
-    allsites: SitesRDS[];
+    userStatus?: UserAuthRoles;
+    sites?: SitesRDS[];
+    allsites?: SitesRDS[];
   }
 
   // Extend the Token type
   interface JWT {
-    userStatus: UserAuthRoles;
-    sites: SitesRDS[];
-    allsites: SitesRDS[];
+    userStatus?: UserAuthRoles;
+    sites?: SitesRDS[];
+    allsites?: SitesRDS[];
   }
 }

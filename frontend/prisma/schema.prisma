@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model sites {
+  SiteID            Int                 @id @default(autoincrement())
+  SiteName          String              @db.VarChar(250)
+  SchemaName        String              @db.VarChar(250)
+  SQDimX            Decimal?            @db.Decimal(10, 2)
+  SQDimY            Decimal?            @db.Decimal(10, 2)
+  DefaultUOMDBH     String?             @default("cm") @db.VarChar(50)
+  DefaultUOMHOM     String?             @default("m") @db.VarChar(50)
+  DoubleDataEntry   Boolean             @default(dbgenerated("b'0'")) @db.Bit(1)
+  usersiterelations usersiterelations[]
+}
+
+model users {
+  UserID            Int                 @id @default(autoincrement())
+  LastName          String              @db.VarChar(100)
+  FirstName         String              @db.VarChar(100)
+  Email             String?             @db.VarChar(250)
+  IsAdmin           Boolean?            @default(dbgenerated("b'0'")) @db.Bit(1)
+  UserStatus        users_UserStatus    @default(field_crew)
+  usersiterelations usersiterelations[]
+}
+
+model usersiterelations {
+  UserSiteRelationID Int   @id @default(autoincrement())
+  UserID             Int
+  SiteID             Int
+  users              users @relation(fields: [UserID], references: [UserID], onDelete: NoAction, onUpdate: NoAction, map: "usersiterelations_ibfk_1")
+  sites              sites @relation(fields: [SiteID], references: [SiteID], onDelete: NoAction, onUpdate: NoAction, map: "usersiterelations_ibfk_2")
+
+  @@unique([UserID, SiteID], map: "UserID")
+  @@index([SiteID], map: "SiteID")
+}
+
+model validationprocedures {
+  ValidationID        Int     @id @default(autoincrement())
+  ProcedureName       String  @db.VarChar(255)
+  Description         String? @db.Text
+  Criteria            String? @db.VarChar(255)
+  Definition          String? @db.Text
+  ChangelogDefinition String? @db.Text
+  IsEnabled           Boolean @default(dbgenerated("b'1'")) @db.Bit(1)
+}
+
+enum users_UserStatus {
+  global
+  db_admin        @map("db admin")
+  lead_technician @map("lead technician")
+  field_crew      @map("field crew")
+}
+
+model User {
+  id            String          @id @default(cuid())
+  name          String?
+  username      String?         @unique
+  email         String?         @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  // Optional for WebAuthn support
+  Authenticator Authenticator[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                       String  @id @default(cuid())
+  userId                   String  @unique
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String? @db.Text
+  access_token             String? @db.Text
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String? @db.Text
+  session_state            String?
+  refresh_token_expires_in Int?
+  user                     User?   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Optional for WebAuthn support
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+}

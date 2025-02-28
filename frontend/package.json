@@ -25,6 +25,7 @@
     "component:headless": "cypress run --component"
   },
   "dependencies": {
+    "@auth/prisma-adapter": "^2.8.0",
     "@azure/storage-blob": "^12.26.0",
     "@base-ui-components/react": "^1.0.0-alpha.5",
     "@codemirror/autocomplete": "^6.18.4",
@@ -41,10 +42,13 @@
     "@mui/x-data-grid": "^7.25.0",
     "@mui/x-data-grid-generator": "^7.25.0",
     "@mui/x-date-pickers": "^7.25.0",
+    "@neondatabase/serverless": "^0.10.4",
     "@next/bundle-analyzer": "^15.1.6",
     "@next/eslint-plugin-next": "^15.1.6",
     "@octokit/types": "^13.8.0",
     "@playwright/test": "^1.50.1",
+    "@prisma/adapter-neon": "^6.4.1",
+    "@prisma/client": "^6.4.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
     "@types/codemirror": "^5.60.15",
@@ -114,6 +118,7 @@
     "eslint-plugin-react": "^7.37.4",
     "prettier": "^3.4.2",
     "prettier-eslint": "^16.3.0",
+    "prisma": "^6.4.1",
     "start-server-and-test": "^2.0.10",
     "tailwindcss": "^4.0.3",
     "typescript-eslint": "^8.23.0"

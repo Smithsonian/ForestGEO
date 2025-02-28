@@ -15,7 +15,7 @@ export const LoginLogout = () => {
   const { data: session, status } = useSession();
 
   const handleRetryLogin = () => {
-    signIn('microsoft-entra-id', { redirectTo: '/dashboard' }).catch((error: any) => {
+    signIn('microsoft-entra-id').catch((error: any) => {
       console.error('Login error:', error);
       signOut({ redirectTo: `/loginfailed?reason=${error.message}` })
         .then(() => localStorage.clear())
