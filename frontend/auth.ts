@@ -1,8 +1,7 @@
 // auth.ts
 import NextAuth from 'next-auth';
-import { UserAuthRoles } from '@/config/macros';
-import { SitesRDS } from '@/config/sqlrdsdefinitions/zones';
 import authConfig from '@/auth.config';
+import { MicrosoftEntraIDProfile } from '@auth/core/providers/microsoft-entra-id';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
@@ -12,12 +11,18 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     maxAge: 24 * 60 * 60 // 24 hours
   },
   callbacks: {
-    async signIn({}) {
+    async signIn({ user, profile }) {
+      const meiProfile = profile as MicrosoftEntraIDProfile;
+      const userEmail = user.email || meiProfile.email;
+      if (!user.email) user.email = userEmail;
+      console.log('SIGNIN CALLBACK USER: ', user);
       return true;
     },
 
     async jwt({ token, user }) {
       if (user) {
+        console.log('JWT CALLBACK USER: ', user);
+        console.log('JWT CALLBACK TOKEN: ', token);
         if (!token.email) token.email = user.email;
       }
       return token;
