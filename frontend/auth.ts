@@ -12,13 +12,20 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     maxAge: 24 * 60 * 60 // 24 hours
   },
   callbacks: {
-    async signIn({ user, profile, email: signInEmail }) {
-      console.log('url: ', process.env.AUTH_URL);
-      const userEmail = user.email || profile?.preferred_username;
-      if (!userEmail) {
-        return false; // No email, reject sign-in
+    async signIn({}) {
+      return true;
+    },
+
+    async jwt({ token, user }) {
+      if (user) {
+        if (!token.email) token.email = user.email;
       }
-      const coreURL = `${process.env.AUTH_URL}/api/customsignin?email=${encodeURIComponent(userEmail)}`;
+      return token;
+    },
+
+    async session({ session, token }) {
+      console.log('url: ', process.env.AUTH_URL);
+      const coreURL = `${process.env.AUTH_URL}/api/customsignin?email=${encodeURIComponent(token.email as string)}`;
       console.log('extracted core url: ', coreURL);
       try {
         const response = await fetch(coreURL, {
@@ -27,35 +34,17 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         console.log('response: ', response);
         if (!response.ok) {
           console.log('response not okay');
-          return false;
+          throw new Error('API call FAILURE!');
         }
 
         const data = await response.json();
         console.log('signin api returned data: ', data);
-        user.userStatus = data.userStatus;
-        user.sites = data.allowedSites;
-        user.allsites = data.allSites;
+        session.user.userStatus = data.userStatus;
+        session.user.sites = data.allowedSites;
+        session.user.allsites = data.allSites;
       } catch (error) {
         console.error('Error fetching user data:', error);
-        return false;
       }
-
-      return true;
-    },
-
-    async jwt({ token, user }) {
-      if (user) {
-        token.userStatus = user.userStatus;
-        token.sites = user.sites;
-        token.allsites = user.allsites;
-      }
-      return token;
-    },
-
-    async session({ session, token }) {
-      session.user.userStatus = token.userStatus as UserAuthRoles;
-      session.user.sites = token.sites as SitesRDS[];
-      session.user.allsites = token.allsites as SitesRDS[];
       return session;
     }
   }
