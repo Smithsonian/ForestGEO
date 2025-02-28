@@ -19,16 +19,19 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         return false; // No email, reject sign-in
       }
       const coreURL = `${process.env.AUTH_URL}/api/customsignin?email=${encodeURIComponent(userEmail)}`;
+      console.log('extracted core url: ', coreURL);
       try {
         const response = await fetch(coreURL, {
           method: 'GET'
         });
-
+        console.log('response: ', response);
         if (!response.ok) {
+          console.log('response not okay');
           return false;
         }
 
         const data = await response.json();
+        console.log('signin api returned data: ', data);
         user.userStatus = data.userStatus;
         user.sites = data.allowedSites;
         user.allsites = data.allSites;
