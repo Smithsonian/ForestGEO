@@ -11,9 +11,11 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     maxAge: 24 * 60 * 60 // 24 hours
   },
   callbacks: {
-    async signIn({ user, profile }) {
-      const meiProfile = profile as MicrosoftEntraIDProfile;
-      const userEmail = user.email || meiProfile.email;
+    async signIn({ user, profile, email: signInEmail, account }) {
+      const userEmail = user.email || profile?.email;
+      console.log('SIGNINCALLBACK profile: ', profile);
+      console.log('SIGININCALLBACK email: ', signInEmail);
+      console.log('SIGNINCALLBACK account: ', account);
       if (!user.email) user.email = userEmail;
       console.log('SIGNIN CALLBACK USER: ', user);
       return true;
@@ -49,6 +51,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         session.user.allsites = data.allSites;
       } catch (error) {
         console.error('Error fetching user data:', error);
+        throw error;
       }
       return session;
     }
