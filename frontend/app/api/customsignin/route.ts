@@ -1,31 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ConnectionManager from '@/config/connectionmanager';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import { Connection, createConnection, RowDataPacket } from 'mysql2/promise';
 
 export async function GET(req: NextRequest) {
   const email = req.nextUrl.searchParams.get('email');
-  const connectionManager = ConnectionManager.getInstance();
+
+  let connection: Connection | null = null;
 
   try {
-    const query = `SELECT UserID, UserStatus FROM catalog.users WHERE Email = ? LIMIT 1`;
-    const results = await connectionManager.executeQuery(query, [email]);
+    connection = await createConnection({
+      host: process.env.AZURE_SQL_SERVER || 'localhost',
+      port: Number(process.env.AZURE_SQL_PORT) || 3306,
+      user: process.env.AZURE_SQL_USER || 'root',
+      password: process.env.AZURE_SQL_PASSWORD || '',
+      database: process.env.AZURE_SQL_CATALOG_SCHEMA || 'catalog'
+    });
+    const [userRows] = await connection.execute<RowDataPacket[]>(`SELECT UserID, UserStatus FROM users WHERE Email = ? LIMIT 1`, [email]);
 
-    if (results.length === 0) {
+    if (!Array.isArray(userRows) || userRows.length === 0) {
       return NextResponse.json({ error: 'User not found' }, { status: 401 });
     }
 
-    const userID = results[0].UserID;
-    const userStatus = results[0].UserStatus;
+    const { UserID: userID, UserStatus: userStatus } = userRows[0] as { UserID: number; UserStatus: string };
 
-    const allSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(await connectionManager.executeQuery(`SELECT * FROM catalog.sites`));
+    const [allSitesRows] = await connection.execute<RowDataPacket[]>(`SELECT * FROM sites`);
 
-    const allowedSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(
-      await connectionManager.executeQuery(
-        `SELECT s.* FROM catalog.sites AS s JOIN catalog.usersiterelations AS usr ON s.SiteID = usr.SiteID WHERE usr.UserID = ?`,
-        [userID]
-      )
+    // Query allowed sites for the user
+    const [allowedSitesRows] = await connection.execute<RowDataPacket[]>(
+      `SELECT s.* FROM sites AS s JOIN usersiterelations AS usr ON s.SiteID = usr.SiteID WHERE usr.UserID = ?`,
+      [userID]
     );
+
+    const allSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(allSitesRows as SitesResult[]);
+
+    const allowedSites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(allowedSitesRows as SitesResult[]);
 
     return NextResponse.json({
       userStatus,
@@ -35,5 +44,7 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     console.error('Database error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } finally {
+    if (connection) await connection.end();
   }
 }
