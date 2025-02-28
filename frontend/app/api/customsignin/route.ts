@@ -3,6 +3,11 @@ import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 import { Connection, createConnection, RowDataPacket } from 'mysql2/promise';
 
+export const runtime = 'nodejs';
+export const config = {
+  runtime: 'nodejs'
+};
+
 export async function GET(req: NextRequest) {
   const email = req.nextUrl.searchParams.get('email');
 
