@@ -32,6 +32,7 @@ jobs:
           echo AUTH_MICROSOFT_ENTRA_ID_ISSUER=${{ secrets.AUTH_MICROSOFT_ENTRA_ID_ISSUER }} >> frontend/.env
           echo AUTH_SECRET=${{ secrets.AUTH_SECRET }} >> frontend/.env
           echo AUTH_URL=${{ secrets.AUTH_URL }} >> frontend/.env
+          echo AUTH_FUNCTIONS_POLL_URL=${{ secrets.AUTH_FUNCTIONS_POLL_URL }} >> frontend/.env
           echo AZURE_SQL_USER=${{ secrets.AZURE_SQL_USER }} >> frontend/.env
           echo AZURE_SQL_PASSWORD=${{ secrets.AZURE_SQL_PASSWORD }} >> frontend/.env
           echo AZURE_SQL_SERVER=${{ secrets.AZURE_SQL_SERVER }} >> frontend/.env
