@@ -29,12 +29,6 @@ class ConnectionManager {
       throw new Error(transactionId ? `No connection found for transaction: ${transactionId}` : 'Unable to acquire connection.');
     }
 
-    const session = await auth();
-
-    if (session?.user.email) {
-      await runQuery(connection, 'SET SESSION @user_email = ?', [session.user.email]);
-    }
-
     try {
       return await runQuery(connection, query, params);
     } catch (error) {
