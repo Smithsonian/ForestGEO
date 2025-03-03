@@ -1,6 +1,8 @@
 // auth.ts
 import NextAuth from 'next-auth';
 import authConfig from '@/auth.config';
+import MapperFactory from '@/config/datamapper';
+import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
@@ -12,24 +14,18 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   callbacks: {
     async signIn({ user, profile, account }) {
       const userEmail = user.email || profile?.email || profile?.preferred_username;
-      console.log('SIGNINCALLBACK profile: ', profile);
-      console.log('SIGNINCALLBACK account: ', account);
       if (!user.email) user.email = userEmail;
-      console.log('SIGNIN CALLBACK USER: ', user);
       return true;
     },
 
     async jwt({ token, user }) {
       if (user) {
-        console.log('JWT CALLBACK USER: ', user);
-        console.log('JWT CALLBACK TOKEN: ', token);
         if (!token.email) token.email = user.email;
       }
       return token;
     },
 
     async session({ session, token }) {
-      console.log('url: ', process.env.AUTH_FUNCTIONS_POLL_URL);
       const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}?email=${encodeURIComponent(token.email as string)}`;
       console.log('extracted core url: ', coreURL);
       try {
@@ -43,10 +39,9 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         }
 
         const data = await response.json();
-        console.log('signin api returned data: ', data);
         session.user.userStatus = data.userStatus;
-        session.user.sites = data.allowedSites;
-        session.user.allsites = data.allSites;
+        session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
+        session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);
       } catch (error) {
         console.error('Error fetching user data:', error);
         throw error;
