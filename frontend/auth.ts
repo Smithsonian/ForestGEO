@@ -29,8 +29,8 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     },
 
     async session({ session, token }) {
-      console.log('url: ', process.env.AUTH_URL);
-      const coreURL = `${process.env.AUTH_URL}/api/customsignin?email=${encodeURIComponent(token.email as string)}`;
+      console.log('url: ', process.env.AUTH_FUNCTIONS_POLL_URL);
+      const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}/api/polluserstate?email=${encodeURIComponent(token.email as string)}`;
       console.log('extracted core url: ', coreURL);
       try {
         const response = await fetch(coreURL, {
