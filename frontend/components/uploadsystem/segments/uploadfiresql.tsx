@@ -381,28 +381,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         await parseFileInChunks(file as File, delimiter);
 
-        // quickly add remaining rows to failed measurements counter
-        const batchID = v4();
-        const rows = Object.values(failedRows[file.name] ?? []);
-        const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-        const values = rows.flatMap(row => {
-          const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
-          return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
-        });
-        const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
+        // quickly add remaining rows to failed measurements counter, only if data is present
+        if (failedRows[file.name].size > 0) {
+          const batchID = v4();
+          const rows = Object.values(failedRows[file.name] ?? []);
+          const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+          const values = rows.flatMap(row => {
+            const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+            return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
+          });
+          const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
       (${file.name}, ${batchID}, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
       VALUES ${placeholders}`;
-        await fetch(`/api/formatrunquery`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: insertSQL, params: values })
-        });
-        // remove submitted rows from failedrows
-        setFailedRows(prev => {
-          const { [file.name]: removed, ...rest } = prev;
-          return rest;
-        });
-
+          await fetch(`/api/formatrunquery`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: insertSQL, params: values })
+          });
+          // remove submitted rows from failedrows
+          setFailedRows(prev => {
+            const { [file.name]: removed, ...rest } = prev;
+            return rest;
+          });
+        }
         setCompletedOperations(prevCompleted => prevCompleted + 1);
       }
 
