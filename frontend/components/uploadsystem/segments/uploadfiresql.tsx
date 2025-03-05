@@ -391,7 +391,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
           });
           const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
-      (${file.name}, ${batchID}, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
       VALUES ${placeholders}`;
           await fetch(`/api/formatrunquery`, {
             method: 'POST',
