@@ -382,7 +382,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         await parseFileInChunks(file as File, delimiter);
 
         // quickly add remaining rows to failed measurements counter, only if data is present
-        if (failedRows[file.name].size > 0) {
+        if (Object.values(failedRows[file.name]).length > 0) {
           const batchID = v4();
           const rows = Object.values(failedRows[file.name] ?? []);
           const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
