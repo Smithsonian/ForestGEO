@@ -382,7 +382,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         await parseFileInChunks(file as File, delimiter);
 
         // quickly add remaining rows to failed measurements counter, only if data is present
-        if (Object.values(failedRows[file.name]).length > 0) {
+        if (failedRows[file.name]?.size > 0) {
           const batchID = v4();
           const rows = Object.values(failedRows[file.name] ?? []);
           const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
@@ -390,18 +390,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
             return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
           });
-          const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
+          const insertSQL = `INSERT IGNORE INTO ${schema}.ingest_failedmeasurements 
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
       VALUES ${placeholders}`;
           await fetch(`/api/formatrunquery`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: insertSQL, params: values })
-          });
-          // remove submitted rows from failedrows
-          setFailedRows(prev => {
-            const { [file.name]: removed, ...rest } = prev;
-            return rest;
           });
         }
         setCompletedOperations(prevCompleted => prevCompleted + 1);
@@ -422,6 +417,20 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             c.EndDate   = m.LastMeasurementDate
         WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
       await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
+
+      setErrorRows(prevErrorRows => {
+        const newErrorRows: FileCollectionRowSet = { ...prevErrorRows };
+        Object.keys(failedRows).forEach(fileName => {
+          const failedSet = failedRows[fileName];
+          const currentRows: FileRowSet = newErrorRows[fileName] ? { ...newErrorRows[fileName] } : {};
+          failedSet.forEach(row => {
+            const key = row.id || `${Date.now()}-${Math.random()}`;
+            currentRows[key] = row;
+          });
+          newErrorRows[fileName] = currentRows;
+        });
+        return newErrorRows;
+      });
 
       setIsDataUnsaved(false);
     };
