@@ -26,25 +26,27 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     },
 
     async session({ session, token }) {
-      const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}?email=${encodeURIComponent(token.email as string)}`;
-      console.log('extracted core url: ', coreURL);
-      try {
-        const response = await fetch(coreURL, {
-          method: 'GET'
-        });
-        // console.log('response: ', response);
-        if (!response.ok) {
-          console.log('response not okay');
-          throw new Error('API call FAILURE!');
-        }
+      if (!session.user.userStatus || !session.user.sites || session.user.allsites) {
+        const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}?email=${encodeURIComponent(token.email as string)}`;
+        console.log('extracted core url: ', coreURL);
+        try {
+          const response = await fetch(coreURL, {
+            method: 'GET'
+          });
+          // console.log('response: ', response);
+          if (!response.ok) {
+            console.log('response not okay');
+            throw new Error('API call FAILURE!');
+          }
 
-        const data = await response.json();
-        session.user.userStatus = data.userStatus;
-        session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
-        session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-        throw error;
+          const data = await response.json();
+          session.user.userStatus = data.userStatus;
+          session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
+          session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          throw error;
+        }
       }
       return session;
     }
