@@ -40,7 +40,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [totalProcessingTime, setTotalProcessingTime] = useState(0);
   const [chunkStartTime, setChunkStartTime] = useState<number>(0);
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 40960;
+  const chunkSize = 4096 * 2;
   const connectionLimit = 10;
   const queue = new PQueue({ concurrency: connectionLimit });
 
