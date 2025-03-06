@@ -90,7 +90,6 @@ export interface QuadratRDS {
   area?: number;
   quadratShape?: string;
 }
-
 export type QuadratResult = ResultType<QuadratRDS>;
 export type Quadrat = QuadratRDS | undefined;
 export const validateQuadratsRow: ValidationFunction = row => {
@@ -112,5 +111,4 @@ export interface CensusQuadratRDS {
   quadratID?: number;
   censusID?: number;
 }
-
 export type CensusQuadratResult = ResultType<CensusQuadratRDS>;

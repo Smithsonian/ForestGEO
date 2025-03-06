@@ -200,7 +200,6 @@ const EditToolbar = (props: EditToolbarProps) => {
 
   const uploadButton = dynamicButtons.find((button: any) => button.label === 'Upload');
   const otherButtons = dynamicButtons.filter((button: any) => button.label !== 'Upload');
-
   return (
     <>
       <GridToolbarContainer>

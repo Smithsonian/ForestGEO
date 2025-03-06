@@ -493,7 +493,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true
   },
   {
-    field: 'stemLocalX',
+    field: 'localX',
     headerName: 'X',
     renderHeader: () => formatHeader('X', 'Stem'),
     flex: 0.7,
@@ -506,7 +506,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
-    field: 'stemLocalY',
+    field: 'localY',
     headerName: 'Y',
     renderHeader: () => formatHeader('Y', 'Stem'),
     flex: 0.7,
@@ -526,7 +526,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true,
     valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
     filterOperators: customNumericOperators,
-    preProcessEditCellProps: params => preprocessor(params)
+    preProcessEditCellProps: params => preprocessor(params),
+    type: 'number'
   },
   {
     field: 'measuredHOM',
@@ -536,6 +537,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
+    type: 'number',
     filterOperators: customNumericOperators,
     preProcessEditCellProps: params => preprocessor(params)
   },

@@ -103,7 +103,6 @@ export const booleanToBit = (value: boolean | undefined): number => (value ? 1 :
 
 export const unitSelectionOptions = ['km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm'];
 export const areaSelectionOptions = ['km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2'];
-
 export interface UnifiedValidityFlags {
   attributes: boolean;
   personnel: boolean;
@@ -138,7 +137,6 @@ export interface FileMapping {
   columnMappings: Record<string, string>;
   specialProcessing?: (props: Readonly<SpecialProcessingProps>) => Promise<void>;
 }
-
 // Define the mappings for each file type
 export const fileMappings: Record<string, FileMapping> = {
   attributes: {

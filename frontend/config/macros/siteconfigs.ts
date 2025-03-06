@@ -26,7 +26,6 @@ export interface SiteConfigProps {
     icon: React.ElementType;
   }[];
 }
-
 export const siteConfig = {
   name: 'ForestGEO',
   description: 'Census data entry and storage',

@@ -40,7 +40,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [totalProcessingTime, setTotalProcessingTime] = useState(0);
   const [chunkStartTime, setChunkStartTime] = useState<number>(0);
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096 * 2;
+  const chunkSize = 4096;
   const connectionLimit = 10;
   const queue = new PQueue({ concurrency: connectionLimit });
 
@@ -302,6 +302,25 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       });
     });
+  };
+
+  const processFailedChunk = async (fileRowSet: FileRowSet, fileName: string) => {
+    const batchErrorRows: FileRowSet = {};
+    for (const [rowId, row] of Object.entries(fileRowSet)) {
+      if (errorRows[fileName]?.[rowId]) {
+        continue;
+      }
+      const singleRowSet: FileCollectionRowSet = {
+        [fileName]: { [rowId]: row }
+      };
+      try {
+        await uploadToSql(singleRowSet, fileName);
+      } catch (rowError) {
+        console.error(`Row ${rowId} failed during retry:`, rowError);
+        batchErrorRows[rowId] = row;
+      }
+    }
+    return batchErrorRows;
   };
 
   const uploadToSql = useCallback(
