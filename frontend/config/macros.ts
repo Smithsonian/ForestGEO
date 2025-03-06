@@ -192,6 +192,7 @@ export const fileMappings: Record<string, FileMapping> = {
     specialProcessing: processCensus
   }
 };
+
 export interface ValidationResponse {
   totalRows: number;
   failedRows: number;

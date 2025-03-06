@@ -1,10 +1,11 @@
 import { HEADER_ALIGN } from '@/config/macros';
-import { Box, Stack, Typography } from '@mui/joy';
-import { GridColDef } from '@mui/x-data-grid';
-import React from 'react';
+import { Autocomplete, Box, Chip, IconButton, Stack, Typography } from '@mui/joy';
+import { GridColDef, GridPreProcessEditCellProps, GridRenderEditCellParams } from '@mui/x-data-grid';
+import React, { Dispatch, SetStateAction, useState } from 'react';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { customNumericOperators } from '@/components/datagrids/filtrationsystem';
+import CloseIcon from '@mui/icons-material/Close';
 
 export const formatHeader = (word1: string, word2: string) => (
   <Stack direction={'column'} sx={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
@@ -20,13 +21,15 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     field: 'id',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'quadratID',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'quadratName',
@@ -44,8 +47,7 @@ export const QuadratGridColumns: GridColDef[] = standardizeGridColumns([
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    editable: true,
-    filterOperators: customNumericOperators
+    editable: true
   },
   {
     field: 'startY',
@@ -112,7 +114,8 @@ export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
     field: 'id',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   { field: 'code', headerName: 'Code', headerClassName: 'header', minWidth: 150, flex: 1, editable: true }, // all unique ID columns need to be tagged 'id'
   {
@@ -138,19 +141,22 @@ export const PersonnelGridColumns: GridColDef[] = standardizeGridColumns([
     field: 'id',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'personnelID',
     headerName: 'PersonnelID',
     flex: 1,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'censusID',
     headerName: 'Census ID',
     flex: 1,
-    editable: true
+    editable: true,
+    filterable: false
   },
   {
     field: 'firstName',
@@ -171,22 +177,63 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
     field: 'id',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
-  { field: 'stemID', headerName: '#', flex: 0.1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
+  {
+    field: 'stemID',
+    headerName: '#',
+    flex: 0.1,
+    headerClassName: 'header',
+    align: 'left',
+    headerAlign: HEADER_ALIGN,
+    filterable: false
+  },
   { field: 'stemTag', headerName: 'Stem Tag', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
-  { field: 'treeID', headerName: 'Tree ID', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
+  {
+    field: 'treeID',
+    headerName: 'Tree ID',
+    flex: 1,
+    headerClassName: 'header',
+    align: 'left',
+    headerAlign: HEADER_ALIGN,
+    filterable: false
+  },
   { field: 'treeTag', headerName: 'Tree Tag', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
-  { field: 'speciesID', headerName: 'Species ID', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
+  {
+    field: 'speciesID',
+    headerName: 'Species ID',
+    flex: 1,
+    headerClassName: 'header',
+    align: 'left',
+    headerAlign: HEADER_ALIGN,
+    filterable: false
+  },
   {
     field: 'speciesCode',
     headerName: 'Species Code',
     renderHeader: () => formatHeader('Species', 'Code'),
     flex: 1
   },
-  { field: 'familyID', headerName: 'Family ID', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
+  {
+    field: 'familyID',
+    headerName: 'Family ID',
+    flex: 1,
+    headerClassName: 'header',
+    align: 'left',
+    headerAlign: HEADER_ALIGN,
+    filterable: false
+  },
   { field: 'family', headerName: 'Family', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
-  { field: 'genusID', headerName: 'Genus ID', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
+  {
+    field: 'genusID',
+    headerName: 'Genus ID',
+    flex: 1,
+    headerClassName: 'header',
+    align: 'left',
+    headerAlign: HEADER_ALIGN,
+    filterable: false
+  },
   { field: 'genus', headerName: 'Genus', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
   { field: 'speciesName', headerName: 'Species', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
   { field: 'subspeciesName', headerName: 'Subspecies', flex: 1, headerClassName: 'header', align: 'left', headerAlign: HEADER_ALIGN },
@@ -306,19 +353,95 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
 // export const renderStemXCell = (params: any) => renderValueCell(params, 'localStemX', '');
 // export const renderEditStemXCell = (params: any) => renderEditValueCell(params, 'localStemX', '', 'Stem Local X Coordinates');
 // export const renderStemYCell = (params: any) => renderValueCell(params, 'localStemY', '');
-// export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');
+// export const renderEditStemYCell = (params: any) => renderEditValueCell(params, 'localStemY', '', 'Stem Local Y Coordinates');\
+
+export function InputChip({
+  params,
+  selectableAttributes,
+  setReloadAttributes
+}: {
+  params: GridRenderEditCellParams;
+  selectableAttributes: string[];
+  setReloadAttributes: Dispatch<SetStateAction<boolean>>;
+}) {
+  const [selectedValues, setSelectedValues] = useState<string[]>(params.value?.replace(/\s+/g, '').split(';') ?? []);
+
+  const handleDelete = (valueToRemove: string) => {
+    const updatedValues = selectedValues.filter(value => value !== valueToRemove);
+    setSelectedValues(updatedValues);
+    params.api.setEditCellValue({ id: params.id, field: 'attributes', value: updatedValues.join(';') });
+    setReloadAttributes(true);
+  };
+
+  return (
+    <Box sx={{ width: '100%', minHeight: '32px' }}>
+      <Autocomplete
+        multiple
+        size="sm"
+        options={selectableAttributes}
+        autoHighlight
+        autoComplete
+        value={selectedValues}
+        filterSelectedOptions
+        onChange={(_, newValues) => {
+          setSelectedValues(newValues);
+          params.api.setEditCellValue({ id: params.id, field: 'attributes', value: newValues.join(';') });
+          setReloadAttributes(true);
+        }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            event.stopPropagation();
+          }
+        }}
+        sx={{ width: '100%' }}
+        renderTags={(values, getTagProps) =>
+          values.map((option, index) => (
+            <Chip
+              {...getTagProps({ index })}
+              key={index}
+              size="sm"
+              endDecorator={
+                <IconButton onClick={() => handleDelete(option)} size="sm" sx={{ padding: 0 }}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              }
+            >
+              {option}
+            </Chip>
+          ))
+        }
+      />
+    </Box>
+  );
+}
+
+function preprocessor(params: GridPreProcessEditCellProps) {
+  const { props } = params;
+  let newValue = props.value;
+
+  if (typeof newValue === 'string' && newValue.trim() !== '') {
+    const parsedValue = parseFloat(newValue);
+    if (!isNaN(parsedValue)) {
+      newValue = parseFloat(parsedValue.toFixed(2));
+    }
+  }
+
+  return { ...props, value: newValue };
+}
 
 export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
     headerName: 'ID',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'coreMeasurementID',
     headerName: '#',
-    flex: 0.4
+    flex: 0.4,
+    filterable: false
   },
   {
     field: 'quadratName',
@@ -331,7 +454,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'speciesID',
     headerName: 'Species ID',
     flex: 1,
-    editable: true
+    editable: true,
+    filterable: false
   },
   {
     field: 'speciesCode',
@@ -344,7 +468,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'treeID',
     headerName: 'Tree ID',
     flex: 1,
-    editable: true
+    editable: true,
+    filterable: false
   },
   {
     field: 'treeTag',
@@ -357,7 +482,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'stemID',
     headerName: 'Stem ID',
     flex: 1,
-    editable: true
+    editable: true,
+    filterable: false
   },
   {
     field: 'stemTag',
@@ -371,13 +497,13 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'X',
     renderHeader: () => formatHeader('X', 'Stem'),
     flex: 0.7,
-    type: 'number',
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
     maxWidth: 100,
     editable: true,
-    filterOperators: customNumericOperators
+    type: 'number',
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'localY',
@@ -390,17 +516,18 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
       return Number(value).toFixed(2);
     },
     editable: true,
-    filterOperators: customNumericOperators
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'measuredDBH',
     headerName: 'DBH',
     flex: 0.5,
     editable: true,
-    valueFormatter: (value: any) => {
-      return Number(value).toFixed(2);
-    },
-    filterOperators: customNumericOperators
+    valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params),
+    type: 'number'
   },
   {
     field: 'measuredHOM',
@@ -410,7 +537,9 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    filterOperators: customNumericOperators
+    type: 'number',
+    filterOperators: customNumericOperators,
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'description',
@@ -426,7 +555,8 @@ export const StemGridColumns: GridColDef[] = standardizeGridColumns([
     field: 'id',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'stemTag',
@@ -522,13 +652,15 @@ export const RolesGridColumns: GridColDef[] = standardizeGridColumns([
     field: 'id',
     headerName: '#',
     flex: 0.3,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'roleID',
     headerName: '#',
     flex: 0.2,
-    editable: false
+    editable: false,
+    filterable: false
   },
   { field: 'roleName', headerName: 'Role', flex: 1, editable: true },
   {
@@ -593,13 +725,15 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'id',
     headerName: '#',
     flex: 1,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'changeID',
     headerName: '#',
     flex: 1,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'tableName',
@@ -611,7 +745,8 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'recordID',
     headerName: 'Record',
     flex: 0.5,
-    editable: false
+    editable: false,
+    filterable: false
   },
   {
     field: 'operation',

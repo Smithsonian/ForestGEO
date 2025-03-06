@@ -73,7 +73,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarVisible, setSidebarVisible] = useState(!!session);
 
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const coreDataLoaded = siteListLoaded && plotListLoaded && censusListLoaded && quadratListLoaded;
   const { isPulsing } = useLockAnimation();
 
@@ -386,7 +386,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
             paddingLeft: 2
           }}
         >
-          {session?.user.name && session.user.email && session.user.userStatus && <>{children}</>}
+          {session && <>{children}</>}
         </Box>
         <Divider orientation="horizontal" />
         <Box

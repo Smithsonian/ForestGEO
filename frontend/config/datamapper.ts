@@ -177,6 +177,10 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
     else if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
       return bitToBoolean(value);
     }
+    // dynamically detect if values are decimal and provide handling
+    else if (this.isDecimal(value)) {
+      return parseFloat(value.toFixed(2));
+    }
     // Now process date-like fields more carefully
     else if (this.isDateKey(key) && value !== null) {
       return parseDate(value);
@@ -192,6 +196,15 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
     const lowerKey = key.toLowerCase();
     // Add other specific date-related keys as needed
     return ['measurementdate', 'createddate', 'updateddate'].includes(lowerKey);
+  }
+
+  private isDecimal(value: any): boolean {
+    if (typeof value !== 'number') return false;
+
+    // Check if the number has more than 2 decimal places
+    const decimalPlaces = (value.toString().split('.')[1] || '').length;
+
+    return decimalPlaces > 2; // If more than 2 decimal places, it's likely a DECIMAL type
   }
 }
 

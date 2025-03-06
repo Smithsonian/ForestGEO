@@ -11,6 +11,7 @@ export interface SitesRDS {
   subquadratDimY?: number;
   doubleDataEntry?: boolean;
 }
+
 export type Site = SitesRDS | undefined;
 
 export interface SitesResult {
@@ -73,8 +74,10 @@ export interface PlotRDS {
   numQuadrats?: number;
   usesSubquadrats?: boolean;
 }
+
 export type Plot = PlotRDS | undefined;
 export type PlotsResult = ResultType<PlotRDS>;
+
 export interface QuadratRDS {
   id?: number;
   quadratID?: number;

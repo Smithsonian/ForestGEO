@@ -7,6 +7,7 @@ import {
   GridColDef,
   GridEventListener,
   GridFilterModel,
+  GridRenderEditCellParams,
   GridRowEditStopReasons,
   GridRowId,
   GridRowModel,
@@ -28,6 +29,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import UploadIcon from '@mui/icons-material/Upload';
 import Box from '@mui/joy/Box';
 import {
   Button,
@@ -39,6 +41,7 @@ import {
   Dropdown,
   FormLabel,
   IconButton,
+  Input,
   Menu,
   MenuButton,
   MenuItem,
@@ -80,7 +83,7 @@ import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ValidationModal from '@/components/client/validationmodal';
-import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
+import { InputChip, MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/validationoverridemodal';
 import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
@@ -88,6 +91,8 @@ import Divider from '@mui/joy/Divider';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
+import MapperFactory from '@/config/datamapper';
+import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -186,7 +191,6 @@ const EditToolbar = (props: EditToolbarProps) => {
   };
 
   const handleChipToggle = (type: string) => {
-    console.log('handle chip toggle: ', type);
     setExportVisibility(prev => (prev.includes(type as VisibleFilter) ? prev.filter(t => t !== (type as VisibleFilter)) : [...prev, type as VisibleFilter]));
   };
 
@@ -194,6 +198,8 @@ const EditToolbar = (props: EditToolbarProps) => {
     .filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
     .map(column => column.field);
 
+  const uploadButton = dynamicButtons.find((button: any) => button.label === 'Upload');
+  const otherButtons = dynamicButtons.filter((button: any) => button.label !== 'Upload');
   return (
     <>
       <GridToolbarContainer>
@@ -251,11 +257,18 @@ const EditToolbar = (props: EditToolbarProps) => {
             >
               Export as CSV...
             </Button>
+            {uploadButton && (
+              <Tooltip title={uploadButton.tooltip} placement="bottom">
+                <Button variant="plain" color="primary" onClick={uploadButton.onClick} startDecorator={<UploadIcon />}>
+                  {uploadButton.label}
+                </Button>
+              </Tooltip>
+            )}
             <Stack direction={'row'} spacing={2}>
               <Dropdown>
                 <MenuButton>Other</MenuButton>
                 <Menu>
-                  {dynamicButtons.map((button: any, index: number) => (
+                  {otherButtons.map((button: any, index: number) => (
                     <>
                       {button.tooltip ? (
                         <>
@@ -460,6 +473,26 @@ const EditToolbar = (props: EditToolbarProps) => {
   );
 };
 
+function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
+  const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
+  const [value, setValue] = useState(initialValue);
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = event.target.value;
+
+    if (/^\d*\.?\d{0,2}$/.test(newValue) || newValue === '') {
+      setValue(newValue);
+    }
+  };
+
+  const handleBlur = () => {
+    const formattedValue = parseFloat(value).toFixed(2);
+    params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(formattedValue) });
+  };
+
+  return <Input autoFocus value={value} onChange={handleChange} onBlur={handleBlur} size="sm" sx={{ width: '100%', height: '100%' }} type="text" />;
+}
+
 export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsProps>) {
   const {
     addNewRowToGrid,
@@ -518,11 +551,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
     ]
   });
-
   const [sortModel, setSortModel] = useState<GridSortModel>([{ field: 'measurementDate', sort: 'asc' }]);
   const [errorCount, setErrorCount] = useState<number | null>(null);
   const [validCount, setValidCount] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
+  const [reloadAttrs, setReloadAttrs] = useState(true);
 
   // context pulls and definitions
   const currentSite = useSiteContext();
@@ -551,6 +585,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
   }, [refresh]);
 
+  useEffect(() => {
+    async function reloadAttributes() {
+      const response = await fetch(`/api/runquery`, {
+        method: 'POST',
+        body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
+      });
+      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+      setReloadAttrs(false);
+    }
+
+    reloadAttributes().catch(console.error);
+  }, []);
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
     setSortModel(newModel);
@@ -801,6 +848,15 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     }
     if (handleSelectQuadrat) handleSelectQuadrat(null);
     setLoading(false);
+    if (reloadAttrs) {
+      const response = await fetch(`/api/runquery`, {
+        method: 'POST',
+        body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
+      });
+      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
+      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
+      setReloadAttrs(false);
+    }
     try {
       setLoading(true, 'Refreshing Measurements Summary View...');
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
@@ -925,15 +981,17 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       );
 
       try {
+        const { items, ...rest } = filterModel;
         const response = await fetch(paginatedQuery, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filterModel })
+          body: filterModel.items.every(item => item.value && item.operator && item.field && item.operator !== '' && item.field !== '')
+            ? JSON.stringify({ filterModel })
+            : JSON.stringify({ filterModel: rest })
         });
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || 'Error fetching data');
-        console.log('data: ', data);
 
         setRows(data.output);
         setRowCount(data.totalCount);
@@ -1170,6 +1228,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       headerAlign: 'center',
       align: 'center',
       width: 50,
+      filterable: false,
       renderCell: (params: GridCellParams) => {
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
           const validationStrings =
@@ -1237,6 +1296,20 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   const columns = useMemo(() => {
     const commonColumns = gridColumns.map(column => {
+      if (column.field === 'attributes') {
+        column = {
+          ...column,
+          renderEditCell: (params: GridRenderEditCellParams) => (
+            <InputChip params={params} selectableAttributes={selectableAttributes} setReloadAttributes={setReloadAttrs} />
+          )
+        };
+      }
+      if (['measuredDBH', 'measuredHOM', 'stemLocalX', 'stemLocalY'].includes(column.field)) {
+        column = {
+          ...column,
+          renderEditCell: (params: GridRenderEditCellParams) => <EditMeasurements params={params} />
+        };
+      }
       return {
         ...column,
         renderCell: (params: GridCellParams) => {
@@ -1245,21 +1318,24 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           const rowError = rowHasError(params.id);
           const cellError = cellHasError(column.field, params.id) ? getCellErrorMessages(column.field, Number(params.row.coreMeasurementID)) : '';
 
-          const isMeasurementField = column.field === 'measuredDBH' || column.field === 'measuredHOM';
+          const isMeasurementField =
+            column.field === 'measuredDBH' || column.field === 'measuredHOM' || column.field.includes('X') || column.field.includes('Y');
+          const isAttributeField = column.field === 'attributes';
+          const attributeValues = column.field === 'attributes' && typeof params.value === 'string' ? params.value.replace(/\s+/g, '').split(';') : [];
 
-          const renderMeasurementDetails = () => (
-            <>
-              <Typography level="body-sm">
-                {column.field === 'measuredDBH'
-                  ? params.row.measuredDBH
-                    ? Number(params.row.measuredDBH).toFixed(2)
-                    : 'null'
-                  : params.row.measuredHOM
-                    ? Number(params.row.measuredHOM).toFixed(2)
-                    : 'null'}
-              </Typography>
-            </>
-          );
+          function renderMeasurementDetails() {
+            return (
+              <Typography level="body-sm">{isMeasurementField && params.row[column.field] ? Number(params.row[column.field]).toFixed(2) : 'null'}</Typography>
+            );
+          }
+
+          function renderAttributeDetails() {
+            return attributeValues.map((value: string, index: number) => (
+              <Chip key={index} size={'sm'}>
+                {value}
+              </Chip>
+            ));
+          }
 
           return (
             <Box
@@ -1274,6 +1350,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             >
               {isMeasurementField ? (
                 <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderMeasurementDetails()}</Box>
+              ) : isAttributeField ? (
+                <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center' }}>{renderAttributeDetails()}</Box>
               ) : (
                 <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedValue}</Typography>
               )}
@@ -1365,7 +1443,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     setFilterModel(prevFilterModel => {
       return {
         ...prevFilterModel,
-        items: [...(incomingValues.items || [])],
         quickFilterValues: [...(incomingValues.quickFilterValues || [])]
       };
     });

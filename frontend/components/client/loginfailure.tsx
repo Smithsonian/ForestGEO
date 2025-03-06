@@ -6,13 +6,14 @@ import { useSearchParams } from 'next/navigation';
 
 const LoginFailed = () => {
   const searchParams = useSearchParams();
-  let failureReason = searchParams.get('reason');
-  if (failureReason === null || failureReason === '') failureReason = 'Login failure triggered without reason. Please speak to an administrator';
+  let failureReason = searchParams?.get('reason');
+  if (failureReason === null || failureReason === '' || failureReason === undefined)
+    failureReason = 'Login failure triggered without reason. Please speak to' + ' an administrator';
 
   const handleTryAgain = () => {
     sessionStorage.clear();
     localStorage.clear();
-    signOut({ callbackUrl: '/login' }).catch(console.error);
+    signOut({ redirectTo: '/login' }).catch(console.error);
   };
 
   return (

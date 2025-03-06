@@ -71,6 +71,7 @@ export interface CMAttributesRDS {
   coreMeasurementID?: number;
   code?: string;
 }
+
 export type CMAttributesResult = ResultType<CMAttributesRDS>;
 
 export interface CMAttributesStagingRDS {
@@ -81,12 +82,14 @@ export interface CMAttributesStagingRDS {
 }
 
 export type CMAttributesStagingResult = ResultType<CMAttributesStagingRDS>;
+
 export interface CMVErrorRDS {
   id?: number;
   cmvErrorID?: number;
   coreMeasurementID?: number;
   validationErrorID?: number;
 }
+
 export type CMVErrorResult = ResultType<CMVErrorRDS>;
 const ATTRIBUTES_CODE_LIMIT = 10;
 export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
@@ -106,16 +109,19 @@ export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
 
   return Object.keys(errors).length > 0 ? errors : null;
 };
+
 export interface AttributesRDS {
   id?: number;
   code?: string;
   description?: string;
   status?: string;
 }
+
 export type AttributesResult = ResultType<AttributesRDS>;
 export const initialAttributesRDSRow = createInitialObject<AttributesRDS>();
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
 export const attributesFields = ['code', 'description', 'status'];
+
 export interface UnifiedChangelogRDS {
   id?: number;
   changeID?: number;
@@ -129,4 +135,5 @@ export interface UnifiedChangelogRDS {
   plotID?: number;
   censusID?: number;
 }
+
 export type UnifiedChangelogResult = ResultType<UnifiedChangelogRDS>;

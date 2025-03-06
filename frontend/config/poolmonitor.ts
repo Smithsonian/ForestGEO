@@ -55,6 +55,10 @@ export class PoolMonitor {
     }
   }
 
+  public isPoolClosed(): boolean {
+    return this.poolClosed;
+  }
+
   private async reinitializePool(): Promise<void> {
     if (this.reinitializing) return; // Prevent concurrent reinitialization
     this.reinitializing = true;
@@ -150,9 +154,5 @@ export class PoolMonitor {
         await this.reinitializePool();
       }
     }, 10000); // Poll every 10 seconds
-  }
-
-  public isPoolClosed(): boolean {
-    return this.poolClosed;
   }
 }

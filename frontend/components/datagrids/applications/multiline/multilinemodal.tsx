@@ -1,6 +1,6 @@
 'use client';
 
-import { DialogTitle, IconButton, Modal, ModalDialog, Typography } from '@mui/joy';
+import { DialogTitle, IconButton, Modal, ModalDialog } from '@mui/joy';
 import CloseIcon from '@mui/icons-material/Close';
 import MultilineSpeciesDataGrid from '@/components/datagrids/applications/multiline/multilinespeciesdatagrid';
 import MultilineAttributesDataGrid from '@/components/datagrids/applications/multiline/multilineattributesdatagrid';

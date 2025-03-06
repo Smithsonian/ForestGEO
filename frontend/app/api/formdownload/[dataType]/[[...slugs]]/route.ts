@@ -3,36 +3,7 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
-import { escape } from 'mysql2';
-
-const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
-  if (!filterModel.items || filterModel.items.length === 0) {
-    return '';
-  }
-
-  return filterModel.items
-    .map((item: GridFilterItem) => {
-      const { field, operator, value } = item;
-      const aliasedField = `${alias ? `${alias}.` : ''}${field}`;
-      const escapedValue = escape(`%${value}%`); // Handle escaping
-      return `${aliasedField} ${operator} ${escapedValue}`;
-    })
-    .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
-};
-
-const buildSearchStub = (columns: string[], quickFilter: string[], alias?: string) => {
-  if (!quickFilter || quickFilter.length === 0) {
-    return ''; // Return empty if no quick filters
-  }
-
-  return columns
-    .map(column => {
-      const aliasedColumn = `${alias ? `${alias}.` : ''}${column}`;
-      return quickFilter.map(word => `${aliasedColumn} LIKE ${escape(`%${word}%`)}`).join(' OR ');
-    })
-    .join(' OR ');
-};
+import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;

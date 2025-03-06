@@ -1,7 +1,8 @@
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
-import { v4 as uuidv4 } from 'uuid'; // For generating unique transaction IDs
+import { v4 as uuidv4 } from 'uuid';
+import { auth } from '@/auth'; // For generating unique transaction IDs
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
@@ -18,19 +19,6 @@ class ConnectionManager {
       ConnectionManager.instance = new ConnectionManager();
     }
     return ConnectionManager.instance;
-  }
-
-  // Acquire a connection for the current operation
-  private async acquireConnectionInternal(): Promise<PoolConnection> {
-    try {
-      const connection = await getConn(); // Reuse getConn from processormacros
-      await connection.ping(); // Validate connection
-      // console.log(chalk.green('Connection validated.'));
-      return connection;
-    } catch (error) {
-      console.error(chalk.red('Error acquiring or validating connection:', error));
-      throw error;
-    }
   }
 
   // Execute a query using the acquired connection
@@ -115,6 +103,19 @@ class ConnectionManager {
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
+  }
+
+  // Acquire a connection for the current operation
+  private async acquireConnectionInternal(): Promise<PoolConnection> {
+    try {
+      const connection = await getConn(); // Reuse getConn from processormacros
+      await connection.ping(); // Validate connection
+      // console.log(chalk.green('Connection validated.'));
+      return connection;
+    } catch (error) {
+      console.error(chalk.red('Error acquiring or validating connection:', error));
+      throw error;
+    }
   }
 }
 

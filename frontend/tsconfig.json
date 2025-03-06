@@ -24,8 +24,8 @@
     "paths": {
       "@/*": ["./*"]
     },
-    "types": ["vitest/globals", "node"]
+    "types": ["cypress", "node"]
   },
-  "include": ["types/next-auth.d.ts", "next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "build/types/**/*.ts", "./vitest.setup.ts", "**/*.sql"],
+  "include": ["types/next-auth.d.ts", "next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "build/types/**/*.ts", "**/*.sql", "**/*.cy.*"],
   "exclude": ["node_modules"]
 }

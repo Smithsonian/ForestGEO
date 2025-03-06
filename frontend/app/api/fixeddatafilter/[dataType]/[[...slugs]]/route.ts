@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
-import { escape } from 'mysql2';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
+import { GridFilterModel } from '@mui/x-data-grid';
 import { handleError } from '@/utils/errorhandler';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
+import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
 
@@ -103,34 +103,6 @@ export async function POST(
     let censusIDs;
     let pastCensusIDs: string | any[];
     let transactionID: string | undefined = undefined;
-
-    const buildFilterModelStub = (filterModel: GridFilterModel, alias?: string) => {
-      if (!filterModel.items || filterModel.items.length === 0) {
-        return '';
-      }
-
-      return filterModel.items
-        .map((item: GridFilterItem) => {
-          const { field, operator, value } = item;
-          const aliasedField = `${alias ? `${alias}.` : ''}${field}`;
-          const escapedValue = escape(`%${value}%`); // Handle escaping
-          return `${aliasedField} ${operator} ${escapedValue}`;
-        })
-        .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
-    };
-
-    const buildSearchStub = (columns: string[], quickFilter: string[], alias?: string) => {
-      if (!quickFilter || quickFilter.length === 0) {
-        return ''; // Return empty if no quick filters
-      }
-
-      return columns
-        .map(column => {
-          const aliasedColumn = `${alias ? `${alias}.` : ''}${column}`;
-          return quickFilter.map(word => `${aliasedColumn} LIKE ${escape(`%${word}%`)}`).join(' OR ');
-        })
-        .join(' OR ');
-    };
 
     try {
       let paginatedQuery = ``;
@@ -331,6 +303,7 @@ export async function POST(
         );
       }
       transactionID = await connectionManager.beginTransaction();
+      console.log('formatted query: ', format(paginatedQuery, queryParams));
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
@@ -445,37 +418,27 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   try {
     transactionID = await connectionManager.beginTransaction();
-
-    // Handle deletion for views
-    if (['alltaxonomiesview', 'measurementssummaryview'].includes(params.dataType)) {
-      const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-
-      // Prepare query configuration based on view
-      let queryConfig;
-      switch (params.dataType) {
-        case 'alltaxonomiesview':
-          queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        default:
-          throw new Error('Incorrect view call');
-      }
-
-      // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
-      await handleDeleteForSlices(connectionManager, schema, deleteRowData, queryConfig);
-      await connectionManager.commitTransaction(transactionID ?? '');
-      return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
-    }
-
-    // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
-    // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
-    if (params.dataType === 'quadrats') {
-      const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(qDeleteQuery);
+    // Handle deletion for views
+    if (params.dataType === 'alltaxonomiesview') {
+      // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
+      await handleDeleteForSlices(connectionManager, schema, deleteRowData, AllTaxonomiesViewQueryConfig);
+    } else if (params.dataType === 'measurementssummary') {
+      // start with surrounding data
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmattributes WHERE ${demappedGridID} = ${gridIDKey}`);
+      // finally, perform core deletion
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.coremeasurements WHERE ${demappedGridID} = ${gridIDKey}`);
+    } else {
+      // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
+      if (params.dataType === 'quadrats') {
+        const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
+        await connectionManager.executeQuery(qDeleteQuery);
+      }
+      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+      await connectionManager.executeQuery(deleteQuery);
     }
-    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-    await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {

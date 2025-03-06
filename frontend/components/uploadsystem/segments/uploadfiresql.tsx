@@ -11,6 +11,7 @@ import PQueue from 'p-queue';
 import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
+import { v4 } from 'uuid';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -33,6 +34,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const { data: session } = useSession();
   const [totalChunks, setTotalChunks] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
+  const [failedRows, setFailedRows] = useState<{ [fileName: string]: Set<FileRow> }>({});
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [etc, setETC] = useState('');
   const [totalProcessingTime, setTotalProcessingTime] = useState(0);
@@ -218,34 +220,43 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 if (failedChunks.has(completedChunks)) {
                   return;
                 }
-
-                try {
+                // single retry -- add this chunk back to the queue
+                await queue.add(async () => {
                   try {
-                    parser.pause();
-                    queue.pause();
-                  } catch (e: any) {
-                    console.error('Error pausing parser or queue:', e.message);
-                  } finally {
-                    await queue.onIdle(); // Ensure all pending tasks finish before proceeding
+                    await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
+                  } catch (e) {
+                    console.error('catatrophic error on retry: ', e);
+                    setFailedChunks(prev => new Set(prev).add(completedChunks));
                   }
-
-                  const batchErrorRows = await processFailedChunk(fileRowSet, file.name);
-
-                  setErrorRows(prev => ({
-                    ...prev,
-                    [file.name]: {
-                      ...prev[file.name],
-                      ...batchErrorRows
-                    }
-                  }));
-
-                  setFailedChunks(prev => new Set(prev).add(completedChunks));
-                } catch (error) {
-                  console.error('Critical error during chunk error handling:', error);
-                } finally {
-                  parser.resume();
-                  queue.start();
-                }
+                });
+                //
+                // try {
+                //   try {
+                //     parser.pause();
+                //     queue.pause();
+                //   } catch (e: any) {
+                //     console.error('Error pausing parser or queue:', e.message);
+                //   } finally {
+                //     await queue.onIdle(); // Ensure all pending tasks finish before proceeding
+                //   }
+                //
+                //   const batchErrorRows = await processFailedChunk(fileRowSet, file.name);
+                //
+                //   setErrorRows(prev => ({
+                //     ...prev,
+                //     [file.name]: {
+                //       ...prev[file.name],
+                //       ...batchErrorRows
+                //     }
+                //   }));
+                //
+                //   setFailedChunks(prev => new Set(prev).add(completedChunks));
+                // } catch (error) {
+                //   console.error('Critical error during chunk error handling:', error);
+                // } finally {
+                //   parser.resume();
+                //   queue.start();
+                // }
               } finally {
                 activeTasks--;
                 setCompletedChunks(prev => {
@@ -332,6 +343,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         if (!response.ok) {
           throw new Error(`API returned status ${response.status}`);
         }
+        try {
+          const data = await response.json();
+          if (data.failingRows) {
+            const failingRows: Set<FileRow> = data.failingRows;
+            setFailedRows(prev => ({
+              ...prev,
+              [fileName]: new Set([...(prev[fileName] ?? []), ...failingRows])
+            }));
+          }
+        } catch (e) {
+          console.error('no failing rows returned. unforeseen error');
+          throw e;
+        }
       } catch (error) {
         console.error('Network or API error:', error);
         throw error; // Re-throw to ensure retries or error reporting is triggered
@@ -376,6 +400,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
         await parseFileInChunks(file as File, delimiter);
 
+        // quickly add remaining rows to failed measurements counter, only if data is present
+        if (Object.values(failedRows[file.name]).length > 0) {
+          const batchID = v4();
+          const rows = Object.values(failedRows[file.name] ?? []);
+          const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+          const values = rows.flatMap(row => {
+            const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+            return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
+          });
+          const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
+      VALUES ${placeholders}`;
+          await fetch(`/api/formatrunquery`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: insertSQL, params: values })
+          });
+          // remove submitted rows from failedrows
+          setFailedRows(prev => {
+            const { [file.name]: removed, ...rest } = prev;
+            return rest;
+          });
+        }
         setCompletedOperations(prevCompleted => prevCompleted + 1);
       }
 
@@ -400,56 +447,19 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     if (!hasUploaded.current) {
       getUserID().then(() => {
-        uploadFiles()
-          .then(() => {
-            // force download of error rows:
-            Object.entries(errorRows).forEach(([fileName, fileRowSet]) => {
-              const rows: string[] = [];
+        uploadFiles().then(() => {
+          hasUploaded.current = true;
+          // enforce timeout before continuing forward
+          const timeout = setTimeout(() => {
+            if (uploadForm === FormType.measurements) {
+              setReviewState(ReviewStates.VALIDATE);
+            } else {
+              setReviewState(ReviewStates.UPLOAD_AZURE);
+            }
+          }, 500);
 
-              // Collect headers from the FileRowSet
-              const headers = new Set<string>();
-              Object.values(fileRowSet).forEach(fileRow => {
-                Object.keys(fileRow).forEach(header => headers.add(header));
-              });
-              rows.push(Array.from(headers).join(',')); // Convert headers to a CSV row
-
-              // Add data rows
-              Object.values(fileRowSet).forEach(fileRow => {
-                const row = Array.from(headers).map(header => {
-                  const value = fileRow[header];
-                  return value !== null && value !== undefined ? `"${value}"` : ''; // Wrap value in quotes and handle null/undefined
-                });
-                rows.push(row.join(',')); // Convert row array to a CSV row
-              });
-
-              // Convert rows array to a single CSV string
-              const csvContent = rows.join('\n');
-
-              // Create and download the CSV file for the current FileRowSet
-              const blob = new Blob([csvContent], { type: 'text/csv' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-
-              // Name the file based on the original file name (with `.csv` extension)
-              a.download = `${fileName.replace(/\.[^/.]+$/, '')}_errors.csv`; // Replace extension with `_errors.csv`
-              a.click();
-              URL.revokeObjectURL(url);
-            });
-          })
-          .then(() => {
-            hasUploaded.current = true;
-            // enforce timeout before continuing forward
-            const timeout = setTimeout(() => {
-              if (uploadForm === FormType.measurements) {
-                setReviewState(ReviewStates.VALIDATE);
-              } else {
-                setReviewState(ReviewStates.UPLOAD_AZURE);
-              }
-            }, 500);
-
-            return () => clearTimeout(timeout);
-          });
+          return () => clearTimeout(timeout);
+        });
       });
     }
   }, [hasUploaded.current, errorRows]);

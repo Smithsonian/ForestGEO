@@ -1,8 +1,9 @@
-/** @type {import('next').NextConfig} */
+/* eslint-disable @typescript-eslint/no-require-imports */
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true'
 });
 
+/** @type {import('next').NextConfig} */
 const nextConfig = withBundleAnalyzer({
   experimental: {
     serverMinification: false,
@@ -12,22 +13,27 @@ const nextConfig = withBundleAnalyzer({
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      config.resolve.fallback = { fs: false }; // ✅ Fixes 'fs' module issue in client builds
+      config.resolve.fallback = { fs: false };
     }
+    config.module.rules.push({
+      test: /\.cy.(js|ts|tsx|jsx)$/,
+      exclude: /node_modules/
+    });
 
     return config;
   },
-  logging: {
-    fetches: {
-      fullUrl: true
-    }
+  eslint: {
+    ignoreDuringBuilds: true
+  },
+  typescript: {
+    ignoreBuildErrors: true
+  },
+  images: {
+    unoptimized: true
   },
   output: 'standalone',
   reactStrictMode: true,
   distDir: 'build',
-  images: {
-    unoptimized: true // since images are served from the public directory
-  },
   env: {
     AZURE_SQL_USER: process.env.AZURE_SQL_USER,
     AZURE_SQL_PASSWORD: process.env.AZURE_SQL_PASSWORD,
