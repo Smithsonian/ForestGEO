@@ -5,10 +5,12 @@ import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('No schema variable provided!');
   try {
-    const query = `SELECT * FROM catalog.validationprocedures;`;
+    const query = `SELECT * FROM ${schema}.sitespecificvalidations;`;
     const results = await connectionManager.executeQuery(query);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('validationprocedures').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
@@ -21,12 +23,14 @@ export async function GET(_request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const validationProcedure: ValidationProceduresRDS = await request.json();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('No schema variable provided!');
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
   try {
     delete validationProcedure['validationID'];
-    const insertQuery = format('INSERT INTO ?? SET ?', [`catalog.validationprocedures`, validationProcedure]);
+    const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.sitespecificvalidations`, validationProcedure]);
     const results = await connectionManager.executeQuery(insertQuery);
     const insertID = results.insertId;
     await connectionManager.commitTransaction(transactionID ?? '');
@@ -42,13 +46,15 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const validationProcedure: ValidationProceduresRDS = await request.json();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('No schema variable provided!');
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
   try {
     delete validationProcedure['id'];
     const updateQuery = format('UPDATE ?? SET ? WHERE ValidationID = ?', [
-      `catalog.validationprocedures`,
+      `${schema}.sitespecificvalidations`,
       validationProcedure,
       validationProcedure.validationID
     ]);
@@ -66,11 +72,13 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const validationProcedure: ValidationProceduresRDS = await request.json();
+  const schema = request.nextUrl.searchParams.get('schema');
+  if (!schema) throw new Error('No schema variable provided!');
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   transactionID = await connectionManager.beginTransaction();
   try {
-    const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`catalog.validationprocedures`, validationProcedure.validationID]);
+    const deleteQuery = format('DELETE FROM ?? WHERE ValidationID = ?', [`${schema}.sitespecificvalidations`, validationProcedure.validationID]);
     await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.OK });

@@ -128,7 +128,6 @@ export interface SpecialProcessingProps {
   quadratID?: number;
   fullName?: string;
 }
-
 export interface InsertUpdateProcessingProps extends SpecialProcessingProps {
   formType: string;
 }
