@@ -2,7 +2,6 @@ import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
-import { auth } from '@/auth'; // For generating unique transaction IDs
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
@@ -43,19 +42,33 @@ class ConnectionManager {
 
   // Begin a transaction
   public async beginTransaction(): Promise<string> {
-    const transactionId = uuidv4(); // Generate a unique transaction ID
-    const connection = await this.acquireConnectionInternal();
+    const startTime = Date.now();
+    const transactionId = uuidv4();
+    let connection: PoolConnection | null = null;
 
-    try {
-      await connection.beginTransaction();
-      this.transactionConnections.set(transactionId, connection); // Store the connection
-      console.log(chalk.green(`Transaction started: ${transactionId}`));
-      return transactionId;
-    } catch (error) {
-      connection.release();
-      console.error(chalk.red('Error starting transaction:', error));
-      throw error;
+    while (Date.now() - startTime < 15000) {
+      try {
+        connection = await this.acquireConnectionInternal();
+        await connection.beginTransaction();
+        this.transactionConnections.set(transactionId, connection);
+        console.log(chalk.green(`Transaction started: ${transactionId}`));
+        return transactionId;
+      } catch (error: any) {
+        connection?.release();
+        if (!this.isDeadlockError(error)) {
+          console.error(chalk.red('Error starting transaction:', error));
+          throw error;
+        }
+        console.warn(chalk.yellow('Deadlock encountered, retrying transaction start...'));
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
     }
+    throw new Error('Failed to start transaction after 15 seconds due to persistent deadlock issues.');
+  }
+
+  // Helper method to detect deadlock errors.
+  private isDeadlockError(error: any): boolean {
+    return error && (error.code === 'ER_LOCK_DEADLOCK' || error.errno === 1213);
   }
 
   // Commit a transaction

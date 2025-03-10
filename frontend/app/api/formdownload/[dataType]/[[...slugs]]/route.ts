@@ -128,7 +128,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                    FROM ${schema}.cmattributes ca
                    WHERE ca.CoreMeasurementID = cm.CoreMeasurementID) AS Codes,
                   (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR ';')
-                   FROM catalog.validationprocedures vp
+                   FROM ${schema}.sitespecificvalidations vp
                    JOIN ${schema}.cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
                    WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
               FROM ${schema}.coremeasurements cm

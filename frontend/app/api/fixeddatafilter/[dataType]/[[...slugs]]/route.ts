@@ -125,7 +125,7 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
 
           paginatedQuery = `
-          SELECT SQL_CALC_FOUND_ROWS * FROM catalog.${params.dataType} 
+          SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.sitespecificvalidations  
           ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`; // validation procedures is special
           queryParams.push(page * pageSize, pageSize);
           break;

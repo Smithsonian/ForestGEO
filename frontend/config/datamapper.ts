@@ -17,9 +17,7 @@ import {
   SpecimensRDS,
   SpecimensResult,
   StemRDS,
-  StemResult,
-  TreeRDS,
-  TreeResult
+  StemResult
 } from '@/config/sqlrdsdefinitions/taxonomies';
 import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
@@ -136,13 +134,9 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   }
 
   private detransformSpecialCases(key: string): string {
-    if (key === 'MeasuredDBH') return 'measuredDBH';
-    if (key === 'MeasuredHOM') return 'measuredHOM';
     return (
       key
         // Add reverse transformation for ValidCode
-        .replace(/DBH/gi, 'dbh')
-        .replace(/HOM/gi, 'hom')
         .replace(/IDLevel/gi, 'idLevel')
         .replace(/ValidCode/gi, 'validCode')
         .replace(/DefaultDBHUnits/gi, 'defaultDBHUnits')
@@ -270,13 +264,11 @@ class MapperFactory {
         return new GenericMapper<SpecimensRDS, SpecimensResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'trees':
-        return new GenericMapper<TreeRDS, TreeResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationchangelog':
         return new GenericMapper<ValidationChangelogRDS, ValidationChangelogResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'sitespecificvalidations':
+      case 'validationprocedures':
         return new GenericMapper<ValidationProceduresRDS, ValidationProceduresResult>() as unknown as IDataMapper<RDS, Result>;
       case 'viewfulltable':
       case 'viewfulltableview':

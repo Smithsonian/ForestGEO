@@ -24,16 +24,13 @@ export async function GET(request: NextRequest) {
       FROM 
           ${schema}.cmverrors AS cve
       JOIN 
-          ${schema}.coremeasurements cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
+          ${schema}.coremeasurements AS cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
       JOIN 
           ${schema}.sitespecificvalidations AS ve ON cve.ValidationErrorID = ve.ValidationID
-      JOIN ${schema}.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
-      JOIN ${schema}.plots p ON c.PlotID = p.PlotID
-      WHERE p.PlotID = ? AND c.PlotCensusNumber = ?
       GROUP BY 
           cm.CoreMeasurementID;
     `;
-    const validationErrorsRows = await conn.executeQuery(validationErrorsQuery, [plotIDParam, censusPCNParam]);
+    const validationErrorsRows = await conn.executeQuery(validationErrorsQuery);
 
     const parsedValidationErrors: CMError[] = validationErrorsRows.map((row: any) => ({
       coreMeasurementID: row.CoreMeasurementID,
