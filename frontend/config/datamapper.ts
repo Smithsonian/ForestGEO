@@ -31,8 +31,6 @@ import {
 import {
   PostValidationQueriesRDS,
   PostValidationQueriesResult,
-  SiteSpecificValidationsRDS,
-  SiteSpecificValidationsResult,
   ValidationChangelogRDS,
   ValidationChangelogResult,
   ValidationProceduresRDS,
@@ -272,8 +270,6 @@ class MapperFactory {
         return new GenericMapper<ValidationChangelogRDS, ValidationChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationprocedures':
         return new GenericMapper<ValidationProceduresRDS, ValidationProceduresResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'sitespecificvalidations':
-        return new GenericMapper<SiteSpecificValidationsRDS, SiteSpecificValidationsResult>() as unknown as IDataMapper<RDS, Result>;
       case 'viewfulltable':
       case 'viewfulltableview':
         return new GenericMapper<ViewFullTableRDS, ViewFullTableResult>() as unknown as IDataMapper<RDS, Result>;

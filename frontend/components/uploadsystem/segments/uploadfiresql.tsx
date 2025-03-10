@@ -4,7 +4,6 @@ import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacro
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
-import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 import PQueue from 'p-queue';
@@ -12,6 +11,7 @@ import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { v4 } from 'uuid';
+import { useSession } from 'next-auth/react';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -31,14 +31,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
   const hasUploaded = useRef(false);
-  const { data: session } = useSession();
+  const totalCompletionTimeRef = useRef(0);
+  const totalProcessCompletionTimeRef = useRef(0);
   const [totalChunks, setTotalChunks] = useState(0);
+  const [totalBatches, setTotalBatches] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
+  const [processedChunks, setProcessedChunks] = useState<number>(0);
   const [failedRows, setFailedRows] = useState<{ [fileName: string]: Set<FileRow> }>({});
   const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [etc, setETC] = useState('');
-  const [totalProcessingTime, setTotalProcessingTime] = useState(0);
+  const [processETC, setProcessETC] = useState('');
   const [chunkStartTime, setChunkStartTime] = useState<number>(0);
+  const [chunkProcessStartTime, setChunkProcessStartTime] = useState<number>(0);
+  const [uploaded, setUploaded] = useState<boolean>(false);
+  const [processed, setProcessed] = useState<boolean>(false);
+  const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096 * 2;
   const connectionLimit = 10;
@@ -77,30 +84,60 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   };
 
   useEffect(() => {
-    if (completedChunks < 3) {
-      setETC('Calculating...');
-      return;
+    if (uploadForm === 'measurements' && !uploaded && !processed) {
+      if (completedChunks < 3) {
+        setETC('Calculating...');
+        return;
+      }
+
+      // Update cumulative time for this chunk
+      totalCompletionTimeRef.current += performance.now() - chunkStartTime;
+
+      const smoothingFactor = 0.2;
+      const lastChunkTime = performance.now() - chunkStartTime;
+      const smoothedAvgTime = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalCompletionTimeRef.current / completedChunks);
+      const remaining = totalChunks - completedChunks;
+      const estimatedTime = smoothedAvgTime * remaining;
+
+      setETC(
+        moment.utc(estimatedTime).format('mm:ss').split(':')[0] +
+          ' minutes and ' +
+          moment.utc(estimatedTime).format('mm:ss').split(':')[1] +
+          ' seconds remaining...'
+      );
     }
+  }, [uploadForm, uploaded, processed, completedChunks, totalChunks, chunkStartTime]);
 
-    // Track cumulative processing time
-    setTotalProcessingTime(prev => prev + (performance.now() - chunkStartTime));
+  useEffect(() => {
+    if (uploadForm === 'measurements' && uploaded && !processed && processedChunks > 0) {
+      const now = performance.now();
+      const elapsed = now - chunkProcessStartTime;
+      totalProcessCompletionTimeRef.current += elapsed;
+      setChunkProcessStartTime(now);
+    }
+  }, [processedChunks]);
 
-    // Calculate exponential moving average for smoother chunk time estimation
-    const smoothingFactor = 0.2; // Adjust between 0 and 1 for desired smoothing (higher = more reactive)
-    const lastChunkTime = performance.now() - chunkStartTime;
-    const smoothedAvgTimePerChunk = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalProcessingTime / completedChunks);
+  useEffect(() => {
+    if (uploadForm === 'measurements' && uploaded && !processed) {
+      if (processedChunks < 3) {
+        setProcessETC('Calculating...');
+        return;
+      }
 
-    // Calculate remaining chunks and ETC
-    const remainingChunks = totalChunks - completedChunks;
-    const estimatedTimeLeft = smoothedAvgTimePerChunk * remainingChunks;
+      const smoothingFactor = 0.2;
+      const currentElapsed = performance.now() - chunkProcessStartTime;
+      const smoothedAvgProcessTime = smoothingFactor * currentElapsed + (1 - smoothingFactor) * (totalProcessCompletionTimeRef.current / processedChunks);
+      const remainingProcessing = totalBatches - processedChunks;
+      const estimatedProcessTime = smoothedAvgProcessTime * remainingProcessing;
 
-    setETC(
-      moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[0] +
-        ' minutes and ' +
-        moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[1] +
-        ' seconds remaining...'
-    );
-  }, [completedChunks, totalChunks]);
+      setProcessETC(
+        moment.utc(estimatedProcessTime).format('mm:ss').split(':')[0] +
+          ' minutes and ' +
+          moment.utc(estimatedProcessTime).format('mm:ss').split(':')[1] +
+          ' seconds remaining...'
+      );
+    }
+  }, [uploadForm, uploaded, processed, processedChunks, totalBatches, chunkProcessStartTime]);
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
     let activeTasks = 0;
@@ -229,42 +266,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     setFailedChunks(prev => new Set(prev).add(completedChunks));
                   }
                 });
-                //
-                // try {
-                //   try {
-                //     parser.pause();
-                //     queue.pause();
-                //   } catch (e: any) {
-                //     console.error('Error pausing parser or queue:', e.message);
-                //   } finally {
-                //     await queue.onIdle(); // Ensure all pending tasks finish before proceeding
-                //   }
-                //
-                //   const batchErrorRows = await processFailedChunk(fileRowSet, file.name);
-                //
-                //   setErrorRows(prev => ({
-                //     ...prev,
-                //     [file.name]: {
-                //       ...prev[file.name],
-                //       ...batchErrorRows
-                //     }
-                //   }));
-                //
-                //   setFailedChunks(prev => new Set(prev).add(completedChunks));
-                // } catch (error) {
-                //   console.error('Critical error during chunk error handling:', error);
-                // } finally {
-                //   parser.resume();
-                //   queue.start();
-                // }
               } finally {
                 activeTasks--;
-                setCompletedChunks(prev => {
-                  if (!failedChunks.has(prev)) {
-                    return prev + 1;
-                  }
-                  return prev;
-                });
+                setCompletedChunks(prev => prev + 1);
                 if (activeTasks < connectionLimit) {
                   parser.resume();
                   queue.start();
@@ -356,94 +360,137 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   useEffect(() => {
-    const calculateTotalOperations = () => {
-      const totalOps = acceptedFiles.length;
+    let isMounted = true;
 
-      setTotalOperations(totalOps);
-    };
+    async function runUploads() {
+      try {
+        // Calculate total operations for the UI.
+        const totalOps = acceptedFiles.length;
+        setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
 
-    async function getUserID() {
-      const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
-      setUserID(await userIDResponse.json());
-    }
+        const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
+        setUserID(await userIDResponse.json());
 
-    const uploadFiles = async () => {
-      calculateTotalOperations();
-
-      for (const file of acceptedFiles) {
-        const count = await countTotalChunks(file as File);
-        setTotalChunks(prev => prev + count);
-      }
-
-      for (const file of acceptedFiles) {
-        const isCSV = file.name.endsWith('.csv');
-        const delimiter = isCSV ? ',' : '\t';
-
-        await parseFileInChunks(file as File, delimiter);
-
-        // quickly add remaining rows to failed measurements counter, only if data is present
-        if (Object.values(failedRows[file.name]).length > 0) {
-          const batchID = v4();
-          const rows = Object.values(failedRows[file.name] ?? []);
-          const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-          const values = rows.flatMap(row => {
-            const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
-            return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
-          });
-          const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
-      VALUES ${placeholders}`;
-          await fetch(`/api/formatrunquery`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: insertSQL, params: values })
-          });
-          // remove submitted rows from failedrows
-          setFailedRows(prev => {
-            const { [file.name]: removed, ...rest } = prev;
-            return rest;
-          });
+        // Count chunks for each file.
+        for (const file of acceptedFiles) {
+          const count = await countTotalChunks(file as File);
+          setTotalChunks(prev => prev + count);
         }
-        setCompletedOperations(prevCompleted => prevCompleted + 1);
+
+        for (const file of acceptedFiles) {
+          const isCSV = file.name.endsWith('.csv');
+          const delimiter = isCSV ? ',' : '\t';
+          await parseFileInChunks(file as File, delimiter);
+
+          // If measurements, handle failed rows for this file.
+          if (uploadForm === FormType.measurements && Object.values(failedRows[file.name] || {}).length > 0) {
+            const batchID = v4();
+            const rows = Object.values(failedRows[file.name] || []);
+            const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+            const values = rows.flatMap(row => {
+              const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+              return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
+            });
+            const insertSQL = `INSERT INTO ${schema}.failedmeasurements 
+              (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
+              VALUES ${placeholders}`;
+            await fetch(`/api/formatrunquery`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: insertSQL, params: values })
+            });
+            // Remove submitted rows.
+            setFailedRows(prev => {
+              const { [file.name]: removed, ...rest } = prev;
+              return rest;
+            });
+          }
+          setCompletedOperations(prev => prev + 1);
+        }
+        await queue.onIdle();
+        if (isMounted) {
+          setUploaded(true);
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+      }
+    }
+
+    runUploads().catch(console.error);
+    return () => {
+      isMounted = false;
+    };
+  }, [acceptedFiles, uploadForm, currentPlot, currentCensus, schema]);
+
+  useEffect(() => {
+    if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
+      async function runProcessBatches() {
+        setProcessedChunks(0);
+        setChunkProcessStartTime(performance.now());
+        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
+        const output: { fileID: string; batchID: string }[] = await response.json();
+        const grouped: Record<string, string[]> = output.reduce(
+          (acc, { fileID, batchID }) => {
+            if (!acc[fileID]) {
+              acc[fileID] = [];
+            }
+            acc[fileID].push(batchID);
+            return acc;
+          },
+          {} as Record<string, string[]>
+        );
+        setTotalBatches(Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0));
+        for (const fileID in grouped) {
+          console.log(`Processing FileID: ${fileID}`);
+          for (const batchID of grouped[fileID]) {
+            console.log(`  BatchID: ${batchID}`);
+            try {
+              await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+              console.log(`Processed batch ${batchID} for file ${fileID}`);
+            } catch (e: any) {
+              console.error(e);
+            } finally {
+              setProcessedChunks(prev => prev + 1);
+            }
+          }
+          setCompletedOperations(prev => prev + 1);
+        }
+        // Optionally, run a combined query to update census dates.
+        const combinedQuery = `
+          UPDATE ${schema}.census c
+            JOIN (SELECT c1.PlotCensusNumber,
+                         MIN(cm.MeasurementDate) AS FirstMeasurementDate,
+                         MAX(cm.MeasurementDate) AS LastMeasurementDate
+                  FROM ${schema}.coremeasurements cm
+                         JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+                  WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
+                  GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
+          SET c.StartDate = m.FirstMeasurementDate,
+              c.EndDate   = m.LastMeasurementDate
+          WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
+        await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) });
+        setProcessed(true);
       }
 
-      await queue.onIdle();
-
-      const combinedQuery = `
-        UPDATE ${schema}.census c
-          JOIN (SELECT c1.PlotCensusNumber,
-                       MIN(cm.MeasurementDate) AS FirstMeasurementDate,
-                       MAX(cm.MeasurementDate) AS LastMeasurementDate
-                FROM ${schema}.coremeasurements cm
-                       JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
-                WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
-                GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
-        SET c.StartDate = m.FirstMeasurementDate,
-            c.EndDate   = m.LastMeasurementDate
-        WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
-      await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
-
-      setIsDataUnsaved(false);
-    };
-
-    if (!hasUploaded.current) {
-      getUserID().then(() => {
-        uploadFiles().then(() => {
-          hasUploaded.current = true;
-          // enforce timeout before continuing forward
-          const timeout = setTimeout(() => {
-            if (uploadForm === FormType.measurements) {
-              setReviewState(ReviewStates.VALIDATE);
-            } else {
-              setReviewState(ReviewStates.UPLOAD_AZURE);
-            }
-          }, 500);
-
-          return () => clearTimeout(timeout);
-        });
-      });
+      runProcessBatches().catch(console.error);
     }
-  }, [hasUploaded.current, errorRows]);
+  }, [uploaded, uploadForm, completedChunks, totalChunks, schema, currentPlot, currentCensus]);
+
+  useEffect(() => {
+    if (uploadForm === FormType.measurements) {
+      if (uploaded && processed) {
+        hasUploaded.current = true;
+        setReviewState(ReviewStates.VALIDATE);
+        setIsDataUnsaved(false);
+      }
+    } else {
+      if (uploaded) {
+        hasUploaded.current = true;
+        setReviewState(ReviewStates.UPLOAD_AZURE);
+        setIsDataUnsaved(false);
+      }
+    }
+  }, [uploaded, processed, uploadForm, setReviewState, setIsDataUnsaved]);
 
   const { palette } = useTheme();
 
@@ -489,15 +536,52 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     '--LinearProgress-progressThickness': '36px'
                   }}
                 >
-                  <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
-                    {totalChunks - completedChunks} remaining
-                    <br />
-                    Estimated time to completion: {etc}
-                  </Typography>
+                  {completedChunks < totalChunks ? (
+                    <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                      LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
+                      {totalChunks - completedChunks} remaining
+                      <br />
+                      Estimated time to completion: {etc}
+                    </Typography>
+                  ) : (
+                    <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                      COMPLETED
+                    </Typography>
+                  )}
                 </LinearProgress>
+                <Divider sx={{ my: 1 }} />
+                {uploadForm === 'measurements' && totalBatches !== 0 && (
+                  <>
+                    <Typography level={'title-md'} gutterBottom>
+                      Total Processing Progress - Completed: {processedChunks}
+                    </Typography>
+                    <LinearProgress
+                      determinate
+                      variant="plain"
+                      color="primary"
+                      thickness={48}
+                      value={(processedChunks / totalBatches) * 100}
+                      sx={{
+                        '--LinearProgress-radius': '0px',
+                        '--LinearProgress-progressThickness': '36px'
+                      }}
+                    >
+                      {processedChunks < totalBatches ? (
+                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                          LOADING: {`${((processedChunks / totalBatches) * 100).toFixed(2)}%`} {' | '} {processedChunks} completed out of {totalBatches} {' | '}
+                          {totalBatches - processedChunks} remaining
+                          <br />
+                          Estimated time to completion: {processETC}
+                        </Typography>
+                      ) : (
+                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                          PROCESSING COMPLETED
+                        </Typography>
+                      )}
+                    </LinearProgress>
+                  </>
+                )}
                 <Divider sx={{ my: 2 }} />
-
                 <Box
                   sx={{
                     display: 'flex',
@@ -512,16 +596,30 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   <Typography level="title-lg" fontWeight="bold" sx={{ mb: 2 }}>
                     Please do not exit this page! The upload will take some time to complete.
                   </Typography>
-                  <DotLottieReact
-                    src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
-                    loop
-                    autoplay
-                    themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                    style={{
-                      width: '25%',
-                      height: '25%'
-                    }}
-                  />
+                  {!uploaded && !processed && (
+                    <DotLottieReact
+                      src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
+                      loop
+                      autoplay
+                      themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                      style={{
+                        width: '40%',
+                        height: '40%'
+                      }}
+                    />
+                  )}
+                  {uploaded && !processed && (
+                    <DotLottieReact
+                      src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
+                      loop
+                      autoplay
+                      themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                      style={{
+                        width: '40%',
+                        height: '40%'
+                      }}
+                    />
+                  )}
                 </Box>
               </Box>
             )}

@@ -18,7 +18,10 @@ export default function ValidationsPage() {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
 
-  const { data: globalValidations, mutate: updateValidations } = useSWR<ValidationProceduresRDS[]>('/api/validations/crud', fetcher);
+  const { data: globalValidations, mutate: updateValidations } = useSWR<ValidationProceduresRDS[]>(
+    `/api/validations/crud?schema=${currentSite?.schemaName}`,
+    fetcher
+  );
 
   const { data: schemaData } = useSWR<{ schema: { table_name: string; column_name: string }[] }>(
     currentSite?.schemaName ? `/api/structure/${currentSite.schemaName}` : null,
@@ -46,13 +49,13 @@ export default function ValidationsPage() {
 
   const handleSaveChanges = async (updatedValidation: ValidationProceduresRDS) => {
     try {
-      const response = await fetch(`/api/validations/crud`, {
+      const response = await fetch(`/api/validations/crud?schema=${currentSite?.schemaName}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedValidation)
       });
       if (response.ok) {
-        updateValidations(prev => (prev ? prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)) : []));
+        await updateValidations(prev => (prev ? prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)) : []));
       } else {
         console.error('Failed to update validation');
       }

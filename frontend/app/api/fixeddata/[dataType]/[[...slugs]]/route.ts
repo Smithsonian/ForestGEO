@@ -35,7 +35,7 @@ export async function GET(
       case 'validationprocedures':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
-          FROM catalog.${params.dataType} LIMIT ?, ?;`; // validation procedures is special
+          FROM ${schema}.sitespecificvalidations LIMIT ?, ?;`; // validation procedures is special
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'specieslimits':

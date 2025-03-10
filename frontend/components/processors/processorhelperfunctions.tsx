@@ -326,18 +326,13 @@ export async function runValidation(
           AND (${params.p_PlotID !== null ? `sl.PlotID = ${params.p_PlotID}` : '1 = 1'})
         LIMIT 1;
       `;
-      console.log('completed speciesLimits query: ', speciesLimitsQuery);
       const speciesLimits = await connectionManager.executeQuery(speciesLimitsQuery);
-      console.log('RESULTS: specieslimits query: ', speciesLimits);
-
       if (speciesLimits.length > 0) {
         // If any species-specific limits were fetched, update the variables
         params.minDBH = speciesLimits[0].minDBH || params.minDBH;
         params.maxDBH = speciesLimits[0].maxDBH || params.maxDBH;
       }
     }
-
-    console.log('updated params? ', params);
 
     // Reformat the query after potentially updating the parameters with species-specific limits
     const reformattedCursorQuery = formattedCursorQuery
@@ -346,9 +341,8 @@ export async function runValidation(
 
     // Execute the cursor query to get the rows that need validation
     console.log('running validation: ', validationProcedureName);
-    console.log('running query: ', reformattedCursorQuery);
-    console.log('running query: ', await connectionManager.executeQuery(reformattedCursorQuery));
     await connectionManager.commitTransaction(transactionID ?? '');
+    console.log('validation executed.');
     return true;
   } catch (error: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');

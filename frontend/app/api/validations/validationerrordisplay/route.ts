@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       JOIN 
           ${schema}.coremeasurements AS cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
       JOIN 
-          catalog.validationprocedures AS ve ON cve.ValidationErrorID = ve.ValidationID
+          ${schema}.sitespecificvalidations AS ve ON cve.ValidationErrorID = ve.ValidationID
       GROUP BY 
           cm.CoreMeasurementID;
     `;

@@ -92,7 +92,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             }
           }
         }
-
         // Update Census Start/End Dates
         // const combinedQuery = `
         //     UPDATE ${schema}.census c
