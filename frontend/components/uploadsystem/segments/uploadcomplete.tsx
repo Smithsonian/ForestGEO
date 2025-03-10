@@ -116,6 +116,13 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       try {
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
+        await fetch(`/api/formatrunquery`, {
+          body: JSON.stringify({
+            query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+            params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
+          }),
+          method: 'POST'
+        });
       } catch (error) {
         console.error(error);
       } finally {
@@ -247,7 +254,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             <Button
               variant={'solid'}
               onClick={async () => {
-                // uploadForm === 'measurements' ? await uploadFailedMeasurements() : undefined;
                 setOpenUploadConfirmModal(false);
                 handleCloseUploadModal();
               }}
