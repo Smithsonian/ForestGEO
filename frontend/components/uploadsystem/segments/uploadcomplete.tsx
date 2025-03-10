@@ -9,7 +9,6 @@ import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch }
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
-import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 
 const ROWS_PER_BATCH = 10;
