@@ -66,11 +66,6 @@ class ConnectionManager {
     throw new Error('Failed to start transaction after 15 seconds due to persistent deadlock issues.');
   }
 
-  // Helper method to detect deadlock errors.
-  private isDeadlockError(error: any): boolean {
-    return error && (error.code === 'ER_LOCK_DEADLOCK' || error.errno === 1213);
-  }
-
   // Commit a transaction
   public async commitTransaction(transactionId: string): Promise<void> {
     const connection = this.transactionConnections.get(transactionId);
@@ -116,6 +111,11 @@ class ConnectionManager {
   // Close connection method (no-op for compatibility)
   public async closeConnection(): Promise<void> {
     // console.warn(chalk.yellow('Warning: closeConnection is deprecated for concurrency. Connections are managed dynamically and do not persist.'));
+  }
+
+  // Helper method to detect deadlock errors.
+  private isDeadlockError(error: any): boolean {
+    return error && (error.code === 'ER_LOCK_DEADLOCK' || error.errno === 1213);
   }
 
   // Acquire a connection for the current operation
