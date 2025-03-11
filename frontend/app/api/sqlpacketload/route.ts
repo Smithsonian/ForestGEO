@@ -61,17 +61,31 @@ export async function POST(request: NextRequest) {
         codes
       ];
     });
-    const insertSQL = `INSERT INTO ${schema}.temporarymeasurements 
+    transactionID = await connectionManager.beginTransaction();
+    try {
+      const insertSQL = `INSERT INTO ${schema}.temporarymeasurements 
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
       VALUES ${placeholders}`;
-    await connectionManager.executeQuery(insertSQL, values);
-    return new NextResponse(
-      JSON.stringify({
-        responseMessage: `Bulk insert to SQL completed`,
-        failingRows: Array.from(failingRows)
-      }),
-      { status: HTTPResponses.OK }
-    );
+      await connectionManager.executeQuery(insertSQL, values);
+      await connectionManager.commitTransaction(transactionID);
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: `Bulk insert to SQL completed`,
+          failingRows: Array.from(failingRows)
+        }),
+        { status: HTTPResponses.OK }
+      );
+    } catch (e: any) {
+      await connectionManager.rollbackTransaction(transactionID);
+      console.error(`Error processing file ${fileName}:`, e.message);
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: `Error processing file ${fileName}: ${e.message}`,
+          failingRows: Array.from(failingRows)
+        }),
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
   } else {
     transactionID = await connectionManager.beginTransaction();
     console.log('sqlpacketload: transaction started.');
