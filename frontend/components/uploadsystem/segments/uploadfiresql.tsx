@@ -424,6 +424,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
   useEffect(() => {
     if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
+      queue.clear();
       async function runProcessBatches() {
         setProcessedChunks(0);
         setChunkProcessStartTime(performance.now());
@@ -442,19 +443,29 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setTotalBatches(Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0));
         for (const fileID in grouped) {
           console.log(`Processing FileID: ${fileID}`);
-          for (const batchID of grouped[fileID]) {
-            console.log(`  BatchID: ${batchID}`);
-            try {
-              await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
-              console.log(`Processed batch ${batchID} for file ${fileID}`);
-            } catch (e: any) {
-              console.error(e);
-            } finally {
-              setProcessedChunks(prev => prev + 1);
-            }
-          }
-          setCompletedOperations(prev => prev + 1);
+          // Map each batchID to a queued task.
+          const batchTasks = grouped[fileID].map(batchID =>
+            queue.add(async () => {
+              console.log(`  BatchID: ${batchID}`);
+              try {
+                await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+                console.log(`Processed batch ${batchID} for file ${fileID}`);
+              } catch (e: any) {
+                console.error(e);
+              } finally {
+                // Update processed chunks count
+                setProcessedChunks(prev => prev + 1);
+              }
+            })
+          );
+
+          // Optionally, queue a follow-up task that updates file-level completion once all its batches are done.
+          await queue.add(async () => {
+            await Promise.all(batchTasks);
+            setCompletedOperations(prev => prev + 1);
+          });
         }
+        await queue.onIdle();
         // Optionally, run a combined query to update census dates.
         const combinedQuery = `
           UPDATE ${schema}.census c
