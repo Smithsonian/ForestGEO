@@ -140,7 +140,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   }, [uploadForm, uploaded, processed, processedChunks, totalBatches, chunkProcessStartTime]);
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
-    let activeTasks = 0;
     queue.clear();
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
@@ -220,10 +219,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         async chunk(results: ParseResult<FileRow>, parser) {
           setChunkStartTime(performance.now());
           try {
-            if (activeTasks >= connectionLimit) {
-              console.log(`active tasks: ${activeTasks}, connection limit: ${connectionLimit}`);
+            if (queue.size >= connectionLimit) {
+              console.log(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
               parser.pause();
-              queue.pause();
+              // Wait until the queue is nearly empty before resuming.
+              await queue.onEmpty();
+              parser.resume();
             }
 
             const validRows: FileRow[] = [];
@@ -250,19 +251,11 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               [file.name]: fileRowSet
             };
 
-            activeTasks++;
-
             await queue.add(async () => {
               try {
                 await uploadToSql(fileCollectionRowSet, file.name);
                 console.log('chunk upload completed.');
-                activeTasks--;
                 setCompletedChunks(prev => prev + 1);
-                if (activeTasks < connectionLimit) {
-                  console.log(`resume upload. active tasks: ${activeTasks}, connection limit: ${connectionLimit}`);
-                  parser.resume();
-                  queue.start();
-                }
               } catch (error) {
                 console.error('Chunk rollback triggered. Error uploading to SQL:', error);
                 console.log('starting retry...');
@@ -271,13 +264,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   try {
                     await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
                     console.log('retry worked. decrementing active tasks and moving on.');
-                    activeTasks--;
                     setCompletedChunks(prev => prev + 1);
-                    if (activeTasks < connectionLimit) {
-                      console.log(`resume upload. active tasks: ${activeTasks}, connection limit: ${connectionLimit}`);
-                      parser.resume();
-                      queue.start();
-                    }
                   } catch (e) {
                     console.error('Catastrophic error on retry: ', e);
                   }
