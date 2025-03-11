@@ -221,6 +221,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           setChunkStartTime(performance.now());
           try {
             if (activeTasks >= connectionLimit) {
+              console.log(`active tasks: ${activeTasks}, connection limit: ${connectionLimit}`);
               parser.pause();
               queue.pause();
             }
@@ -233,6 +234,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             });
 
             if (validRows.length === 0) {
+              // Increment completedChunks even if there is nothing to upload.
+              setCompletedChunks(prev => prev + 1);
               parser.resume();
               return;
             }
@@ -252,32 +255,38 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await queue.add(async () => {
               try {
                 await uploadToSql(fileCollectionRowSet, file.name);
-              } catch (error) {
-                console.error('Chunk rollback triggered. Error uploading to SQL:', error);
-                if (failedChunks.has(completedChunks)) {
-                  return;
-                }
-                // single retry -- add this chunk back to the queue
-                await queue.add(async () => {
-                  try {
-                    await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
-                  } catch (e) {
-                    console.error('catatrophic error on retry: ', e);
-                    setFailedChunks(prev => new Set(prev).add(completedChunks));
-                  }
-                });
-              } finally {
+                console.log('chunk upload completed.');
                 activeTasks--;
                 setCompletedChunks(prev => prev + 1);
                 if (activeTasks < connectionLimit) {
+                  console.log(`resume upload. active tasks: ${activeTasks}, connection limit: ${connectionLimit}`);
                   parser.resume();
                   queue.start();
                 }
+              } catch (error) {
+                console.error('Chunk rollback triggered. Error uploading to SQL:', error);
+                console.log('starting retry...');
+                // Single retry -- add this chunk back to the queue.
+                await queue.add(async () => {
+                  try {
+                    await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
+                    console.log('retry worked. decrementing active tasks and moving on.');
+                    activeTasks--;
+                    setCompletedChunks(prev => prev + 1);
+                    if (activeTasks < connectionLimit) {
+                      console.log(`resume upload. active tasks: ${activeTasks}, connection limit: ${connectionLimit}`);
+                      parser.resume();
+                      queue.start();
+                    }
+                  } catch (e) {
+                    console.error('Catastrophic error on retry: ', e);
+                  }
+                });
               }
             });
           } catch (err) {
             console.error('Error processing chunk:', err);
-            reject(err);
+            parser.abort();
           }
         },
         complete: async () => {
@@ -311,7 +320,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
-        const response = await fetchWithTimeout(`/api/sqlpacketload`, {
+        const response = await fetch(`/api/sqlpacketload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -358,6 +367,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       currentQuadrat?.quadratID
     ]
   );
+
+  useEffect(() => {
+    console.log('upload in progress...');
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
