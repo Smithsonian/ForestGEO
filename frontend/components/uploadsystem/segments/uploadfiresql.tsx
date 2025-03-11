@@ -48,7 +48,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096 * 2;
-  const connectionLimit = 10;
+  const connectionLimit = 50;
   const queue = new PQueue({ concurrency: connectionLimit });
 
   const generateErrorRowId = (row: FileRow) =>
