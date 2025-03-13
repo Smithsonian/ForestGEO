@@ -341,6 +341,7 @@ export async function runValidation(
 
     // Execute the cursor query to get the rows that need validation
     console.log('running validation: ', validationProcedureName);
+    console.log('validation query: ', reformattedCursorQuery);
     await connectionManager.commitTransaction(transactionID ?? '');
     console.log('validation executed.');
     return true;
@@ -353,69 +354,32 @@ export async function runValidation(
   }
 }
 
-export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }): Promise<any[]> {
+export async function updateValidatedRows(schema: string, params: { p_CensusID?: number | null; p_PlotID?: number | null }) {
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
-  const tempTable = `CREATE TEMPORARY TABLE UpdatedRows
-                     (
-                       CoreMeasurementID INT
-                     );`;
-
-  const insertTemp = `
-    INSERT INTO UpdatedRows (CoreMeasurementID)
-    SELECT cm.CoreMeasurementID
-    FROM ${schema}.coremeasurements cm
-           JOIN ${schema}.census c ON cm.CensusID = c.CensusID
-    WHERE cm.IsValidated IS NULL
-      AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
-      AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
-  `;
-
-  const updateValidation = `
-    UPDATE ${schema}.coremeasurements cm
-    SET cm.IsValidated = (
-      CASE
-        WHEN NOT EXISTS (
-          SELECT 1
-          FROM ${schema}.cmverrors cme
-          WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
-        ) THEN TRUE  -- No validation errors exist
-        ELSE FALSE   -- Validation errors exist
-      END
-    )
-    WHERE cm.IsValidated IS NULL
-      AND cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
-  `;
-
-  const getUpdatedRows = `
-    SELECT cm.*
-    FROM ${schema}.coremeasurements cm
-    WHERE cm.CoreMeasurementID IN (SELECT CoreMeasurementID FROM UpdatedRows);
-  `;
-
-  const dropTemp = `DROP TEMPORARY TABLE IF EXISTS UpdatedRows;`;
+  const updateQuery = `
+  UPDATE ${schema}.coremeasurements cm
+  JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+  SET cm.IsValidated = CASE
+    WHEN NOT EXISTS (
+      SELECT 1
+      FROM ${schema}.cmverrors cme
+      WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
+    ) THEN TRUE
+    ELSE FALSE
+  END
+  WHERE cm.IsValidated IS NULL
+    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
+    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+    `;
 
   try {
     // Begin transaction
     transactionID = await connectionManager.beginTransaction();
 
-    // Ensure any leftover temporary table is cleared
-    await connectionManager.executeQuery(dropTemp);
+    await connectionManager.executeQuery(updateQuery);
 
-    // Create temporary table and populate it
-    await connectionManager.executeQuery(tempTable);
-    await connectionManager.executeQuery(insertTemp);
-
-    // Update validation states
-    await connectionManager.executeQuery(updateValidation);
-
-    // Fetch and return the updated rows
-    const results = await connectionManager.executeQuery(getUpdatedRows);
-
-    // Clean up temporary table
-    await connectionManager.executeQuery(dropTemp);
     await connectionManager.commitTransaction(transactionID ?? '');
-    return MapperFactory.getMapper<any, any>('coremeasurements').mapData(results);
   } catch (error: any) {
     // Roll back on error
     await connectionManager.rollbackTransaction(transactionID ?? '');

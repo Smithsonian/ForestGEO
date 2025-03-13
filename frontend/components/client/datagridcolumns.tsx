@@ -625,8 +625,8 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'DBH',
     flex: 0.5,
     editable: true,
+    type: 'number',
     valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
-    filterOperators: customNumericOperators,
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
@@ -637,7 +637,6 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    filterOperators: customNumericOperators,
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
