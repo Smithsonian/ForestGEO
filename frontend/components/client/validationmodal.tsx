@@ -1,10 +1,9 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { Modal, ModalDialog } from '@mui/joy';
-import { CoreMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
@@ -17,11 +16,9 @@ function ValidationModal(props: VMProps) {
   const { isValidationModalOpen, handleCloseValidationModal } = props;
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
-  const [errorsFound, setErrorsFound] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
   const [validationProgress, setValidationProgress] = useState<Record<string, number>>({});
   const [isUpdatingRows, setIsUpdatingRows] = useState<boolean>(false);
-  const [rowsPassed, setRowsPassed] = useState<CoreMeasurementsRDS[]>([]);
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -29,22 +26,34 @@ function ValidationModal(props: VMProps) {
 
   const plotID = currentPlot?.plotID;
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isMounted = useRef<boolean>(true);
+
   useEffect(() => {
-    fetch(`/api/validations/validationlist?schema=${currentSite?.schemaName}`, { method: 'GET' })
-      .then(response => response.json())
-      .then(data => {
-        setValidationMessages(data.coreValidations);
-        const initialProgress = Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
-        setValidationProgress(initialProgress);
-      })
-      .catch(error => {
-        console.error('Error fetching validation messages:', error);
-      });
+    // Create an AbortController instance when the component mounts
+    abortControllerRef.current = new AbortController();
+
+    // Cleanup function: mark as unmounted and abort any pending requests
+    return () => {
+      isMounted.current = false;
+      abortControllerRef.current?.abort();
+    };
   }, []);
 
   useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
       performValidations().catch(console.error);
+    } else {
+      fetch(`/api/validations/validationlist?schema=${currentSite?.schemaName}`, { method: 'GET' })
+        .then(response => response.json())
+        .then(data => {
+          setValidationMessages(data.coreValidations);
+          const initialProgress = Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
+          setValidationProgress(initialProgress);
+        })
+        .catch(error => {
+          console.error('Error fetching validation messages:', error);
+        });
     }
   }, [validationMessages]);
 
@@ -52,70 +61,78 @@ function ValidationModal(props: VMProps) {
     try {
       const validationProcedureNames = Object.keys(validationMessages);
 
-      const results = await Promise.all(
-        validationProcedureNames.map(async procedureName => {
-          const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
+      for (const procedureName of validationProcedureNames) {
+        const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
 
-          try {
-            const response = await fetch(`/api/validations/procedures/${procedureName}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                schema: currentSite?.schemaName,
-                validationProcedureID,
-                cursorQuery,
-                p_CensusID: currentCensus?.dateRanges[0].censusID,
-                p_PlotID: plotID,
-                minDBH: null,
-                maxDBH: null,
-                minHOM: null,
-                maxHOM: null
-              })
-            });
+        try {
+          const response = await fetch(`/api/validations/procedures/${procedureName}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: abortControllerRef.current?.signal,
+            body: JSON.stringify({
+              schema: currentSite?.schemaName,
+              validationProcedureID,
+              cursorQuery,
+              p_CensusID: currentCensus?.dateRanges[0].censusID,
+              p_PlotID: plotID,
+              minDBH: null,
+              maxDBH: null,
+              minHOM: null,
+              maxHOM: null
+            })
+          });
 
-            if (!response.ok) {
-              throw new Error(`Error executing ${procedureName}`);
-            }
-
-            const result: boolean = await response.json();
-            setValidationProgress(prevProgress => ({
-              ...prevProgress,
-              [procedureName]: 100
-            }));
-
-            return { procedureName, hasError: result };
-          } catch (error: any) {
-            console.error(`Error performing validation for ${procedureName}:`, error);
+          if (!response.ok) {
+            throw new Error(`Error executing ${procedureName}`);
+          }
+          setValidationProgress(prevProgress => ({
+            ...prevProgress,
+            [procedureName]: 100
+          }));
+        } catch (error: any) {
+          if (error.name === 'AbortError') {
+            console.log(`Fetch aborted for ${procedureName}`);
+            return; // Exit early if the request was aborted.
+          }
+          console.error(`Error performing validation for ${procedureName}:`, error);
+          if (isMounted.current) {
             setApiErrors(prev => [...prev, `Failed to execute ${procedureName}: ${error.message}`]);
             setValidationProgress(prevProgress => ({
               ...prevProgress,
               [procedureName]: -1
             }));
-            return { procedureName, hasError: true };
           }
-        })
-      );
-
-      const errorsExist = results.some(({ hasError }) => hasError);
+        }
+      }
 
       try {
-        setIsUpdatingRows(true);
-        const response = await fetch(
+        if (isMounted.current) {
+          setIsUpdatingRows(true);
+        }
+        await fetch(
           `/api/validations/updatepassedvalidations?schema=${currentSite?.schemaName}&plotID=${plotID}&censusID=${currentCensus?.dateRanges[0].censusID}`,
-          { method: 'GET' }
+          { method: 'GET', signal: abortControllerRef.current?.signal }
         );
-        setRowsPassed(await response.json());
-        setErrorsFound(errorsExist);
       } catch (error: any) {
+        if (error.name === 'AbortError') {
+          console.log('Update fetch aborted');
+          return;
+        }
         console.error('Error in updating validated rows:', error);
-        setApiErrors(prev => [...prev, `Failed to update validated rows: ${error.message}`]);
+        if (isMounted.current) {
+          setApiErrors(prev => [...prev, `Failed to update validated rows: ${error.message}`]);
+        }
       } finally {
-        setIsUpdatingRows(false);
-        setIsValidationComplete(true);
-        await handleCloseValidationModal();
+        if (isMounted.current) {
+          setIsUpdatingRows(false);
+          setIsValidationComplete(true);
+        }
       }
     } catch (error) {
       console.error('Error during validation process:', error);
+    } finally {
+      setIsUpdatingRows(false);
+      setIsValidationComplete(true);
     }
   };
 
@@ -197,12 +214,6 @@ function ValidationModal(props: VMProps) {
                     ))}
                   </Box>
                 )}
-                {rowsPassed.length > 0 &&
-                  rowsPassed.map(row => (
-                    <Box key={row.id} sx={{ mb: 2 }}>
-                      <Typography>Updated Row: {row.coreMeasurementID}</Typography>
-                    </Box>
-                  ))}
               </Box>
             )}
           </Box>

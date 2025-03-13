@@ -16,23 +16,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<Validation
   const schema = request.nextUrl.searchParams.get('schema');
   if (!schema) throw new Error('No schema variable provided!');
   try {
-    // const compositeQuery = `
-    // SELECT
-    //   ProcedureName,
-    //   MIN(ValidationID) AS ValidationID,
-    //   MIN(Description) AS Description,
-    //   MIN(Definition) AS Definition,
-    // FROM (
-    //   SELECT ValidationID, ProcedureName, Description, Definition
-    //   FROM ${schema}.sitespecificvalidations
-    //   WHERE IsEnabled = 1
-    //   UNION ALL
-    //   SELECT ValidationID, ProcedureName, Description, Definition
-    //   FROM catalog.validationprocedures
-    //   WHERE IsEnabled = 1
-    // ) AS CombinedValidations
-    // GROUP BY ProcedureName;`;
-
     const siteQuery = `SELECT ValidationID, ProcedureName, Description, Definition FROM ${schema}.sitespecificvalidations WHERE IsEnabled = 1;`;
 
     const results: ValidationProcedure[] = await conn.executeQuery(siteQuery);
