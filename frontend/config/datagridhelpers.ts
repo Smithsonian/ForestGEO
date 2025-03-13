@@ -168,7 +168,7 @@ export function getGridID(gridType: string): string {
       return 'speciesID';
     case 'specieslimits':
       return 'speciesLimitID';
-    case 'validationprocedures':
+    case 'sitespecificvalidations':
       return 'validationID';
     case 'failedmeasurements':
       return 'failedMeasurementID';

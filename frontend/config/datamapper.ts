@@ -268,7 +268,7 @@ class MapperFactory {
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationchangelog':
         return new GenericMapper<ValidationChangelogRDS, ValidationChangelogResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'validationprocedures':
+      case 'sitespecificvalidations':
         return new GenericMapper<ValidationProceduresRDS, ValidationProceduresResult>() as unknown as IDataMapper<RDS, Result>;
       case 'viewfulltable':
       case 'viewfulltableview':

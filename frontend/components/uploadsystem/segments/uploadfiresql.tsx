@@ -339,7 +339,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       } catch (error) {
         console.error('Network or API error:', error);
-        throw error; // Re-throw to ensure retries or error reporting is triggered
+        throw error;
       }
     },
     [
