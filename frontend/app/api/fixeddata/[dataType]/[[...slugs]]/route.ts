@@ -32,7 +32,7 @@ export async function GET(
     const queryParams: any[] = [];
 
     switch (params.dataType) {
-      case 'validationprocedures':
+      case 'sitesspecificvalidations':
         paginatedQuery = `
           SELECT SQL_CALC_FOUND_ROWS * 
           FROM ${schema}.sitespecificvalidations LIMIT ?, ?;`; // validation procedures is special

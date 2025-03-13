@@ -46,49 +46,49 @@ const UploadValidation: React.FC<UploadValidationProps> = ({ setReviewState, sch
     try {
       const validationProcedureNames = Object.keys(validationMessages);
 
-      const results = await Promise.all(
-        validationProcedureNames.map(async procedureName => {
-          const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
+      const results: { procedureName: string; hasError: boolean }[] = [];
 
-          try {
-            const response = await fetch(`/api/validations/procedures/${procedureName}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                schema: currentSite?.schemaName,
-                validationProcedureID,
-                cursorQuery,
-                p_CensusID: currentCensus?.dateRanges[0].censusID,
-                p_PlotID: plotID,
-                minDBH: null,
-                maxDBH: null,
-                minHOM: null,
-                maxHOM: null
-              })
-            });
+      for (const procedureName of validationProcedureNames) {
+        const { id: validationProcedureID, definition: cursorQuery } = validationMessages[procedureName];
 
-            if (!response.ok) {
-              throw new Error(`Error executing ${procedureName}`);
-            }
+        try {
+          const response = await fetch(`/api/validations/procedures/${procedureName}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              schema: currentSite?.schemaName,
+              validationProcedureID,
+              cursorQuery,
+              p_CensusID: currentCensus?.dateRanges[0].censusID,
+              p_PlotID: plotID,
+              minDBH: null,
+              maxDBH: null,
+              minHOM: null,
+              maxHOM: null
+            })
+          });
 
-            const result: boolean = await response.json();
-            setValidationProgress(prevProgress => ({
-              ...prevProgress,
-              [procedureName]: 100
-            }));
-
-            return { procedureName, hasError: result };
-          } catch (error: any) {
-            console.error(`Error performing validation for ${procedureName}:`, error);
-            setApiErrors(prev => [...prev, `Failed to execute ${procedureName}: ${error.message}`]);
-            setValidationProgress(prevProgress => ({
-              ...prevProgress,
-              [procedureName]: -1
-            }));
-            return { procedureName, hasError: true };
+          if (!response.ok) {
+            throw new Error(`Error executing ${procedureName}`);
           }
-        })
-      );
+
+          const result: boolean = await response.json();
+          setValidationProgress(prevProgress => ({
+            ...prevProgress,
+            [procedureName]: 100
+          }));
+
+          results.push({ procedureName, hasError: result });
+        } catch (error: any) {
+          console.error(`Error performing validation for ${procedureName}:`, error);
+          setApiErrors(prev => [...prev, `Failed to execute ${procedureName}: ${error.message}`]);
+          setValidationProgress(prevProgress => ({
+            ...prevProgress,
+            [procedureName]: -1
+          }));
+          results.push({ procedureName, hasError: true });
+        }
+      }
 
       const errorsExist = results.some(({ hasError }) => hasError);
 

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   try {
     const query = `SELECT * FROM ${schema}.sitespecificvalidations;`;
     const results = await connectionManager.executeQuery(query);
-    return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('validationprocedures').mapData(results)), { status: HTTPResponses.OK });
+    return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('sitespecificvalidations').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
     console.error('Error:', error);
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
