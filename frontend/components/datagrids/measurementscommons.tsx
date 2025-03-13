@@ -93,6 +93,7 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
+import { v4 } from 'uuid';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -268,24 +269,20 @@ const EditToolbar = (props: EditToolbarProps) => {
             <Stack direction={'row'} spacing={2}>
               <Dropdown>
                 <MenuButton>Other</MenuButton>
-                <Menu>
-                  {otherButtons.map((button: any, index: number) => (
-                    <>
-                      {button.tooltip ? (
-                        <>
-                          <Tooltip title={button.tooltip} placement={'left'} arrow>
-                            <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
-                              {button.label}
-                            </MenuItem>
-                          </Tooltip>
-                        </>
-                      ) : (
-                        <MenuItem key={index} onClick={button.onClick} variant={'soft'} color={'primary'}>
+                <Menu key={v4()}>
+                  {otherButtons.map((button: any, index: number) =>
+                    button.tooltip ? (
+                      <Tooltip key={index} title={button.tooltip} placement="left" arrow>
+                        <MenuItem onClick={button.onClick} variant="soft" color="primary">
                           {button.label}
                         </MenuItem>
-                      )}
-                    </>
-                  ))}
+                      </Tooltip>
+                    ) : (
+                      <MenuItem key={index} onClick={button.onClick} variant="soft" color="primary">
+                        {button.label}
+                      </MenuItem>
+                    )
+                  )}
                 </Menu>
               </Dropdown>
             </Stack>

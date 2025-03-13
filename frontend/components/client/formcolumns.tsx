@@ -277,10 +277,10 @@ const InnerInput = React.forwardRef<
   const id = React.useId();
 
   return (
-    <React.Fragment>
+    <Box>
       <StyledInput {...rest} ref={ref} id={id} aria-invalid={error} />
       <StyledLabel htmlFor={id}>{noInput ? AttributeStatusOptions.join(', ') : error ? 'Invalid status' : 'Accepted!'}</StyledLabel>
-    </React.Fragment>
+    </Box>
   );
 });
 

@@ -5,7 +5,7 @@
 import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
-import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
+import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
 import { Dispatch, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
@@ -62,6 +62,10 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   measurements: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
+  },
+  failedmeasurements: {
+    id: false,
+    ...getFailedMeasurementsHCs()
   },
   measurementssummary: {
     id: false,
@@ -166,6 +170,8 @@ export function getGridID(gridType: string): string {
       return 'speciesLimitID';
     case 'validationprocedures':
       return 'validationID';
+    case 'failedmeasurements':
+      return 'failedMeasurementID';
     default:
       return 'breakage';
   }

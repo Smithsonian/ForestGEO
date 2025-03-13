@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { getUpdatedValues } from '@/config/utils'; // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
+import { getUpdatedValues } from '@/config/utils';
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
@@ -49,6 +49,13 @@ export async function GET(
             JOIN ${schema}.census c ON uc.CensusID = c.CensusID
             WHERE p.PlotID = ?
             AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
+        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+        break;
+      case 'failedmeasurements':
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} fm
+          JOIN census c ON fm.CensusID = c.CensusID
+          WHERE fm.PlotID = ? 
+          AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'attributes':

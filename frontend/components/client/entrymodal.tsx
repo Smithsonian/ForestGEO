@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { useFirstLoadContext, useFirstLoadDispatch } from '@/app/contexts/listselectionprovider';
-import { Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack, Typography } from '@mui/joy';
+import { Box, Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Stack, Typography } from '@mui/joy';
 import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 import Divider from '@mui/joy/Divider';
 import { redirect } from 'next/navigation';
@@ -12,7 +12,7 @@ export default function EntryModal() {
   const firstLoad = useFirstLoadContext();
   const firstLoadDispatch = useFirstLoadDispatch();
   return (
-    <>
+    <Box>
       {firstLoad && status !== 'unauthenticated' ? (
         <Modal
           open={firstLoad}
@@ -52,6 +52,6 @@ export default function EntryModal() {
       ) : (
         status === 'authenticated' && redirect('/dashboard')
       )}
-    </>
+    </Box>
   );
 }

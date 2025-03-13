@@ -220,7 +220,7 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
       </Box>
       <Stack direction={'row'} spacing={2}>
         {dynamicButtons.map((button: any, index: number) => (
-          <React.Fragment key={index}>
+          <Box key={index}>
             {button.tooltip ? (
               <Tooltip title={button.tooltip} placement={'bottom'} arrow>
                 <Button onClick={button.onClick} variant={'outlined'} color={'neutral'}>
@@ -232,7 +232,7 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
                 {button.label}
               </Button>
             )}
-          </React.Fragment>
+          </Box>
         ))}
       </Stack>
       <Modal
