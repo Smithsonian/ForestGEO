@@ -120,7 +120,7 @@ export async function POST(
       let searchStub = '';
       let filterStub = '';
       switch (params.dataType) {
-        case 'validationprocedures':
+        case 'sitespecificvalidations':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
 
@@ -144,7 +144,6 @@ export async function POST(
         case 'stems':
         case 'alltaxonomiesview':
         case 'quadratpersonnel':
-        case 'sitespecificvalidations':
         case 'roles':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
