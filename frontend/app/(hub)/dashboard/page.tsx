@@ -59,15 +59,19 @@ export default function DashboardPage() {
         `/api/changelog/overview/unifiedchangelog/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`,
         { method: 'GET' }
       );
-      const results: UnifiedChangelogRDS[] = await response.json();
+      try {
+        const results: UnifiedChangelogRDS[] = await response.json();
 
-      // Pad the array if it has less than 5 items
-      const paddedResults = [...results];
-      while (paddedResults.length < 5) {
-        paddedResults.push({}); // Push empty objects to pad the array
+        // Pad the array if it has less than 5 items
+        const paddedResults = [...results];
+        while (paddedResults.length < 5) {
+          paddedResults.push({}); // Push empty objects to pad the array
+        }
+
+        setChangelogHistory(paddedResults);
+      } catch (e) {
+        console.log('no json response');
       }
-
-      setChangelogHistory(paddedResults);
     } catch (error) {
       console.error('Failed to load changelog history', error);
       setChangelogHistory(Array(5).fill({})); // Fallback to an empty padded array in case of an error

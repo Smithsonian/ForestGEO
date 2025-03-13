@@ -13,6 +13,7 @@ import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
+import FailedMeasurementsModal from '@/components/client/failedmeasurementsmodal';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -51,6 +52,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [openAlert, setOpenAlert] = useState(false);
+  const [openFSM, setOpenFSM] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -95,7 +97,6 @@ export default function MeasurementsSummaryViewDataGrid() {
       const response = await fetch(`/api/refreshviews/measurementssummary/${currentSite?.schemaName ?? ''}`, { method: 'POST' });
       if (!response.ok) throw new Error('Measurements View Refresh failure');
       setLoading(true, 'Processing data...');
-      await response.json();
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
       console.error(e);
@@ -134,6 +135,7 @@ export default function MeasurementsSummaryViewDataGrid() {
         }}
         formType={'measurements'}
       />
+      <FailedMeasurementsModal open={openFSM} setOpen={setOpenFSM} />
       <MeasurementsCommons
         gridType={'measurementssummary'}
         gridColumns={MeasurementsSummaryViewGridColumns}
@@ -157,7 +159,8 @@ export default function MeasurementsSummaryViewDataGrid() {
         dynamicButtons={[
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
-          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view' }
+          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view' },
+          { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.' }
         ]}
       />
       <Collapse in={openAlert} sx={{ width: '100%' }}>

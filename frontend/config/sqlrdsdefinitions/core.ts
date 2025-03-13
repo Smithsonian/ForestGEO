@@ -36,6 +36,14 @@ export interface FailedMeasurementsRDS {
 
 export type FailedMeasurementsResult = ResultType<FailedMeasurementsRDS>;
 
+export function getFailedMeasurementsHCs(): ColumnStates {
+  return {
+    failedMeasurementID: false,
+    plotID: false,
+    censusID: false
+  };
+}
+
 export function getCoreMeasurementsHCs(): ColumnStates {
   return {
     censusID: false,

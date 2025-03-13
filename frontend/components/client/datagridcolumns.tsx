@@ -136,6 +136,107 @@ export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   }
 ]);
 
+export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumns([
+  {
+    field: 'id',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'failedMeasurementID',
+    headerName: 'FailedMeasurementID',
+    flex: 1,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotID',
+    headerName: 'PlotID',
+    flex: 1,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusID',
+    headerName: 'CensusID',
+    flex: 1,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'tag',
+    headerName: 'Tree Tag',
+    flex: 1,
+    type: 'string',
+    filterable: false
+  },
+  {
+    field: 'stemTag',
+    headerName: 'Stem Tag',
+    flex: 1,
+    type: 'string',
+    filterable: false
+  },
+  {
+    field: 'spCode',
+    headerName: 'Species Code',
+    flex: 1,
+    type: 'string',
+    filterable: false
+  },
+  {
+    field: 'quadrat',
+    headerName: 'Quadrat',
+    flex: 1,
+    type: 'string',
+    filterable: false
+  },
+  {
+    field: 'x',
+    headerName: 'X',
+    flex: 1,
+    type: 'number',
+    filterable: false
+  },
+  {
+    field: 'y',
+    headerName: 'Y',
+    flex: 1,
+    type: 'number',
+    filterable: false
+  },
+  {
+    field: 'dbh',
+    headerName: 'DBH',
+    flex: 1,
+    type: 'number',
+    filterable: false
+  },
+  {
+    field: 'hom',
+    headerName: 'HOM',
+    flex: 1,
+    type: 'number',
+    filterable: false
+  },
+  {
+    field: 'date',
+    headerName: 'Date',
+    flex: 1,
+    type: 'date',
+    filterable: false
+  },
+  {
+    field: 'codes',
+    headerName: 'Codes',
+    flex: 1,
+    type: 'string',
+    filterable: false
+  }
+]);
+
 export const PersonnelGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
