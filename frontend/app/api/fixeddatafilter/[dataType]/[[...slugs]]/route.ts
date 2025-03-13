@@ -129,6 +129,16 @@ export async function POST(
           ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`; // validation procedures is special
           queryParams.push(page * pageSize, pageSize);
           break;
+        case 'failedmeasurements':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
+          paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} fm
+          JOIN census c ON fm.CensusID = c.CensusID
+          WHERE fm.PlotID = ? 
+          AND c.PlotCensusNumber = ? 
+          ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
         case 'attributes':
         case 'species':
         case 'stems':
@@ -303,7 +313,6 @@ export async function POST(
         );
       }
       transactionID = await connectionManager.beginTransaction();
-      console.log('formatted query: ', format(paginatedQuery, queryParams));
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);

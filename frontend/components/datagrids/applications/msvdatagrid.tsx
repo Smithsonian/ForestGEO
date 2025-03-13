@@ -1,10 +1,10 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
-import { Snackbar, Typography } from '@mui/joy';
+import { Snackbar } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
@@ -13,8 +13,7 @@ import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
-import { AssignmentOutlined, CachedOutlined, RuleOutlined, UploadFileOutlined } from '@mui/icons-material';
+import FailedMeasurementsModal from '@/components/client/failedmeasurementsmodal';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -53,9 +52,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [openAlert, setOpenAlert] = useState(false);
-  const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
-  const [dataReingested, setDataReingested] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -68,10 +65,6 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
-
-  useEffect(() => {
-    if (openFSM) fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(console.error);
-  }, [openFSM]);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -142,15 +135,7 @@ export default function MeasurementsSummaryViewDataGrid() {
         }}
         formType={'measurements'}
       />
-      <FailedMeasurementsModal
-        open={openFSM}
-        setReingested={setDataReingested}
-        handleCloseModal={async () => {
-          reloadMSV().then(() => {
-            setOpenFSM(false);
-          });
-        }}
-      />
+      <FailedMeasurementsModal open={openFSM} setOpen={setOpenFSM} />
       <MeasurementsCommons
         gridType={'measurementssummary'}
         gridColumns={MeasurementsSummaryViewGridColumns}
@@ -172,43 +157,23 @@ export default function MeasurementsSummaryViewDataGrid() {
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
         dynamicButtons={[
-          {
-            label: 'Manual Entry Form',
-            onClick: () => setIsManualEntryFormOpen(true),
-            tooltip: 'Submit data by filling out a form',
-            icon: <AssignmentOutlined />
-          },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
-          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> },
-          { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.', icon: <RuleOutlined /> }
+          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
+          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view' },
+          { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.' }
         ]}
       />
-      <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
+      <Collapse in={openAlert} sx={{ width: '100%' }}>
         <Snackbar
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
           open={openAlert}
           autoHideDuration={6000}
           onClose={() => setOpenAlert(false)}
-          variant={'plain'}
           sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
         >
-          <Alert variant={'standard'} onClose={() => setOpenAlert(false)}>
+          <Alert variant={'outlined'} onClose={() => setOpenAlert(false)} severity="warning">
             <AlertTitle>Changes detected!</AlertTitle>
             Please press the refresh button to update the grid.
-          </Alert>
-        </Snackbar>
-        <Snackbar
-          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-          open={openViewResetAlert}
-          autoHideDuration={6000}
-          onClose={() => setOpenViewResetAlert(false)}
-          variant={'plain'}
-          sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <Alert variant={'outlined'} onClose={() => setOpenViewResetAlert(false)} sx={{ display: 'flex', flex: 1, width: '100%', flexDirection: 'column' }}>
-            <AlertTitle>CORE CHANGES DETECTED!</AlertTitle>
-            <Typography fontWeight={'bold'}>You must reset the view to see your changes.</Typography>
-            <Typography fontWeight={'bold'}>Press the view reset button!</Typography>
           </Alert>
         </Snackbar>
       </Collapse>
