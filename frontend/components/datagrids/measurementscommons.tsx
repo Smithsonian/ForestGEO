@@ -1212,6 +1212,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             return acc;
           }, {})
         : {};
+      console.log('error map: ', errorMap);
       setValidationErrors(errorMap);
     } catch (error) {
       console.error('Error fetching validation errors:', error);
@@ -1228,6 +1229,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       width: 50,
       filterable: false,
       renderCell: (params: GridCellParams) => {
+        console.log(params.row);
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
           const validationStrings =
             validationErrors[Number(params.row.coreMeasurementID)]?.errors.map(errorDetail => {

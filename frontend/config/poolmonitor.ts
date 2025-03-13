@@ -77,9 +77,9 @@ export class PoolMonitor {
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
-    const bufferTime = 120;
+    const bufferTime = 180;
     try {
-      const [rows]: any[] = await this.pool.query('SELECT * FROM information_schema.processlist WHERE TIME > 60;');
+      const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime};`);
       if (rows.length > 0) {
         // console.log(chalk.cyan('Active MySQL Processes:'));
         // console.table(rows);
@@ -88,7 +88,7 @@ export class PoolMonitor {
           (acc: any, process: any) => {
             if (process.COMMAND !== 'Sleep') {
               acc.liveIds.push(process.ID);
-            } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime) {
+            } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime * 2) {
               acc.sleepingIds.push(process.ID);
             }
             return acc;
