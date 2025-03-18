@@ -3,17 +3,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import { Modal, ModalDialog } from '@mui/joy';
 
 type ValidationMessages = Record<string, { id: number; description: string; definition: string }>;
 
-interface VMProps {
-  isValidationModalOpen: boolean;
-  handleCloseValidationModal: () => Promise<void>;
-}
+type VCProps = {
+  onValidationComplete?: () => void;
+};
 
-function ValidationModal(props: VMProps) {
-  const { isValidationModalOpen, handleCloseValidationModal } = props;
+export default function ValidationCore({ onValidationComplete }: VCProps) {
   const [validationMessages, setValidationMessages] = useState<ValidationMessages>({});
   const [isValidationComplete, setIsValidationComplete] = useState<boolean>(false);
   const [apiErrors, setApiErrors] = useState<string[]>([]);
@@ -133,6 +130,7 @@ function ValidationModal(props: VMProps) {
     } finally {
       setIsUpdatingRows(false);
       setIsValidationComplete(true);
+      if (onValidationComplete) onValidationComplete();
     }
   };
 
@@ -147,80 +145,65 @@ function ValidationModal(props: VMProps) {
   };
 
   return (
-    <Modal open={isValidationModalOpen} onClose={handleCloseValidationModal}>
-      <ModalDialog
-        sx={{
-          width: '80%',
-          borderRadius: 'md',
-          p: 2,
-          boxShadow: 'lg',
-          display: 'flex',
-          flex: 1,
-          flexDirection: 'column',
-          alignItems: 'center'
-        }}
-      >
-        {Object.keys(validationMessages).length > 0 && (
-          <Box
-            sx={{
-              width: '100%',
-              p: 2,
-              display: 'flex',
-              flex: 1,
-              flexDirection: 'column'
-            }}
-          >
-            {!isValidationComplete ? (
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Typography variant="h6">Validating data...</Typography>
-                {renderProgressBars()}
-              </Box>
-            ) : isUpdatingRows ? (
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <CircularProgress />
-                <Typography variant="h6">Updating validated rows...</Typography>
-              </Box>
-            ) : (
-              <Box
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <Typography variant="h6">Validation Results</Typography>
-                {apiErrors.length > 0 && (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography color="error">Some validations could not be performed:</Typography>
-                    {apiErrors.map(error => (
-                      <Typography key={error} color="error">
-                        - {error}
-                      </Typography>
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            )}
-          </Box>
-        )}
-      </ModalDialog>
-    </Modal>
+    <>
+      {Object.keys(validationMessages).length > 0 && (
+        <Box
+          sx={{
+            width: '100%',
+            p: 2,
+            display: 'flex',
+            flex: 1,
+            flexDirection: 'column'
+          }}
+        >
+          {!isValidationComplete ? (
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Typography variant="h6">Validating data...</Typography>
+              {renderProgressBars()}
+            </Box>
+          ) : isUpdatingRows ? (
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <CircularProgress />
+              <Typography variant="h6">Updating validated rows...</Typography>
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Typography variant="h6">Validation Results</Typography>
+              {apiErrors.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography color="error">Some validations could not be performed:</Typography>
+                  {apiErrors.map(error => (
+                    <Typography key={error} color="error">
+                      - {error}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
+    </>
   );
 }
-
-export default ValidationModal;

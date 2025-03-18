@@ -170,6 +170,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Tree Tag',
     flex: 1,
     type: 'string',
+    editable: true,
     filterable: false
   },
   {
@@ -177,6 +178,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Stem Tag',
     flex: 1,
     type: 'string',
+    editable: true,
     filterable: false
   },
   {
@@ -184,6 +186,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Species Code',
     flex: 1,
     type: 'string',
+    editable: true,
     filterable: false
   },
   {
@@ -191,6 +194,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Quadrat',
     flex: 1,
     type: 'string',
+    editable: true,
     filterable: false
   },
   {
@@ -198,6 +202,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'X',
     flex: 1,
     type: 'number',
+    editable: true,
     filterable: false
   },
   {
@@ -205,6 +210,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Y',
     flex: 1,
     type: 'number',
+    editable: true,
     filterable: false
   },
   {
@@ -212,6 +218,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'DBH',
     flex: 1,
     type: 'number',
+    editable: true,
     filterable: false
   },
   {
@@ -219,6 +226,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'HOM',
     flex: 1,
     type: 'number',
+    editable: true,
     filterable: false
   },
   {
@@ -226,6 +234,10 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Date',
     flex: 1,
     type: 'date',
+    valueGetter: value => {
+      return new Date(value);
+    },
+    editable: true,
     filterable: false
   },
   {
@@ -233,6 +245,7 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Codes',
     flex: 1,
     type: 'string',
+    editable: true,
     filterable: false
   }
 ]);
