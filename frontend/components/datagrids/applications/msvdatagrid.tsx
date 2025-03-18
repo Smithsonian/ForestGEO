@@ -14,6 +14,7 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/failedmeasurementsmodal';
+import { AssignmentOutlined, CachedOutlined, ReplayOutlined, RuleOutlined, UploadFileOutlined } from '@mui/icons-material';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -157,10 +158,15 @@ export default function MeasurementsSummaryViewDataGrid() {
         setShouldAddRowAfterFetch={setShouldAddRowAfterFetch}
         addNewRowToGrid={addNewRowToGrid}
         dynamicButtons={[
-          { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
-          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view' },
-          { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.' }
+          {
+            label: 'Manual Entry Form',
+            onClick: () => setIsManualEntryFormOpen(true),
+            tooltip: 'Submit data by filling out a form',
+            icon: <AssignmentOutlined />
+          },
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
+          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> },
+          { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.', icon: <RuleOutlined /> }
         ]}
       />
       <Collapse in={openAlert} sx={{ width: '100%' }}>

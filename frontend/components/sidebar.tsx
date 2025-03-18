@@ -331,6 +331,7 @@ export default function Sidebar(props: SidebarProps) {
     setCensus(selectedCensus);
     if (censusDispatch) {
       await censusDispatch({ census: selectedCensus });
+      console.log(`await census dispatch completed for ${selectedCensus}`);
     }
   };
 

@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
           ${schema}.sitespecificvalidations AS ve ON cve.ValidationErrorID = ve.ValidationID
       JOIN ${schema}.census c ON cm.CensusID = c.CensusID
       JOIN ${schema}.plots p ON c.PlotID = p.PlotID
-      WHERE p.PlotID = ${plotIDParam} AND c.PlotCensusNumber = ${censusPCNParam}
+      WHERE p.PlotID = ? AND c.PlotCensusNumber = ?
       GROUP BY 
           cm.CoreMeasurementID;
     `;

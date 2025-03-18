@@ -53,7 +53,7 @@ export async function GET(
         break;
       case 'failedmeasurements':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} fm
-          JOIN census c ON fm.CensusID = c.CensusID
+          JOIN ${schema}.census c ON fm.CensusID = c.CensusID
           WHERE fm.PlotID = ? 
           AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
@@ -63,7 +63,6 @@ export async function GET(
       case 'stems':
       case 'alltaxonomiesview':
       case 'quadratpersonnel':
-      case 'sitespecificvalidations':
       case 'roles':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
@@ -121,6 +120,7 @@ export async function GET(
       throw new Error('Mismatch between query placeholders and parameters');
     }
     const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
+    if (params.dataType === 'failedmeasurements') console.log('paginated results: ', paginatedResults);
 
     const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
     const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
@@ -241,9 +241,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     // Handle non-view table updates
     else {
       if (params.dataType === 'measurementssummary') {
-        console.log('params datatype is ', params.dataType);
         const updatedFields = getUpdatedValues(oldRow, newRow);
-        console.log('updated fields: ', updatedFields);
         const { coreMeasurementID, quadratID, treeID, stemID, speciesID } = newRow;
 
         const fieldGroups = {
@@ -317,7 +315,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         }
       } else {
         // special handling need not apply to non-measurements tables
+        console.log('new row: ', newRow);
         const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
+        console.log('new row data: ', newRowData);
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
         // Construct the UPDATE query
