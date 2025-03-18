@@ -47,7 +47,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096 * 2;
+  const chunkSize = 4096 * 8;
   const connectionLimit = 50;
   const queue = new PQueue({ concurrency: connectionLimit });
 
@@ -288,7 +288,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               }
 
               parsingInvalidRows.forEach(row => {
-                updatedErrorRows[file.name][generateErrorRowId(row)] = row;
+                updatedErrorRows[file.name][generateErrorRowId(row)] = {
+                  plotID: String(currentPlot?.plotID ?? -1),
+                  censusID: String(currentCensus?.dateRanges[0].censusID ?? -1),
+                  tag: row.tag,
+                  stemTag: row.stemtag,
+                  spCode: row.spcode,
+                  quadrat: row.quadrat,
+                  x: row.lx,
+                  y: row.ly,
+                  dbh: row.dbh,
+                  hom: row.hom,
+                  date: moment(row.date).format('YYYY-MM-DD'),
+                  codes: row.codes
+                };
+                console.log('updated row: ', updatedErrorRows[file.name][generateErrorRowId(row)]);
               });
 
               return updatedErrorRows;
@@ -425,6 +439,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   useEffect(() => {
     if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
       queue.clear();
+
       async function runProcessBatches() {
         setProcessedChunks(0);
         setChunkProcessStartTime(performance.now());

@@ -29,7 +29,6 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import UploadIcon from '@mui/icons-material/Upload';
 import Box from '@mui/joy/Box';
 import {
   Button,
@@ -38,13 +37,9 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Dropdown,
   FormLabel,
   IconButton,
   Input,
-  Menu,
-  MenuButton,
-  MenuItem,
   Modal,
   ModalDialog,
   Skeleton,
@@ -82,7 +77,6 @@ import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import { ClearIcon } from '@mui/x-date-pickers';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
-import ValidationModal from '@/components/client/validationmodal';
 import { InputChip, MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
 import ValidationOverrideModal from '@/components/client/validationoverridemodal';
@@ -93,7 +87,8 @@ import GridOnIcon from '@mui/icons-material/GridOn';
 import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
-import { v4 } from 'uuid';
+import ValidationCore from '@/components/client/validationcore';
+import { CloudSync, GppGoodOutlined, SettingsBackupRestoreRounded } from '@mui/icons-material';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -199,9 +194,6 @@ const EditToolbar = (props: EditToolbarProps) => {
     .filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
     .map(column => column.field);
 
-  const uploadButton = dynamicButtons.find((button: any) => button.label === 'Upload');
-  const otherButtons = dynamicButtons.filter((button: any) => button.label !== 'Upload');
-
   return (
     <>
       <GridToolbarContainer>
@@ -241,50 +233,57 @@ const EditToolbar = (props: EditToolbarProps) => {
                 </Tooltip>
               </Box>
             </Tooltip>
-            <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
+            <Button
+              color={'primary'}
+              variant={'plain'}
+              startDecorator={<RefreshIcon />}
+              onClick={async () => await handleRefresh()}
+              sx={{
+                margin: 1
+              }}
+            >
               Refresh
             </Button>
-            <Button
-              variant={'plain'}
-              color={'primary'}
-              endDecorator={
-                <CloudDownloadIcon
-                  sx={{
-                    fontSize: '1.5rem',
-                    verticalAlign: 'middle'
-                  }}
-                />
-              }
-              onClick={() => setOpenExportModal(true)}
-            >
-              Export as CSV...
-            </Button>
-            {uploadButton && (
-              <Tooltip title={uploadButton.tooltip} placement="bottom">
-                <Button variant="plain" color="primary" onClick={uploadButton.onClick} startDecorator={<UploadIcon />}>
-                  {uploadButton.label}
-                </Button>
+            <Stack direction={'row'} spacing={2} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+              <Tooltip title={'Export as CSV'} placement="top" arrow>
+                <IconButton
+                  variant={'soft'}
+                  color={'primary'}
+                  onClick={() => setOpenExportModal(true)}
+                  sx={theme => ({
+                    width: theme.spacing(5),
+                    height: theme.spacing(5),
+                    padding: 0
+                  })}
+                >
+                  <CloudDownloadIcon />
+                </IconButton>
               </Tooltip>
-            )}
-            <Stack direction={'row'} spacing={2}>
-              <Dropdown>
-                <MenuButton>Other</MenuButton>
-                <Menu key={v4()}>
-                  {otherButtons.map((button: any, index: number) =>
-                    button.tooltip ? (
-                      <Tooltip key={index} title={button.tooltip} placement="left" arrow>
-                        <MenuItem onClick={button.onClick} variant="soft" color="primary">
+              {dynamicButtons.map(
+                (button: any, index: number) =>
+                  button.tooltip && (
+                    <Tooltip key={index} title={button.tooltip} placement="top" arrow color={'primary'} size={'lg'} variant={'solid'}>
+                      {button.icon ? (
+                        <IconButton
+                          onClick={button.onClick}
+                          variant="soft"
+                          color="primary"
+                          sx={theme => ({
+                            width: theme.spacing(5),
+                            height: theme.spacing(5),
+                            padding: 0
+                          })}
+                        >
+                          {button.icon}
+                        </IconButton>
+                      ) : (
+                        <Button onClick={button.onClick} variant="soft" color="primary">
                           {button.label}
-                        </MenuItem>
-                      </Tooltip>
-                    ) : (
-                      <MenuItem key={index} onClick={button.onClick} variant="soft" color="primary">
-                        {button.label}
-                      </MenuItem>
-                    )
-                  )}
-                </Menu>
-              </Dropdown>
+                        </Button>
+                      )}
+                    </Tooltip>
+                  )
+              )}
             </Stack>
           </Box>
         </Box>
@@ -578,6 +577,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }, [showErrorRows, showValidRows, showPendingRows]);
 
   useEffect(() => {
+    console.log('current census: ', JSON.stringify(currentCensus));
     if (refresh) {
       runFetchPaginated().then(() => setRefresh(false));
     }
@@ -1229,7 +1229,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       width: 50,
       filterable: false,
       renderCell: (params: GridCellParams) => {
-        console.log(params.row);
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
           const validationStrings =
             validationErrors[Number(params.row.coreMeasurementID)]?.errors.map(errorDetail => {
@@ -1607,13 +1606,19 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                 gridColumns: gridColumns,
                 dynamicButtons: [
                   ...dynamicButtons,
-                  { label: 'Run Validations', onClick: () => setIsValidationModalOpen(true) },
-                  ...(errorCount !== null && errorCount > 0
-                    ? [{ label: 'Override Failed Validations?', onClick: () => setIsValidationOverrideModalOpen(true) }]
-                    : []),
-                  ...((errorCount !== null && errorCount > 0) || (validCount !== null && validCount > 0)
-                    ? [{ label: 'Reset Validation Results?', onClick: () => setIsResetValidationModalOpen(true) }]
-                    : [])
+                  { label: 'Run Validations', tooltip: 'Re-trigger validation queries', onClick: () => setIsValidationModalOpen(true), icon: <CloudSync /> },
+                  {
+                    label: 'Override Failed Validations?',
+                    tooltip: 'Forcibly update all validation results to PASSED',
+                    onClick: () => setIsValidationOverrideModalOpen(true),
+                    icon: <GppGoodOutlined />
+                  },
+                  {
+                    label: 'Reset Validation Results?',
+                    tooltip: 'Delete all validation results and set all rows to PENDING',
+                    onClick: () => setIsResetValidationModalOpen(true),
+                    icon: <SettingsBackupRestoreRounded />
+                  }
                 ]
               } as EditToolbarProps
             }}
@@ -1646,10 +1651,22 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           />
         )}
         {isValidationModalOpen && (
-          <ValidationModal
-            isValidationModalOpen={isValidationModalOpen}
-            handleCloseValidationModal={async () => await handleCloseModal(setIsValidationModalOpen)}
-          />
+          <Modal open={isValidationModalOpen} onClose={async () => await handleCloseModal(setIsValidationModalOpen)}>
+            <ModalDialog
+              sx={{
+                width: '80%',
+                borderRadius: 'md',
+                p: 2,
+                boxShadow: 'lg',
+                display: 'flex',
+                flex: 1,
+                flexDirection: 'column',
+                alignItems: 'center'
+              }}
+            >
+              <ValidationCore onValidationComplete={() => handleCloseModal(setIsValidationModalOpen)} />
+            </ModalDialog>
+          </Modal>
         )}
         {isValidationOverrideModalOpen && (
           <ValidationOverrideModal
