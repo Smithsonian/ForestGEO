@@ -134,9 +134,13 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   }
 
   private detransformSpecialCases(key: string): string {
+    if (key === 'MeasuredDBH') return 'measuredDBH';
+    if (key === 'MeasuredHOM') return 'measuredHOM';
     return (
       key
         // Add reverse transformation for ValidCode
+        .replace(/DBH/gi, 'dbh')
+        .replace(/HOM/gi, 'hom')
         .replace(/IDLevel/gi, 'idLevel')
         .replace(/ValidCode/gi, 'validCode')
         .replace(/DefaultDBHUnits/gi, 'defaultDBHUnits')

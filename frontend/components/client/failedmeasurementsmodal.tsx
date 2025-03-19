@@ -1,17 +1,16 @@
 'use client';
 
-import { Dispatch, SetStateAction } from 'react';
 import { Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Typography } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 interface FailedMeasurementsModalProps {
   open: boolean;
-  setOpen: Dispatch<SetStateAction<boolean>>;
+  handleCloseModal: () => Promise<void>;
 }
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
-  const { open, setOpen } = props;
+  const { open, handleCloseModal } = props;
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -24,10 +23,11 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
         params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
       })
     });
+    await handleCloseModal();
   }
 
   return (
-    <Modal open={open} onClose={() => setOpen(false)}>
+    <Modal open={open} onClose={handleCloseModal}>
       <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog">
         <DialogTitle>Failed Measurements</DialogTitle>
         <DialogContent>
@@ -41,7 +41,7 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
           <Button variant="solid" color="primary" onClick={resubmitRows}>
             Resubmit Rows
           </Button>
-          <Button variant={'soft'} color={'danger'}>
+          <Button variant={'soft'} color={'danger'} onClick={handleCloseModal}>
             Close Modal
           </Button>
         </DialogActions>

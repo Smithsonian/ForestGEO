@@ -216,6 +216,7 @@ export interface IsolatedDataGridCommonProps {
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
   onDataUpdate?: () => void; // Add the onDataUpdate prop
   clusters?: Record<string, string[]>;
+  defaultHideEmpty?: boolean;
 }
 
 export interface DataGridCommonProps {

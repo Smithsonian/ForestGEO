@@ -52,7 +52,7 @@ export async function GET(
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'failedmeasurements':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} fm
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS fm.* FROM ${schema}.${params.dataType} fm
           JOIN ${schema}.census c ON fm.CensusID = c.CensusID
           WHERE fm.PlotID = ? 
           AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
@@ -120,7 +120,6 @@ export async function GET(
       throw new Error('Mismatch between query placeholders and parameters');
     }
     const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
-    if (params.dataType === 'failedmeasurements') console.log('paginated results: ', paginatedResults);
 
     const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
     const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
@@ -187,10 +186,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
     else {
       delete newRowData[demappedGridID];
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
-      const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+      let insertQuery = '';
+      if (params.dataType === 'failedmeasurements') insertQuery = format('INSERT IGNORE INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
+      else insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       const results = await connectionManager.executeQuery(insertQuery);
       insertIDs = { [params.dataType]: results.insertId }; // Standardize output with table name as key
-
       // special handling needed for quadrats --> need to correlate incoming quadrats with current census
       if (params.dataType === 'quadrats' && censusID) {
         const cqQuery = format('INSERT INTO ?? SET ?', [`${schema}.censusquadrats`, { CensusID: censusID, QuadratID: insertIDs.quadrats }]);
@@ -267,7 +267,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             },
             {} as Partial<typeof updatedFields>
           );
-          console.log(`matching fields for group name ${groupName}: `, matchingFields);
 
           if (Object.keys(matchingFields).length > 0) {
             changesFound = true;
@@ -283,9 +282,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
               }
             }
             const demappedData = MapperFactory.getMapper<any, any>(groupName).demapData([matchingFields])[0];
-            console.log('demapped data: ', JSON.stringify(demappedData));
             const query = format('UPDATE ?? SET ? WHERE ?? = ?', [`${schema}.${tableName}`, demappedData, idColumn, idValue]);
-            console.log('update query: ', query);
             await connectionManager.executeQuery(query);
           }
         };
@@ -299,7 +296,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         // Reset validation status and clear errors if changes were made
         if (changesFound) {
-          console.log('changes were found. resetting validation/clearing cmverrors');
           const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
             `${schema}.coremeasurements`,
             'IsValidated',
@@ -307,17 +303,13 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
             'CoreMeasurementID',
             coreMeasurementID
           ]);
-          console.log('reset validation query: ', resetValidationQuery);
           const deleteErrorsQuery = `DELETE FROM ${schema}.cmverrors WHERE CoreMeasurementID = ${coreMeasurementID}`;
-          console.log('delete cmverrors query: ', deleteErrorsQuery);
           await connectionManager.executeQuery(resetValidationQuery);
           await connectionManager.executeQuery(deleteErrorsQuery);
         }
       } else {
         // special handling need not apply to non-measurements tables
-        console.log('new row: ', newRow);
         const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-        console.log('new row data: ', newRowData);
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
         // Construct the UPDATE query

@@ -38,7 +38,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [completedChunks, setCompletedChunks] = useState<number>(0);
   const [processedChunks, setProcessedChunks] = useState<number>(0);
   const [failedRows, setFailedRows] = useState<{ [fileName: string]: Set<FileRow> }>({});
-  const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [etc, setETC] = useState('');
   const [processETC, setProcessETC] = useState('');
   const [chunkStartTime, setChunkStartTime] = useState<number>(0);
@@ -397,28 +396,28 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           await parseFileInChunks(file as File, delimiter);
 
           // If measurements, handle failed rows for this file.
-          if (uploadForm === FormType.measurements && Object.values(failedRows[file.name] || {}).length > 0) {
-            const batchID = v4();
-            const rows = Object.values(failedRows[file.name] || []);
-            const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-            const values = rows.flatMap(row => {
-              const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
-              return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
-            });
-            const insertSQL = `INSERT INTO ${schema}.failedmeasurements 
-              (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
-              VALUES ${placeholders}`;
-            await fetch(`/api/formatrunquery`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ query: insertSQL, params: values })
-            });
-            // Remove submitted rows.
-            setFailedRows(prev => {
-              const { [file.name]: removed, ...rest } = prev;
-              return rest;
-            });
-          }
+          // if (uploadForm === FormType.measurements && Object.values(failedRows[file.name] || {}).length > 0) {
+          //   const batchID = v4();
+          //   const rows = Object.values(failedRows[file.name] || []);
+          //   const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+          //   const values = rows.flatMap(row => {
+          //     const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+          //     return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
+          //   });
+          //   const insertSQL = `INSERT INTO ${schema}.failedmeasurements
+          //     (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
+          //     VALUES ${placeholders}`;
+          //   await fetch(`/api/formatrunquery`, {
+          //     method: 'POST',
+          //     headers: { 'Content-Type': 'application/json' },
+          //     body: JSON.stringify({ query: insertSQL, params: values })
+          //   });
+          //   // Remove submitted rows.
+          //   setFailedRows(prev => {
+          //     const { [file.name]: removed, ...rest } = prev;
+          //     return rest;
+          //   });
+          // }
           setCompletedOperations(prev => prev + 1);
         }
         await queue.onIdle();
