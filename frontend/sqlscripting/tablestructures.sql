@@ -6,9 +6,32 @@ create table if not exists attributes
     Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
-create index idx_attributes_codes on attributes (Code);
-create index idx_attributes_description on attributes (Description);
-create index idx_attributes_status on attributes (Status);
+create index idx_attributes_codes
+    on attributes (Code);
+
+create index idx_attributes_description
+    on attributes (Description);
+
+create index idx_attributes_status
+    on attributes (Status);
+
+create table if not exists failedmeasurements
+(
+    FailedMeasurementID int auto_increment
+        primary key,
+    PlotID              int            null,
+    CensusID            int            null,
+    Tag                 varchar(255)   null,
+    StemTag             varchar(255)   null,
+    SpCode              varchar(255)   null,
+    Quadrat             varchar(255)   null,
+    X                   decimal(10, 6) null,
+    Y                   decimal(10, 6) null,
+    DBH                 decimal(10, 6) null,
+    HOM                 decimal(10, 6) null,
+    Date                date           null,
+    Codes               varchar(255)   null
+);
 
 create table if not exists measurementssummary
 (
@@ -27,7 +50,7 @@ create table if not exists measurementssummary
     StemLocalX        decimal(10, 6)   null,
     StemLocalY        decimal(10, 6)   null,
     QuadratName       varchar(255)     null,
-    MeasurementDate   date             null,
+    MeasurementDate   date             not null,
     MeasuredDBH       decimal(10, 6)   null,
     MeasuredHOM       decimal(10, 6)   null,
     IsValidated       bit default b'0' null,
@@ -38,27 +61,68 @@ create table if not exists measurementssummary
     primary key (CoreMeasurementID, StemID, TreeID, SpeciesID, QuadratID, PlotID, CensusID)
 );
 
-CREATE INDEX idx_coremeasurementid ON measurementssummary (CoreMeasurementID);
-CREATE INDEX idx_stemid ON measurementssummary (StemID);
-CREATE INDEX idx_treeid ON measurementssummary (TreeID);
-CREATE INDEX idx_speciesid ON measurementssummary (SpeciesID);
-CREATE INDEX idx_quadratid ON measurementssummary (QuadratID);
-CREATE INDEX idx_plotid ON measurementssummary (PlotID);
-CREATE INDEX idx_censusid ON measurementssummary (CensusID);
-CREATE INDEX idx_speciesname ON measurementssummary (SpeciesName);
-CREATE INDEX idx_subspeciesname ON measurementssummary (SubspeciesName);
-CREATE INDEX idx_speciescode ON measurementssummary (SpeciesCode);
-CREATE INDEX idx_treetag ON measurementssummary (TreeTag);
-CREATE INDEX idx_stemtag ON measurementssummary (StemTag);
-CREATE INDEX idx_stemlocalx ON measurementssummary (StemLocalX);
-CREATE INDEX idx_stemlocaly ON measurementssummary (StemLocalY);
-CREATE INDEX idx_quadratname ON measurementssummary (QuadratName);
-CREATE INDEX idx_measurementdate ON measurementssummary (MeasurementDate);
-CREATE INDEX idx_measureddbh ON measurementssummary (MeasuredDBH);
-CREATE INDEX idx_measuredhom ON measurementssummary (MeasuredHOM);
-CREATE INDEX idx_isvalidated ON measurementssummary (IsValidated);
-CREATE INDEX idx_description ON measurementssummary (Description);
-CREATE INDEX idx_attributes ON measurementssummary (Attributes);
+create index idx_attributes
+    on measurementssummary (Attributes);
+
+create index idx_censusid
+    on measurementssummary (CensusID);
+
+create index idx_coremeasurementid
+    on measurementssummary (CoreMeasurementID);
+
+create index idx_description
+    on measurementssummary (Description);
+
+create index idx_isvalidated
+    on measurementssummary (IsValidated);
+
+create index idx_measureddbh
+    on measurementssummary (MeasuredDBH);
+
+create index idx_measuredhom
+    on measurementssummary (MeasuredHOM);
+
+create index idx_measurementdate
+    on measurementssummary (MeasurementDate);
+
+create index idx_plotid
+    on measurementssummary (PlotID);
+
+create index idx_quadratid
+    on measurementssummary (QuadratID);
+
+create index idx_quadratname
+    on measurementssummary (QuadratName);
+
+create index idx_speciescode
+    on measurementssummary (SpeciesCode);
+
+create index idx_speciesid
+    on measurementssummary (SpeciesID);
+
+create index idx_speciesname
+    on measurementssummary (SpeciesName);
+
+create index idx_stemid
+    on measurementssummary (StemID);
+
+create index idx_stemlocalx
+    on measurementssummary (StemLocalX);
+
+create index idx_stemlocaly
+    on measurementssummary (StemLocalY);
+
+create index idx_stemtag
+    on measurementssummary (StemTag);
+
+create index idx_subspeciesname
+    on measurementssummary (SubspeciesName);
+
+create index idx_treeid
+    on measurementssummary (TreeID);
+
+create index idx_treetag
+    on measurementssummary (TreeTag);
 
 create table if not exists plots
 (
@@ -82,24 +146,6 @@ create table if not exists plots
     DefaultHOMUnits        enum ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm')        default 'm'  not null
 );
 
-CREATE INDEX idx_plotname ON plots (PlotName);
-CREATE INDEX idx_locationname ON plots (LocationName);
-CREATE INDEX idx_countryname ON plots (CountryName);
-CREATE INDEX idx_dimensionx ON plots (DimensionX);
-CREATE INDEX idx_dimensiony ON plots (DimensionY);
-CREATE INDEX idx_area ON plots (Area);
-CREATE INDEX idx_globalx ON plots (GlobalX);
-CREATE INDEX idx_globaly ON plots (GlobalY);
-CREATE INDEX idx_globalz ON plots (GlobalZ);
-CREATE INDEX idx_plotshape ON plots (PlotShape);
-CREATE INDEX idx_plotdescription ON plots (PlotDescription);
-CREATE INDEX idx_defaultdimensionunits ON plots (DefaultDimensionUnits);
-CREATE INDEX idx_defaultcoordinateunits ON plots (DefaultCoordinateUnits);
-CREATE INDEX idx_defaultareaunits ON plots (DefaultAreaUnits);
-CREATE INDEX idx_defaultdbhunits ON plots (DefaultDBHUnits);
-CREATE INDEX idx_defaulthomunits ON plots (DefaultHOMUNits);
-
-
 create table if not exists census
 (
     CensusID         int auto_increment
@@ -113,11 +159,102 @@ create table if not exists census
         foreign key (PlotID) references plots (PlotID)
 );
 
-CREATE INDEX idx_plotid ON census (PlotID);
-CREATE INDEX idx_startdate ON census (StartDate);
-CREATE INDEX idx_enddate ON census (EndDate);
-CREATE INDEX idx_description ON census (Description);
-CREATE INDEX idx_plotcensusnumber ON census (PlotCensusNumber);
+create index idx_description
+    on census (Description);
+
+create index idx_enddate
+    on census (EndDate);
+
+create index idx_plotcensusnumber
+    on census (PlotCensusNumber);
+
+create index idx_plotid
+    on census (PlotID);
+
+create index idx_startdate
+    on census (StartDate);
+
+create index idx_area
+    on plots (Area);
+
+create index idx_countryname
+    on plots (CountryName);
+
+create index idx_defaultareaunits
+    on plots (DefaultAreaUnits);
+
+create index idx_defaultcoordinateunits
+    on plots (DefaultCoordinateUnits);
+
+create index idx_defaultdbhunits
+    on plots (DefaultDBHUnits);
+
+create index idx_defaultdimensionunits
+    on plots (DefaultDimensionUnits);
+
+create index idx_defaulthomunits
+    on plots (DefaultHOMUnits);
+
+create index idx_dimensionx
+    on plots (DimensionX);
+
+create index idx_dimensiony
+    on plots (DimensionY);
+
+create index idx_globalx
+    on plots (GlobalX);
+
+create index idx_globaly
+    on plots (GlobalY);
+
+create index idx_globalz
+    on plots (GlobalZ);
+
+create index idx_locationname
+    on plots (LocationName);
+
+create index idx_plotdescription
+    on plots (PlotDescription);
+
+create index idx_plotname
+    on plots (PlotName);
+
+create index idx_plotshape
+    on plots (PlotShape);
+
+create table if not exists postvalidationqueries
+(
+    QueryID         int auto_increment
+        primary key,
+    QueryName       varchar(255)                null,
+    QueryDefinition text                        null,
+    Description     text                        null,
+    IsEnabled       bit default b'0'            not null,
+    LastRunAt       datetime                    null,
+    LastRunResult   longtext                    null,
+    LastRunStatus   enum ('success', 'failure') null
+);
+
+create index idx_description
+    on postvalidationqueries (Description(255));
+
+create index idx_isenabled
+    on postvalidationqueries (IsEnabled);
+
+create index idx_lastrunat
+    on postvalidationqueries (LastRunAt);
+
+create index idx_lastrunresult
+    on postvalidationqueries (LastRunResult(255));
+
+create index idx_lastrunstatus
+    on postvalidationqueries (LastRunStatus);
+
+create index idx_querydefinition
+    on postvalidationqueries (QueryDefinition(255));
+
+create index idx_queryname
+    on postvalidationqueries (QueryName);
 
 create table if not exists quadrats
 (
@@ -137,26 +274,43 @@ create table if not exists quadrats
         foreign key (PlotID) references plots (PlotID)
 );
 
-CREATE INDEX idx_plotid ON quadrats (PlotID);
-CREATE INDEX idx_quadratname ON quadrats (QuadratName);
-CREATE INDEX idx_startx ON quadrats (StartX);
-CREATE INDEX idx_starty ON quadrats (StartY);
-CREATE INDEX idx_dimensionx ON quadrats (DimensionX);
-CREATE INDEX idx_dimensiony ON quadrats (DimensionY);
-CREATE INDEX idx_area ON quadrats (Area);
-CREATE INDEX idx_quadratshape ON quadrats (QuadratShape);
-
 create table if not exists censusquadrat
 (
-    CQID      int auto_increment primary key,
+    CQID      int auto_increment
+        primary key,
     CensusID  int null,
     QuadratID int null,
+    constraint CensusID
+        unique (CensusID, QuadratID),
     constraint cq_census_censusid_fk
         foreign key (CensusID) references census (CensusID),
     constraint cq_quadrats_quadratid_fk
-        foreign key (QuadratID) references quadrats (QuadratID),
-    UNIQUE (CensusID, QuadratID)
+        foreign key (QuadratID) references quadrats (QuadratID)
 );
+
+create index idx_area
+    on quadrats (Area);
+
+create index idx_dimensionx
+    on quadrats (DimensionX);
+
+create index idx_dimensiony
+    on quadrats (DimensionY);
+
+create index idx_plotid
+    on quadrats (PlotID);
+
+create index idx_quadratname
+    on quadrats (QuadratName);
+
+create index idx_quadratshape
+    on quadrats (QuadratShape);
+
+create index idx_startx
+    on quadrats (StartX);
+
+create index idx_starty
+    on quadrats (StartY);
 
 create table if not exists reference
 (
@@ -167,11 +321,6 @@ create table if not exists reference
     DateOfPublication date         null,
     Citation          varchar(50)  null
 );
-
-CREATE INDEX idx_publicationtitle ON reference (PublicationTitle);
-CREATE INDEX idx_fullreference ON reference (FullReference);
-CREATE INDEX idx_dateofpublication ON reference (DateOfPublication);
-CREATE INDEX idx_citation ON reference (Citation);
 
 create table if not exists family
 (
@@ -185,8 +334,11 @@ create table if not exists family
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-CREATE INDEX idx_family ON family (Family);
-CREATE INDEX idx_referenceid ON family (ReferenceID);
+create index idx_family
+    on family (Family);
+
+create index idx_referenceid
+    on family (ReferenceID);
 
 create table if not exists genus
 (
@@ -204,10 +356,29 @@ create table if not exists genus
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-CREATE INDEX idx_familyid ON genus (FamilyID);
-CREATE INDEX idx_genus ON genus (Genus);
-CREATE INDEX idx_referenceid ON genus (ReferenceID);
-CREATE INDEX idx_genusauthority ON genus (GenusAuthority);
+create index idx_familyid
+    on genus (FamilyID);
+
+create index idx_genus
+    on genus (Genus);
+
+create index idx_genusauthority
+    on genus (GenusAuthority);
+
+create index idx_referenceid
+    on genus (ReferenceID);
+
+create index idx_citation
+    on reference (Citation);
+
+create index idx_dateofpublication
+    on reference (DateOfPublication);
+
+create index idx_fullreference
+    on reference (FullReference);
+
+create index idx_publicationtitle
+    on reference (PublicationTitle);
 
 create table if not exists roles
 (
@@ -218,9 +389,6 @@ create table if not exists roles
     constraint unique_roles
         unique (RoleName)
 );
-
-CREATE INDEX idx_rolename ON roles (RoleName);
-CREATE INDEX idx_roledescription ON roles (RoleDescription);
 
 create table if not exists personnel
 (
@@ -238,10 +406,17 @@ create table if not exists personnel
         foreign key (RoleID) references roles (RoleID)
 );
 
-CREATE INDEX idx_censusid ON personnel (CensusID);
-CREATE INDEX idx_firstname ON personnel (FirstName);
-CREATE INDEX idx_lastname ON personnel (LastName);
-CREATE INDEX idx_roleid ON personnel (RoleID);
+create index idx_censusid
+    on personnel (CensusID);
+
+create index idx_firstname
+    on personnel (FirstName);
+
+create index idx_lastname
+    on personnel (LastName);
+
+create index idx_roleid
+    on personnel (RoleID);
 
 create table if not exists quadratpersonnel
 (
@@ -258,22 +433,24 @@ create table if not exists quadratpersonnel
         foreign key (CensusID) references census (CensusID)
 );
 
+create index idx_roledescription
+    on roles (RoleDescription);
+
+create index idx_rolename
+    on roles (RoleName);
+
 create table if not exists sitespecificvalidations
 (
-    ValidationProcedureID int auto_increment
+    ValidationID        int auto_increment
         primary key,
-    Name                  varchar(255)     not null,
-    Definition            text             not null,
-    Description           varchar(255)     null,
-    Criteria              varchar(255)     null,
-    IsEnabled             bit default b'0' not null
-);
-
-CREATE INDEX idx_name ON sitespecificvalidations (Name);
-CREATE INDEX idx_definition ON sitespecificvalidations (Definition(255));
-CREATE INDEX idx_description ON sitespecificvalidations (Description);
-CREATE INDEX idx_criteria ON sitespecificvalidations (Criteria);
-CREATE INDEX idx_isenabled ON sitespecificvalidations (IsEnabled);
+    ProcedureName       varchar(255)     not null,
+    Description         text             null,
+    Criteria            varchar(255)     null,
+    Definition          text             null,
+    ChangelogDefinition text             null,
+    IsEnabled           bit default b'1' not null
+)
+    charset = utf8mb3;
 
 create table if not exists species
 (
@@ -292,23 +469,46 @@ create table if not exists species
     ReferenceID         int          null,
     constraint SpeciesCode
         unique (SpeciesCode, SpeciesName, SubspeciesName),
+    constraint species_SpeciesCode_uindex
+        unique (SpeciesCode),
     constraint Species_Genus_GenusID_fk
         foreign key (GenusID) references genus (GenusID),
     constraint Species_Reference_ReferenceID_fk
         foreign key (ReferenceID) references reference (ReferenceID)
 );
 
-CREATE INDEX idx_genusid ON species (GenusID);
-CREATE INDEX idx_speciescode ON species (SpeciesCode);
-CREATE INDEX idx_speciesname ON species (SpeciesName);
-CREATE INDEX idx_subspeciesname ON species (SubspeciesName);
-CREATE INDEX idx_idlevel ON species (IDLevel);
-CREATE INDEX idx_speciesauthority ON species (SpeciesAuthority);
-CREATE INDEX idx_subspeciesauthority ON species (SubspeciesAuthority);
-CREATE INDEX idx_fieldfamily ON species (FieldFamily);
-CREATE INDEX idx_description ON species (Description);
-CREATE INDEX idx_validcode ON species (ValidCode);
-CREATE INDEX idx_referenceid ON species (ReferenceID);
+create index idx_description
+    on species (Description);
+
+create index idx_fieldfamily
+    on species (FieldFamily);
+
+create index idx_genusid
+    on species (GenusID);
+
+create index idx_idlevel
+    on species (IDLevel);
+
+create index idx_referenceid
+    on species (ReferenceID);
+
+create index idx_speciesauthority
+    on species (SpeciesAuthority);
+
+create index idx_speciescode
+    on species (SpeciesCode);
+
+create index idx_speciesname
+    on species (SpeciesName);
+
+create index idx_subspeciesauthority
+    on species (SubspeciesAuthority);
+
+create index idx_subspeciesname
+    on species (SubspeciesName);
+
+create index idx_validcode
+    on species (ValidCode);
 
 create table if not exists specieslimits
 (
@@ -328,10 +528,53 @@ create table if not exists specieslimits
         foreign key (SpeciesID) references species (SpeciesID)
 );
 
-create index idx_limittype on specieslimits (LimitType);
-create index idx_lowerbound on specieslimits (LowerBound);
-create index idx_speciesid on specieslimits (SpeciesID);
-create index idx_upperbound on specieslimits (UpperBound);
+create index idx_limittype
+    on specieslimits (LimitType);
+
+create index idx_lowerbound
+    on specieslimits (LowerBound);
+
+create index idx_speciesid
+    on specieslimits (SpeciesID);
+
+create index idx_upperbound
+    on specieslimits (UpperBound);
+
+create table if not exists temporarymeasurements
+(
+    id              bigint unsigned auto_increment
+        primary key,
+    FileID          varchar(36)                         null,
+    BatchID         varchar(36)                         not null,
+    PlotID          int                                 null,
+    CensusID        int                                 null,
+    TreeTag         varchar(10)                         null,
+    StemTag         varchar(10)                         null,
+    SpeciesCode     varchar(25)                         null,
+    QuadratName     varchar(255)                        null,
+    LocalX          decimal(10, 6)                      null,
+    LocalY          decimal(10, 6)                      null,
+    DBH             decimal(10, 6)                      null,
+    HOM             decimal(10, 6)                      null,
+    MeasurementDate date                                null,
+    Codes           varchar(255)                        null,
+    UploadedAt      timestamp default CURRENT_TIMESTAMP null
+);
+
+create index ingest_temporarymeasurements_FBPC_index
+    on temporarymeasurements (FileID, BatchID, PlotID, CensusID);
+
+create index ingest_temporarymeasurements_batchID_index
+    on temporarymeasurements (BatchID);
+
+create index temporarymeasurements_FileID_BatchID_index
+    on temporarymeasurements (FileID, BatchID);
+
+create index temporarymeasurements_FileID_index
+    on temporarymeasurements (FileID);
+
+create index temporarymeasurements_TreeTag_index
+    on temporarymeasurements (TreeTag);
 
 create table if not exists trees
 (
@@ -339,14 +582,11 @@ create table if not exists trees
         primary key,
     TreeTag   varchar(10) null,
     SpeciesID int         null,
-    constraint TreeTag
+    constraint trees_TreeTag_uindex
         unique (TreeTag),
     constraint Trees_Species_SpeciesID_fk
         foreign key (SpeciesID) references species (SpeciesID)
 );
-
-CREATE INDEX idx_treetag ON trees (TreeTag);
-CREATE INDEX idx_speciesid ON trees (SpeciesID);
 
 create table if not exists stems
 (
@@ -360,24 +600,17 @@ create table if not exists stems
     LocalY          decimal(10, 6) null,
     Moved           bit            null,
     StemDescription varchar(255)   null,
+    constraint stems_StemTag_uindex
+        unique (StemTag),
+    constraint unique_stem_coordinates
+        unique (StemTag, TreeID, QuadratID, LocalX, LocalY),
+    constraint unique_stem_per_tree_quadrat
+        unique (StemTag, TreeID, QuadratID),
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID),
     constraint stems_quadrats_QuadratID_fk
-        foreign key (QuadratID) references quadrats (QuadratID),
-    constraint unique_stem_per_tree_quadrat
-        unique (StemTag, TreeID, QuadratID),
-    constraint unique_stem_coordinates
-        unique (StemTag, TreeID, QuadratID, LocalX, LocalY)
+        foreign key (QuadratID) references quadrats (QuadratID)
 );
-
-CREATE INDEX idx_treeid ON stems (TreeID);
-CREATE INDEX idx_quadratid ON stems (QuadratID);
-CREATE INDEX idx_stemnumber ON stems (StemNumber);
-CREATE INDEX idx_stemtag ON stems (StemTag);
-CREATE INDEX idx_localx ON stems (LocalX);
-CREATE INDEX idx_localy ON stems (LocalY);
-CREATE INDEX idx_moved ON stems (Moved);
-CREATE INDEX idx_stemdescription ON stems (StemDescription);
 
 create table if not exists coremeasurements
 (
@@ -391,21 +624,13 @@ create table if not exists coremeasurements
     MeasuredHOM       decimal(10, 6)   null,
     Description       varchar(255)     null,
     UserDefinedFields json             null,
+    constraint coremeasurements_MeasurementDate_Description_uindex
+        unique (StemID, CensusID, MeasuredDBH, MeasuredHOM, MeasurementDate),
     constraint FK_CoreMeasurements_Stems
         foreign key (StemID) references stems (StemID),
     constraint coremeasurements_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID),
-    constraint unique_measurements
-        unique (CensusID, StemID, MeasuredDBH, MeasuredHOM)
+        foreign key (CensusID) references census (CensusID)
 );
-
-CREATE INDEX idx_censusid ON coremeasurements (CensusID);
-CREATE INDEX idx_stemid ON coremeasurements (StemID);
-CREATE INDEX idx_isvalidated ON coremeasurements (IsValidated);
-CREATE INDEX idx_measurementdate ON coremeasurements (MeasurementDate);
-CREATE INDEX idx_measureddbh ON coremeasurements (MeasuredDBH);
-CREATE INDEX idx_measuredhom ON coremeasurements (MeasuredHOM);
-CREATE INDEX idx_description ON coremeasurements (Description);
 
 create table if not exists cmattributes
 (
@@ -413,12 +638,12 @@ create table if not exists cmattributes
         primary key,
     CoreMeasurementID int         null,
     Code              varchar(10) null,
+    constraint unique_cm_attribute
+        unique (CoreMeasurementID, Code),
     constraint CMAttributes_Attributes_Code_fk
         foreign key (Code) references attributes (Code),
     constraint CMAttributes_CoreMeasurements_CoreMeasurementID_fk
-        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID),
-    constraint unique_cm_attribute
-        unique (CoreMeasurementID, Code)
+        foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID)
 );
 
 create table if not exists cmverrors
@@ -427,13 +652,34 @@ create table if not exists cmverrors
         primary key,
     CoreMeasurementID int null,
     ValidationErrorID int null,
+    constraint unique_cmverrors_cm_valerror
+        unique (CoreMeasurementID, ValidationErrorID),
     constraint cmverrors_coremeasurements_CoreMeasurementID_fk
         foreign key (CoreMeasurementID) references coremeasurements (CoreMeasurementID),
-    constraint cmverrors_validationprocedures_ValidationID_fk
-        foreign key (ValidationErrorID) references catalog.validationprocedures (ValidationID),
-    constraint unique_cmverrors_cm_valerror
-        unique (CoreMeasurementID, ValidationErrorID)
+    constraint cmverrors_sitespecificvalidations_ValidationID_fk
+        foreign key (ValidationErrorID) references sitespecificvalidations (ValidationID)
 );
+
+create index idx_censusid
+    on coremeasurements (CensusID);
+
+create index idx_description
+    on coremeasurements (Description);
+
+create index idx_isvalidated
+    on coremeasurements (IsValidated);
+
+create index idx_measureddbh
+    on coremeasurements (MeasuredDBH);
+
+create index idx_measuredhom
+    on coremeasurements (MeasuredHOM);
+
+create index idx_measurementdate
+    on coremeasurements (MeasurementDate);
+
+create index idx_stemid
+    on coremeasurements (StemID);
 
 create table if not exists specimens
 (
@@ -454,6 +700,36 @@ create table if not exists specimens
         foreign key (StemID) references stems (StemID)
 );
 
+create index idx_localx
+    on stems (LocalX);
+
+create index idx_localy
+    on stems (LocalY);
+
+create index idx_moved
+    on stems (Moved);
+
+create index idx_quadratid
+    on stems (QuadratID);
+
+create index idx_stemdescription
+    on stems (StemDescription);
+
+create index idx_stemnumber
+    on stems (StemNumber);
+
+create index idx_stemtag
+    on stems (StemTag);
+
+create index idx_treeid
+    on stems (TreeID);
+
+create index idx_speciesid
+    on trees (SpeciesID);
+
+create index trees_TreeTag_index
+    on trees (TreeTag);
+
 create table if not exists unifiedchangelog
 (
     ChangeID        int auto_increment,
@@ -470,13 +746,26 @@ create table if not exists unifiedchangelog
 )
     partition by key (`TableName`) partitions 24;
 
-CREATE INDEX idx_tablename ON unifiedchangelog (TableName);
-CREATE INDEX idx_recordid ON unifiedchangelog (RecordID);
-CREATE INDEX idx_operation ON unifiedchangelog (Operation);
-CREATE INDEX idx_changetimestamp ON unifiedchangelog (ChangeTimestamp);
-CREATE INDEX idx_changedby ON unifiedchangelog (ChangedBy);
-CREATE INDEX idx_plotid ON unifiedchangelog (PlotID);
-CREATE INDEX idx_censusid ON unifiedchangelog (CensusID);
+create index idx_censusid
+    on unifiedchangelog (CensusID);
+
+create index idx_changedby
+    on unifiedchangelog (ChangedBy);
+
+create index idx_changetimestamp
+    on unifiedchangelog (ChangeTimestamp);
+
+create index idx_operation
+    on unifiedchangelog (Operation);
+
+create index idx_plotid
+    on unifiedchangelog (PlotID);
+
+create index idx_recordid
+    on unifiedchangelog (RecordID);
+
+create index idx_tablename
+    on unifiedchangelog (TableName);
 
 create table if not exists validationchangelog
 (
@@ -495,6 +784,7 @@ create table if not exists validationchangelog
 
 create table if not exists viewfulltable
 (
+    my_row_id                  bigint unsigned                                                     not null invisible primary key,
     CoreMeasurementID          int                                                                 null,
     MeasurementDate            date                                                                null,
     MeasuredDBH                decimal(10, 6)                                                      null,
@@ -552,39 +842,3 @@ create table if not exists viewfulltable
     UserDefinedFields          json                                                                null
 );
 
-create table if not exists postvalidationqueries
-(
-    QueryID         int auto_increment primary key,
-    QueryName       varchar(255)                null,
-    QueryDefinition text                        null,
-    Description     text                        null,
-    IsEnabled       bit default b'0'            not null,
-    LastRunAt       DATETIME                    NULL,
-    LastRunResult   LONGTEXT                    NULL,
-    LastRunStatus   ENUM ('success', 'failure') NULL
-);
-
-CREATE INDEX idx_queryname ON postvalidationqueries (QueryName);
-CREATE INDEX idx_querydefinition ON postvalidationqueries (QueryDefinition(255));
-CREATE INDEX idx_description ON postvalidationqueries (Description(255));
-CREATE INDEX idx_isenabled ON postvalidationqueries (IsEnabled);
-CREATE INDEX idx_lastrunat ON postvalidationqueries (LastRunAt);
-CREATE INDEX idx_lastrunresult ON postvalidationqueries (LastRunResult(255));
-CREATE INDEX idx_lastrunstatus ON postvalidationqueries (LastRunStatus);
-
-create table if not exists failedmeasurements
-(
-    FailedMeasurementID int auto_increment primary key,
-    PlotID              int            null,
-    CensusID            int            null,
-    Tag                 varchar(255)   null,
-    StemTag             varchar(255)   null,
-    SpCode              varchar(255)   null,
-    Quadrat             varchar(255)   null,
-    X                   decimal(10, 6) null,
-    Y                   decimal(10, 6) null,
-    DBH                 decimal(10, 6) null,
-    HOM                 decimal(10, 6) null,
-    Date                date           null,
-    Codes               varchar(255)   null
-);

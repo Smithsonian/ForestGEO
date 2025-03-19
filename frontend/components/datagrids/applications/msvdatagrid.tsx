@@ -136,7 +136,14 @@ export default function MeasurementsSummaryViewDataGrid() {
         }}
         formType={'measurements'}
       />
-      <FailedMeasurementsModal open={openFSM} setOpen={setOpenFSM} />
+      <FailedMeasurementsModal
+        open={openFSM}
+        handleCloseModal={async () => {
+          await reloadMSV();
+          setOpenFSM(false);
+          setOpenAlert(true);
+        }}
+      />
       <MeasurementsCommons
         gridType={'measurementssummary'}
         gridColumns={MeasurementsSummaryViewGridColumns}

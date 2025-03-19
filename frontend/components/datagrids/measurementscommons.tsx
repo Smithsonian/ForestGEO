@@ -1212,7 +1212,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             return acc;
           }, {})
         : {};
-      console.log('error map: ', errorMap);
       setValidationErrors(errorMap);
     } catch (error) {
       console.error('Error fetching validation errors:', error);

@@ -29,16 +29,15 @@ export default function IsolatedFailedMeasurementsDataGrid() {
   };
 
   return (
-    <>
-      <IsolatedDataGridCommons
-        gridType="failedmeasurements"
-        gridColumns={FailedMeasurementsGridColumns}
-        refresh={refresh}
-        setRefresh={setRefresh}
-        initialRow={initialFailedMeasurementsRow}
-        fieldToFocus={'tag'}
-        dynamicButtons={[]}
-      />
-    </>
+    <IsolatedDataGridCommons
+      gridType="failedmeasurements"
+      gridColumns={FailedMeasurementsGridColumns}
+      refresh={refresh}
+      setRefresh={setRefresh}
+      initialRow={initialFailedMeasurementsRow}
+      fieldToFocus={'tag'}
+      dynamicButtons={[]}
+      defaultHideEmpty={false} // override default true to false -- user should see any missing fields that need correcting
+    />
   );
 }
