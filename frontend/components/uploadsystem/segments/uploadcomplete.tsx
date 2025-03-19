@@ -3,7 +3,7 @@
 import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
 import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -21,6 +21,8 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
   const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
+
+  const hasRunRef = useRef(false);
 
   const { triggerRefresh } = useDataValidityContext();
 
@@ -114,6 +116,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     document.body.removeChild(link);
   };
   useEffect(() => {
+    if (hasRunRef.current) return;
+    hasRunRef.current = true;
+
     const runAsyncTasks = async () => {
       try {
         triggerRefresh();
@@ -126,11 +131,14 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           method: 'POST'
         });
         const flattened: FileRow[] = [];
+        console.log('error rows!! --> ', errorRows);
         for (const fileName in errorRows) {
           const fileRowSet = errorRows[fileName];
           Object.values(fileRowSet).forEach(row => flattened.push(row));
         }
+        console.log('flattened: ', flattened);
         for (const row of flattened) {
+          console.log('row in flattened: ', row);
           await fetch(
             createPostPatchQuery(
               currentSite?.schemaName ?? '',

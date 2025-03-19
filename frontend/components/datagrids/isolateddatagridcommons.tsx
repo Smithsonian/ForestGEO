@@ -73,6 +73,7 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import GridOnIcon from '@mui/icons-material/GridOn';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import Divider from '@mui/joy/Divider';
+import moment from 'moment/moment';
 
 const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) => {
   const {
@@ -351,7 +352,7 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
 };
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [] } = props;
+  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [], defaultHideEmpty = true } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -368,7 +369,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [usingQuery, setUsingQuery] = useState('');
-  const [hidingEmpty, setHidingEmpty] = useState(true);
+  const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
     actionType: '',
     actionId: null
@@ -394,6 +395,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   useSession();
 
   const apiRef = useGridApiRef();
+
+  useEffect(() => {
+    console.log('updated rows: ', rows);
+  }, [rows]);
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
@@ -959,6 +964,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     paginationModel: { page: number }
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
+    if ('date' in newRow) newRow.date = moment(newRow.date).format('YYYY-MM-DD');
     const fetchProcessQuery =
       gridType !== 'quadrats'
         ? createPostPatchQuery(schemaName ?? '', gridType, gridID)

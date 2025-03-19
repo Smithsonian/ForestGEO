@@ -317,6 +317,12 @@ export default function RolloverModal(props: RolloverModalProps) {
                 onChange={(_event, newValue) => {
                   const selected = censusValidationStatus.find(census => census.censusID === newValue) || defaultCVS;
                   if (selected === defaultCVS) setConfirmNoPersonnelRollover(false);
+                  if (selected.censusID === 0) {
+                    setConfirmNoPersonnelRollover(false);
+                    setRolloverPersonnel(false);
+                  } else {
+                    setRolloverPersonnel(true);
+                  }
                   setSelectedPersonnelCensus(selected);
                 }}
               >
@@ -371,7 +377,6 @@ export default function RolloverModal(props: RolloverModalProps) {
                               paginationModel: { pageSize: 5, page: 0 }
                             }
                           }}
-                          autoHeight
                         />
                       )}
                     </Box>
@@ -389,6 +394,12 @@ export default function RolloverModal(props: RolloverModalProps) {
                 onChange={(_event, newValue) => {
                   const selected = censusValidationStatus.find(census => census.censusID === newValue) || defaultCVS;
                   if (selected === defaultCVS) setConfirmNoQuadratsRollover(false);
+                  if (selected.censusID === 0) {
+                    setConfirmNoQuadratsRollover(false);
+                    setRolloverQuadrats(false);
+                  } else {
+                    setRolloverQuadrats(true);
+                  }
                   setSelectedQuadratsCensus(selected);
                 }}
               >
@@ -437,13 +448,12 @@ export default function RolloverModal(props: RolloverModalProps) {
                           columns={QuadratGridColumns}
                           pageSizeOptions={[5, 10, 25, 100]}
                           checkboxSelection
-                          onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedPersonnel)}
+                          onRowSelectionModelChange={selectionModel => handleRowSelection(selectionModel, setSelectedQuadrats)}
                           initialState={{
                             pagination: {
                               paginationModel: { pageSize: 5, page: 0 }
                             }
                           }}
-                          autoHeight
                         />
                       )}
                     </Box>
