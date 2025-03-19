@@ -39,7 +39,7 @@ import RolloverModal from './client/rollovermodal';
 import RolloverStemsModal from './client/rolloverstemsmodal';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
-import { MoreHoriz } from '@mui/icons-material';
+import { DeleteForever, MoreHoriz } from '@mui/icons-material';
 import PlotCardModal from '@/components/client/plotcardmodal';
 
 export interface SimpleTogglerProps {
@@ -425,11 +425,9 @@ export default function Sidebar(props: SidebarProps) {
 
     return (
       <Stack direction={'column'} alignItems={'start'}>
-        <Typography
-          level="body-md"
-          className="sidebar-item"
-          data-testid={'selected-census-plotcensusnumber'}
-        >{`Census: ${selectedCensus?.plotCensusNumber}`}</Typography>
+        <Typography level="body-md" className="sidebar-item" data-testid={'selected-census-plotcensusnumber'}>
+          {`Census: ${selectedCensus?.plotCensusNumber}`}
+        </Typography>
         <Stack direction={'column'} alignItems={'start'}>
           <Typography color={!census ? 'danger' : 'primary'} level="body-sm" className="sidebar-item" data-testid={'selected-census-dates'}>
             {census !== undefined && dateMessage}
@@ -542,6 +540,14 @@ export default function Sidebar(props: SidebarProps) {
                   </React.Fragment>
                 ))}
               </Box>
+              <IconButton
+                onClick={async () => {
+                  await fetch(`/api/clearcensus?schema=${site?.schemaName}&censusID=${item?.dateRanges[0].censusID}`);
+                  setManualReset(true);
+                }}
+              >
+                <DeleteForever />
+              </IconButton>
             </Box>
           </Option>
         ))}
