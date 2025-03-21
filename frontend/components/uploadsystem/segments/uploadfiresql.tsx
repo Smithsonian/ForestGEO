@@ -10,7 +10,6 @@ import PQueue from 'p-queue';
 import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
-import { v4 } from 'uuid';
 import { useSession } from 'next-auth/react';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
@@ -152,19 +151,39 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     const transformHeader = (header: string) => header.trim();
     const validateRow = (row: FileRow): boolean => {
+      let rejectRow = false;
+      let failureReason = ``;
       const missingFields = requiredHeaders.filter(header => {
         const value = row[header.label];
         return value === null || value === '' || value === 'NA' || value === 'NULL';
       });
 
+      if (Object.keys(row).length > expectedHeaders.length) {
+        failureReason += `Extra columns detected. Likely caused by final column using commas instead of semicolons|`;
+        rejectRow = true;
+      }
+
       if (missingFields.length > 0) {
+        failureReason += `Missing required fields: ${missingFields.map(f => f.label).join(', ')}|`; // pipe separator
+        rejectRow = true;
+      }
+      for (const [key, value] of Object.entries(row)) {
+        if (value !== null) {
+          const num = parseFloat(value);
+          if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
+            failureReason += `Decimal value for ${key} is out of range: ${value}|`;
+            rejectRow = true;
+          }
+        }
+      }
+
+      if (rejectRow) {
         parsingInvalidRows.push({
           ...row,
-          failureReason: `Missing required fields: ${missingFields.map(f => f.label).join(', ')}`
+          failureReason: failureReason
         });
-        return false;
       }
-      return true;
+      return !rejectRow;
     };
 
     const transform = (value: string, field: string) => {
