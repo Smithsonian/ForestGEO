@@ -185,7 +185,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       ) : (
         <>
           <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'warning'}>
-            The following rows were not uploaded due to errors:
+            The following rows were captured during pre-processing and were not uploaded:
           </Typography>
           <Box sx={{ marginBottom: 2, display: 'flex', flex: 1, flexDirection: 'row' }}>
             <Button variant="plain" onClick={downloadCSV}>
@@ -255,14 +255,12 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               <>
                 {Object.values(errorRows).length > 0 ? (
                   <Stack direction={'column'}>
-                    <Typography level={'body-md'}>Errors were found during the upload process.</Typography>
                     <Typography level={'body-md'}>
                       All broken rows have been moved to the <code>failedmeasurements</code> table.
                     </Typography>
                   </Stack>
                 ) : (
                   <Stack direction={'column'}>
-                    <Typography level={'body-md'}>No errors were found during the upload process.</Typography>
                     <Typography level={'body-md'}>
                       No changes will be made to the the <code>failedmeasurements</code> table.
                     </Typography>
