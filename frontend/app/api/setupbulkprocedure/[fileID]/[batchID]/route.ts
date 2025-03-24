@@ -29,7 +29,7 @@ export async function GET(
     try {
       attempt++;
       transactionID = await connectionManager.beginTransaction();
-      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess_test(?, ?);`, [fileID, batchID]);
+      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID]);
       await connectionManager.commitTransaction(transactionID);
 
       return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });
