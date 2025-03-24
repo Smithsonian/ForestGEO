@@ -18,12 +18,10 @@ export interface UploadParseFilesProps {
   // state vars
   uploadForm: FormType | undefined;
   acceptedFiles: FileWithStream[];
-  personnelRecording: string;
   dataViewActive: number;
   // state setters
   setDataViewActive: Dispatch<SetStateAction<number>>;
   // centralized functions
-  parseFullFile: (file: FileWithPath) => Promise<void>;
   handleInitialSubmit: () => Promise<void>;
   handleAddFile: (newFile: FileWithPath) => void;
   handleRemoveFile: (fileIndex: number) => void;
