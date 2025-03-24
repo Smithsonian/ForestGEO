@@ -17,18 +17,19 @@ export async function GET(
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
+  const maxAttempts = 1000;
 
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
-  let delay = 100;
+  const delay = 100;
 
-  while (true) {
+  while (attempt <= maxAttempts) {
     let transactionID: string = '';
 
     try {
       attempt++;
       transactionID = await connectionManager.beginTransaction();
-      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID]);
+      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess_test(?, ?);`, [fileID, batchID]);
       await connectionManager.commitTransaction(transactionID);
 
       return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });
@@ -42,7 +43,6 @@ export async function GET(
         }
         // Wait for an exponentially increasing delay before retrying
         await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // exponential backoff
       } else {
         try {
           await connectionManager.rollbackTransaction(transactionID);
@@ -53,35 +53,4 @@ export async function GET(
       }
     }
   }
-  // let transactionID: string = '';
-  // const connectionManager = ConnectionManager.getInstance();
-  // try {
-  //   transactionID = await connectionManager.beginTransaction();
-  //   await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID]);
-  //   await connectionManager.commitTransaction(transactionID);
-  //   return new NextResponse(
-  //     JSON.stringify({
-  //       responseMessage: `Processing procedure executed`
-  //     }),
-  //     { status: HTTPResponses.OK }
-  //   );
-  // } catch (e: any) {
-  //   console.log('first try failed! rolling back changes and trying again...');
-  //   await connectionManager.rollbackTransaction(transactionID);
-  //   let secondary = '';
-  //   try {
-  //     secondary = await connectionManager.beginTransaction();
-  //     await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID]);
-  //     await connectionManager.commitTransaction(secondary);
-  //     return new NextResponse(
-  //       JSON.stringify({
-  //         responseMessage: `Processing procedure executed`
-  //       }),
-  //       { status: HTTPResponses.OK }
-  //     );
-  //   } catch (e: any) {
-  //     await connectionManager.rollbackTransaction(secondary);
-  //     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
-  //   }
-  // }
 }
