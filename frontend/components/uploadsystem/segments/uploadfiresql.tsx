@@ -29,9 +29,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const currentQuadrat = useQuadratContext();
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
-  const hasUploaded = useRef(false);
-  const totalCompletionTimeRef = useRef(0);
-  const totalProcessCompletionTimeRef = useRef(0);
   const [totalChunks, setTotalChunks] = useState(0);
   const [totalBatches, setTotalBatches] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
@@ -39,8 +36,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [failedRows, setFailedRows] = useState<{ [fileName: string]: Set<FileRow> }>({});
   const [etc, setETC] = useState('');
   const [processETC, setProcessETC] = useState('');
-  const [chunkStartTime, setChunkStartTime] = useState<number>(0);
-  const [chunkProcessStartTime, setChunkProcessStartTime] = useState<number>(0);
   const [uploaded, setUploaded] = useState<boolean>(false);
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
@@ -48,6 +43,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const chunkSize = 4096 * 8;
   const connectionLimit = 50;
   const queue = new PQueue({ concurrency: connectionLimit });
+  // refs
+  const hasUploaded = useRef(false);
+  const totalCompletionTimeRef = useRef(0);
+  const totalProcessCompletionTimeRef = useRef(0);
+  const chunkStartTime = useRef(0);
+  const chunkProcessStartTime = useRef(0);
 
   const generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -89,10 +90,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       // Update cumulative time for this chunk
-      totalCompletionTimeRef.current += performance.now() - chunkStartTime;
+      totalCompletionTimeRef.current += performance.now() - chunkStartTime.current;
 
       const smoothingFactor = 0.2;
-      const lastChunkTime = performance.now() - chunkStartTime;
+      const lastChunkTime = performance.now() - chunkStartTime.current;
       const smoothedAvgTime = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalCompletionTimeRef.current / completedChunks);
       const remaining = totalChunks - completedChunks;
       const estimatedTime = smoothedAvgTime * remaining;
@@ -104,14 +105,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ' seconds remaining...'
       );
     }
-  }, [uploadForm, uploaded, processed, completedChunks, totalChunks, chunkStartTime]);
+  }, [uploadForm, uploaded, processed, completedChunks, totalChunks]);
 
   useEffect(() => {
     if (uploadForm === 'measurements' && uploaded && !processed && processedChunks > 0) {
       const now = performance.now();
-      const elapsed = now - chunkProcessStartTime;
+      const elapsed = now - chunkProcessStartTime.current;
       totalProcessCompletionTimeRef.current += elapsed;
-      setChunkProcessStartTime(now);
+      chunkProcessStartTime.current = now;
     }
   }, [processedChunks]);
 
@@ -123,7 +124,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       const smoothingFactor = 0.2;
-      const currentElapsed = performance.now() - chunkProcessStartTime;
+      const currentElapsed = performance.now() - chunkProcessStartTime.current;
       const smoothedAvgProcessTime = smoothingFactor * currentElapsed + (1 - smoothingFactor) * (totalProcessCompletionTimeRef.current / processedChunks);
       const remainingProcessing = totalBatches - processedChunks;
       const estimatedProcessTime = smoothedAvgProcessTime * remainingProcessing;
@@ -135,7 +136,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           ' seconds remaining...'
       );
     }
-  }, [uploadForm, uploaded, processed, processedChunks, totalBatches, chunkProcessStartTime]);
+  }, [uploadForm, uploaded, processed, processedChunks, totalBatches]);
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
     queue.clear();
@@ -235,7 +236,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
-          setChunkStartTime(performance.now());
+          chunkStartTime.current = performance.now();
           try {
             if (queue.size >= connectionLimit) {
               console.log(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
@@ -292,6 +293,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           } catch (err) {
             console.error('Error processing chunk:', err);
             parser.abort();
+            throw err;
           }
         },
         complete: async () => {
@@ -388,10 +390,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   useEffect(() => {
-    console.log('upload in progress...');
-  }, []);
-
-  useEffect(() => {
     let isMounted = true;
 
     async function runUploads() {
@@ -445,10 +443,14 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       } catch (error) {
         console.error('Upload error:', error);
+        throw error;
       }
     }
 
-    runUploads().catch(console.error);
+    runUploads().catch(error => {
+      setUploadError(error);
+      setReviewState(ReviewStates.ERRORS);
+    });
     return () => {
       isMounted = false;
     };
@@ -460,7 +462,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
       async function runProcessBatches() {
         setProcessedChunks(0);
-        setChunkProcessStartTime(performance.now());
+        chunkProcessStartTime.current = performance.now();
         const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
         const output: { fileID: string; batchID: string }[] = await response.json();
         const grouped: Record<string, string[]> = output.reduce(
@@ -484,7 +486,16 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
                 console.log(`Processed batch ${batchID} for file ${fileID}`);
               } catch (e: any) {
-                console.error(e);
+                // unforeseen error OR max attempts exceeded. Need to move to errors and reset the table. User should reupload
+                // clear temporarymeasurements table:
+                await fetch(`/api/formatrunquery`, {
+                  body: JSON.stringify({
+                    query: `delete from ${schema}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+                    params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
+                  }),
+                  method: 'POST'
+                });
+                throw e;
               } finally {
                 // Update processed chunks count
                 setProcessedChunks(prev => prev + 1);
@@ -516,7 +527,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         setProcessed(true);
       }
 
-      runProcessBatches().catch(console.error);
+      runProcessBatches().catch(error => {
+        setUploadError(error);
+        setReviewState(ReviewStates.ERRORS);
+      });
     }
   }, [uploaded, uploadForm, completedChunks, totalChunks, schema, currentPlot, currentCensus]);
 

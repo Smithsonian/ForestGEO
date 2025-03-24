@@ -574,13 +574,14 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
       ]
     }));
+    setRefresh(true);
   }, [showErrorRows, showValidRows, showPendingRows]);
 
   useEffect(() => {
-    console.log('current census: ', JSON.stringify(currentCensus));
     if (refresh) {
       runFetchPaginated().then(() => setRefresh(false));
     }
+    console.log(rows);
   }, [refresh]);
 
   useEffect(() => {

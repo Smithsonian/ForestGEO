@@ -789,8 +789,8 @@ FROM coremeasurements cm
                    ON e.CoreMeasurementID = cm.CoreMeasurementID
                        AND e.ValidationErrorID = @validationProcedureID
 WHERE (
-    (cm.MeasuredDBH IS NOT NULL) OR
-    (cm.MeasuredHOM IS NOT NULL)
+    (cm.MeasuredDBH IS NOT NULL AND cm.MeasuredDBH > 0) OR
+    (cm.MeasuredHOM IS NOT NULL AND cm.MeasuredHOM > 0)
     )
   AND cm.IsValidated IS NULL
   AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
@@ -848,7 +848,7 @@ WHERE (
   AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
   AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
   AND e.CoreMeasurementID IS NULL
-', true);
+', false);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes', 'Missing DBH;Missing HOM;LIVE-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'INSERT INTO cmverrors (CoreMeasurementID, ValidationErrorID)
 SELECT
     cm.CoreMeasurementID,
@@ -867,7 +867,7 @@ LEFT JOIN cmverrors e
     AND e.ValidationErrorID = @validationProcedureID
 WHERE
     (a.Status NOT IN (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\') OR a.Status IS NULL)
-    AND (cm.MeasuredDBH IS NULL OR cm.MeasuredHOM IS NULL)
+    AND ((cm.MeasuredDBH IS NULL OR cm.MeasuredDBH = 0) OR (cm.MeasuredHOM IS NULL OR cm.MeasuredHOM = 0))
     AND e.CoreMeasurementID IS NULL
     AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
     AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
@@ -916,7 +916,7 @@ WHERE (a.Status NOT IN (\'dead\', \'stem dead\', \'broken below\', \'missing\', 
   AND e.CoreMeasurementID IS NULL
   AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
   AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
-  AND cm.IsValidated IS NULL', true);
+  AND cm.IsValidated IS NULL', false);
 
 
 truncate postvalidationqueries; -- clear the table if re-running this script on accident

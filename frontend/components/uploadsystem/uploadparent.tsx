@@ -1,11 +1,10 @@
 'use client';
 import React, { useEffect, useState } from 'react';
 import { FileWithStream, ReviewStates } from '@/config/macros/uploadsystemmacros';
-import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
+import { FileCollectionRowSet, FileRow, FormType, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { FileWithPath } from 'react-dropzone';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useSession } from 'next-auth/react';
-import { parse, ParseResult } from 'papaparse';
 import { Box, Typography } from '@mui/joy';
 import UploadParseFiles from '@/components/uploadsystem/segments/uploadparsefiles';
 import UploadFireSQL from '@/components/uploadsystem/segments/uploadfiresql';
@@ -15,7 +14,6 @@ import UploadUpdateValidations from '@/components/uploadsystem/segments/uploadup
 import UploadStart from '@/components/uploadsystem/segments/uploadstart';
 import UploadFireAzure from '@/components/uploadsystem/segments/uploadfireazure';
 import UploadComplete from '@/components/uploadsystem/segments/uploadcomplete';
-import moment from 'moment';
 
 export interface CMIDRow {
   coreMeasurementID: number;
@@ -150,112 +148,6 @@ export default function UploadParent(props: UploadParentProps) {
     });
   };
 
-  const parseFullFile = async (file: FileWithPath) => {
-    try {
-      const isCSV = file.name.endsWith('.csv');
-      const delimiter = isCSV ? ',' : '\t';
-
-      parse<FileRow>(file as File, {
-        delimiter: delimiter,
-        header: true,
-        skipEmptyLines: true,
-        chunkSize: 1024,
-        transformHeader: h => h.trim(),
-        transform: (value, field) => {
-          if (uploadForm === FormType.measurements && field === 'date') {
-            const match = value.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})|(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
-
-            if (match) {
-              let normalizedDate;
-              if (match[1]) {
-                normalizedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-              } else {
-                normalizedDate = `${match[6]}-${match[5].padStart(2, '0')}-${match[4].padStart(2, '0')}`;
-              }
-
-              const parsedDate = moment(normalizedDate, 'YYYY-MM-DD', true);
-              if (parsedDate.isValid()) {
-                return parsedDate.toDate();
-              } else {
-                console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
-                return value;
-              }
-            } else {
-              console.error(`Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD and DD-MM-YYYY.`);
-              return value;
-            }
-          }
-          return value;
-        },
-        complete: async (results: ParseResult<FileRow>) => {
-          if (!uploadForm) throw new Error('Upload form set failure');
-          const expectedHeaders = getTableHeaders(uploadForm, currentPlot?.usesSubquadrats ?? false);
-          const requiredHeaders = RequiredTableHeadersByFormType[uploadForm];
-
-          if (!expectedHeaders || !requiredHeaders) {
-            console.error(`No headers defined for form type: ${uploadForm}`);
-            setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
-            return;
-          }
-
-          const updatedFileRowSet: FileRowSet = {};
-          const fileErrors: FileRowSet = {};
-
-          for (const [index, row] of results.data.entries()) {
-            const rowId = `row-${index}`;
-            const updatedRow: FileRow = { ...row };
-
-            expectedHeaders.forEach(header => {
-              const headerLabel = header.label;
-              if (!(headerLabel in row)) {
-                updatedRow[header.label] = null;
-              }
-            });
-
-            updatedFileRowSet[rowId] = updatedRow;
-
-            const rowErrors: FileRow = {};
-            let hasError = false;
-
-            for (const header of requiredHeaders) {
-              const value = row[header.label];
-              if (value === null || value === undefined || value === '' || value === 'NULL') {
-                rowErrors[header.label] = 'This field is required';
-                hasError = true;
-              }
-            }
-
-            if (hasError) {
-              fileErrors[rowId] = rowErrors;
-            }
-          }
-
-          setParsedData(prevParsedData => ({
-            ...prevParsedData,
-            [file.name]: updatedFileRowSet
-          }));
-          setErrorRows(prevErrorRows => ({
-            ...prevErrorRows,
-            [file.name]: updatedFileRowSet
-          }));
-          setErrors(prevErrors => ({
-            ...prevErrors,
-            [file.name]: fileErrors
-          }));
-        }
-      });
-    } catch (error: any) {
-      const errorWithFile = {
-        message: error.message,
-        file: file.name,
-        originalError: error
-      };
-      setUploadError(errorWithFile);
-      setErrorComponent('UploadParseFiles');
-      setReviewState(ReviewStates.ERRORS);
-    }
-  };
-
   async function handleInitialSubmit() {
     // setReviewState(ReviewStates.REVIEW);
     setReviewState(ReviewStates.UPLOAD_SQL);
@@ -292,48 +184,14 @@ export default function UploadParent(props: UploadParentProps) {
           <UploadParseFiles
             uploadForm={uploadForm}
             acceptedFiles={acceptedFiles}
-            personnelRecording={personnelRecording}
             dataViewActive={dataViewActive}
             setDataViewActive={setDataViewActive}
-            parseFullFile={parseFullFile}
             handleInitialSubmit={handleInitialSubmit}
             handleAddFile={handleAddFile}
             handleRemoveFile={handleRemoveFile}
             handleReplaceFile={handleReplaceFile}
           />
         );
-      // case ReviewStates.REVIEW:
-      //   return (
-      //     <UploadReviewFiles
-      //       dbhUnit={dbhUnit}
-      //       homUnit={homUnit}
-      //       coordUnit={coordUnit}
-      //       acceptedFiles={acceptedFiles}
-      //       setAcceptedFiles={setAcceptedFiles}
-      //       uploadForm={uploadForm}
-      //       errors={errors}
-      //       errorRows={errorRows}
-      //       parsedData={parsedData}
-      //       expectedHeaders={expectedHeaders}
-      //       currentFileHeaders={currentFileHeaders}
-      //       dataViewActive={dataViewActive}
-      //       setDataViewActive={setDataViewActive}
-      //       areHeadersValid={areHeadersValid}
-      //       setErrors={setErrors}
-      //       setErrorRows={setErrorRows}
-      //       setReviewState={setReviewState}
-      //       confirmationDialogOpen={confirmationDialogOpen}
-      //       setParsedData={setParsedData}
-      //       handleConfirm={handleConfirmationConfirm}
-      //       handleCancel={handleConfirmationCancel}
-      //       handleApproval={handleConfirmationApproval}
-      //       handleChange={handleChange}
-      //       setUploadError={setUploadError}
-      //       setErrorComponent={setErrorComponent}
-      //       handleReplaceFile={handleReplaceFile}
-      //       handleRemoveFile={handleRemoveFile}
-      //     />
-      //   );
       case ReviewStates.UPLOAD_SQL:
         return (
           <UploadFireSQL

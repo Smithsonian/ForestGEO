@@ -11,18 +11,7 @@ import { FileWithPath } from 'react-dropzone';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
 
 export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>) {
-  const {
-    uploadForm,
-    personnelRecording,
-    acceptedFiles,
-    dataViewActive,
-    setDataViewActive,
-    parseFullFile,
-    handleInitialSubmit,
-    handleAddFile,
-    handleReplaceFile,
-    handleRemoveFile
-  } = props;
+  const { uploadForm, acceptedFiles, dataViewActive, setDataViewActive, handleInitialSubmit, handleAddFile, handleReplaceFile, handleRemoveFile } = props;
 
   const [fileToReplace, setFileToReplace] = useState<FileWithPath | null>(null);
 
@@ -33,7 +22,6 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
         setFileToReplace(file);
       } else {
         handleAddFile(file);
-        // await parseFullFile(file); // parse the file
       }
     }
   };
