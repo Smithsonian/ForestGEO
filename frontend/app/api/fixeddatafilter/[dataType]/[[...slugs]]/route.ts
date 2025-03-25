@@ -229,8 +229,6 @@ export async function POST(
         case 'measurementssummary':
         case 'measurementssummary_staging':
         case 'measurementssummaryview':
-        case 'viewfulltable':
-        case 'viewfulltableview':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
 
@@ -263,6 +261,17 @@ export async function POST(
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
             ORDER BY vft.MeasurementDate ASC`;
           queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
+          break;
+        case 'viewfulltable':
+        case 'viewfulltableview':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
+          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
+
+          paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS *
+            FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ?
+              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''} `;
+          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'coremeasurements':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'pdt');
@@ -315,7 +324,6 @@ export async function POST(
       const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
       const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
       const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
-      console.log('total rows: ', totalRowsResult);
       const totalRows = totalRowsResult[0].totalRows;
       await connectionManager.commitTransaction(transactionID ?? '');
       if (updatedMeasurementsExist) {
