@@ -58,6 +58,10 @@ export async function GET(
           AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
+      case 'viewfulltable':
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE PlotID = ? AND PlotCensusNumber = ? LIMIT ?, ?`;
+        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+        break;
       case 'attributes':
       case 'species':
       case 'stems':

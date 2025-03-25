@@ -264,7 +264,7 @@ export const CellItemContainer = styled('div')({
  * Function to determine if all entries in a column are null
  */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === undefined || row[field] === null || row[field] === '');
+  return rows.length > 0 && rows.every(row => field === undefined || row[field] === undefined || row[field] === null || row[field] === '');
 }
 
 /**
