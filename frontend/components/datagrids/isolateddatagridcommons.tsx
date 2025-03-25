@@ -442,27 +442,28 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber
       );
-
+      console.log('temp query: ', tempQuery);
+      const tempBody = await (
+        await fetch(tempQuery, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filterModel })
+        })
+      ).json();
+      console.log('tempBody', tempBody);
+      const tempFQuery = tempBody.finishedQuery
+        .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
+        .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
+        .trim();
+      console.log('tempfquery: ', tempFQuery);
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            (
-              await (
-                await fetch(tempQuery, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ filterModel })
-                })
-              ).json()
-            ).finishedQuery
-              .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
-              .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
-              .trim()
-          )
+          body: JSON.stringify(tempFQuery)
         })
       ).json();
+      console.log('export results: ', results);
 
       const jsonData = JSON.stringify(results, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
@@ -665,6 +666,9 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         document.body.appendChild(sLink);
         sLink.click();
         document.body.removeChild(sLink);
+        break;
+      case 'viewfulltable':
+        await fetchFullData();
         break;
     }
     setLoading(false);
@@ -977,8 +981,12 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oldRow: oldRow, newRow: newRow })
       });
-
-      const responseJSON = await response.json();
+      let responseJSON;
+      try {
+        responseJSON = await response.json();
+      } catch (e) {
+        console.error(e);
+      }
 
       if (!response.ok) {
         throw new Error(responseJSON.message || 'An unknown error occurred');

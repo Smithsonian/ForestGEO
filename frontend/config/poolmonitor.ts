@@ -13,7 +13,7 @@ export class PoolMonitor {
     this.pool = createPool(config);
     this.poolClosed = false;
 
-    // console.log(chalk.green('PoolMonitor initialized.'));
+    console.log(chalk.cyan('PoolMonitor initialized.'));
     this.monitorPoolHealth();
     this.resetInactivityTimer();
   }
@@ -64,11 +64,11 @@ export class PoolMonitor {
     this.reinitializing = true;
 
     try {
-      // console.log(chalk.cyan('Reinitializing connection pool...'));
+      console.log(chalk.cyan('Reinitializing connection pool...'));
       await this.closeAllConnections();
       this.pool = createPool(this.config);
       this.poolClosed = false;
-      // console.log(chalk.cyan('Connection pool reinitialized.'));
+      console.log(chalk.cyan('Connection pool reinitialized.'));
     } catch (error) {
       console.error(chalk.red('Error during reinitialization:', error));
     } finally {
@@ -79,10 +79,10 @@ export class PoolMonitor {
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
     const bufferTime = 180;
     try {
-      const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime};`);
+      const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime} AND USER <> 'event_scheduler';`);
       if (rows.length > 0) {
-        // console.log(chalk.cyan('Active MySQL Processes:'));
-        // console.table(rows);
+        console.log(chalk.cyan('Active MySQL Processes:'));
+        console.table(rows);
 
         const { liveIds, sleepingIds } = rows.reduce(
           (acc: any, process: any) => {
@@ -127,7 +127,7 @@ export class PoolMonitor {
       if (live.length === 0) {
         console.log(chalk.red('Inactivity period exceeded and no active connections found. Initiating graceful shutdown...'));
         await this.closeAllConnections();
-        // console.log(chalk.red('Graceful shutdown complete.'));
+        console.log(chalk.red('Graceful shutdown complete.'));
       }
     }, 3600000); // 1 hour in milliseconds
   }
@@ -153,6 +153,6 @@ export class PoolMonitor {
         console.warn(chalk.yellow('Attempting to reinitialize pool.'));
         await this.reinitializePool();
       }
-    }, 10000); // Poll every 10 seconds
+    }, 30000); // Poll every 10 seconds
   }
 }
