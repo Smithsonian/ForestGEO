@@ -152,38 +152,41 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     const transformHeader = (header: string) => header.trim();
     const validateRow = (row: FileRow): boolean => {
-      let rejectRow = false;
-      let failureReason = ``;
+      const errors: string[] = [];
+      let extraData = false;
+
       const missingFields = requiredHeaders.filter(header => {
         const value = row[header.label];
         return value === null || value === '' || value === 'NA' || value === 'NULL';
       });
-
-      if (Object.keys(row).length > expectedHeaders.length) {
-        failureReason += `Extra columns detected. Likely caused by final column using commas instead of semicolons|`;
-        rejectRow = true;
-      }
-
       if (missingFields.length > 0) {
-        failureReason += `Missing required fields: ${missingFields.map(f => f.label).join(', ')}|`; // pipe separator
-        rejectRow = true;
+        errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
       }
+
+      if (row['__parsed_extra'] !== undefined || Object.keys(row).length > expectedHeaders.length) {
+        errors.push('Extra columns detected. Likely caused by final column using commas instead of semicolons');
+        extraData = true;
+      }
+
       for (const [key, value] of Object.entries(row)) {
-        if (value !== null) {
+        if (value !== null && !['tag', 'stemtag'].includes(key)) {
+          // tags and stemtags are NOT decimals
           const num = parseFloat(value);
           if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
-            failureReason += `Decimal value for ${key} is out of range: ${value}|`;
-            rejectRow = true;
+            errors.push(`Decimal value for ${key} is out of range: ${value}`);
           }
         }
       }
 
+      const rejectRow = errors.length > 0;
       if (rejectRow) {
         parsingInvalidRows.push({
           ...row,
-          failureReason: failureReason
+          failureReason: errors.join('|'),
+          ...(extraData ? { excessData: row['__parsed_extra'] } : {})
         });
       }
+
       return !rejectRow;
     };
 

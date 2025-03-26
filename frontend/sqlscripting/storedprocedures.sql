@@ -286,15 +286,18 @@ begin
 
     create temporary table filter_validity as
     select i.*,
-           true                                                  as Valid,
-           (select sum(if(a.Code is null, 1, 0))
-            FROM json_table(
-                         if(i.Codes is null or trim(i.Codes) = '', '[]',
-                            concat('["', replace(trim(i.Codes), ';', '","'), '"]')
-                         ),
-                         '$[*]' columns ( code varchar(10) path '$')
-                 ) jt
-                     left join attributes a on a.Code = jt.code) as invalid_count
+           true as Valid,
+           IFNULL(
+                   (select sum(if(a.Code is null, 1, 0))
+                    FROM json_table(
+                                 if(i.Codes is null or trim(i.Codes) = '', '[]',
+                                    concat('["', replace(trim(i.Codes), ';', '","'), '"]')
+                                 ),
+                                 '$[*]' columns ( code varchar(10) path '$')
+                         ) jt
+                             left join attributes a on a.Code = jt.code),
+                   0
+           )    as invalid_count
     from temporarymeasurements i
              left join quadrats q ON i.QuadratName = q.QuadratName
              left join censusquadrat cq on cq.QuadratID = q.QuadratID
@@ -440,11 +443,10 @@ begin
                            end
            )                   as UserDefinedFields
     from filtered f
-             join stems s on s.StemTag = f.StemTag
+             join stems s on s.StemTag <=> f.StemTag
              join trees t on t.TreeID = s.TreeID and t.TreeTag = f.TreeTag
              join treestates ts on ts.TreeTag = f.TreeTag
-             join stemstates ss on ss.StemTag = s.StemTag;
-
+             join stemstates ss on ss.StemTag <=> s.StemTag;
 
     -- Create a duplicate copy of preinsert_core
     CREATE TEMPORARY TABLE preinsert_core_copy AS
@@ -495,7 +497,7 @@ begin
            TRIM(jt.code) AS Code
     FROM filtered f
              JOIN trees t ON t.TreeTag = f.TreeTag
-             JOIN stems s ON s.StemTag = f.StemTag AND s.TreeID = t.TreeID
+             JOIN stems s ON s.StemTag <=> f.StemTag AND s.TreeID = t.TreeID
              join quadrats q on q.QuadratName = f.QuadratName
              join coremeasurements cm
                   on cm.StemID = s.StemID and cm.CensusID = f.CensusID and
@@ -517,6 +519,9 @@ begin
     DROP TEMPORARY TABLE IF EXISTS tempcodes, treestates, stemstates, filtered, filter_validity, filter_validity_dup, preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
     set @disable_triggers = 0;
 end;
+
+
+
 
 create
     definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)
