@@ -8,12 +8,11 @@ SELECT
 FROM coremeasurements cm1
 JOIN coremeasurements cm2
     ON cm1.StemID = cm2.StemID
-    AND YEAR(cm2.MeasurementDate) = YEAR(cm1.MeasurementDate) + 1
 LEFT JOIN stems st2
     ON cm2.StemID = st2.StemID
-LEFT JOIN quadrats q
-    ON st2.QuadratID = q.QuadratID
-LEFT JOIN plots p ON q.PlotID = p.PlotID
+LEFT JOIN census c1 ON cm1.CensusID = c1.CensusID
+LEFT JOIN census c2 ON cm2.CensusID = c2.CensusID AND c2.PlotCensusNumber = c1.PlotCensusNumber + 1
+LEFT JOIN plots p ON c1.PlotID = p.PlotID and c2.PlotID = p.PlotID
 LEFT JOIN cmattributes cma
     ON cm1.CoreMeasurementID = cma.CoreMeasurementID
 LEFT JOIN attributes a
@@ -28,7 +27,7 @@ WHERE
     AND cm1.IsValidated IS TRUE
     AND cm2.IsValidated IS NULL
     AND (@p_CensusID IS NULL OR cm2.CensusID = @p_CensusID)
-    AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
+    AND (@p_PlotID IS NULL OR p.PlotID = @p_PlotID)
     AND (cm2.MeasuredDBH * (CASE p.DefaultDBHUnits
                               WHEN \'km\' THEN 1000000
                               WHEN \'hm\' THEN 100000
@@ -50,7 +49,8 @@ WHERE
     AND e.CoreMeasurementID IS NULL
 ON DUPLICATE KEY UPDATE
     CoreMeasurementID = VALUES(CoreMeasurementID),
-    ValidationErrorID = VALUES(ValidationErrorID);', 'INSERT INTO validationchangelog (
+    ValidationErrorID = VALUES(ValidationErrorID);
+', 'INSERT INTO validationchangelog (
     ProcedureName, RunDateTime, TargetRowID, ValidationOutcome,
     ErrorMessage, ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
 )
@@ -137,12 +137,9 @@ SELECT
     FROM coremeasurements cm1
     JOIN coremeasurements cm2
       ON cm1.StemID = cm2.StemID
-      AND YEAR(cm2.MeasurementDate) = YEAR(cm1.MeasurementDate) + 1
-    LEFT JOIN stems st
-      ON cm2.StemID = st.StemID
-    LEFT JOIN quadrats q
-      ON st.QuadratID = q.QuadratID
-    LEFT JOIN plots p ON q.PlotID = p.PlotID
+    LEFT JOIN census c1 ON cm1.CensusID = c1.CensusID
+    LEFT JOIN census c2 ON cm2.CensusID = c2.CensusID and c2.PlotCensusNumber = c1.PlotCensusNumber + 1
+    LEFT JOIN plots p ON c1.PlotID = p.PlotID and c2.PlotID = p.PlotID
     LEFT JOIN cmattributes cma
       ON cm1.CoreMeasurementID = cma.CoreMeasurementID
     LEFT JOIN attributes a
@@ -157,7 +154,7 @@ SELECT
       AND cm1.IsValidated IS TRUE
       AND cm2.IsValidated IS NULL
       AND (@p_CensusID IS NULL OR cm2.CensusID = @p_CensusID)
-      AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
+      AND (@p_PlotID IS NULL OR p.PlotID = @p_PlotID)
       AND (cm2.MeasuredDBH * (CASE p.DefaultDBHUnits
                                 WHEN \'km\' THEN 1000000
                                 WHEN \'hm\' THEN 100000
@@ -179,7 +176,7 @@ SELECT
     AND e.CoreMeasurementID IS NULL
 ON DUPLICATE KEY UPDATE
     CoreMeasurementID = VALUES(CoreMeasurementID),
-    ValidationErrorID = VALUES(ValidationErrorID);    ', 'INSERT INTO validationchangelog (
+    ValidationErrorID = VALUES(ValidationErrorID);', 'INSERT INTO validationchangelog (
     ProcedureName, RunDateTime, TargetRowID, ValidationOutcome,
     ErrorMessage, ValidationCriteria, MeasuredValue, ExpectedValueRange, AdditionalDetails
 )
@@ -917,7 +914,6 @@ WHERE (a.Status NOT IN (\'dead\', \'stem dead\', \'broken below\', \'missing\', 
   AND (@p_CensusID IS NULL OR cm.CensusID = @p_CensusID)
   AND (@p_PlotID IS NULL OR q.PlotID = @p_PlotID)
   AND cm.IsValidated IS NULL', false);
-
 
 truncate postvalidationqueries; -- clear the table if re-running this script on accident
 insert into postvalidationqueries
