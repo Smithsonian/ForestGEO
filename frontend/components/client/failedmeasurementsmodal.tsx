@@ -16,48 +16,9 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
   const currentCensus = useOrgCensusContext();
 
   async function resubmitRows() {
-    await fetch(`/api/formatrunquery`, {
-      method: 'POST',
-      body: JSON.stringify({
-        query: `CALL ${currentSite?.schemaName}.reingestfailedrows(?, ?);`,
-        params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
-      })
+    await fetch(`/api/reingest/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
+      method: 'GET'
     });
-    const response = await fetch(`/api/setupbulkprocessor/${currentSite?.schemaName}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
-    const failedOutput: { fileID: string; batchID: string }[] = await response.json();
-    const grouped: Record<string, string[]> = failedOutput.reduce(
-      (acc, { fileID, batchID }) => {
-        if (!acc[fileID]) {
-          acc[fileID] = [];
-        }
-        acc[fileID].push(batchID);
-        return acc;
-      },
-      {} as Record<string, string[]>
-    );
-    for (const fileID in grouped) {
-      console.log(`Processing FileID: ${fileID}`);
-      // Map each batchID to a queued task.
-      const batchTasks = grouped[fileID].map(async batchID => {
-        console.log(`  BatchID: ${batchID}`);
-        try {
-          await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${currentSite?.schemaName}`);
-          console.log(`Processed batch ${batchID} for file ${fileID}`);
-        } catch (e: any) {
-          // unforeseen error OR max attempts exceeded. Need to move to errors and reset the table. User should reupload
-          // clear temporarymeasurements table:
-          await fetch(`/api/formatrunquery`, {
-            body: JSON.stringify({
-              query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-              params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
-            }),
-            method: 'POST'
-          });
-          throw e;
-        }
-      });
-      await Promise.all(batchTasks);
-    }
     await handleCloseModal();
   }
 

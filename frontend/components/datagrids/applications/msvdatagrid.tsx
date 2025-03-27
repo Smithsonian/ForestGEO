@@ -4,7 +4,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import React, { useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
-import { Snackbar } from '@mui/joy';
+import { Snackbar, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import MeasurementsCommons from '@/components/datagrids/measurementscommons';
 import { MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
@@ -14,7 +14,7 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/failedmeasurementsmodal';
-import { AssignmentOutlined, CachedOutlined, ReplayOutlined, RuleOutlined, UploadFileOutlined } from '@mui/icons-material';
+import { AssignmentOutlined, CachedOutlined, RuleOutlined, UploadFileOutlined } from '@mui/icons-material';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -53,6 +53,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [triggerGlobalError, setTriggerGlobalError] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [openAlert, setOpenAlert] = useState(false);
+  const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
@@ -139,9 +140,8 @@ export default function MeasurementsSummaryViewDataGrid() {
       <FailedMeasurementsModal
         open={openFSM}
         handleCloseModal={async () => {
-          await reloadMSV();
           setOpenFSM(false);
-          setOpenAlert(true);
+          setOpenViewResetAlert(true);
         }}
       />
       <MeasurementsCommons
@@ -176,17 +176,32 @@ export default function MeasurementsSummaryViewDataGrid() {
           { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.', icon: <RuleOutlined /> }
         ]}
       />
-      <Collapse in={openAlert} sx={{ width: '100%' }}>
+      <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
         <Snackbar
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
           open={openAlert}
           autoHideDuration={6000}
           onClose={() => setOpenAlert(false)}
+          variant={'plain'}
           sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
         >
-          <Alert variant={'outlined'} onClose={() => setOpenAlert(false)} severity="warning">
+          <Alert variant={'standard'} onClose={() => setOpenAlert(false)}>
             <AlertTitle>Changes detected!</AlertTitle>
             Please press the refresh button to update the grid.
+          </Alert>
+        </Snackbar>
+        <Snackbar
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+          open={openViewResetAlert}
+          autoHideDuration={6000}
+          onClose={() => setOpenViewResetAlert(false)}
+          variant={'plain'}
+          sx={{ display: 'flex', flex: 1, alignSelf: 'center', justifySelf: 'center', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Alert variant={'outlined'} onClose={() => setOpenViewResetAlert(false)} sx={{ display: 'flex', flex: 1, width: '100%', flexDirection: 'column' }}>
+            <AlertTitle>CORE CHANGES DETECTED!</AlertTitle>
+            <Typography fontWeight={'bold'}>You must reset the view to see your changes.</Typography>
+            <Typography fontWeight={'bold'}>Press the view reset button!</Typography>
           </Alert>
         </Snackbar>
       </Collapse>
