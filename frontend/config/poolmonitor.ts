@@ -79,24 +79,27 @@ export class PoolMonitor {
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
     const bufferTime = 180;
     try {
-      const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime} AND USER <> 'event_scheduler';`);
-      if (rows.length > 0) {
-        console.log(chalk.cyan('Active MySQL Processes:'));
-        console.table(rows);
+      if (!this.isPoolClosed()) {
+        // only log if pool is not closed
+        const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime} AND USER <> 'event_scheduler';`);
+        if (rows.length > 0) {
+          console.log(chalk.cyan('Active MySQL Processes:'));
+          console.table(rows);
 
-        const { liveIds, sleepingIds } = rows.reduce(
-          (acc: any, process: any) => {
-            if (process.COMMAND !== 'Sleep') {
-              acc.liveIds.push(process.ID);
-            } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime * 2) {
-              acc.sleepingIds.push(process.ID);
-            }
-            return acc;
-          },
-          { liveIds: [], sleepingIds: [] }
-        );
+          const { liveIds, sleepingIds } = rows.reduce(
+            (acc: any, process: any) => {
+              if (process.COMMAND !== 'Sleep') {
+                acc.liveIds.push(process.ID);
+              } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime * 2) {
+                acc.sleepingIds.push(process.ID);
+              }
+              return acc;
+            },
+            { liveIds: [], sleepingIds: [] }
+          );
 
-        return { sleeping: sleepingIds, live: liveIds };
+          return { sleeping: sleepingIds, live: liveIds };
+        }
       }
       return { sleeping: [], live: [] };
     } catch (error) {
