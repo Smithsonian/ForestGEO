@@ -576,6 +576,27 @@ create index temporarymeasurements_FileID_index
 create index temporarymeasurements_TreeTag_index
     on temporarymeasurements (TreeTag);
 
+create index temporarymeasurements_Codes_index
+    on temporarymeasurements (Codes);
+
+create index temporarymeasurements_DBH_HOM_MeasurementDate_index
+    on temporarymeasurements (DBH, HOM, MeasurementDate);
+
+create index temporarymeasurements_QuadratName_index
+    on temporarymeasurements (QuadratName);
+
+create index temporarymeasurements_StemTag_LocalX_LocalY_index
+    on temporarymeasurements (StemTag, LocalX, LocalY);
+
+create index temporarymeasurements_StemTag_index
+    on temporarymeasurements (StemTag);
+
+create index temporarymeasurements_TreeTag_SpeciesCode_index
+    on temporarymeasurements (TreeTag, SpeciesCode);
+
+create index temporarymeasurements_id_index
+    on temporarymeasurements (id);
+
 create table if not exists trees
 (
     TreeID    int auto_increment
