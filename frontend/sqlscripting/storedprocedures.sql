@@ -340,10 +340,10 @@ begin
                     nullif(StemTag, '')                   as StemTag,
                     nullif(SpeciesCode, '')               as SpCode,
                     nullif(QuadratName, '')               as Quadrat,
-                    nullif(LocalX, -1)                    as X,
-                    nullif(LocalY, -1)                    as Y,
-                    nullif(DBH, -1)                       as DBH,
-                    nullif(HOM, -1)                       as HOM,
+                    nullif(nullif(LocalX, -1), 0)         as X,
+                    nullif(nullif(LocalY, -1), 0)         as Y,
+                    nullif(nullif(DBH, -1), 0)            as DBH,
+                    nullif(nullif(HOM, -1), 0)            as HOM,
                     nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
                     nullif(Codes, '')                     as Codes
     from (
@@ -530,15 +530,15 @@ begin
 end;
 
 
-
 create
     definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)
 BEGIN
     SET @disable_triggers = 1;
-
+    set foreign_key_checks  = 0;
     START TRANSACTION;
 
     DELETE FROM temporarymeasurements WHERE CensusID = targetCensusID;
+    delete from failedmeasurements where CensusID = targetCensusID;
 
     DELETE cma
     FROM cmattributes cma
@@ -563,6 +563,8 @@ BEGIN
 
     DELETE FROM census WHERE CensusID = targetCensusID;
 
+    alter table failedmeasurements
+        auto_increment = 1;
     ALTER TABLE temporarymeasurements
         AUTO_INCREMENT = 1;
     ALTER TABLE cmattributes
@@ -584,7 +586,9 @@ BEGIN
     COMMIT;
 
     SET @disable_triggers = 0;
+    set foreign_key_checks = 1;
 END;
+
 
 create
     definer = azureroot@`%` procedure reingestfailedrows(IN vPlotID int, IN vCensusID int)

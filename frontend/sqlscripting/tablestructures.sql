@@ -21,16 +21,20 @@ create table if not exists failedmeasurements
         primary key,
     PlotID              int            null,
     CensusID            int            null,
-    Tag                 varchar(255)   null,
-    StemTag             varchar(255)   null,
-    SpCode              varchar(255)   null,
+    Tag                 varchar(10)    null,
+    StemTag             varchar(10)    null,
+    SpCode              varchar(25)    null,
     Quadrat             varchar(255)   null,
     X                   decimal(12, 6) null,
     Y                   decimal(12, 6) null,
     DBH                 decimal(12, 6) null,
     HOM                 decimal(12, 6) null,
     Date                date           null,
-    Codes               varchar(255)   null
+    Codes               varchar(255)   null,
+    hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
+                                                      `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`, `Codes`))) stored,
+    constraint unique_required_hash
+        unique (hash_id)
 );
 
 create table if not exists measurementssummary
