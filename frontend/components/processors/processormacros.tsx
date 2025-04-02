@@ -1,5 +1,4 @@
-import { PoolConnection, PoolOptions } from 'mysql2/promise';
-import { PoolMonitor } from '@/config/poolmonitor';
+import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
 import { capitalizeAndTransformField } from '@/config/utils';

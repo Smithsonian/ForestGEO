@@ -470,7 +470,7 @@ const EditToolbar = (props: EditToolbarProps) => {
   );
 };
 
-function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
+export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
   const [value, setValue] = useState(initialValue);
 
@@ -586,10 +586,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   useEffect(() => {
     async function reloadAttributes() {
-      const response = await fetch(`/api/runquery`, {
-        method: 'POST',
-        body: JSON.stringify(`SELECT * FROM ${currentSite?.schemaName}.attributes;`)
-      });
+      const response = await fetch(`/api/fetchall/attributes?schema=${currentSite?.schemaName ?? ''}`);
       const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
       setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
       setReloadAttrs(false);
