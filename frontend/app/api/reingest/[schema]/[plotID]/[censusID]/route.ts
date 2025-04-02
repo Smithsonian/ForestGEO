@@ -21,7 +21,7 @@ export async function GET(
     const fileID = 'reingestion.csv';
     const batchID = v4();
     const shiftQuery = `
-    INSERT INTO ${schema}.temporarymeasurements 
+    INSERT IGNORE INTO ${schema}.temporarymeasurements 
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
     SELECT 
       ? AS FileID, 
@@ -40,6 +40,7 @@ export async function GET(
       fm.Codes
     FROM ${schema}.failedmeasurements fm
     WHERE fm.PlotID = ? AND fm.CensusID = ?;`;
+    await connectionManager.executeQuery(`truncate ${schema}.temporarymeasurements`);
     await connectionManager.executeQuery(shiftQuery, [fileID, batchID, plotID, censusID]);
     await connectionManager.executeQuery(`delete from ${schema}.failedmeasurements where PlotID = ? and CensusID = ?`, [plotID, censusID]);
     await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?)`, [fileID, batchID]);

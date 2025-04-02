@@ -32,6 +32,7 @@ export interface FailedMeasurementsRDS {
   hom?: number;
   date?: Date;
   codes?: string;
+  failureReasons?: string;
 }
 
 export type FailedMeasurementsResult = ResultType<FailedMeasurementsRDS>;
