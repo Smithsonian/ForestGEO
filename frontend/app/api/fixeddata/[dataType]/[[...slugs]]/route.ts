@@ -213,9 +213,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
 
 // slugs: schema, gridID
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const params = await props.params;
-  if (!params.slugs) throw new Error('slugs not provided');
-  const [schema, gridID] = params.slugs;
+  const { dataType, slugs } = await props.params;
+  const [schema, gridID] = slugs ?? [];
   if (!schema || !gridID) throw new Error('no schema or gridID provided');
 
   const connectionManager = ConnectionManager.getInstance();
@@ -228,9 +227,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     transactionID = await connectionManager.beginTransaction();
 
     // Handle views with handleUpsertForSlices (applies to both insert and update logic)
-    if (params.dataType === 'alltaxonomiesview') {
+    if (dataType === 'alltaxonomiesview') {
       let queryConfig;
-      switch (params.dataType) {
+      switch (dataType) {
         case 'alltaxonomiesview':
           queryConfig = AllTaxonomiesViewQueryConfig;
           break;
@@ -244,7 +243,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
     // Handle non-view table updates
     else {
-      if (params.dataType === 'measurementssummary') {
+      if (dataType === 'measurementssummary') {
         const updatedFields = getUpdatedValues(oldRow, newRow);
         const { coreMeasurementID, quadratID, treeID, stemID, speciesID } = newRow;
 
@@ -313,22 +312,32 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         }
       } else {
         // special handling need not apply to non-measurements tables
-        const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
+        // failedmeasurements executed here
+        const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([newRow])[0];
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
-        // Construct the UPDATE query
+        let failedTrimmed, _ignored;
+
+        if (dataType === 'failedmeasurements') {
+          ({ Hash_ID: _ignored, ...failedTrimmed } = newRowData);
+          failedTrimmed['FailureReasons'] = '';
+        }
+
+        // Use failedTrimmed for failedmeasurements, otherwise use remainingProperties
+        const dataToUpdate = dataType === 'failedmeasurements' ? failedTrimmed : remainingProperties;
+
         const updateQuery = format(
           `UPDATE ??
-         SET ?
-         WHERE ?? = ?`,
-          [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]
+           SET ?
+           WHERE ?? = ?`,
+          [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
         );
 
         // Execute the UPDATE query
         await connectionManager.executeQuery(updateQuery);
 
         // For non-view tables, standardize the response format
-        updateIDs = { [params.dataType]: gridIDKey };
+        updateIDs = { [dataType]: gridIDKey };
       }
     }
     await connectionManager.commitTransaction(transactionID ?? '');
@@ -380,9 +389,16 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
     if (params.dataType === 'quadrats') {
       const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
       await connectionManager.executeQuery(qDeleteQuery);
+    } else if (params.dataType === 'measurementssummary') {
+      // start with surrounding data
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmattributes WHERE ${demappedGridID} = ${gridIDKey}`);
+      // finally, perform core deletion
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.coremeasurements WHERE ${demappedGridID} = ${gridIDKey}`);
+    } else {
+      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+      await connectionManager.executeQuery(deleteQuery);
     }
-    const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-    await connectionManager.executeQuery(deleteQuery);
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
   } catch (error: any) {

@@ -3,6 +3,7 @@ drop procedure if exists RefreshMeasurementsSummary;
 drop procedure if exists bulkingestionprocess;
 drop procedure if exists clearcensus;
 drop procedure if exists reingestfailedrows;
+drop procedure if exists reviewfailed;
 
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
@@ -280,52 +281,71 @@ END;
 create
     definer = azureroot@`%` procedure bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
 begin
-    drop temporary table if exists tempcodes, treestates, stemstates, filtered, filter_validity, filter_validity_dup, preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
+    drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
+        stemstates, filtered, filter_validity, filter_validity_dup,
+        preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
 
     set @disable_triggers = 1;
 
+    create temporary table initial_dup_filter as
+    select distinct id,
+                    FileID,
+                    BatchID,
+                    PlotID,
+                    CensusID,
+                    TreeTag,
+                    StemTag,
+                    SpeciesCode,
+                    QuadratName,
+                    LocalX,
+                    LocalY,
+                    DBH,
+                    HOM,
+                    MeasurementDate,
+                    Codes
+    from temporarymeasurements
+    where FileID = vFileID
+      and BatchID = vBatchID;
+
     create temporary table filter_validity as
-    select i.id,
-           i.FileID,
-           i.BatchID,
-           i.PlotID,
-           i.CensusID,
-           coalesce(i.TreeTag, '')                                    as TreeTag,
-           coalesce(i.StemTag, '')                                    as StemTag,
-           coalesce(i.SpeciesCode, '')                                as SpeciesCode,
-           coalesce(i.QuadratName, '')                                as QuadratName,
-           coalesce(i.LocalX, -1)                                     as LocalX,
-           coalesce(i.LocalY, -1)                                     as LocalY,
-           coalesce(i.DBH, -1)                                        as DBH,
-           coalesce(i.HOM, -1)                                        as HOM,
-           coalesce(i.MeasurementDate, '1900-01-01')                  as MeasurementDate,
-           coalesce(i.Codes, '')                                      as Codes,
-           if((((i.DBH is null or i.DBH = -1) or (i.HOM is null or i.HOM = -1)) and
-               (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
-           ifnull(
-                   (select sum(if(a.Code is null, 1, 0))
-                    from json_table(
-                                 if(i.Codes is null or trim(i.Codes) = '', '[]',
-                                    concat('["', replace(trim(i.Codes), ';', '","'), '"]')
-                                 ),
-                                 '$[*]' columns ( code varchar(10) path '$')
-                         ) jt
-                             left join attributes a on a.Code = jt.code),
-                   0
-           )                                                          as invalid_count
-    from temporarymeasurements i
+    select distinct i.id,
+                    i.FileID,
+                    i.BatchID,
+                    i.PlotID,
+                    i.CensusID,
+                    coalesce(i.TreeTag, '')                                    as TreeTag,
+                    coalesce(i.StemTag, '')                                    as StemTag,
+                    coalesce(i.SpeciesCode, '')                                as SpeciesCode,
+                    coalesce(i.QuadratName, '')                                as QuadratName,
+                    coalesce(i.LocalX, -1)                                     as LocalX,
+                    coalesce(i.LocalY, -1)                                     as LocalY,
+                    coalesce(i.DBH, -1)                                        as DBH,
+                    coalesce(i.HOM, -1)                                        as HOM,
+                    coalesce(i.MeasurementDate, '1900-01-01')                  as MeasurementDate,
+                    coalesce(i.Codes, '')                                      as Codes,
+                    if((((i.DBH is null or i.DBH = 0 or i.DBH = -1) or (i.HOM is null or i.HOM = 0 or i.HOM = -1)) and
+                        (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
+                    ifnull(
+                            (select sum(if(a.Code is null, 1, 0))
+                             from json_table(
+                                          if(i.Codes is null or trim(i.Codes) = '', '[]',
+                                             concat('["', replace(trim(i.Codes), ';', '","'), '"]')
+                                          ),
+                                          '$[*]' columns ( code varchar(10) path '$')
+                                  ) jt
+                                      left join attributes a on a.Code = jt.code),
+                            0
+                    )                                                          as invalid_count
+    from initial_dup_filter i
              left join quadrats q ON i.QuadratName = q.QuadratName
              left join censusquadrat cq on cq.QuadratID = q.QuadratID
              left join census c on cq.CensusID = c.CensusID
              left join species s ON i.SpeciesCode = s.SpeciesCode
-    where i.BatchID = vBatchID
-      and i.FileID = vFileID
-      and i.TreeTag is not null
+    where i.TreeTag is not null
       and c.CensusID = i.CensusID
       and q.PlotID = i.PlotID
       and (q.QuadratID is not null and s.SpeciesID is not null) -- using OR will pass the row if one condition is satisfied but not the other
-      and i.MeasurementDate is not null
-    group by i.id;
+      and i.MeasurementDate is not null;
 
     create temporary table filter_validity_dup as
     select * from filter_validity;
@@ -340,10 +360,10 @@ begin
                     nullif(StemTag, '')                   as StemTag,
                     nullif(SpeciesCode, '')               as SpCode,
                     nullif(QuadratName, '')               as Quadrat,
-                    nullif(LocalX, -1)                    as X,
-                    nullif(LocalY, -1)                    as Y,
-                    nullif(DBH, -1)                       as DBH,
-                    nullif(HOM, -1)                       as HOM,
+                    nullif(nullif(LocalX, -1), 0)         as X,
+                    nullif(nullif(LocalY, -1), 0)         as Y,
+                    nullif(nullif(DBH, -1), 0)            as DBH,
+                    nullif(nullif(HOM, -1), 0)            as HOM,
                     nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
                     nullif(Codes, '')                     as Codes
     from (
@@ -385,81 +405,66 @@ begin
                                from filter_validity_dup f
                                where f.id = tm.id)) as combined;
 
-    -- Capture a snapshot of trees before inserting new rows
-    create temporary table preexisting_trees as
+    create temporary table trees_snapshot as
     select * from trees;
 
-    -- Insert into trees as before
-    insert ignore into trees (TreeTag, SpeciesID)
-    select binary f.TreeTag, s.SpeciesID
-    from filtered f
-             join species s on s.SpeciesCode = f.SpeciesCode;
-
-    -- Create temporary table for tree states using the pre-insert snapshot
     create temporary table treestates as
     select distinct f.TreeTag,
-                    if(pt.TreeID is null, 'insert', 'update') as TreeState
+                    if(t.TreeID is null, 'insert', 'update') as TreeState
+    from filtered f
+             left join trees_snapshot t on t.TreeTag = f.TreeTag;
+
+    insert into trees (TreeTag, SpeciesID)
+    select binary f.TreeTag, s.SpeciesID
     from filtered f
              join species s on s.SpeciesCode = f.SpeciesCode
-             left join preexisting_trees pt on pt.TreeTag = f.TreeTag;
+    on duplicate key update SpeciesID = values(SpeciesID);
 
+    create temporary table treestemstates as
+    select distinct f.TreeTag,
+                    f.StemTag,
+                    (case
+                         when coalesce(ts.TreeState, 'insert') = 'insert' and s.StemID is null then 'new recruit'
+                         when coalesce(ts.TreeState, 'insert') = 'update' and s.StemID is null then 'multistem'
+                         when coalesce(ts.TreeState, 'insert') = 'update' and s.StemID is not null then 'old tree'
+                         else 'unknown'
+                        end) as TreeStemState
+    from filtered f
+             left join treestates ts on ts.TreeTag = f.TreeTag
+             left join trees_snapshot t on t.TreeTag = f.TreeTag
+             left join stems s on coalesce(s.StemTag, '') = coalesce(f.StemTag, '') and s.TreeID = t.TreeID;
 
-    -- Similarly, capture a snapshot of stems before inserting new rows
-    create temporary table preexisting_stems as
-    select * from stems;
-
-    -- Insert into stems as before
     insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
     select t.TreeID, q.QuadratID, f.StemTag, f.LocalX, f.LocalY
     from filtered f
              join trees t on t.TreeTag = f.TreeTag
              join quadrats q on q.QuadratName = f.QuadratName
-    on duplicate key update StemTag = values(StemTag),
+    on duplicate key update QuadratID = values(stems.QuadratID),
+                            StemTag = values(StemTag),
                             LocalX  = values(LocalX),
                             LocalY  = values(LocalY);
-
-    -- Create temporary table for stem states using the pre-insert snapshot
-    create temporary table stemstates as
-    select distinct f.StemTag,
-                    if(ps.StemID is null, 'insert', 'update') as StemState
-    from filtered f
-             join quadrats q on q.QuadratName = f.QuadratName
-             left join preexisting_stems ps on ps.StemTag = f.StemTag;
-
 
     -- need to clean any duplicates out of the table
     create temporary table preinsert_core
     (
-        PICID             int auto_increment primary key,
-        CensusID          int,
-        StemID            int,
-        IsValidated       bit,
-        MeasurementDate   date,
-        MeasuredDBH       decimal(12, 6),
-        MeasuredHOM       decimal(12, 6),
-        UserDefinedFields json
+        PICID           int auto_increment primary key,
+        CensusID        int,
+        StemID          int,
+        IsValidated     bit,
+        MeasurementDate date,
+        MeasuredDBH     decimal(12, 6),
+        MeasuredHOM     decimal(12, 6)
     );
 
-    insert into preinsert_core (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                UserDefinedFields)
+    insert into preinsert_core (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM)
     select f.CensusID,
            s.StemID,
            null  as IsValidated,
            f.MeasurementDate,
            f.DBH as MeasuredDBH,
-           f.HOM as MeasuredHOM,
-           json_object('treestemstate',
-                       case
-                           when ss.StemState = 'insert' and ts.TreeState = 'insert' then 'new recruit'
-                           when ss.StemState = 'insert' and ts.TreeState = 'update' then 'multistem'
-                           when ss.StemState = 'update' and ts.TreeState = 'update' then 'old tree'
-                           end
-           )     as UserDefinedFields
+           f.HOM as MeasuredHOM
     from filtered f
-             join stems s on s.StemTag = f.StemTag
-             join trees t on t.TreeID = s.TreeID and t.TreeTag = f.TreeTag
-             join treestates ts on ts.TreeTag = f.TreeTag
-             join stemstates ss on ss.StemTag = s.StemTag;
+             join stems s on s.StemTag = f.StemTag;
 
     -- Create a duplicate copy of preinsert_core
     create temporary table preinsert_core_copy as
@@ -470,8 +475,10 @@ begin
     select cm1.PICID as dup_id
     from preinsert_core cm1
              join preinsert_core_copy cm2
-                  on cm1.StemID = cm2.StemID
+                  on cm1.MeasuredDBH = cm2.MeasuredDBH
+                      and cm1.MeasuredHOM = cm2.MeasuredHOM
                       and cm1.CensusID = cm2.CensusID
+                      and cm1.StemID = cm2.StemID
                       and cm1.MeasurementDate = cm2.MeasurementDate
     where cm1.PICID <> cm2.PICID;
 
@@ -485,19 +492,25 @@ begin
 
     insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   UserDefinedFields)
-    select CensusID,
-           StemID,
-           IsValidated,
-           MeasurementDate,
-           MeasuredDBH,
-           MeasuredHOM,
-           UserDefinedFields
-    from preinsert_core
-    on duplicate key update StemID            = values(StemID),
-                            MeasuredDBH       = values(MeasuredDBH),
-                            MeasuredHOM       = values(MeasuredHOM),
-                            MeasurementDate   = values(MeasurementDate),
-                            UserDefinedFields = cast(values(UserDefinedFields) as json);
+    select distinct CensusID,
+                    pic.StemID,
+                    IsValidated,
+                    MeasurementDate,
+                    MeasuredDBH,
+                    MeasuredHOM,
+                    json_object('treestemstate', tss.TreeStemState) as UserDefinedFields
+    from preinsert_core pic
+             join stems s on s.StemID = pic.StemID
+             join trees t on s.TreeID = t.TreeID
+             left join (select * from treestemstates) tss on coalesce(tss.TreeTag, '') = coalesce(t.TreeTag, '') and
+                                                             coalesce(tss.StemTag, '') = coalesce(s.StemTag, '')
+    where not exists (select 1
+                      from coremeasurements cm
+                      where cm.CensusID = pic.CensusID
+                        and cm.StemID = pic.StemID
+                        and cm.MeasuredDBH = pic.MeasuredDBH
+                        and cm.MeasuredHOM = pic.MeasuredHOM
+                        and cm.MeasurementDate = pic.MeasurementDate);
 
     create temporary table tempcodes as
     select cm.CoreMeasurementID,
@@ -525,20 +538,21 @@ begin
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = -1;
     update coremeasurements set MeasurementDate = null where MeasurementDate = '1900-01-01';
 
-    drop temporary table if exists tempcodes, treestates, stemstates, filtered, filter_validity, filter_validity_dup, preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
+    drop temporary table if exists initial_dup_filter, treestemstates,trees_snapshot, tempcodes, treestates,
+        stemstates, filtered, filter_validity, filter_validity_dup,
+        preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
     set @disable_triggers = 0;
 end;
-
-
 
 create
     definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)
 BEGIN
     SET @disable_triggers = 1;
-
+    set foreign_key_checks = 0;
     START TRANSACTION;
 
     DELETE FROM temporarymeasurements WHERE CensusID = targetCensusID;
+    delete from failedmeasurements where CensusID = targetCensusID;
 
     DELETE cma
     FROM cmattributes cma
@@ -563,6 +577,8 @@ BEGIN
 
     DELETE FROM census WHERE CensusID = targetCensusID;
 
+    alter table failedmeasurements
+        auto_increment = 1;
     ALTER TABLE temporarymeasurements
         AUTO_INCREMENT = 1;
     ALTER TABLE cmattributes
@@ -584,6 +600,7 @@ BEGIN
     COMMIT;
 
     SET @disable_triggers = 0;
+    set foreign_key_checks = 1;
 END;
 
 create
@@ -639,3 +656,41 @@ begin
 
 end;
 
+create
+    definer = azureroot@`%` procedure reviewfailed()
+begin
+    update failedmeasurements set FailureReasons = '';
+    update failedmeasurements fm2
+        left join species s on fm2.SpCode = s.SpeciesCode
+        left join quadrats q on fm2.PlotID = q.PlotID and fm2.Quadrat = q.QuadratName
+        left join (select fm.FailedMeasurementID,
+                          ifnull(
+                                  (select sum(if(a.Code is null, 1, 0))
+                                   from json_table(
+                                                if(fm.Codes is null or trim(fm.Codes) = '', '[]',
+                                                   concat('["', replace(trim(fm.Codes), ';', '","'), '"]')
+                                                ),
+                                                '$[*]' columns ( code varchar(10) path '$')
+                                        ) jt
+                                            left join attributes a
+                                                      on a.Code = jt.code), 0
+                          ) AS invalid_codes
+                   from failedmeasurements fm) sub on sub.FailedMeasurementID = fm2.FailedMeasurementID
+    set fm2.FailureReasons = trim(both '|' from concat_ws('|',
+                                                          if(fm2.SpCode is null or fm2.SpCode = '', 'SpCode missing', null),
+                                                          if(fm2.SpCode is not null and s.SpeciesID is null,
+                                                             'SpCode invalid', null),
+                                                          if(fm2.Quadrat is null or fm2.Quadrat = '', 'Quadrat missing', null),
+                                                          if(fm2.Quadrat is not null and q.QuadratID is null,
+                                                             'Quadrat invalid', null),
+                                                          if(fm2.X is null or fm2.X = 0 or fm2.X = -1, 'Missing X', null),
+                                                          if(fm2.Y is null or fm2.Y = 0 or fm2.Y = -1, 'Missing Y', null),
+                                                          if((fm2.Codes is null or trim(fm2.Codes) = '') and
+                                                             (fm2.DBH is null or fm2.DBH in (-1, 0)),
+                                                             'Missing Codes and DBH', null),
+                                                          if((fm2.Codes is null or trim(fm2.Codes) = '') and
+                                                             (fm2.HOM is null or fm2.HOM in (-1, 0)),
+                                                             'Missing Codes and HOM', null),
+                                                          if(fm2.Date is null or fm2.Date = '1900-01-01', 'Missing Date', null),
+                                                          if(sub.invalid_codes > 0, 'Invalid Codes', null)));
+end;

@@ -529,7 +529,7 @@ export function InputChip({
   );
 }
 
-function preprocessor(params: GridPreProcessEditCellProps) {
+export function preprocessor(params: GridPreProcessEditCellProps) {
   const { props } = params;
   let newValue = props.value;
 
