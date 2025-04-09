@@ -17,7 +17,9 @@ import {
   SpecimensRDS,
   SpecimensResult,
   StemRDS,
-  StemResult
+  StemResult,
+  TreeRDS,
+  TreeResult
 } from '@/config/sqlrdsdefinitions/taxonomies';
 import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
 import {
@@ -268,6 +270,8 @@ class MapperFactory {
         return new GenericMapper<SpecimensRDS, SpecimensResult>() as unknown as IDataMapper<RDS, Result>;
       case 'stems':
         return new GenericMapper<StemRDS, StemResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'trees':
+        return new GenericMapper<TreeRDS, TreeResult>() as unknown as IDataMapper<RDS, Result>;
       case 'unifiedchangelog':
         return new GenericMapper<UnifiedChangelogRDS, UnifiedChangelogResult>() as unknown as IDataMapper<RDS, Result>;
       case 'validationchangelog':

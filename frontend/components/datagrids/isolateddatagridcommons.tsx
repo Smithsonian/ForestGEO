@@ -352,7 +352,7 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
 };
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [], defaultHideEmpty = true } = props;
+  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [], defaultHideEmpty = true, apiRef = undefined } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -394,7 +394,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   useSession();
 
-  const apiRef = useGridApiRef();
+  const localApiRef = apiRef === undefined ? useGridApiRef() : apiRef;
 
   useEffect(() => {
     console.log('updated rows: ', rows);
@@ -839,11 +839,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      apiRef.current.stopRowEditMode({ id, ignoreModifications: true });
+      localApiRef.current.stopRowEditMode({ id, ignoreModifications: true });
 
       const oldRow = rows.find(row => String(row.id) === String(id));
 
-      const updatedRow = apiRef.current.getRowWithUpdatedValues(id, 'anyField');
+      const updatedRow = localApiRef.current.getRowWithUpdatedValues(id, 'anyField');
 
       if (oldRow && updatedRow) {
         setPromiseArguments({
@@ -856,7 +856,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         openConfirmationDialog('save', id);
       }
     },
-    [locked, rowModesModel, rows, apiRef, openConfirmationDialog]
+    [locked, rowModesModel, rows, localApiRef, openConfirmationDialog]
   );
 
   const handleDeleteClick = useCallback(
@@ -1114,11 +1114,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setTimeout(() => {
         const firstEditableColumn = filteredColumns.find(col => col.editable);
         if (firstEditableColumn) {
-          apiRef.current.setCellFocus(id, firstEditableColumn.field);
+          localApiRef.current.setCellFocus(id, firstEditableColumn.field);
         }
       });
     },
-    [locked, apiRef]
+    [locked, localApiRef]
   );
 
   const handleCancelClick = useCallback(
@@ -1255,7 +1255,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
           <StyledDataGrid
-            apiRef={apiRef}
+            apiRef={localApiRef}
             sx={{ width: '100%' }}
             rows={rows}
             columns={filteredColumns}
