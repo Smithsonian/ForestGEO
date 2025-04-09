@@ -217,6 +217,7 @@ export interface IsolatedDataGridCommonProps {
   onDataUpdate?: () => void; // Add the onDataUpdate prop
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
+  apiRef?: RefObject<GridApiCommunity>;
 }
 
 export interface DataGridCommonProps {

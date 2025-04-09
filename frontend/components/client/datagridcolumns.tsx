@@ -471,12 +471,16 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
 
 export function InputChip({
   params,
-  selectableAttributes,
-  setReloadAttributes
+  selectable,
+  reload,
+  field,
+  singleSelect = false
 }: {
   params: GridRenderEditCellParams;
-  selectableAttributes: string[];
-  setReloadAttributes: Dispatch<SetStateAction<boolean>>;
+  selectable: string[];
+  reload: Dispatch<SetStateAction<boolean>>;
+  field: string;
+  singleSelect?: boolean;
 }) {
   const [selectedValues, setSelectedValues] = useState<string[]>(params.value?.replace(/\s+/g, '').split(';') ?? []);
 
@@ -484,23 +488,23 @@ export function InputChip({
     const updatedValues = selectedValues.filter(value => value !== valueToRemove);
     setSelectedValues(updatedValues);
     params.api.setEditCellValue({ id: params.id, field: 'attributes', value: updatedValues.join(';') });
-    setReloadAttributes(true);
+    reload(true);
   };
 
   return (
     <Box sx={{ width: '100%', minHeight: '32px' }}>
       <Autocomplete
-        multiple
+        multiple={!singleSelect}
         size="sm"
-        options={selectableAttributes}
+        options={selectable}
         autoHighlight
         autoComplete
         value={selectedValues}
         filterSelectedOptions
         onChange={(_, newValues) => {
-          setSelectedValues(newValues);
-          params.api.setEditCellValue({ id: params.id, field: 'attributes', value: newValues.join(';') });
-          setReloadAttributes(true);
+          setSelectedValues(Array.isArray(newValues) ? newValues : [newValues ?? '']);
+          params.api.setEditCellValue({ id: params.id, field: field, value: Array.isArray(newValues) ? newValues.join(';') : (newValues ?? '') });
+          reload(true);
         }}
         onKeyDown={event => {
           if (event.key === 'Enter' || event.key === 'Tab') {
