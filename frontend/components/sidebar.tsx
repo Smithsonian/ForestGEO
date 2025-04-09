@@ -508,6 +508,8 @@ export default function Sidebar(props: SidebarProps) {
                 ))}
               </Box>
               <IconButton
+                variant={'soft'}
+                color={'danger'}
                 onClick={async () => {
                   await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${item?.dateRanges[0].censusID}`);
                   setManualReset(true);

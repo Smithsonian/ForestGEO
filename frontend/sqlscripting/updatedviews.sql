@@ -1,3 +1,8 @@
+drop view if exists alltaxonomiesview;
+drop view if exists measurementssummaryview;
+drop view if exists stemtaxonomiesview;
+drop view if exists viewfulltableview;
+
 CREATE VIEW alltaxonomiesview AS
 SELECT s.SpeciesID           AS SpeciesID,
        f.FamilyID            AS FamilyID,
