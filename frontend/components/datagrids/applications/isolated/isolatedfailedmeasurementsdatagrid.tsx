@@ -9,6 +9,8 @@ import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
+import { Box, Chip, Stack, Typography } from '@mui/joy';
+import { failureErrorMapping } from '@/config/datagridhelpers';
 
 export default function IsolatedFailedMeasurementsDataGrid() {
   const [refresh, setRefresh] = useState(false);
@@ -43,35 +45,69 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     dbh: 0,
     hom: 0,
     date: null,
-    codes: ''
+    codes: '',
+    failureReasons: ''
   };
 
   const columns: GridColDef[] = useMemo(() => {
     return [
       ...FailedMeasurementsGridColumns.map(column => {
-        if (column.field === 'codes') {
-          return {
-            ...column,
-            renderCell: (params: any) => {
-              const codes: string[] = (params.value ?? '').split(';') ?? [];
-              const filteredCodes = codes.filter(code => selectableCodes.includes(code));
-              return filteredCodes.join(';');
-            },
-            renderEditCell: (params: GridRenderEditCellParams) => (
-              <InputChip params={params} selectableAttributes={selectableCodes} setReloadAttributes={setReloadCodes} />
-            )
-          };
-        } else if (['dbh', 'hom', 'x', 'y'].includes(column.field)) {
-          column = {
-            ...column,
-            valueFormatter: (value: any) => {
-              return Number(value).toFixed(2);
-            },
-            preProcessEditCellProps: params => preprocessor(params),
-            renderEditCell: (params: GridRenderEditCellParams) => <EditMeasurements params={params} />
-          };
-        }
-        return column;
+        return {
+          ...column,
+          renderCell: (params: any) => {
+            const failureReasonsFromRow = params.row.failureReasons
+              .split('|')
+              .map((reason: string) => reason.trim())
+              .filter((reason: string) => reason !== '');
+            const failureReason = failureReasonsFromRow.filter((reason: string) => {
+              const mappedColumns = failureErrorMapping[reason];
+              return mappedColumns && mappedColumns.includes(column.field);
+            });
+            console.log(failureReason);
+            return (
+              <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', width: '100%', marginY: 0.5 }}>
+                  {column.field === 'codes' ? (
+                    ((params.value ?? '').split(';') ?? [])
+                      .filter((code: string) => selectableCodes.includes(code))
+                      .map((i: string, index: number) => (
+                        <Chip key={index} variant={'soft'}>
+                          {i}
+                        </Chip>
+                      ))
+                  ) : (
+                    <Typography
+                      sx={{
+                        whiteSpace: 'normal',
+                        lineHeight: 'normal'
+                      }}
+                    >
+                      {params.value instanceof Date
+                        ? new Date(params.value).toDateString()
+                        : params.value === '' || params.value === null
+                          ? 'null'
+                          : params.value}
+                    </Typography>
+                  )}
+                </Box>
+                {failureReason && failureReason.length > 0 && (
+                  <Chip variant={'soft'} color={'danger'} sx={{ marginY: 0.5 }}>
+                    {failureReason.join(', ')}
+                  </Chip>
+                )}
+              </Stack>
+            );
+          },
+          renderEditCell: (params: GridRenderEditCellParams) => {
+            if (column.field === 'codes') {
+              return <InputChip params={params} selectableAttributes={selectableCodes} setReloadAttributes={setReloadCodes} />;
+            } else if (['dbh', 'hom', 'x', 'y'].includes(column.field)) {
+              return <EditMeasurements params={params} />;
+            }
+          },
+          valueFormatter: (value: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? Number(value).toFixed(2) : value),
+          preProcessEditCellProps: (params: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? preprocessor(params) : {})
+        };
       })
     ];
   }, [selectableCodes]);

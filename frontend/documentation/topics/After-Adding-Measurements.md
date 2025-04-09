@@ -15,9 +15,9 @@ After navigating to the page, you should see a table appear with a set of:
 - SQL queries
 - a brief explanation of their function
 - historical data columns indicating:
-    - the last time they were run
-    - whether they were successful
-    - what their successful run returned
+  - the last time they were run
+  - whether they were successful
+  - what their successful run returned
 
 Use the checkboxes to select the queries you want to run, and then click on the **Run
 Statistics** button to run the queries. The queries should update momentarily.

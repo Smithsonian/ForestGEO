@@ -153,6 +153,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             }
           );
         }
+        await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
         setAllLoadsCompleted(true);
       } catch (error) {
         console.error(error);
