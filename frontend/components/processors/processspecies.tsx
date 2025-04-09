@@ -6,7 +6,7 @@ function cleanInputData(data: any) {
   const cleanedData: any = {};
   for (const key in data) {
     if (data.hasOwnProperty(key)) {
-      cleanedData[key] = data[key] !== undefined && data[key] !== '' ? data[key] : null;
+      cleanedData[key] = data[key] !== undefined && data[key] !== '' ? data[key] : '';
     }
   }
   return cleanedData;
@@ -31,7 +31,7 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
         SpeciesCode: rowData.spcode,
         SpeciesName: rowData.species,
         SubspeciesName: rowData.subspecies,
-        IDLevel: rowData.IDLevel,
+        IDLevel: rowData.idlevel,
         SpeciesAuthority: rowData.authority,
         SubspeciesAuthority: rowData.subauthority,
         GenusID: genusID

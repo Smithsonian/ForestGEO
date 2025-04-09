@@ -307,22 +307,19 @@ export interface MeasurementsCommonsProps {
   locked?: boolean;
   dynamicButtons: any[];
 }
-
-export const errorMapping: Record<string, string[]> = {
-  '1': ['attributes'],
-  '2': ['measuredDBH'],
-  '3': ['measuredHOM'],
-  '4': ['treeTag', 'stemTag'],
-  '5': ['treeTag', 'stemTag', 'quadratName'],
-  '6': ['stemLocalX', 'stemLocalY'],
-  '7': ['speciesCode'],
-  '8': ['measurementDate'],
-  '9': ['treeTag', 'stemTag', 'plotCensusNumber'],
-  '10': ['treeTag', 'stemTag', 'plotCensusNumber'],
-  '11': ['quadratName'],
-  '12': ['speciesCode'],
-  '13': ['measuredDBH', 'measuredHOM']
+export const failureErrorMapping: Record<string, string[]> = {
+  'SpCode missing': ['spCode'],
+  'SpCode invalid': ['spCode'],
+  'Quadrat missing': ['quadrat'],
+  'Quadrat invalid': ['quadrat'],
+  'Missing X': ['x'],
+  'Missing Y': ['y'],
+  'Codes and DBH': ['codes', 'dbh'],
+  'Codes and HOM': ['codes', 'hom'],
+  'Missing Date': ['date'],
+  'Invalid Codes': ['codes']
 };
+
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
   return rows.slice().sort((a, b) => {
     const dateA = new Date(a.measurementDate).getTime();

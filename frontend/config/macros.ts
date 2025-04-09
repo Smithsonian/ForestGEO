@@ -167,7 +167,7 @@ export const fileMappings: Record<string, FileMapping> = {
       genus: 'Genus.GenusName',
       species: 'Species.SpeciesName',
       subspecies: 'Species.SubspeciesName', // optional
-      IDLevel: 'Species.IDLevel',
+      idlevel: 'Species.IDLevel',
       authority: 'Species.Authority',
       subauthority: 'Species.SubspeciesAuthority' // optional
     },
