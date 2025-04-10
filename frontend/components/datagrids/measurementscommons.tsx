@@ -1296,7 +1296,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         column = {
           ...column,
           renderEditCell: (params: GridRenderEditCellParams) => (
-            <InputChip params={params} selectable={selectableAttributes} field={column.field} reload={setReloadAttrs} />
+            <InputChip params={params} selectable={selectableAttributes} reload={setReloadAttrs} />
           )
         };
       }

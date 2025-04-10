@@ -352,7 +352,18 @@ const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) 
 };
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
-  const { gridColumns, gridType, refresh, setRefresh, locked = false, initialRow, fieldToFocus, dynamicButtons = [], defaultHideEmpty = true, apiRef = undefined } = props;
+  const {
+    gridColumns,
+    gridType,
+    refresh,
+    setRefresh,
+    locked = false,
+    initialRow,
+    fieldToFocus,
+    dynamicButtons = [],
+    defaultHideEmpty = true,
+    apiRef = undefined
+  } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
