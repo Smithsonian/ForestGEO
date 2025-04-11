@@ -267,8 +267,11 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
           {
-            label: 'Reset Table',
-            onClick: async () => await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`),
+            label: 'RESET Table',
+            onClick: async () => {
+              await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
+              setRefresh(true);
+            },
             tooltip: 'Reset all species-related tables!'
           }
         ]}

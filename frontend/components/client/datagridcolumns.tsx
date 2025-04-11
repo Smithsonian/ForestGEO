@@ -471,12 +471,12 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
 
 export function InputChip({
   params,
-  selectableAttributes,
-  setReloadAttributes
+  selectable,
+  reload
 }: {
   params: GridRenderEditCellParams;
-  selectableAttributes: string[];
-  setReloadAttributes: Dispatch<SetStateAction<boolean>>;
+  selectable: string[];
+  reload: Dispatch<SetStateAction<boolean>>;
 }) {
   const [selectedValues, setSelectedValues] = useState<string[]>(params.value?.replace(/\s+/g, '').split(';') ?? []);
 
@@ -484,7 +484,7 @@ export function InputChip({
     const updatedValues = selectedValues.filter(value => value !== valueToRemove);
     setSelectedValues(updatedValues);
     params.api.setEditCellValue({ id: params.id, field: 'attributes', value: updatedValues.join(';') });
-    setReloadAttributes(true);
+    reload(true);
   };
 
   return (
@@ -492,7 +492,7 @@ export function InputChip({
       <Autocomplete
         multiple
         size="sm"
-        options={selectableAttributes}
+        options={selectable}
         autoHighlight
         autoComplete
         value={selectedValues}
@@ -500,7 +500,7 @@ export function InputChip({
         onChange={(_, newValues) => {
           setSelectedValues(newValues);
           params.api.setEditCellValue({ id: params.id, field: 'attributes', value: newValues.join(';') });
-          setReloadAttributes(true);
+          reload(true);
         }}
         onKeyDown={event => {
           if (event.key === 'Enter' || event.key === 'Tab') {
