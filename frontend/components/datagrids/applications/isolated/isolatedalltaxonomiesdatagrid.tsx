@@ -171,7 +171,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       editable: true
     },
     {
-      field: 'speciesIDLevel',
+      field: 'speciesidLevel',
       headerName: 'Species ID Level',
       renderHeader: () => formatHeader('Species', 'ID Level'),
       flex: 1,
