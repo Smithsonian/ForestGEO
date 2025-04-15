@@ -1295,9 +1295,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       if (column.field === 'attributes') {
         column = {
           ...column,
-          renderEditCell: (params: GridRenderEditCellParams) => (
-            <InputChip params={params} selectable={selectableAttributes} reload={setReloadAttrs} />
-          )
+          renderEditCell: (params: GridRenderEditCellParams) => <InputChip params={params} selectable={selectableAttributes} reload={setReloadAttrs} />
         };
       }
       if (['measuredDBH', 'measuredHOM', 'stemLocalX', 'stemLocalY'].includes(column.field)) {
