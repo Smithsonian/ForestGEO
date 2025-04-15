@@ -308,6 +308,7 @@ export interface MeasurementsCommonsProps {
   locked?: boolean;
   dynamicButtons: any[];
 }
+
 export const failureErrorMapping: Record<string, string[]> = {
   'SpCode missing': ['spCode'],
   'SpCode invalid': ['spCode'],
