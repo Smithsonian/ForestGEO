@@ -285,6 +285,8 @@ begin
         stemstates, filtered, filter_validity, filter_validity_dup,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
 
+    drop temporary table if exists old_trees, multi_stems, new_recruits;
+
     set @disable_triggers = 1;
 
     create temporary table initial_dup_filter as
@@ -313,17 +315,17 @@ begin
                     i.BatchID,
                     i.PlotID,
                     i.CensusID,
-                    coalesce(i.TreeTag, '')                                    as TreeTag,
-                    coalesce(i.StemTag, '')                                    as StemTag,
-                    coalesce(i.SpeciesCode, '')                                as SpeciesCode,
-                    coalesce(i.QuadratName, '')                                as QuadratName,
-                    coalesce(i.LocalX, -1)                                     as LocalX,
-                    coalesce(i.LocalY, -1)                                     as LocalY,
-                    coalesce(i.DBH, -1)                                        as DBH,
-                    coalesce(i.HOM, -1)                                        as HOM,
-                    coalesce(i.MeasurementDate, '1900-01-01')                  as MeasurementDate,
-                    coalesce(i.Codes, '')                                      as Codes,
-                    if((((i.DBH is null or i.DBH = 0 or i.DBH = -1) or (i.HOM is null or i.HOM = 0 or i.HOM = -1)) and
+                    i.TreeTag                                                  as TreeTag,
+                    ifnull(i.StemTag, '')                                      as StemTag,
+                    i.SpeciesCode                                              as SpeciesCode,
+                    i.QuadratName                                              as QuadratName,
+                    ifnull(i.LocalX, 0)                                        as LocalX,
+                    ifnull(i.LocalY, 0)                                        as LocalY,
+                    ifnull(i.DBH, 0)                                           as DBH,
+                    ifnull(i.HOM, 0)                                           as HOM,
+                    i.MeasurementDate                                          as MeasurementDate,
+                    i.Codes                                                    as Codes,
+                    if((((i.DBH = 0) or (i.HOM = 0)) and
                         (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
                     ifnull(
                             (select sum(if(a.Code is null, 1, 0))
@@ -360,10 +362,10 @@ begin
                     nullif(StemTag, '')                   as StemTag,
                     nullif(SpeciesCode, '')               as SpCode,
                     nullif(QuadratName, '')               as Quadrat,
-                    nullif(nullif(LocalX, -1), 0)         as X,
-                    nullif(nullif(LocalY, -1), 0)         as Y,
-                    nullif(nullif(DBH, -1), 0)            as DBH,
-                    nullif(nullif(HOM, -1), 0)            as HOM,
+                    nullif(LocalX, 0)                     as X,
+                    nullif(LocalY, 0)                     as Y,
+                    nullif(DBH, 0)                        as DBH,
+                    nullif(HOM, 0)                        as HOM,
                     nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
                     nullif(Codes, '')                     as Codes
     from (
@@ -405,123 +407,158 @@ begin
                                from filter_validity_dup f
                                where f.id = tm.id)) as combined;
 
-    create temporary table trees_snapshot as
-    select * from trees;
-
-    create temporary table treestates as
-    select distinct f.TreeTag,
-                    if(t.TreeID is null, 'insert', 'update') as TreeState
-    from filtered f
-             left join trees_snapshot t on t.TreeTag = f.TreeTag;
-
-    insert into trees (TreeTag, SpeciesID)
-    select binary f.TreeTag, s.SpeciesID
-    from filtered f
-             join species s on s.SpeciesCode = f.SpeciesCode
-    on duplicate key update SpeciesID = values(SpeciesID);
-
-    create temporary table treestemstates as
-    select distinct f.TreeTag,
-                    f.StemTag,
-                    (case
-                         when coalesce(ts.TreeState, 'insert') = 'insert' and s.StemID is null then 'new recruit'
-                         when coalesce(ts.TreeState, 'insert') = 'update' and s.StemID is null then 'multistem'
-                         when coalesce(ts.TreeState, 'insert') = 'update' and s.StemID is not null then 'old tree'
-                         else 'unknown'
-                        end) as TreeStemState
-    from filtered f
-             left join treestates ts on ts.TreeTag = f.TreeTag
-             left join trees_snapshot t on t.TreeTag = f.TreeTag
-             left join stems s on coalesce(s.StemTag, '') = coalesce(f.StemTag, '') and s.TreeID = t.TreeID;
-
-    insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
-    select t.TreeID, q.QuadratID, f.StemTag, f.LocalX, f.LocalY
+    create temporary table old_trees as
+    select f.*
     from filtered f
              join trees t on t.TreeTag = f.TreeTag
-             join quadrats q on q.QuadratName = f.QuadratName
-    on duplicate key update QuadratID = values(stems.QuadratID),
-                            StemTag = values(StemTag),
-                            LocalX  = values(LocalX),
-                            LocalY  = values(LocalY);
+             join stems s on s.TreeID = t.TreeID and s.StemTag = f.StemTag;
 
-    -- need to clean any duplicates out of the table
-    create temporary table preinsert_core
-    (
-        PICID           int auto_increment primary key,
-        CensusID        int,
-        StemID          int,
-        IsValidated     bit,
-        MeasurementDate date,
-        MeasuredDBH     decimal(12, 6),
-        MeasuredHOM     decimal(12, 6)
-    );
-
-    insert into preinsert_core (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM)
-    select f.CensusID,
-           s.StemID,
-           null  as IsValidated,
-           f.MeasurementDate,
-           f.DBH as MeasuredDBH,
-           f.HOM as MeasuredHOM
+    create temporary table multi_stems as
+    select f.*
     from filtered f
-             join stems s on s.StemTag = f.StemTag;
+             join trees t on t.TreeTag = f.TreeTag
+    where f.id not in (select id from old_trees)
+      and not exists (select 1 from stems s where s.TreeID = t.TreeID and s.StemTag = f.StemTag);
 
-    -- Create a duplicate copy of preinsert_core
-    create temporary table preinsert_core_copy as
-    select * from preinsert_core;
+    create temporary table new_recruits as
+    select f.*
+    from filtered f
+             left join trees t on t.TreeTag = f.TreeTag
+    where t.TreeTag is null
+      and f.id not in (select id from old_trees)
+      and f.id not in (select id from multi_stems);
 
-    -- Now, join preinsert_core with its copy to identify duplicates
-    create temporary table duplicate_ids as
-    select cm1.PICID as dup_id
-    from preinsert_core cm1
-             join preinsert_core_copy cm2
-                  on cm1.MeasuredDBH = cm2.MeasuredDBH
-                      and cm1.MeasuredHOM = cm2.MeasuredHOM
-                      and cm1.CensusID = cm2.CensusID
-                      and cm1.StemID = cm2.StemID
-                      and cm1.MeasurementDate = cm2.MeasurementDate
-    where cm1.PICID <> cm2.PICID;
+    -- no changes needed for old stems!
 
-    -- Drop the copy since it's no longer needed
-    drop temporary table preinsert_core_copy;
+    -- handle multi stems
+    insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
+    select distinct t.TreeID, q.QuadratID, ms.StemTag, ms.LocalX, ms.LocalY
+    from multi_stems ms
+             join trees t on t.TreeTag = ms.TreeTag
+             join quadrats q on q.QuadratName = ms.QuadratName and q.PlotID = ms.PlotID
+             left join old_trees ot on ms.id = ot.id
+    where ot.id is null
+    on duplicate key update QuadratID = values(stems.QuadratID),
+                            StemTag   = values(StemTag),
+                            LocalX    = values(LocalX),
+                            LocalY    = values(LocalY);
 
-    -- Delete duplicates from preinsert_core using the duplicate_ids table
-    delete
-    from preinsert_core
-    where PICID in (select dup_id from duplicate_ids);
+    -- handle new recruits
+    insert into trees (TreeTag, SpeciesID)
+    select distinct binary nt.TreeTag, sp.SpeciesID
+    from new_recruits nt
+             join species sp on sp.SpeciesCode = nt.SpeciesCode
+             left join old_trees ot on ot.id = nt.id
+    where ot.id is null
+    on duplicate key update TreeTag   = values(TreeTag),
+                            SpeciesID = values(SpeciesID);
 
+    insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
+    select distinct t.TreeID, q.QuadratID, nt.StemTag, nt.LocalX, nt.LocalY
+    from new_recruits nt
+             join trees t on t.TreeTag = nt.TreeTag
+             join quadrats q on q.QuadratName = nt.QuadratName and q.PlotID = nt.PlotID
+             left join multi_stems ms on ms.id = nt.id
+             left join old_trees ot on ot.id = nt.id
+    where ms.id is null
+      and ot.id is null
+    on duplicate key update QuadratID = values(QuadratID),
+                            StemTag   = values(StemTag),
+                            LocalX    = values(LocalX),
+                            LocalY    = values(LocalY);
+
+    -- handle old recruit insertion first:
     insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
                                   UserDefinedFields)
-    select distinct CensusID,
-                    pic.StemID,
-                    IsValidated,
-                    MeasurementDate,
-                    MeasuredDBH,
-                    MeasuredHOM,
-                    json_object('treestemstate', tss.TreeStemState) as UserDefinedFields
-    from preinsert_core pic
-             join stems s on s.StemID = pic.StemID
-             join trees t on s.TreeID = t.TreeID
-             left join (select * from treestemstates) tss on coalesce(tss.TreeTag, '') = coalesce(t.TreeTag, '') and
-                                                             coalesce(tss.StemTag, '') = coalesce(s.StemTag, '')
-    where not exists (select 1
-                      from coremeasurements cm
-                      where cm.CensusID = pic.CensusID
-                        and cm.StemID = pic.StemID
-                        and cm.MeasuredDBH = pic.MeasuredDBH
-                        and cm.MeasuredHOM = pic.MeasuredHOM
-                        and cm.MeasurementDate = pic.MeasurementDate);
+    select distinct ot.CensusID,
+                    s.StemID,
+                    null                                      as IsValidated,
+                    ot.MeasurementDate,
+                    ot.DBH,
+                    ot.HOM,
+                    json_object('treestemstate', 'old trees') as UserDefinedFields
+    from old_trees ot
+             join quadrats q on q.QuadratName = ot.QuadratName and q.PlotID = ot.PlotID
+             join stems s on s.StemTag = ot.StemTag and s.QuadratID = q.QuadratID
+             join trees t on s.TreeID = t.TreeID and t.TreeTag = ot.TreeTag
+    on duplicate key update CensusID        = values(CensusID),
+                            StemID          = values(StemID),
+                            MeasurementDate = values(MeasurementDate),
+                            MeasuredDBH     = values(MeasuredDBH),
+                            MeasuredHOM     = values(MeasuredHOM);
+
+    -- handle multi stems insertion:
+    insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+                                  UserDefinedFields)
+    select distinct ms.CensusID,
+                    s.StemID,
+                    null                                       as IsValidated,
+                    ms.MeasurementDate,
+                    ms.DBH,
+                    ms.HOM,
+                    json_object('treestemstate', 'multi stem') as UserDefinedFields
+    from multi_stems ms
+             join quadrats q on q.QuadratName = ms.QuadratName and q.PlotID = ms.PlotID
+             join stems s on s.StemTag = ms.StemTag and s.QuadratID = q.QuadratID
+             join trees t on s.TreeID = t.TreeID and t.TreeTag = ms.TreeTag
+             left join old_trees ot on ot.id = ms.id
+             left join new_recruits nt on nt.id = ms.id
+    where ot.id is null
+      and nt.id is null
+    on duplicate key update CensusID        = values(CensusID),
+                            StemID          = values(StemID),
+                            MeasurementDate = values(MeasurementDate),
+                            MeasuredDBH     = values(MeasuredDBH),
+                            MeasuredHOM     = values(MeasuredHOM);
+
+    -- handle new recruits
+    insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+                                  UserDefinedFields)
+    select distinct nr.CensusID,
+                    s.StemID,
+                    null                                        as IsValidated,
+                    nr.MeasurementDate,
+                    nr.DBH,
+                    nr.HOM,
+                    json_object('treestemstate', 'new recruit') as UserDefinedFields
+    from new_recruits nr
+             join quadrats q on q.QuadratName = nr.QuadratName and q.PlotID = nr.PlotID
+             join stems s on s.StemTag = nr.StemTag and s.QuadratID = q.QuadratID
+             join trees t on s.TreeID = t.TreeID and t.TreeTag = nr.TreeTag
+             left join old_trees ot on ot.id = nr.id
+             left join multi_stems mt on mt.id = nr.id
+    where ot.id is null
+      and mt.id is null
+    on duplicate key update CensusID        = values(CensusID),
+                            StemID          = values(StemID),
+                            MeasurementDate = values(MeasurementDate),
+                            MeasuredDBH     = values(MeasuredDBH),
+                            MeasuredHOM     = values(MeasuredHOM);
+
+    -- collapser
+    set foreign_key_checks = 0;
+    delete cm1
+    from coremeasurements cm1
+             inner join coremeasurements cm2
+                        on cm1.CensusID = cm2.CensusID
+                            and cm1.StemID = cm2.StemID
+                            and cm1.MeasurementDate = cm2.MeasurementDate
+                            and cm1.MeasuredDBH <=> cm2.MeasuredDBH
+                            and cm1.MeasuredHOM <=> cm2.MeasuredHOM
+                            and cm1.Description <=> cm2.Description
+                            and cm1.CoreMeasurementID > cm2.CoreMeasurementID;
+    set foreign_key_checks = 1;
 
     create temporary table tempcodes as
     select cm.CoreMeasurementID,
            trim(jt.code) as Code
     from filtered f
              join trees t on t.TreeTag = f.TreeTag
-             join stems s on s.StemTag = f.StemTag and s.TreeID = t.TreeID
              join quadrats q on q.QuadratName = f.QuadratName
+             join stems s on s.StemTag = f.StemTag and s.TreeID = t.TreeID and s.QuadratID = q.QuadratID
              join coremeasurements cm
                   on cm.StemID = s.StemID and cm.CensusID = f.CensusID and
-                     cm.MeasurementDate = f.MeasurementDate,
+                     cm.MeasurementDate = f.MeasurementDate and cm.MeasuredDBH = f.DBH and cm.MeasuredHOM = f.HOM,
          json_table(
                  if(f.Codes = '' or trim(f.Codes) = '', '[]',
                     concat('["', replace(trim(f.Codes), ';', '","'), '"]')),
@@ -534,15 +571,17 @@ begin
     on duplicate key update CoreMeasurementID = values(CoreMeasurementID),
                             Code              = values(Code);
 
-    update coremeasurements set MeasuredDBH = null where MeasuredDBH = -1;
-    update coremeasurements set MeasuredHOM = null where MeasuredHOM = -1;
-    update coremeasurements set MeasurementDate = null where MeasurementDate = '1900-01-01';
+    update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0;
+    update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0;
 
+    set @disable_triggers = 0;
+
+    drop temporary table if exists old_trees, multi_stems, new_recruits;
     drop temporary table if exists initial_dup_filter, treestemstates,trees_snapshot, tempcodes, treestates,
         stemstates, filtered, filter_validity, filter_validity_dup,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
-    set @disable_triggers = 0;
 end;
+
 
 create
     definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)

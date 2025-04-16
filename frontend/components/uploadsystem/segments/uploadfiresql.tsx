@@ -11,6 +11,7 @@ import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { useSession } from 'next-auth/react';
+import { v4 } from 'uuid';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -163,7 +164,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
       }
 
-      if (row['__parsed_extra'] !== undefined || Object.keys(row).length > expectedHeaders.length) {
+      if (row['__parsed_extra'] !== undefined) {
+        console.log(`found extra: ${JSON.stringify(row)}`);
         errors.push('Extra columns detected. Likely caused by final column using commas instead of semicolons');
         extraData = true;
       }
@@ -230,6 +232,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       return value;
     };
 
+    let totalRows = 0;
+
     await new Promise<void>((resolve, reject) => {
       Papa.parse<FileRow>(file, {
         delimiter: delimiter,
@@ -240,6 +244,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
           chunkStartTime.current = performance.now();
+          totalRows += results.data.length;
           try {
             if (queue.size >= connectionLimit) {
               console.log(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
@@ -264,8 +269,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             }
 
             const fileRowSet: FileRowSet = {};
-            validRows.forEach((row, index) => {
-              const rowId = `row-${completedChunks + index}`;
+            validRows.forEach(row => {
+              const rowId = `row-${v4()}`;
               fileRowSet[rowId] = row;
             });
 
@@ -302,6 +307,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         complete: async () => {
           await queue.onIdle();
           console.log('File parsing and upload complete');
+          console.log('total rows: ', totalRows);
           if (parsingInvalidRows.length > 0) {
             console.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
             setErrorRows(prevErrorRows => {
