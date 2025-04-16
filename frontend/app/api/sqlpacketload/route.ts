@@ -63,11 +63,14 @@ export async function POST(request: NextRequest) {
     });
     transactionID = await connectionManager.beginTransaction();
     try {
-      const insertSQL = `INSERT INTO ${schema}.temporarymeasurements 
+      const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements 
       (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
       VALUES ${placeholders}`;
       await connectionManager.executeQuery(insertSQL, values);
       await connectionManager.commitTransaction(transactionID);
+      console.log(
+        await connectionManager.executeQuery(`SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [fileName, batchID])
+      );
       return new NextResponse(
         JSON.stringify({
           responseMessage: `Bulk insert to SQL completed`,

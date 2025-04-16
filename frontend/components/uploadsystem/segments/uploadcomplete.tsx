@@ -136,9 +136,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           const fileRowSet = errorRows[fileName];
           Object.values(fileRowSet).forEach(row => flattened.push(row));
         }
-        console.log('flattened: ', flattened);
         for (const row of flattened) {
-          console.log('row in flattened: ', row);
           await fetch(
             createPostPatchQuery(
               currentSite?.schemaName ?? '',
