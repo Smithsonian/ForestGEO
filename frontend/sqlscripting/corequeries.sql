@@ -2,7 +2,7 @@ set foreign_key_checks = 0;
 
 truncate sitespecificvalidations;
 
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm_present.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm_present
          join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID
@@ -32,7 +32,7 @@ where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
                                                             when \'cm\' THEN 10
                                                             when \'mm\' THEN 1
                                                             else 1 end) > 65;', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm_present.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm_present
          join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID
@@ -54,7 +54,7 @@ where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
   and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null
   and (cm_present.MeasuredDBH < cm_past.MeasuredDBH * 0.95);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)', 'speciesCode', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)', 'speciesCode', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          left join stems s on cm.StemID = s.StemID
@@ -68,7 +68,7 @@ where cm.IsValidated is null
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null
   and (sp.SpeciesID is null or t.TreeID is null or s.StemID is null);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (4, 'ValidateFindDuplicatedQuadratsByName', 'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)', 'quadratName', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (4, 'ValidateFindDuplicatedQuadratsByName', 'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)', 'quadratName', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID
@@ -82,7 +82,7 @@ where cm.IsValidated is null
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null;', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus', 'Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census', 'stemTag;treeTag', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus', 'Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census', 'stemTag;treeTag', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID
@@ -96,7 +96,7 @@ where cm.IsValidated is null
   and e.CoreMeasurementID is null
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (6, 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', 'Outside census date bounds', 'measurementDate', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (6, 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', 'Outside census date bounds', 'measurementDate', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID
@@ -107,7 +107,7 @@ where cm.IsValidated is null
   and (cm.MeasurementDate < c.StartDate or cm.MeasurementDate > c.EndDate)
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies', 'Flagged;Different species', 'stemTag;speciesCode', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies', 'Flagged;Different species', 'stemTag;speciesCode', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select min(cm.CoreMeasurementID), @validationProcedureID as ValidationErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID
@@ -120,7 +120,7 @@ and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID)
 group by t.TreeTag
 having count(distinct sp.SpeciesCode) > 1;', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (8, 'ValidateFindStemsOutsidePlots', 'Flagged;X outside plot OR;Y outside plot', 'stemTag;stemLocalX;stemLocalY', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (8, 'ValidateFindStemsOutsidePlots', 'Flagged;X outside plot OR;Y outside plot', 'stemTag;stemLocalX;stemLocalY', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
 join census c on cm.CensusID = c.CensusID
@@ -133,7 +133,7 @@ where cm.IsValidated is null and e.CoreMeasurementID is null
 and ((s.LocalX + q.StartX + p.GlobalX) > (p.GlobalX + p.DimensionX)) or ((s.LocalY + q.StartY + p.GlobalY) > (p.GlobalY + p.DimensionY))
 and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats', 'Flagged;Flagged;Different quadrats', 'stemTag;treeTag;quadratName', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats', 'Flagged;Flagged;Different quadrats', 'stemTag;treeTag;quadratName', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID
@@ -147,7 +147,7 @@ where cm.IsValidated is null
   and s1.QuadratID <> s2.QuadratID
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds', 'measuredDBH', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds', 'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join stems s on cm.StemID = s.StemID
@@ -160,7 +160,7 @@ where cm.IsValidated is null
     or (@maxDBH is not null and cm.MeasuredDBH > @maxDBH))
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes', 'Invalid DBH;Invalid HOM;DEAD-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes', 'Invalid DBH;Invalid HOM;DEAD-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID
@@ -176,7 +176,7 @@ where cm.IsValidated is null
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);
 ', '', false);
-INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes', 'Missing DBH;Missing HOM;LIVE-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert ignore into cmverrors (CoreMeasurementID, ValidationErrorID)
+INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes', 'Missing DBH;Missing HOM;LIVE-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
          join census c on cm.CensusID = c.CensusID

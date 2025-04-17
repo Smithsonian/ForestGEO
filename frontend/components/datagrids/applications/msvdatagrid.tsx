@@ -1,7 +1,7 @@
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GridRowModes, GridRowModesModel, GridRowsProp } from '@mui/x-data-grid';
 import { randomId } from '@mui/x-data-grid-generator';
 import { Snackbar, Typography } from '@mui/joy';
@@ -55,6 +55,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [openAlert, setOpenAlert] = useState(false);
   const [openViewResetAlert, setOpenViewResetAlert] = useState(false);
   const [openFSM, setOpenFSM] = useState(false);
+  const [dataReingested, setDataReingested] = useState(false);
 
   const [rows, setRows] = React.useState([initialMeasurementsSummaryViewRDSRow] as GridRowsProp);
   const [rowCount, setRowCount] = useState(0);
@@ -67,6 +68,10 @@ export default function MeasurementsSummaryViewDataGrid() {
   });
   const [isNewRowAdded, setIsNewRowAdded] = useState<boolean>(false);
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
+
+  useEffect(() => {
+    if (openFSM) fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(console.error)
+  }, [openFSM]);
 
   const addNewRowToGrid = () => {
     const id = randomId();
@@ -139,9 +144,10 @@ export default function MeasurementsSummaryViewDataGrid() {
       />
       <FailedMeasurementsModal
         open={openFSM}
+        setReingested={setDataReingested}
         handleCloseModal={async () => {
           setOpenFSM(false);
-          setOpenViewResetAlert(true);
+          setOpenViewResetAlert(dataReingested); // if data reingested, show view reset alert
         }}
       />
       <MeasurementsCommons

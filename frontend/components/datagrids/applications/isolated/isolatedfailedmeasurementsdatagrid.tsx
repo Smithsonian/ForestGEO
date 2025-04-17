@@ -14,6 +14,8 @@ import { failureErrorMapping } from '@/config/datagridhelpers';
 import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import CircularProgress from '@mui/joy/CircularProgress';
+import { DatePicker } from '@mui/x-date-pickers';
+import moment from 'moment/moment';
 
 export default function IsolatedFailedMeasurementsDataGrid() {
   const [refresh, setRefresh] = useState(false);
@@ -87,20 +89,47 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     failureReasons: ''
   };
 
+  const fieldToReasons = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    Object.entries(failureErrorMapping).forEach(([reason, cols]) => {
+      cols.forEach(col => {
+        if (!m[col]) m[col] = [];
+        m[col].push(reason);
+      });
+    });
+    return m;
+  }, []);
+
+  function displayFailureReason(params: any, column: GridColDef) {
+    const failureReasonsFromRow = (params.row.failureReasons ?? '')
+      .split('|')
+      .map((reason: string) => reason.trim())
+      .filter((reason: string) => reason !== '');
+    const visibleReasons = failureReasonsFromRow.filter((reason: string) => fieldToReasons[column.field]?.includes(reason));
+    if (visibleReasons && visibleReasons.length > 0) {
+      return (
+        <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
+          {visibleReasons.map((reason: string, index: number) => (
+            <Chip
+              key={index}
+              variant={'soft'}
+              color={'danger'}
+              sx={{ marginY: 0.5, display: 'flex', flex: 1, width: '100%', justifyContent: 'center', alignSelf: 'center' }}
+            >
+              {reason}
+            </Chip>
+          ))}
+        </Stack>
+      );
+    } else return null;
+  }
+
   const columns: GridColDef[] = useMemo(() => {
     return [
       ...FailedMeasurementsGridColumns.map(column => {
         return {
           ...column,
           renderCell: (params: any) => {
-            const failureReasonsFromRow = (params.row.failureReasons ?? '')
-              .split('|')
-              .map((reason: string) => reason.trim())
-              .filter((reason: string) => reason !== '');
-            const failureReason = failureReasonsFromRow.filter((reason: string) => {
-              const mappedColumns = failureErrorMapping[reason];
-              return mappedColumns && mappedColumns.includes(column.field);
-            });
             return (
               <Stack direction={'column'} sx={{ display: 'flex', flex: 1, width: '100%' }}>
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'row', width: '100%', marginY: 0.5 }}>
@@ -119,56 +148,63 @@ export default function IsolatedFailedMeasurementsDataGrid() {
                         lineHeight: 'normal'
                       }}
                     >
-                      {params.value instanceof Date
-                        ? new Date(params.value).toDateString()
+                      {moment.isMoment(params.value)
+                        ? moment(params.value).format('YYYY-MM-DD')
                         : params.value === '' || params.value === null
                           ? 'null'
                           : params.value}
                     </Typography>
                   )}
                 </Box>
-                {failureReason && failureReason.length > 0 && (
-                  <Chip variant={'soft'} color={'danger'} sx={{ marginY: 0.5 }}>
-                    {failureReason.join(', ')}
-                  </Chip>
-                )}
+                {displayFailureReason(params, column)}
               </Stack>
             );
           },
           renderEditCell: (params: GridRenderEditCellParams) => {
             if (Object.keys(selectableOpts).includes(column.field)) {
-              if (params.value && !selectableOpts[column.field].includes(params.value)) {
-                setTimeout(() => {
-                  setSelectableOpts(prevState => {
-                    const updatedArray = [...prevState[column.field], params.value];
-                    return {
-                      ...prevState,
-                      [column.field]: Array.from(new Set(updatedArray)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
-                    };
-                  });
-                }, 0);
-              }
               return (
-                <Autocomplete
-                  variant={'soft'}
-                  autoSelect
-                  isOptionEqualToValue={(option, value) => option === value}
-                  options={selectableOpts[column.field]}
-                  value={params.value || ''}
-                  onChange={(_event, value) => {
-                    if (value) {
-                      params.api.setEditCellValue({
-                        id: params.id,
-                        field: params.field,
-                        value
-                      });
-                    }
-                  }}
-                />
+                <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
+                  <Autocomplete
+                    sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+                    multiple={column.field === 'codes'}
+                    variant={'soft'}
+                    autoSelect
+                    autoHighlight
+                    isOptionEqualToValue={(option, value) => option === value}
+                    options={selectableOpts[column.field]}
+                    value={params.value}
+                    onChange={(_event, value) => {
+                      if (value) {
+                        params.api.setEditCellValue({
+                          id: params.id,
+                          field: params.field,
+                          value: Array.isArray(value) ? value.join(';') : value
+                        });
+                      }
+                    }}
+                  />
+                  {displayFailureReason(params, column)}
+                </Box>
               );
             }
             if (['dbh', 'hom', 'x', 'y'].includes(column.field)) {
-              return <EditMeasurements params={params} />;
+              return (
+                <Box sx={{ width: '100%', height: '100%' }}>
+                  <EditMeasurements params={params} />
+                  {displayFailureReason(params, column)}
+                </Box>
+              );
+            }
+            if (column.field === 'date') {
+              return (
+                <DatePicker
+                  label={column.headerName}
+                  value={moment(params.value, 'YYYY-MM-DD')}
+                  onChange={newValue => {
+                    params.api.setEditCellValue({ id: params.id, field: params.field, value: newValue ? newValue.format('YYYY-MM-DD') : null });
+                  }}
+                />
+              );
             }
           },
           valueFormatter: (value: any) => (['dbh', 'hom', 'x', 'y'].includes(column.field) ? Number(value).toFixed(2) : value),
@@ -178,7 +214,9 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     ];
   }, [selectableOpts]);
 
-  return Object.keys(selectableOpts).every(key => selectableOpts[key].length > 0) ? (
+  return Object.keys(selectableOpts)
+    .filter(i => !['tag', 'stemTag'].includes(i))
+    .every(key => selectableOpts[key].length > 0) ? (
     <IsolatedDataGridCommons
       gridType="failedmeasurements"
       gridColumns={columns}

@@ -3,14 +3,16 @@
 import { Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Typography } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { Dispatch, SetStateAction } from 'react';
 
 interface FailedMeasurementsModalProps {
   open: boolean;
+  setReingested: Dispatch<SetStateAction<boolean>>;
   handleCloseModal: () => Promise<void>;
 }
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
-  const { open, handleCloseModal } = props;
+  const { open, setReingested, handleCloseModal } = props;
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
   const currentCensus = useOrgCensusContext();
@@ -19,11 +21,12 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
     await fetch(`/api/reingest/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
       method: 'GET'
     });
+    setReingested(true);
     await handleCloseModal();
   }
 
   return (
-    <Modal open={open} onClose={handleCloseModal}>
+    <Modal open={open} onClose={() => {}}>
       <ModalDialog size="lg" sx={{ width: '100%', maxHeight: '100vh', overflow: 'auto' }} role="alertdialog">
         <DialogTitle>Failed Measurements</DialogTitle>
         <DialogContent>
