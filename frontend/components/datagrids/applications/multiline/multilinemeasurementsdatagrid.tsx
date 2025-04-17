@@ -16,7 +16,6 @@ import { GridColDef } from '@mui/x-data-grid';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment';
 import CircularProgress from '@mui/joy/CircularProgress';
-import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
 
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
@@ -46,7 +45,44 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   });
 
   useEffect(() => {
-    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(console.error);
+    async function loadOptions() {
+      const codeOpts = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes')
+        .mapData(await (await fetch(`/api/fetchall/attributes?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.code)
+        .filter((code): code is string => code !== undefined);
+      const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
+        .mapData(await (await fetch(`/api/fetchall/trees?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.treeTag)
+        .filter((tag): tag is string => tag !== undefined);
+      const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
+        .mapData(await (await fetch(`/api/fetchall/stems?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.stemTag)
+        .filter((stemTag): stemTag is string => stemTag !== undefined);
+      const quadOpts = MapperFactory.getMapper<QuadratRDS, QuadratResult>('quadrats')
+        .mapData(
+          await (
+            await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+          ).json()
+        )
+        .map(i => i.quadratName)
+        .filter((quadrat): quadrat is string => quadrat !== undefined);
+      const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
+        .mapData(await (await fetch(`/api/fetchall/species?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.speciesCode)
+        .filter((species): species is string => species !== undefined);
+      setSelectableOpts(prev => {
+        return {
+          ...prev,
+          tag: tagOpts,
+          stemtag: stemOpts,
+          quadrat: quadOpts,
+          spcode: specOpts,
+          codes: codeOpts
+        };
+      });
+    }
+
+    loadOptions().catch(console.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   const gridColumns: GridColDef[] = useMemo(() => {
@@ -58,7 +94,25 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
             if (Object.keys(selectableOpts).includes(column.field)) {
               return (
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
-                  {selectableAutocomplete(params, column, selectableOpts)}
+                  <Autocomplete
+                    sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+                    multiple={column.field === 'codes'}
+                    variant={'soft'}
+                    autoSelect
+                    autoHighlight
+                    isOptionEqualToValue={(option, value) => option === value}
+                    options={selectableOpts[column.field]}
+                    value={params.value}
+                    onChange={(_event, value) => {
+                      if (value) {
+                        params.api.setEditCellValue({
+                          id: params.id,
+                          field: params.field,
+                          value: Array.isArray(value) ? value.join(';') : value
+                        });
+                      }
+                    }}
+                  />
                 </Box>
               );
             } else if (column.field === 'date') {
@@ -69,22 +123,6 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
                   value={moment(params.value, 'YYYY-MM-DD')}
                   onChange={newValue => {
                     params.api.setEditCellValue({ id: params.id, field: params.field, value: newValue ? newValue.format('YYYY-MM-DD') : null });
-                  }}
-                  slotProps={{
-                    textField: {
-                      fullWidth: true,
-                      variant: 'outlined',
-                      sx: {
-                        marginTop: 0.5,
-                        height: '100%',
-                        '& .MuiInputBase-root': {
-                          height: '100%'
-                        },
-                        '& .MuiOutlinedInput-notchedOutline': {
-                          top: 0
-                        }
-                      }
-                    }
                   }}
                 />
               );

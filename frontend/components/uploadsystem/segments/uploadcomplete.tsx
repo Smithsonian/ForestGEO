@@ -121,8 +121,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
     const runAsyncTasks = async () => {
       try {
-        triggerRefresh();
-        await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         await fetch(`/api/formatrunquery`, {
           body: JSON.stringify({
             query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
@@ -152,6 +150,8 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
           );
         }
         await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
+        triggerRefresh();
+        await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         setAllLoadsCompleted(true);
       } catch (error) {
         console.error(error);

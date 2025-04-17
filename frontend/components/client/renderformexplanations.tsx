@@ -40,7 +40,7 @@ export default function RenderFormExplanations(uploadForm: FormType) {
         <Accordion>
           <AccordionSummary>
             <Typography level="title-lg" sx={{ alignSelf: 'center', justifyContent: 'center', alignContent: 'center', my: 2 }}>
-              Understanding Form Headers
+              Understanding the Headers
             </Typography>
           </AccordionSummary>
           <AccordionDetails>
