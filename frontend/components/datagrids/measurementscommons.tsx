@@ -46,7 +46,8 @@ import {
   Stack,
   Switch,
   Tooltip,
-  Typography
+  Typography,
+  useTheme
 } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
@@ -89,6 +90,7 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ValidationCore from '@/components/client/validationcore';
 import { CloudSync, GppGoodOutlined, SettingsBackupRestoreRounded } from '@mui/icons-material';
+import Avatar from '@mui/joy/Avatar';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -126,6 +128,7 @@ const EditToolbar = (props: EditToolbarProps) => {
   const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
   const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel.visible);
   const apiRef = useGridApiContext();
+  const theme = useTheme();
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(event.target.value);
@@ -209,6 +212,30 @@ const EditToolbar = (props: EditToolbarProps) => {
           }}
         >
           <Box sx={{ display: 'flex', flex: 1 }}>
+            <Stack direction={'row'} spacing={0.5} sx={{ alignItems: 'center', justifyContent: 'center', marginRight: 1 }}>
+              <Typography level={'body-md'}>Legend:</Typography>
+              <Tooltip title={'New Recruit'} arrow>
+                <Avatar size="sm" variant="soft" color="primary">
+                  NR
+                </Avatar>
+              </Tooltip>
+              <Tooltip title={'Old Tree'} arrow>
+                <Avatar size="sm" variant="soft" color="success">
+                  OT
+                </Avatar>
+              </Tooltip>
+              <Tooltip title={'Multi Stem'} arrow>
+                <Avatar size="sm" variant="soft" color="warning">
+                  MS
+                </Avatar>
+              </Tooltip>
+              <Tooltip title={'No State Found'} arrow>
+                <Avatar size={'sm'} variant={'soft'} color={'danger'}>
+                  NU
+                </Avatar>
+              </Tooltip>
+            </Stack>
+            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
             <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
               <Box display={'flex'} alignItems={'center'}>
                 <GridToolbarColumnsButton />
@@ -233,18 +260,12 @@ const EditToolbar = (props: EditToolbarProps) => {
                 </Tooltip>
               </Box>
             </Tooltip>
-            <Button
-              color={'primary'}
-              variant={'plain'}
-              startDecorator={<RefreshIcon />}
-              onClick={async () => await handleRefresh()}
-              sx={{
-                margin: 1
-              }}
-            >
+            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+            <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
               Refresh
             </Button>
-            <Stack direction={'row'} spacing={2} sx={{ alignItems: 'center', justifyContent: 'center' }}>
+            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
+            <Stack direction={'row'} spacing={1} sx={{ alignItems: 'center', justifyContent: 'center' }}>
               <Tooltip title={'Export as CSV'} placement="top" arrow>
                 <IconButton
                   variant={'soft'}
@@ -581,7 +602,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     if (refresh) {
       runFetchPaginated().then(() => setRefresh(false));
     }
-    console.log(rows);
   }, [refresh]);
 
   useEffect(() => {
@@ -1381,15 +1401,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     return columns;
   }, [rows, columns, hidingEmpty]);
 
-  const getRowClassName = (params: any) => {
-    const rowId = params.id;
-    if (rowHasError(rowId)) {
-      return 'error-row';
-    } else {
-      return 'validated';
-    }
-  };
-
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const activeElement = document.activeElement as HTMLElement;
@@ -1618,7 +1629,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               } as EditToolbarProps
             }}
             getRowHeight={() => 'auto'}
-            getRowClassName={getRowClassName}
+            getRowClassName={params => `treestemstate--${params.row.userDefinedFields.split(' ').join('')}`}
             isCellEditable={() => !locked}
           />
         </Box>

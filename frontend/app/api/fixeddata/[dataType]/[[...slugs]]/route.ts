@@ -124,6 +124,13 @@ export async function GET(
       throw new Error('Mismatch between query placeholders and parameters');
     }
     const paginatedResults = await connectionManager.executeQuery(format(paginatedQuery, queryParams));
+    paginatedResults.forEach((result: any) => {
+      if (result.UserDefinedFields !== undefined && result.UserDefinedFields !== null) {
+        if (typeof result.UserDefinedFields === 'string') {
+          result.UserDefinedFields = JSON.parse(result.UserDefinedFields).treestemstate;
+        } else result.UserDefinedFields = result.UserDefinedFields.treestemstate;
+      }
+    });
 
     const totalRowsQuery = 'SELECT FOUND_ROWS() as totalRows';
     const totalRowsResult = await connectionManager.executeQuery(totalRowsQuery);
