@@ -103,7 +103,7 @@ export default function IsolatedPersonnelDataGrid() {
           </IconButton>
           <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%' }}>
             <IsolatedRolesDataGrid
-              onRolesUpdated={() => {
+              onRolesUpdated={async () => {
                 // This triggers the personnel grid to refresh
                 setRefresh(true);
               }}

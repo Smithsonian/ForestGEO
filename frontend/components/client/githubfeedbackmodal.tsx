@@ -158,7 +158,7 @@ ${pathname}
         'X-GitHub-Api-Version': '2022-11-28'
       }
     });
-    if (results.status !== 201) throw new Error('Failed to create GitHub issue: ', results);
+    if (results.status !== 201) throw new Error('Failed to create GitHub issue: ', results as any);
     setCreatedIssue(results.data);
     setLoading(false);
   }
