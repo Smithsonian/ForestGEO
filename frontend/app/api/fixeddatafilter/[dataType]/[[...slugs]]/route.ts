@@ -370,7 +370,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
   const connectionManager = ConnectionManager.getInstance();
   const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow } = await request.json();
+  const { newRow, oldRow } = await request.json();
   let updateIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
 
@@ -394,7 +394,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
     // Handle non-view table updates
     else {
-      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
+      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([{ ...oldRow, ...newRow }])[0];
       const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
       // Construct the UPDATE query

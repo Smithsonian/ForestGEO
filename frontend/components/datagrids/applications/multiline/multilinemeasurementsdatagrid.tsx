@@ -49,15 +49,18 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
       const codeOpts = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes')
         .mapData(await (await fetch(`/api/fetchall/attributes?schema=${currentSite?.schemaName ?? ''}`)).json())
         .map(i => i.code)
-        .filter((code): code is string => code !== undefined);
+        .filter((code): code is string => code !== undefined)
+        .sort((a, b) => a.localeCompare(b));
       const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
         .mapData(await (await fetch(`/api/fetchall/trees?schema=${currentSite?.schemaName ?? ''}`)).json())
         .map(i => i.treeTag)
-        .filter((tag): tag is string => tag !== undefined);
+        .filter((tag): tag is string => tag !== undefined)
+        .sort((a, b) => a.localeCompare(b));
       const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
         .mapData(await (await fetch(`/api/fetchall/stems?schema=${currentSite?.schemaName ?? ''}`)).json())
         .map(i => i.stemTag)
-        .filter((stemTag): stemTag is string => stemTag !== undefined);
+        .filter((stemTag): stemTag is string => stemTag !== undefined)
+        .sort((a, b) => a.localeCompare(b));
       const quadOpts = MapperFactory.getMapper<QuadratRDS, QuadratResult>('quadrats')
         .mapData(
           await (
@@ -65,11 +68,13 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
           ).json()
         )
         .map(i => i.quadratName)
-        .filter((quadrat): quadrat is string => quadrat !== undefined);
+        .filter((quadrat): quadrat is string => quadrat !== undefined)
+        .sort((a, b) => a.localeCompare(b));
       const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
         .mapData(await (await fetch(`/api/fetchall/species?schema=${currentSite?.schemaName ?? ''}`)).json())
         .map(i => i.speciesCode)
-        .filter((species): species is string => species !== undefined);
+        .filter((species): species is string => species !== undefined)
+        .sort((a, b) => a.localeCompare(b));
       setSelectableOpts(prev => {
         return {
           ...prev,
@@ -100,15 +105,23 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
                     variant={'soft'}
                     autoSelect
                     autoHighlight
+                    freeSolo={column.field !== 'codes'}
+                    clearOnBlur={false}
                     isOptionEqualToValue={(option, value) => option === value}
-                    options={selectableOpts[column.field]}
-                    value={params.value}
+                    options={[...selectableOpts[column.field]].sort((a, b) => a.localeCompare(b))}
+                    value={
+                      column.field === 'codes'
+                        ? params.value
+                          ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0)
+                          : []
+                        : (params.value ?? '')
+                    }
                     onChange={(_event, value) => {
                       if (value) {
                         params.api.setEditCellValue({
                           id: params.id,
                           field: params.field,
-                          value: Array.isArray(value) ? value.join(';') : value
+                          value: column.field === 'codes' && Array.isArray(value) ? value.join(';') : value
                         });
                       }
                     }}
@@ -123,6 +136,22 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
                   value={moment(params.value, 'YYYY-MM-DD')}
                   onChange={newValue => {
                     params.api.setEditCellValue({ id: params.id, field: params.field, value: newValue ? newValue.format('YYYY-MM-DD') : null });
+                  }}
+                  slotProps={{
+                    textField: {
+                      fullWidth: true,
+                      variant: 'outlined',
+                      sx: {
+                        marginTop: 0.5,
+                        height: '100%',
+                        '& .MuiInputBase-root': {
+                          height: '100%'
+                        },
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          top: 0
+                        }
+                      }
+                    }
                   }}
                 />
               );

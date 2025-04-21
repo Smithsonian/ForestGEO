@@ -70,7 +70,7 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
 
   useEffect(() => {
-    if (openFSM) fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(console.error)
+    if (openFSM) fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(console.error);
   }, [openFSM]);
 
   const addNewRowToGrid = () => {
@@ -146,8 +146,9 @@ export default function MeasurementsSummaryViewDataGrid() {
         open={openFSM}
         setReingested={setDataReingested}
         handleCloseModal={async () => {
-          setOpenFSM(false);
-          setOpenViewResetAlert(dataReingested); // if data reingested, show view reset alert
+          reloadMSV().then(() => {
+            setOpenFSM(false);
+          });
         }}
       />
       <MeasurementsCommons

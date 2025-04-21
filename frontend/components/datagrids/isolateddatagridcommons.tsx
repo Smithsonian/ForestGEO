@@ -760,7 +760,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         promiseArguments.resolve(updatedRow);
 
         if (props.onDataUpdate) {
-          props.onDataUpdate();
+          await props.onDataUpdate({
+            ...Object.fromEntries(Object.entries(promiseArguments.oldRow).filter(([, val]) => val !== undefined)),
+            ...Object.fromEntries(Object.entries(updatedRow).filter(([, val]) => val !== undefined))
+          });
         }
       } catch (error) {
         promiseArguments.reject(error);

@@ -2,7 +2,6 @@
 
 import { Button, DialogActions, DialogContent, DialogTitle, Modal, ModalDialog, Typography } from '@mui/joy';
 import IsolatedFailedMeasurementsDataGrid from '@/components/datagrids/applications/isolated/isolatedfailedmeasurementsdatagrid';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { Dispatch, SetStateAction } from 'react';
 
 interface FailedMeasurementsModalProps {
@@ -13,17 +12,6 @@ interface FailedMeasurementsModalProps {
 
 export default function FailedMeasurementsModal(props: FailedMeasurementsModalProps) {
   const { open, setReingested, handleCloseModal } = props;
-  const currentSite = useSiteContext();
-  const currentPlot = usePlotContext();
-  const currentCensus = useOrgCensusContext();
-
-  async function resubmitRows() {
-    await fetch(`/api/reingest/${currentSite?.schemaName}/${currentPlot?.plotID}/${currentCensus?.dateRanges[0].censusID}`, {
-      method: 'GET'
-    });
-    setReingested(true);
-    await handleCloseModal();
-  }
 
   return (
     <Modal open={open} onClose={() => {}}>
@@ -37,11 +25,8 @@ export default function FailedMeasurementsModal(props: FailedMeasurementsModalPr
           <IsolatedFailedMeasurementsDataGrid />
         </DialogContent>
         <DialogActions>
-          <Button variant="solid" color="primary" onClick={resubmitRows}>
-            Resubmit Rows
-          </Button>
           <Button variant={'soft'} color={'danger'} onClick={handleCloseModal}>
-            Close Modal
+            OK
           </Button>
         </DialogActions>
       </ModalDialog>
