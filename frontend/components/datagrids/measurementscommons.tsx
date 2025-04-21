@@ -484,7 +484,7 @@ export function EditMeasurements({ params }: { params: GridRenderEditCellParams 
 
   const handleBlur = () => {
     const formattedValue = parseFloat(value).toFixed(2);
-    params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(formattedValue) });
+    params.api.setEditCellValue({ id: params.id, field: params.field, value: parseFloat(value) === 0 ? null : parseFloat(formattedValue) });
   };
 
   return <Input autoFocus value={value} onChange={handleChange} onBlur={handleBlur} size="sm" sx={{ width: '100%', height: '100%' }} type="text" />;

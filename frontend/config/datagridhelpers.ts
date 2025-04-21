@@ -214,7 +214,7 @@ export interface IsolatedDataGridCommonProps {
   locked?: boolean;
   selectionOptions?: { value: string | number; label: string }[];
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
-  onDataUpdate?: () => void; // Add the onDataUpdate prop
+  onDataUpdate?: (updatedRow: GridRowModel) => Promise<void>; // Add the onDataUpdate prop
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
@@ -312,12 +312,14 @@ export interface MeasurementsCommonsProps {
 export const failureErrorMapping: Record<string, string[]> = {
   'SpCode missing': ['spCode'],
   'SpCode invalid': ['spCode'],
+  'Missing Tree Tag': ['tag'],
+  'Missing Tree and Stem Tag': ['tag', 'stemTag'],
   'Quadrat missing': ['quadrat'],
   'Quadrat invalid': ['quadrat'],
   'Missing X': ['x'],
   'Missing Y': ['y'],
-  'Codes and DBH': ['codes', 'dbh'],
-  'Codes and HOM': ['codes', 'hom'],
+  'Missing Codes and DBH': ['codes', 'dbh'],
+  'Missing Codes and HOM': ['codes', 'hom'],
   'Missing Date': ['date'],
   'Invalid Codes': ['codes']
 };
