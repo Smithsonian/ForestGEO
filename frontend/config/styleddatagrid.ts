@@ -83,10 +83,10 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
     }
   },
   '& .treestemstate--null': {
-    backgroundColor: theme.palette.danger['900'],
-    '&:hover': { backgroundColor: theme.palette.danger['800'] },
+    backgroundColor: theme.palette.danger.softBg,
+    '&:hover': { backgroundColor: theme.palette.danger.softHoverBg },
     '&.Mui-selected': {
-      backgroundColor: theme.palette.danger['700']
+      backgroundColor: theme.palette.danger.softActiveBg
     }
   }
 }));
