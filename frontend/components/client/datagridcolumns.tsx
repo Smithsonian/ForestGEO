@@ -234,9 +234,6 @@ export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumn
     headerName: 'Date',
     flex: 1,
     type: 'date',
-    valueGetter: value => {
-      return new Date(value);
-    },
     editable: true,
     filterable: false
   },

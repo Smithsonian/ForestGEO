@@ -313,7 +313,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       } else {
         // special handling need not apply to non-measurements tables
         // failedmeasurements executed here
-        const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([newRow])[0];
+        const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([{ ...oldRow, ...newRow }])[0];
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
         let failedTrimmed, _ignored;

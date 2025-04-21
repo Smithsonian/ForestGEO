@@ -30,7 +30,7 @@ export interface FailedMeasurementsRDS {
   y?: number;
   dbh?: number;
   hom?: number;
-  date?: Date;
+  date?: Date | null;
   codes?: string;
   failureReasons?: string;
 }
