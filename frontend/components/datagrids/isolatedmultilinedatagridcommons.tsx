@@ -292,13 +292,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           }}
           sx={{
             [`& .${gridClasses.row}.row--removed`]: {
-              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 170, 170, 0.3)' : darken('rgba(255, 170, 170, 1)', 0.7))
+              backgroundColor: (theme: any) => (theme.palette.mode === 'light' ? 'rgba(255, 170, 170, 0.3)' : darken('rgba(255, 170, 170, 1)', 0.7))
             },
             [`& .${gridClasses.row}.row--edited`]: {
-              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 254, 176, 0.3)' : darken('rgba(255, 254, 176, 1)', 0.6))
+              backgroundColor: (theme: any) => (theme.palette.mode === 'light' ? 'rgba(255, 254, 176, 0.3)' : darken('rgba(255, 254, 176, 1)', 0.6))
             },
             [`& .${gridClasses.row}.row--invalid`]: {
-              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.6))
+              backgroundColor: (theme: any) => (theme.palette.mode === 'light' ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.6))
             }
           }}
           loading={isSaving}
