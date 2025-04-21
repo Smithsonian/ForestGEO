@@ -238,7 +238,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
       }
 
       // Use handleUpsertForSlices for update operations as well (updates where needed)
-      updateIDs = await handleUpsertForSlices(connectionManager, schema, newRow, queryConfig);
+      updateIDs = await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig);
     }
 
     // Handle non-view table updates

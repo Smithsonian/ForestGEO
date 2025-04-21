@@ -78,9 +78,11 @@ export async function handleUpsertForSlices<Result>(
 
   // Convert newRow from RDS to Result upfront
   const mappedNewRow = mapper.demapData([newRow as any])[0];
+  console.log('mappedNewRow: ', mappedNewRow);
 
   for (const sliceKey in config.slices) {
     const { range, primaryKey } = config.slices[sliceKey];
+    console.log('range: ', range, ' primaryKey: ', primaryKey);
 
     // Extract fields relevant to the current slice from the already transformed newRow
     const rowData: Partial<Result> = {};
@@ -92,16 +94,24 @@ export async function handleUpsertForSlices<Result>(
         rowData[field as keyof Result] = mappedNewRow[field as keyof typeof mappedNewRow];
       }
     });
+    console.log('after fields in slice rowData: ', rowData);
 
     // Check if we need to propagate a foreign key from a prior slice
     const prevSlice = getPreviousSlice(sliceKey, config.slices);
+    console.log('prevSlice: ', prevSlice);
     if (prevSlice && insertedIds[prevSlice]) {
       const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
+      console.log('prevPrimaryKey: ', prevPrimaryKey);
       (rowData as any)[prevPrimaryKey] = insertedIds[prevSlice]; // Set the foreign key in the current row
+      console.log('updated rowdata: ', rowData);
     }
+
+    if ((mappedNewRow as any)[primaryKey] !== undefined) (rowData as any)[primaryKey] = (mappedNewRow as any)[primaryKey];
+    console.log('inserting rowData: ', rowData);
 
     // Perform the upsert and store the resulting ID
     insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
+    console.log(insertedIds[sliceKey]);
   }
 
   return insertedIds;
