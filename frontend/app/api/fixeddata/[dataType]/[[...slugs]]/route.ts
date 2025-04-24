@@ -5,11 +5,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { getUpdatedValues } from '@/config/utils';
+export { PATCH } from '@/config/macros/coreapifunctions';
 
 // slugs SHOULD CONTAIN AT MINIMUM: schema, page, pageSize, plotID, plotCensusNumber, (optional) quadratID, (optional) speciesID
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   props: {
     params: Promise<{ dataType: string; slugs?: string[] }>;
   }
@@ -211,144 +211,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
     }
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
-  } catch (error: any) {
-    return handleError(error, connectionManager, newRow, transactionID ?? undefined);
-  } finally {
-    await connectionManager.closeConnection();
-  }
-}
-
-// slugs: schema, gridID
-export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const { dataType, slugs } = await props.params;
-  const [schema, gridID] = slugs ?? [];
-  if (!schema || !gridID) throw new Error('no schema or gridID provided');
-
-  const connectionManager = ConnectionManager.getInstance();
-  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow, oldRow } = await request.json();
-  let updateIDs: Record<string, number> = {};
-  let transactionID: string | undefined = undefined;
-
-  try {
-    transactionID = await connectionManager.beginTransaction();
-
-    // Handle views with handleUpsertForSlices (applies to both insert and update logic)
-    if (dataType === 'alltaxonomiesview') {
-      let queryConfig;
-      switch (dataType) {
-        case 'alltaxonomiesview':
-          queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        default:
-          throw new Error('Incorrect view call');
-      }
-
-      // Use handleUpsertForSlices for update operations as well (updates where needed)
-      updateIDs = await handleUpsertForSlices(connectionManager, schema, { ...oldRow, ...newRow }, queryConfig);
-    }
-
-    // Handle non-view table updates
-    else {
-      if (dataType === 'measurementssummary') {
-        const updatedFields = getUpdatedValues(oldRow, newRow);
-        const { coreMeasurementID, quadratID, treeID, stemID, speciesID } = newRow;
-
-        const fieldGroups = {
-          coremeasurements: ['measuredDBH', 'measuredHOM', 'measurementDate'],
-          quadrats: ['quadratName'],
-          trees: ['treeTag'],
-          stems: ['stemTag', 'stemLocalX', 'stemLocalY'],
-          species: ['speciesName', 'subspeciesName', 'speciesCode']
-        };
-
-        // Initialize a flag for changes
-        let changesFound = false;
-
-        // Helper function to handle updates
-        const handleUpdate = async (groupName: keyof typeof fieldGroups, tableName: string, idColumn: string, idValue: any) => {
-          console.log('updating: ', groupName);
-          const matchingFields = Object.keys(updatedFields).reduce(
-            (acc, key) => {
-              if (fieldGroups[groupName].includes(key)) {
-                acc[key] = updatedFields[key];
-              }
-              return acc;
-            },
-            {} as Partial<typeof updatedFields>
-          );
-
-          if (Object.keys(matchingFields).length > 0) {
-            changesFound = true;
-            if (groupName === 'stems') {
-              // need to correct for key matching
-              if (matchingFields.stemLocalX) {
-                matchingFields.localX = matchingFields.stemLocalX;
-                delete matchingFields.stemLocalX;
-              }
-              if (matchingFields.stemLocalY) {
-                matchingFields.localY = matchingFields.stemLocalY;
-                delete matchingFields.stemLocalY;
-              }
-            }
-            const demappedData = MapperFactory.getMapper<any, any>(groupName).demapData([matchingFields])[0];
-            const query = format('UPDATE ?? SET ? WHERE ?? = ?', [`${schema}.${tableName}`, demappedData, idColumn, idValue]);
-            await connectionManager.executeQuery(query);
-          }
-        };
-
-        // Process each group
-        await handleUpdate('coremeasurements', 'coremeasurements', 'CoreMeasurementID', coreMeasurementID);
-        await handleUpdate('quadrats', 'quadrats', 'QuadratID', quadratID);
-        await handleUpdate('trees', 'trees', 'TreeID', treeID);
-        await handleUpdate('stems', 'stems', 'StemID', stemID);
-        await handleUpdate('species', 'species', 'SpeciesID', speciesID);
-
-        // Reset validation status and clear errors if changes were made
-        if (changesFound) {
-          const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
-            `${schema}.coremeasurements`,
-            'IsValidated',
-            null,
-            'CoreMeasurementID',
-            coreMeasurementID
-          ]);
-          const deleteErrorsQuery = `DELETE FROM ${schema}.cmverrors WHERE CoreMeasurementID = ${coreMeasurementID}`;
-          await connectionManager.executeQuery(resetValidationQuery);
-          await connectionManager.executeQuery(deleteErrorsQuery);
-        }
-      } else {
-        // special handling need not apply to non-measurements tables
-        // failedmeasurements executed here
-        const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([{ ...oldRow, ...newRow }])[0];
-        const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
-
-        let failedTrimmed, _ignored;
-
-        if (dataType === 'failedmeasurements') {
-          ({ Hash_ID: _ignored, ...failedTrimmed } = newRowData);
-          failedTrimmed['FailureReasons'] = '';
-        }
-
-        // Use failedTrimmed for failedmeasurements, otherwise use remainingProperties
-        const dataToUpdate = dataType === 'failedmeasurements' ? failedTrimmed : remainingProperties;
-
-        const updateQuery = format(
-          `UPDATE ??
-           SET ?
-           WHERE ?? = ?`,
-          [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
-        );
-
-        // Execute the UPDATE query
-        await connectionManager.executeQuery(updateQuery);
-
-        // For non-view tables, standardize the response format
-        updateIDs = { [dataType]: gridIDKey };
-      }
-    }
-    await connectionManager.commitTransaction(transactionID ?? '');
-    return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
   } catch (error: any) {
     return handleError(error, connectionManager, newRow, transactionID ?? undefined);
   } finally {

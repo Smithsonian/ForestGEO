@@ -245,7 +245,7 @@ export default function DashboardPage() {
                           >
                             <Skeleton loading={changelog.operation === undefined} sx={{ width: '95%' }} animation={'wave'}>
                               <Typography level={'title-md'} fontWeight={'bold'} sx={{ width: '100%' }}>
-                                {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).format('YYYY-MM-DD HH:mm:ss')}
+                                {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).format('dddd, MMMM Do YYYY, hh:mm:ss a')}
                               </Typography>
                             </Skeleton>
                           </Box>

@@ -13,53 +13,6 @@ import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
 
-export const renderDatePicker = (params: GridRenderEditCellParams) => {
-  const convertedValue = params.row.date ? moment(params.row.date, 'YYYY-MM-DD') : null;
-  if (!convertedValue) return <></>;
-
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100%',
-        height: '100%',
-        padding: '0'
-      }}
-    >
-      <Input
-        size={'lg'}
-        value={convertedValue.format('MM-DD-YYYY')}
-        disabled
-        sx={{
-          textAlign: 'center',
-          width: '100%',
-          overflow: 'hidden'
-        }}
-      />
-    </Box>
-  );
-};
-
-export const renderEditDatePicker = (params: GridRenderEditCellParams) => {
-  const apiRef = useGridApiContext();
-  const { id, row } = params;
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center', marginY: 1 }}>
-      <DatePicker
-        label={'Recorded Date'}
-        slotProps={{ textField: { size: 'small' } }}
-        value={moment(row.date, 'YYYY-MM-DD')}
-        onChange={newValue => {
-          apiRef.current.setEditCellValue({ id, field: 'date', value: newValue ? newValue.format('YYYY-MM-DD') : null });
-        }}
-      />
-    </Box>
-  );
-};
-
 const getClosestAreaUnit = (input: string): string | null => {
   const normalizedInput = input.trim().toLowerCase();
 

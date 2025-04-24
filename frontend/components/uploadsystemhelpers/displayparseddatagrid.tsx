@@ -72,7 +72,7 @@ export const DisplayParsedDataGridInline: React.FC<DisplayParsedDataProps> = (pr
         },
         renderCell: (params: GridCellParams) => {
           if (header.label === 'date') {
-            const formattedDate = params.value ? moment(params.value).format('YYYY-MM-DD') : '';
+            const formattedDate = params.value ? moment(params.value).format('dddd, MMMM Do YYYY, hh:mm:ss a') : '';
             return <Typography sx={{ whiteSpace: 'normal', lineHeight: 'normal' }}>{formattedDate}</Typography>;
           }
 
