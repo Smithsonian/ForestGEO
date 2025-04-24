@@ -7,6 +7,7 @@ import { GridFilterModel } from '@mui/x-data-grid';
 import { handleError } from '@/utils/errorhandler';
 import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+export { PATCH } from '@/config/macros/coreapifunctions';
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
 
@@ -365,66 +366,6 @@ export async function POST(
     } finally {
       await connectionManager.closeConnection();
     }
-  }
-}
-
-// slugs: schema, gridID
-export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const params = await props.params;
-  if (!params.slugs) throw new Error('slugs not provided');
-  const [schema, gridID] = params.slugs;
-  if (!schema || !gridID) throw new Error('no schema or gridID provided');
-
-  const connectionManager = ConnectionManager.getInstance();
-  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow, oldRow } = await request.json();
-  let updateIDs: Record<string, number> = {};
-  let transactionID: string | undefined = undefined;
-
-  try {
-    transactionID = await connectionManager.beginTransaction();
-
-    // Handle views with handleUpsertForSlices (applies to both insert and update logic)
-    if (params.dataType === 'alltaxonomiesview') {
-      let queryConfig;
-      switch (params.dataType) {
-        case 'alltaxonomiesview':
-          queryConfig = AllTaxonomiesViewQueryConfig;
-          break;
-        default:
-          throw new Error('Incorrect view call');
-      }
-
-      // Use handleUpsertForSlices for update operations as well (updates where needed)
-      updateIDs = await handleUpsertForSlices(connectionManager, schema, newRow, queryConfig);
-    }
-
-    // Handle non-view table updates
-    else {
-      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([{ ...oldRow, ...newRow }])[0];
-      const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
-
-      // Construct the UPDATE query
-      const updateQuery = format(
-        `UPDATE ??
-         SET ?
-         WHERE ?? = ?`,
-        [`${schema}.${params.dataType}`, remainingProperties, demappedGridID, gridIDKey]
-      );
-
-      // Execute the UPDATE query
-      await connectionManager.executeQuery(updateQuery);
-
-      // For non-view tables, standardize the response format
-      updateIDs = { [params.dataType]: gridIDKey };
-    }
-
-    await connectionManager.commitTransaction(transactionID ?? '');
-    return NextResponse.json({ message: 'Update successful', updatedIDs: updateIDs }, { status: HTTPResponses.OK });
-  } catch (error: any) {
-    return handleError(error, connectionManager, newRow, transactionID);
-  } finally {
-    await connectionManager.closeConnection();
   }
 }
 

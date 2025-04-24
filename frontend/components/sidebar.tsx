@@ -481,7 +481,8 @@ export default function Sidebar(props: SidebarProps) {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                width: '100%'
+                width: '100%',
+                gap: 1
               }}
               className="sidebar-item"
             >
@@ -514,6 +515,7 @@ export default function Sidebar(props: SidebarProps) {
                   await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${item?.dateRanges[0].censusID}`);
                   setManualReset(true);
                 }}
+                disabled={(item?.plotCensusNumber ?? 0) < censusListContext?.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)}
               >
                 <DeleteForever />
               </IconButton>

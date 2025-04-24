@@ -1,7 +1,10 @@
+// connectionmanager.ts
+import '@/lib/connectionlogger';
 import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
+import { patchConnectionManager } from '@/lib/connectionlogger';
 
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
@@ -131,5 +134,7 @@ class ConnectionManager {
     }
   }
 }
+
+patchConnectionManager(ConnectionManager.getInstance());
 
 export default ConnectionManager;
