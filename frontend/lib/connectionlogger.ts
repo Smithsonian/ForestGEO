@@ -93,7 +93,7 @@ export function patchConnectionManager(cm: any) {
 
     await orig(
       `INSERT INTO \`${schema}\`.\`unifiedchangelog\` (TableName, RecordID, Operation, OldRowState, NewRowState, ChangedBy, PlotID, CensusID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [table, recordIDs.join('|'), op, JSON.stringify(beforeImages), JSON.stringify(afterImages), user, plotID, censusID],
+      [table, recordIDs.join('|'), op, beforeImages, afterImages, user, plotID, censusID],
       transactionId
     );
     return result;

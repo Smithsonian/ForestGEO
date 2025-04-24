@@ -49,19 +49,10 @@ export default function IsolatedUnifiedChangelogDataGrid() {
           return {
             ...col,
             renderCell: (params: any) => {
-              let raw = params.value;
-              if (typeof raw === 'string') {
-                try {
-                  raw = JSON.parse(raw);
-                } catch (e) {
-                  return <Typography>Invalid JSON</Typography>;
-                }
-              }
-              const arr = Array.isArray(raw) ? raw : [raw];
-              if (!arr.length) return <></>;
-
-              return arr.map((obj, idx) => (
-                <React.Fragment key={idx}>
+              const jsonDataArr: any[] = params.row[col.field];
+              console.log(jsonDataArr);
+              return jsonDataArr.map(obj => (
+                <>
                   <Box
                     sx={{
                       display: 'flex',
@@ -84,7 +75,7 @@ export default function IsolatedUnifiedChangelogDataGrid() {
                       ))}
                   </Box>
                   <Divider sx={{ my: 1 }} />
-                </React.Fragment>
+                </>
               ));
             }
           };

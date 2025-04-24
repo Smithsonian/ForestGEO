@@ -1160,20 +1160,6 @@ export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
   }
 ]);
 
-function formatValue(value: any): React.ReactNode {
-  if (value === null || value === undefined) {
-    return 'NULL';
-  }
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch (error) {
-      return '[Circular Object]';
-    }
-  }
-  return value.toString();
-}
-
 export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -1213,76 +1199,12 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     headerName: 'Old',
     flex: 1,
     editable: false,
-    renderCell: params => {
-      const jsonData = params.row['oldRowState'];
-
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'neutral.softBg',
-            borderRadius: '8px',
-            padding: '8px',
-            maxHeight: '150px',
-            overflow: 'auto',
-            fontSize: '12px'
-          }}
-        >
-          {jsonData && Object.keys(jsonData).length > 0 ? (
-            Object.entries(jsonData).map(([key, value]) => (
-              <Stack direction={'row'} key={key}>
-                <Typography level={'body-md'}>
-                  <strong>{key}</strong>:{formatValue(value)}
-                </Typography>
-              </Stack>
-            ))
-          ) : (
-            <Typography level={'body-sm'} fontWeight={'bold'}>
-              No previous data available
-            </Typography>
-          )}
-        </Box>
-      );
-    }
   },
   {
     field: 'newRowState',
     headerName: 'New',
     flex: 1,
     editable: false,
-    renderCell: params => {
-      const jsonData = params.row['newRowState'];
-
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'neutral.softBg',
-            borderRadius: '8px',
-            padding: '8px',
-            maxHeight: '150px',
-            overflow: 'auto',
-            fontSize: '12px'
-          }}
-        >
-          {jsonData && Object.keys(jsonData).length > 0 ? (
-            Object.entries(jsonData).map(([key, value]) => (
-              <Stack direction={'row'} key={key}>
-                <Typography level={'body-md'}>
-                  <strong>{key}</strong>:{formatValue(value)}
-                </Typography>
-              </Stack>
-            ))
-          ) : (
-            <Typography level={'body-sm'} fontWeight={'bold'}>
-              No previous data available
-            </Typography>
-          )}
-        </Box>
-      );
-    }
   },
   {
     field: 'changeTimestamp',
