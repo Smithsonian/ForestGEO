@@ -31,6 +31,7 @@ import CancelIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from '@mui/joy/Box';
 import {
+  Autocomplete,
   Button,
   Checkbox,
   Chip,
@@ -85,12 +86,14 @@ import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
 import Divider from '@mui/joy/Divider';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import GridOnIcon from '@mui/icons-material/GridOn';
-import MSVEditingModal from '@/components/datagrids/applications/msveditingmodal';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ValidationCore from '@/components/client/validationcore';
-import { CloudSync, GppGoodOutlined, SettingsBackupRestoreRounded } from '@mui/icons-material';
+import { ArrowRightAlt, CloudSync, GppGoodOutlined, SettingsBackupRestoreRounded } from '@mui/icons-material';
 import Avatar from '@mui/joy/Avatar';
+import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
+import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -546,6 +549,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [isValidationModalOpen, setIsValidationModalOpen] = useState(false);
   const [isValidationOverrideModalOpen, setIsValidationOverrideModalOpen] = useState(false);
   const [isResetValidationModalOpen, setIsResetValidationModalOpen] = useState(false);
+  const [isSingleCMVErrorOpen, setIsSingleCMVErrorOpen] = useState(false);
+  const [cmvSelected, setCMVSelected] = useState(-1);
   const [promiseArguments, setPromiseArguments] = useState<{
     resolve: (value: GridRowModel) => void;
     reject: (reason?: any) => void;
@@ -574,6 +579,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const [validCount, setValidCount] = useState<number | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [selectableAttributes, setSelectableAttributes] = useState<string[]>([]);
+  const [selectableOpts, setSelectableOpts] = useState<{ [optName: string]: string[] }>({
+    tag: [],
+    stemTag: [],
+    quadrat: [],
+    spCode: []
+  });
   const [reloadAttrs, setReloadAttrs] = useState(true);
 
   // context pulls and definitions
@@ -610,6 +621,39 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
       setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
       setReloadAttrs(false);
+      const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
+        .mapData(await (await fetch(`/api/fetchall/trees?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.treeTag)
+        .filter((code): code is string => code !== undefined)
+        .sort((a, b) => a.localeCompare(b));
+      const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
+        .mapData(await (await fetch(`/api/fetchall/stems?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.stemTag)
+        .filter((code): code is string => code !== undefined)
+        .sort((a, b) => a.localeCompare(b));
+      const quadOpts = MapperFactory.getMapper<QuadratRDS, QuadratResult>('quadrats')
+        .mapData(
+          await (
+            await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+          ).json()
+        )
+        .map(i => i.quadratName)
+        .filter((code): code is string => code !== undefined)
+        .sort((a, b) => a.localeCompare(b));
+      const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
+        .mapData(await (await fetch(`/api/fetchall/species?schema=${currentSite?.schemaName ?? ''}`)).json())
+        .map(i => i.speciesCode)
+        .filter((code): code is string => code !== undefined)
+        .sort((a, b) => a.localeCompare(b));
+      setSelectableOpts(prev => {
+        return {
+          ...prev,
+          treeTag: tagOpts,
+          stemTag: stemOpts,
+          quadratName: quadOpts,
+          speciesCode: specOpts
+        };
+      });
     }
 
     reloadAttributes().catch(console.error);
@@ -1247,17 +1291,16 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       filterable: false,
       renderCell: (params: GridCellParams) => {
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
-          const validationStrings =
-            validationErrors[Number(params.row.coreMeasurementID)]?.errors.map(errorDetail => {
-              const pairsString = errorDetail.validationPairs
-                .map(pair => `(${pair.description} <--> ${pair.criterion})`) // Format each validation pair
-                .join(', '); // Combine all pairs for the errorDetail
-
-              return `ID ${errorDetail.id}: ${pairsString}`; // Format the string for the ID
-            }) || [];
           return (
-            <Tooltip title={`Failing: ${validationStrings.join(',')}`} size="md">
-              <ErrorIcon color="error" />
+            <Tooltip title={`Click to review errors!`} size="md">
+              <IconButton
+                onClick={() => {
+                  setCMVSelected(params.row.coreMeasurementID ?? -1);
+                  setIsSingleCMVErrorOpen(true);
+                }}
+              >
+                <ErrorIcon color="error" />
+              </IconButton>
             </Tooltip>
           );
         } else if (params.row.isValidated === null) {
@@ -1277,7 +1320,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }
       }
     }),
-    [rows, validationErrors, paginationModel]
+    [rows, validationErrors, paginationModel, refresh]
   );
 
   const measurementDateColumn: GridColDef = {
@@ -1322,6 +1365,42 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         column = {
           ...column,
           renderEditCell: (params: GridRenderEditCellParams) => <EditMeasurements params={params} />
+        };
+      }
+      if (['quadratName', 'speciesCode', 'treeTag', 'stemTag'].includes(column.field)) {
+        column = {
+          ...column,
+          renderEditCell: (params: GridRenderEditCellParams) => (
+            <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
+              <Autocomplete
+                sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
+                multiple={column.field === 'attributes'}
+                variant={'soft'}
+                autoSelect
+                autoHighlight
+                freeSolo={['treeTag', 'stemTag'].includes(column.field)}
+                clearOnBlur={false}
+                isOptionEqualToValue={(option, value) => option === value}
+                options={[...selectableOpts[column.field]].sort((a, b) => a.localeCompare(b))}
+                value={
+                  column.field === 'attributes'
+                    ? params.value
+                      ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0)
+                      : []
+                    : (params.value ?? '')
+                }
+                onChange={(_event, value) => {
+                  if (value) {
+                    params.api.setEditCellValue({
+                      id: params.id,
+                      field: params.field,
+                      value: column.field === 'attributes' && Array.isArray(value) ? value.join(';') : value
+                    });
+                  }
+                }}
+              />
+            </Box>
+          )
         };
       }
       return {
@@ -1394,7 +1473,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns)];
     }
     return [validationStatusColumn, measurementDateColumn, ...applyFilterToColumns(commonColumns), getGridActionsColumn()];
-  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors, rowModesModel]);
+  }, [MeasurementsSummaryViewGridColumns, locked, rows, validationErrors, rowModesModel, refresh]);
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);
@@ -1638,15 +1717,18 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             <Alert {...snackbar} onClose={handleCloseSnackbar} />
           </Snackbar>
         )}
-        {isDialogOpen && promiseArguments && !promiseArguments.oldRow.isNew && (
-          <MSVEditingModal
-            gridType={gridType}
-            oldRow={promiseArguments.oldRow}
-            newRow={promiseArguments.newRow}
-            handleClose={handleCancelAction}
-            handleSave={handleConfirmAction}
-          />
+        {isDialogOpen && promiseArguments && (
+          <SkipReEnterDataModal gridType={gridType} row={promiseArguments.newRow} handleClose={handleCancelAction} handleSave={handleConfirmAction} />
         )}
+        {/*{isDialogOpen && promiseArguments && !promiseArguments.oldRow.isNew && (*/}
+        {/*  <MSVEditingModal*/}
+        {/*    gridType={gridType}*/}
+        {/*    oldRow={promiseArguments.oldRow}*/}
+        {/*    newRow={promiseArguments.newRow}*/}
+        {/*    handleClose={handleCancelAction}*/}
+        {/*    handleSave={handleConfirmAction}*/}
+        {/*  />*/}
+        {/*)}*/}
         {isDeleteDialogOpen && (
           <ConfirmationDialog
             open={isDeleteDialogOpen}
@@ -1695,6 +1777,63 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                   Yes
                 </Button>
                 <Button onClick={async () => await handleCloseModal(setIsResetValidationModalOpen)}>No</Button>
+              </DialogActions>
+            </ModalDialog>
+          </Modal>
+        )}
+        {isSingleCMVErrorOpen && cmvSelected > 0 && (
+          <Modal open={isSingleCMVErrorOpen} onClose={() => {}}>
+            <ModalDialog role={'alertdialog'}>
+              <DialogTitle>Details</DialogTitle>
+              <DialogContent>
+                The following validation errors were found in this row:
+                <Stack direction={'column'} gap={1.5} sx={{ display: 'flex', flex: 1 }}>
+                  {validationErrors[cmvSelected].errors.map((err, index) => (
+                    <Stack key={index} direction={'column'} spacing={2} alignItems={'center'}>
+                      {err.validationPairs.map((vp, index) => (
+                        <Stack key={`${index}-stack`} direction={'row'}>
+                          <Chip key={`${index}-cr`}>{vp.criterion}</Chip>
+                          <ArrowRightAlt />
+                          <Chip key={`${index}-desc`}>{vp.description}</Chip>
+                        </Stack>
+                      ))}
+                    </Stack>
+                    // <Chip key={index}>{err.validationPairs.join(', ')}</Chip>
+                  ))}
+                </Stack>
+              </DialogContent>
+              <DialogActions>
+                <Button
+                  onClick={async () => {
+                    await handleCloseModal(setIsSingleCMVErrorOpen);
+                    setCMVSelected(-1);
+                  }}
+                >
+                  Close
+                </Button>
+                <Button
+                  onClick={async () => {
+                    await fetch(`/api/formatrunquery`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        query: `DELETE FROM ${currentSite?.schemaName}.cmverrors WHERE CoreMeasurementID = ?`,
+                        params: [cmvSelected]
+                      })
+                    });
+                    await fetch(`/api/formatrunquery`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        query: `UPDATE ${currentSite?.schemaName}.coremeasurements SET IsValidated = NULL WHERE CoreMeasurementID = ?`,
+                        params: [cmvSelected]
+                      })
+                    });
+                    await fetchValidationErrors();
+                    await handleCloseModal(setIsSingleCMVErrorOpen);
+                    setCMVSelected(-1);
+                  }}
+                >
+                  Clear Errors
+                </Button>
               </DialogActions>
             </ModalDialog>
           </Modal>

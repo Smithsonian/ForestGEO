@@ -1,11 +1,14 @@
 'use client';
 
 // isolated unifiedchangelog datagrid
-import React, { useState } from 'react';
+import React, { ReactNode, useMemo, useState } from 'react';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
 import { UnifiedChangelogGridColumns } from '@/components/client/datagridcolumns';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
+import { Box, Divider, Stack, Typography } from '@mui/joy';
+import { GridColDef } from '@mui/x-data-grid';
+import moment from 'moment';
 
 export default function IsolatedUnifiedChangelogDataGrid() {
   const currentPlot = usePlotContext();
@@ -25,11 +28,76 @@ export default function IsolatedUnifiedChangelogDataGrid() {
   };
   const [refresh, setRefresh] = useState(false);
 
+  function formatValue(value: any): ReactNode {
+    if (value === null || value === undefined) {
+      return 'NULL';
+    }
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch (error) {
+        return '[Circular Object]';
+      }
+    }
+    return value.toString();
+  }
+
+  const columns: GridColDef[] = useMemo(
+    () =>
+      UnifiedChangelogGridColumns.map(col => {
+        if (['oldRowState', 'newRowState'].includes(col.field)) {
+          return {
+            ...col,
+            renderCell: (params: any) => {
+              const jsonDataArr: any[] = params.row[col.field];
+              console.log(jsonDataArr);
+              return jsonDataArr.map(obj => (
+                <>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      backgroundColor: 'neutral.softBg',
+                      borderRadius: '8px',
+                      padding: '8px',
+                      overflow: 'auto',
+                      fontSize: '12px'
+                    }}
+                  >
+                    {obj &&
+                      Object.keys(obj).length > 0 &&
+                      Object.entries(obj).map(([key, value]) => (
+                        <Stack direction={'row'} key={key}>
+                          <Typography level={'body-md'}>
+                            <strong>{key}</strong>:{formatValue(value)}
+                          </Typography>
+                        </Stack>
+                      ))}
+                  </Box>
+                  <Divider sx={{ my: 1 }} />
+                </>
+              ));
+            }
+          };
+        } else if (col.field === 'changeTimestamp') {
+          return {
+            ...col,
+            renderCell: (params: any) => {
+              const date = moment(params.value);
+              return date.isValid() ? date.format('dddd, MMMM Do YYYY, hh:mm:ss a') : 'Invalid Date';
+            }
+          };
+        }
+        return col;
+      }),
+    [UnifiedChangelogGridColumns]
+  );
+
   return (
     <>
       <IsolatedDataGridCommons
         gridType="unifiedchangelog"
-        gridColumns={UnifiedChangelogGridColumns}
+        gridColumns={columns}
         refresh={refresh}
         setRefresh={setRefresh}
         initialRow={initialUCRDSRow}

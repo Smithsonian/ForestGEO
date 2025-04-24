@@ -353,7 +353,19 @@ begin
     select * from filter_validity;
 
     create temporary table if not exists filtered as
-    select distinct * from filter_validity where invalid_count = 0;
+    select distinct fv.*
+    from filter_validity fv
+    where invalid_count = 0
+      and not exists (select 1
+                      from coremeasurements cm
+                               join stems s on cm.StemID = s.StemID
+                               join trees t on s.TreeID = t.TreeID
+                      where cm.CensusID = fv.CensusID
+                        and t.TreeTag = fv.TreeTag
+                        and s.StemTag = fv.StemTag
+                        and cm.MeasuredDBH = fv.DBH
+                        and cm.MeasuredHOM = fv.HOM
+                        and cm.MeasurementDate = fv.MeasurementDate);
 
     insert ignore into failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes)
     select distinct PlotID,
@@ -428,16 +440,53 @@ begin
       and f.id not in (select id from old_trees)
       and f.id not in (select id from multi_stems);
 
-    -- no changes needed for old stems!
+    -- re-inserting old trees and old stems
+    insert into trees (TreeTag, SpeciesID)
+    select distinct binary ot.TreeTag, sp.SpeciesID
+    from old_trees ot
+             join species sp on ot.SpeciesCode = sp.SpeciesCode
+             left join multi_stems ms on ot.id = ms.id
+             left join new_recruits nr on ot.id = nr.id
+    where ms.id is null
+      and nr.id is null
+    on duplicate key update TreeTag   = values(TreeTag),
+                            SpeciesID = values(SpeciesID);
+
+    insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
+    select distinct t.TreeID, q.QuadratID, ot.StemTag, ot.LocalX, ot.LocalY
+    from old_trees ot
+             join trees t on ot.TreeTag = t.TreeTag
+             join quadrats q on q.QuadratName = ot.QuadratName and q.PlotID = ot.PlotID
+             left join multi_stems ms on ot.id = ms.id
+             left join new_recruits nr on ot.id = nr.id
+    where ms.id is null
+      and nr.id is null
+    on duplicate key update QuadratID = values(stems.QuadratID),
+                            StemTag   = values(StemTag),
+                            LocalX    = values(LocalX),
+                            LocalY    = values(LocalY);
 
     -- handle multi stems
+    insert into trees (TreeTag, SpeciesID)
+    select distinct binary ms.TreeTag, sp.SpeciesID
+    from multi_stems ms
+             join species sp on ms.SpeciesCode = sp.SpeciesCode
+             left join old_trees ot on ms.id = ot.id
+             left join new_recruits nr on ms.id = nr.id
+    where ot.id is null
+      and nr.id is null
+    on duplicate key update TreeTag   = values(TreeTag),
+                            SpeciesID = values(SpeciesID);
+
     insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
     select distinct t.TreeID, q.QuadratID, ms.StemTag, ms.LocalX, ms.LocalY
     from multi_stems ms
              join trees t on t.TreeTag = ms.TreeTag
              join quadrats q on q.QuadratName = ms.QuadratName and q.PlotID = ms.PlotID
              left join old_trees ot on ms.id = ot.id
+             left join new_recruits nr on ms.id = nr.id
     where ot.id is null
+      and nr.id is null
     on duplicate key update QuadratID = values(stems.QuadratID),
                             StemTag   = values(StemTag),
                             LocalX    = values(LocalX),
@@ -449,7 +498,9 @@ begin
     from new_recruits nt
              join species sp on sp.SpeciesCode = nt.SpeciesCode
              left join old_trees ot on ot.id = nt.id
+             left join multi_stems ms on ms.id = nt.id
     where ot.id is null
+      and ms.id is null
     on duplicate key update TreeTag   = values(TreeTag),
                             SpeciesID = values(SpeciesID);
 
@@ -535,20 +586,6 @@ begin
                             MeasuredDBH     = values(MeasuredDBH),
                             MeasuredHOM     = values(MeasuredHOM);
 
-    -- collapser
-    set foreign_key_checks = 0;
-    delete cm1
-    from coremeasurements cm1
-             inner join coremeasurements cm2
-                        on cm1.CensusID = cm2.CensusID
-                            and cm1.StemID = cm2.StemID
-                            and cm1.MeasurementDate = cm2.MeasurementDate
-                            and cm1.MeasuredDBH <=> cm2.MeasuredDBH
-                            and cm1.MeasuredHOM <=> cm2.MeasuredHOM
-                            and cm1.Description <=> cm2.Description
-                            and cm1.CoreMeasurementID > cm2.CoreMeasurementID;
-    set foreign_key_checks = 1;
-
     create temporary table tempcodes as
     select cm.CoreMeasurementID,
            trim(jt.code) as Code
@@ -571,6 +608,33 @@ begin
     on duplicate key update CoreMeasurementID = values(CoreMeasurementID),
                             Code              = values(Code);
 
+    -- collapser
+    set foreign_key_checks = 0;
+    call RefreshMeasurementsSummary();
+
+    create temporary table if not exists dup_cms as
+    select ms1.CoreMeasurementID
+    from measurementssummary ms1
+             inner join measurementssummary ms2 on ms1.QuadratName = ms2.QuadratName and
+                                                   ms1.CensusID = ms2.CensusID and
+                                                   ms1.StemID = ms2.StemID and
+                                                   ms1.MeasuredDBH <=> ms2.MeasuredDBH and
+                                                   ms1.MeasuredHOM <=> ms2.MeasuredHOM and
+                                                   ms1.MeasurementDate = ms2.MeasurementDate and
+                                                   ms1.Attributes <=> ms2.Attributes and
+                                                   ms1.CoreMeasurementID > ms2.CoreMeasurementID;
+
+    delete ca
+    from cmattributes ca
+             join dup_cms dc on ca.CoreMeasurementID = dc.CoreMeasurementID;
+
+    delete cm
+    from coremeasurements cm
+             join dup_cms dc on cm.CoreMeasurementID = dc.CoreMeasurementID;
+
+    drop temporary table if exists dup_cms;
+    set foreign_key_checks = 1;
+
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0;
 
@@ -581,6 +645,10 @@ begin
         stemstates, filtered, filter_validity, filter_validity_dup,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
 end;
+
+
+
+
 
 
 create
