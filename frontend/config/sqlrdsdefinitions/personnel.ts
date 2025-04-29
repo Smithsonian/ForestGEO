@@ -5,7 +5,6 @@ import { ColumnStates } from '@/config/macros';
 export interface PersonnelRDS {
   id?: number;
   personnelID?: number;
-  censusID?: number;
   firstName?: string;
   lastName?: string;
   roleID?: number;

@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
                 INNER JOIN
             ${schema}.quadrats q ON st.QuadratID = q.QuadratID
                 INNER JOIN
-            ${schema}.plots p ON q.PlotID = p.PlotID
+            ${schema}.plots p ON q.PlotID = p.PlotID AND q.IsActive IS TRUE
                 INNER JOIN
             ${schema}.census c ON cm.CensusID = c.CensusID
         WHERE

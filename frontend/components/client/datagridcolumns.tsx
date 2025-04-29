@@ -1198,13 +1198,13 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'oldRowState',
     headerName: 'Old',
     flex: 1,
-    editable: false,
+    editable: false
   },
   {
     field: 'newRowState',
     headerName: 'New',
     flex: 1,
-    editable: false,
+    editable: false
   },
   {
     field: 'changeTimestamp',
@@ -1217,5 +1217,129 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     headerName: 'Changed By',
     flex: 0.5,
     editable: false
+  }
+]);
+
+export const AllTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumns([
+  {
+    field: 'id',
+    headerName: '#',
+    flex: 0.3,
+    editable: false
+  },
+  {
+    field: 'speciesID',
+    headerName: '#',
+    flex: 0.5,
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'speciesCode',
+    headerName: 'Species Code',
+    renderHeader: () => formatHeader('Species', 'Code'),
+    flex: 0.5,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'familyID',
+    headerName: 'Family ID',
+    flex: 0,
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'family',
+    headerName: 'Family',
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusID',
+    headerName: 'Genus ID',
+    flex: 1,
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'genus',
+    headerName: 'Genus',
+    flex: 0.75,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusAuthority',
+    headerName: 'Genus Auth',
+    renderHeader: () => formatHeader('Genus', 'Authority'),
+    flex: 0.75,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesName',
+    headerName: 'Species',
+    renderHeader: () => formatHeader('Species', 'Name'),
+    flex: 0.75,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesName',
+    headerName: 'Subspecies',
+    renderHeader: () => formatHeader('Subspecies', 'Name'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'idLevel',
+    headerName: 'Species ID Level',
+    renderHeader: () => formatHeader('Species', 'ID Level'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesAuthority',
+    headerName: 'Species Auth',
+    renderHeader: () => formatHeader('Species', 'Authority'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesAuthority',
+    headerName: 'Subspecies Auth',
+    renderHeader: () => formatHeader('Subspecies', 'Authority'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'fieldFamily',
+    headerName: 'Field Family',
+    renderHeader: () => formatHeader('Field', 'Family'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'validCode',
+    headerName: 'Valid Code',
+    renderHeader: () => formatHeader('Valid', 'Code'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesDescription',
+    headerName: 'Species Description',
+    renderHeader: () => formatHeader('Species', 'Description'),
+    flex: 1,
+    type: 'string',
+    editable: true
   }
 ]);

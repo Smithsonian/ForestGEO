@@ -6,10 +6,7 @@ const withBundleAnalyzer = require('@next/bundle-analyzer')({
 /** @type {import('next').NextConfig} */
 const nextConfig = withBundleAnalyzer({
   experimental: {
-    serverMinification: false,
-    turbo: {
-      resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
-    }
+    serverMinification: false
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {
@@ -21,6 +18,9 @@ const nextConfig = withBundleAnalyzer({
     });
 
     return config;
+  },
+  turbopack: {
+    resolveExtensions: ['.mdx', '.tsx', '.ts', '.jsx', '.js', '.mjs', '.json']
   },
   eslint: {
     ignoreDuringBuilds: true

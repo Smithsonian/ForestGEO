@@ -1,4 +1,4 @@
-import LoginFailed from '@/components/client/loginfailure';
+import LoginFailed from '@/components/client/modals/loginfailure';
 import { Suspense } from 'react';
 
 export default function LoginFailedPage() {

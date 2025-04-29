@@ -1,6 +1,6 @@
 // connectionmanager.ts
 import '@/lib/connectionlogger';
-import { PoolConnection } from 'mysql2/promise';
+import { format, PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
@@ -32,7 +32,7 @@ class ConnectionManager {
     }
 
     try {
-      return await runQuery(connection, query, params);
+      return await runQuery(connection, format(query, params));
     } catch (error) {
       console.error(chalk.red('Error executing query:', error));
       throw error;

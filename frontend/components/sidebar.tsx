@@ -35,12 +35,12 @@ import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 
-import RolloverModal from './client/rollovermodal';
-import RolloverStemsModal from './client/rolloverstemsmodal';
+import RolloverModal from './client/modals/rollovermodal';
+import RolloverStemsModal from './client/modals/rolloverstemsmodal';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, MoreHoriz } from '@mui/icons-material';
-import PlotCardModal from '@/components/client/plotcardmodal';
+import PlotCardModal from '@/components/client/modals/plotcardmodal';
 
 export interface SimpleTogglerProps {
   isOpen: boolean;
