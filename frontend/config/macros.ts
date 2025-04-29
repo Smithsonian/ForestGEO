@@ -6,10 +6,9 @@
 import { FileRejection, FileWithPath } from 'react-dropzone';
 import '@/styles/customtablesettings.css';
 import ConnectionManager from '@/config/connectionmanager';
-import { FileRow } from '@/config/macros/formdetails';
+import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { processPersonnel } from '@/components/processors/processpersonnel';
 import { processSpecies } from '@/components/processors/processspecies';
-import { processQuadrats } from '@/components/processors/processquadrats';
 import { processCensus } from '@/components/processors/processcensus';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
@@ -109,7 +108,6 @@ export interface UnifiedValidityFlags {
   personnel: boolean;
   species: boolean;
   quadrats: boolean;
-  quadratpersonnel: boolean;
 }
 
 export interface GridSelections {
@@ -122,6 +120,16 @@ export type UserAuthRoles = 'global' | 'db admin' | 'lead technician' | 'field c
 export interface SpecialProcessingProps {
   connectionManager: ConnectionManager;
   rowData: FileRow;
+  schema: string;
+  plot?: Plot;
+  census?: OrgCensus;
+  quadratID?: number;
+  fullName?: string;
+}
+
+export interface SpecialBulkProcessingProps {
+  connectionManager: ConnectionManager;
+  rowDataSet: FileRowSet;
   schema: string;
   plot?: Plot;
   census?: OrgCensus;
@@ -185,8 +193,7 @@ export const fileMappings: Record<string, FileMapping> = {
       dimy: 'DimensionY',
       dimensionunit: 'DimensionUnits',
       quadratshape: 'QuadratShape'
-    },
-    specialProcessing: processQuadrats
+    }
   },
   measurements: {
     tableName: '', // Multiple tables involved

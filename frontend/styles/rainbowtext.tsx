@@ -22,12 +22,12 @@ const generateDynamicColors = (): string[] => {
 };
 
 const waveAnimation = keyframes`
-    from {
-        background-position: 0% 50%;
-    }
-    to {
-        background-position: -200% 50%;
-    }
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: -200% 50%;
+  }
 `;
 
 const RainbowText = styled(Typography)`

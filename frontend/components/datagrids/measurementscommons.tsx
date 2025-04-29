@@ -14,13 +14,7 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridSortModel,
-  GridToolbarColumnsButton,
-  GridToolbarContainer,
-  GridToolbarFilterButton,
   GridToolbarProps,
-  GridToolbarQuickFilter,
-  ToolbarPropsOverrides,
-  useGridApiContext,
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertColor, AlertProps, AlertPropsColorOverrides, Snackbar } from '@mui/material';
@@ -28,7 +22,6 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import Box from '@mui/joy/Box';
 import {
   Autocomplete,
@@ -38,17 +31,13 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormLabel,
   IconButton,
   Input,
   Modal,
   ModalDialog,
-  Skeleton,
   Stack,
-  Switch,
   Tooltip,
-  Typography,
-  useTheme
+  Typography
 } from '@mui/joy';
 import { StyledDataGrid } from '@/config/styleddatagrid';
 import {
@@ -74,425 +63,21 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { bitToBoolean, HTTPResponses } from '@/config/macros';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import { useSession } from 'next-auth/react';
-import ConfirmationDialog from './confirmationdialog';
+import ConfirmationDialog from '../client/modals/confirmationdialog';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
-import { ClearIcon } from '@mui/x-date-pickers';
-import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import { InputChip, MeasurementsSummaryViewGridColumns } from '@/components/client/datagridcolumns';
 import { OverridableStringUnion } from '@mui/types';
-import ValidationOverrideModal from '@/components/client/validationoverridemodal';
+import ValidationOverrideModal from '@/components/client/modals/validationoverridemodal';
 import { MeasurementsSummaryResult } from '@/config/sqlrdsdefinitions/views';
-import Divider from '@mui/joy/Divider';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import GridOnIcon from '@mui/icons-material/GridOn';
 import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CloudSync, GppGoodOutlined, SettingsBackupRestoreRounded } from '@mui/icons-material';
-import Avatar from '@mui/joy/Avatar';
 import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
-
-function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  return ((...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn(...args), delay);
-  }) as T;
-}
-
-type EditToolbarProps = EditToolbarCustomProps & GridToolbarProps & ToolbarPropsOverrides;
-
-type VisibleFilter = 'valid' | 'errors' | 'pending';
-
-interface ExtendedGridFilterModel extends GridFilterModel {
-  visible: VisibleFilter[];
-}
-
-const EditToolbar = (props: EditToolbarProps) => {
-  const {
-    handleAddNewRow,
-    handleRefresh,
-    handleExport,
-    handleQuickFilterChange,
-    filterModel,
-    dynamicButtons = [],
-    currentSite,
-    currentPlot,
-    currentCensus,
-    gridColumns
-  } = props;
-  if (!handleAddNewRow || !handleExport || !handleRefresh || !handleQuickFilterChange || !filterModel || !gridColumns) return <></>;
-  const [inputValue, setInputValue] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [openExportModal, setOpenExportModal] = useState(false);
-  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
-  const [exportVisibility, setExportVisibility] = useState<VisibleFilter[]>(filterModel.visible);
-  const apiRef = useGridApiContext();
-  const theme = useTheme();
-
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(event.target.value);
-    setIsTyping(true);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      handleQuickFilterChange({
-        ...filterModel,
-        items: filterModel?.items || [],
-        quickFilterValues: inputValue.split(' ') || []
-      });
-      setIsTyping(false);
-    }
-  };
-
-  const handleClearInput = () => {
-    setInputValue('');
-    handleQuickFilterChange({
-      ...filterModel,
-      items: filterModel?.items || [],
-      quickFilterValues: []
-    });
-    setIsTyping(false);
-  };
-
-  useEffect(() => {
-    if (isTyping) {
-      const timeout = setTimeout(() => setIsTyping(false), 2000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isTyping, inputValue]);
-
-  function exportFilterModel() {
-    const jsonData = JSON.stringify(filterModel, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'results.json';
-    link.click();
-
-    URL.revokeObjectURL(url);
-  }
-
-  const downloadExportedData = async () => {
-    const blob = new Blob([await handleExport(exportVisibility, exportType)], {
-      type: 'text/csv;charset=utf-8;'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `measurements_${exportType}_${currentSite?.schemaName ?? ''}_${currentPlot?.plotName ?? ''}_${currentCensus?.plotCensusNumber ?? 0}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleChipToggle = (type: string) => {
-    setExportVisibility(prev => (prev.includes(type as VisibleFilter) ? prev.filter(t => t !== (type as VisibleFilter)) : [...prev, type as VisibleFilter]));
-  };
-
-  const csvHeaders = gridColumns
-    .filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
-    .map(column => column.field);
-
-  return (
-    <>
-      <GridToolbarContainer>
-        <Box
-          sx={{
-            display: 'flex',
-            flex: 1,
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            backgroundColor: 'warning.main',
-            borderRadius: '4px',
-            p: 2
-          }}
-        >
-          <Box sx={{ display: 'flex', flex: 1 }}>
-            <Stack direction={'row'} spacing={0.5} sx={{ alignItems: 'center', justifyContent: 'center', marginRight: 1 }}>
-              <Typography level={'body-md'}>Legend:</Typography>
-              <Tooltip title={'New Recruit'} arrow>
-                <Avatar size="sm" variant="soft" color="primary">
-                  NR
-                </Avatar>
-              </Tooltip>
-              <Tooltip title={'Old Tree'} arrow>
-                <Avatar size="sm" variant="soft" color="success">
-                  OT
-                </Avatar>
-              </Tooltip>
-              <Tooltip title={'Multi Stem'} arrow>
-                <Avatar size="sm" variant="soft" color="warning">
-                  MS
-                </Avatar>
-              </Tooltip>
-              <Tooltip title={'No State Found'} arrow>
-                <Avatar size={'sm'} variant={'soft'} color={'danger'}>
-                  NU
-                </Avatar>
-              </Tooltip>
-            </Stack>
-            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
-            <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-              <Box display={'flex'} alignItems={'center'}>
-                <GridToolbarColumnsButton />
-                <GridToolbarFilterButton />
-                <GridToolbarQuickFilter
-                  sx={{ ml: 2 }}
-                  variant={'outlined'}
-                  value={inputValue}
-                  onKeyDown={handleKeyDown}
-                  onChange={handleInputChange}
-                  placeholder={'Search All Fields...'}
-                  slotProps={{
-                    input: {
-                      endAdornment: null
-                    }
-                  }}
-                />
-                <Tooltip title={'Clear filter'} placement={'bottom'}>
-                  <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
-                    <ClearIcon fontSize={'small'} />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-            </Tooltip>
-            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
-            <Button color={'primary'} variant={'plain'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
-              Refresh
-            </Button>
-            <Divider orientation={'vertical'} sx={{ mx: 1 }} />
-            <Stack direction={'row'} spacing={1} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-              <Tooltip title={'Export as CSV'} placement="top" arrow>
-                <IconButton
-                  variant={'soft'}
-                  color={'primary'}
-                  onClick={() => setOpenExportModal(true)}
-                  sx={theme => ({
-                    width: theme.spacing(5),
-                    height: theme.spacing(5),
-                    padding: 0
-                  })}
-                >
-                  <CloudDownloadIcon />
-                </IconButton>
-              </Tooltip>
-              {dynamicButtons.map(
-                (button: any, index: number) =>
-                  button.tooltip && (
-                    <Tooltip key={index} title={button.tooltip} placement="top" arrow color={'primary'} size={'lg'} variant={'solid'}>
-                      {button.icon ? (
-                        <IconButton
-                          onClick={button.onClick}
-                          variant="soft"
-                          color="primary"
-                          sx={theme => ({
-                            width: theme.spacing(5),
-                            height: theme.spacing(5),
-                            padding: 0
-                          })}
-                        >
-                          {button.icon}
-                        </IconButton>
-                      ) : (
-                        <Button onClick={button.onClick} variant="soft" color="primary">
-                          {button.label}
-                        </Button>
-                      )}
-                    </Tooltip>
-                  )
-              )}
-            </Stack>
-          </Box>
-        </Box>
-        <Modal
-          open={openExportModal}
-          onClose={() => setOpenExportModal(false)}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <ModalDialog
-            role={'alertdialog'}
-            sx={{
-              width: '90%',
-              maxWidth: '60vh',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              p: 3
-            }}
-          >
-            <DialogTitle>
-              <Typography level={'h3'}>Exporting Data</Typography>
-            </DialogTitle>
-            <DialogContent
-              sx={{
-                mt: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                flexGrow: 1,
-                overflowY: 'auto'
-              }}
-            >
-              <Stack direction={'row'} sx={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Stack direction={'column'}>
-                  <Typography level={'body-md'}>Desired Format Type:</Typography>
-                  <Typography level={'body-sm'}>You can export data in either of these formats:</Typography>
-                  <Stack direction={'row'}>
-                    <Chip>
-                      <strong>Table CSV</strong>
-                    </Chip>
-                    <Chip>
-                      <strong>Form CSV</strong>
-                    </Chip>
-                  </Stack>
-                </Stack>
-                <Switch
-                  size={'lg'}
-                  checked={exportType === 'csv'}
-                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
-                  endDecorator={
-                    <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-                      <Skeleton loading={exportType !== 'csv'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
-                        <GridOnIcon />
-                      </Skeleton>
-                      <Typography level={'body-sm'}>
-                        <Skeleton loading={exportType !== 'csv'}>CSV</Skeleton>
-                      </Typography>
-                    </Stack>
-                  }
-                  startDecorator={
-                    <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-                      <Skeleton loading={exportType !== 'form'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
-                        <PictureAsPdfIcon />
-                      </Skeleton>
-                      <Typography level={'body-sm'}>
-                        <Skeleton loading={exportType !== 'form'}>Form</Skeleton>
-                      </Typography>
-                    </Stack>
-                  }
-                  sx={{
-                    marginRight: '1.5em',
-                    transform: 'scale(1.25)',
-                    transformOrigin: 'center'
-                  }}
-                />
-              </Stack>
-              <Divider sx={{ my: 1 }} />
-              <FormLabel>Export Headers:</FormLabel>
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
-                  gap: '0.5rem',
-                  mb: 1,
-                  width: '100%',
-                  boxSizing: 'border-box'
-                }}
-              >
-                {exportType === 'csv'
-                  ? csvHeaders.map((header, index) => (
-                      <Chip key={index} variant={'soft'} color={'primary'}>
-                        {header}
-                      </Chip>
-                    ))
-                  : getTableHeaders(FormType.measurements)
-                      .map(header => header.label)
-                      .map((label, index) => (
-                        <Chip key={index} variant={'soft'} color={'primary'}>
-                          {label}
-                        </Chip>
-                      ))}
-              </Box>
-              <Divider sx={{ my: 1 }} />
-              <Typography level={'title-md'}>Please choose your desired visibility settings using the provided legend:</Typography>
-              <Stack
-                direction={'row'}
-                sx={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  justifyContent: 'space-between',
-                  gap: 1
-                }}
-              >
-                <Chip
-                  color={'success'}
-                  size={'lg'}
-                  aria-label={exportVisibility.includes('valid') ? 'Rows passing validation will be exported' : "Rows passing validation won't be exported"}
-                  variant={exportVisibility.includes('valid') ? 'soft' : 'outlined'}
-                  startDecorator={exportVisibility.includes('valid') ? <CheckIcon /> : undefined}
-                  sx={{
-                    flex: 1,
-                    textAlign: 'center',
-                    whiteSpace: 'normal',
-                    wordBreak: 'break-word'
-                  }}
-                  onClick={() => handleChipToggle('valid')}
-                >
-                  Rows passing validation
-                </Chip>
-                <Chip
-                  color={'danger'}
-                  size={'lg'}
-                  variant={exportVisibility.includes('errors') ? 'soft' : 'outlined'}
-                  aria-label={exportVisibility.includes('errors') ? 'Rows failing validation will be exported' : "Rows failing validation won't be exported"}
-                  startDecorator={exportVisibility.includes('errors') ? <CheckIcon /> : undefined}
-                  sx={{
-                    flex: 1,
-                    textAlign: 'center',
-                    whiteSpace: 'normal',
-                    wordBreak: 'break-word'
-                  }}
-                  onClick={() => handleChipToggle('errors')}
-                >
-                  Rows failing validation
-                </Chip>
-                <Chip
-                  color={'primary'}
-                  size={'lg'}
-                  variant={exportVisibility.includes('pending') ? 'soft' : 'outlined'}
-                  aria-label={exportVisibility.includes('pending') ? 'Rows pending validation will be exported' : "Rows pending validation won't be exported"}
-                  startDecorator={exportVisibility.includes('pending') ? <CheckIcon /> : undefined}
-                  sx={{
-                    flex: 1,
-                    textAlign: 'center',
-                    whiteSpace: 'normal',
-                    wordBreak: 'break-word'
-                  }}
-                  onClick={() => handleChipToggle('pending')}
-                >
-                  Rows pending validation
-                </Chip>
-              </Stack>
-            </DialogContent>
-            <DialogActions>
-              <Button
-                onClick={async () => {
-                  await downloadExportedData();
-                  setOpenExportModal(false);
-                }}
-                aria-label={'Export selected data/visibility and close the modal'}
-              >
-                Export
-              </Button>
-              <Button aria-label={'Cancel the operation and close the modal'} onClick={() => setOpenExportModal(false)}>
-                Cancel
-              </Button>
-            </DialogActions>
-          </ModalDialog>
-        </Modal>
-      </GridToolbarContainer>
-    </>
-  );
-};
+import { debounce, EditToolbar, ExtendedGridFilterModel, VisibleFilter } from '../client/datagridelements';
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -586,6 +171,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
     spCode: []
   });
   const [reloadAttrs, setReloadAttrs] = useState(true);
+
+  // const [rowSelectionModel, setRowSelectionModel] = useState<GridRowSelectionModel>({ type: 'include', ids: new Set() });
 
   // context pulls and definitions
   const currentSite = useSiteContext();
@@ -1091,7 +678,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                             SUM(CASE WHEN vft.IsValidated = FALSE THEN 1 ELSE 0 END) AS CountErrors,
                             SUM(CASE WHEN vft.IsValidated IS NULL THEN 1 ELSE 0 END) AS CountPending
                      FROM ${currentSite?.schemaName ?? ''}.${gridType} vft
-                            JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID
+                            JOIN ${currentSite?.schemaName ?? ''}.census c ON vft.PlotID = c.PlotID AND vft.CensusID = c.CensusID AND c.IsActive IS TRUE
                      WHERE vft.PlotID = ${currentPlot?.plotID ?? 0}
                        AND c.PlotID = ${currentPlot?.plotID ?? 0}
                        AND c.PlotCensusNumber = ${currentCensus?.plotCensusNumber ?? 0}`;
@@ -1508,7 +1095,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       openConfirmationDialog('save', params.id);
       setIsSaveHighlighted(false);
     } else if (currentColumn.type === 'singleSelect') {
-      const cell = apiRef.current.getCellElement(params.id, params.field);
+      const cell = apiRef?.current?.getCellElement(params.id, params.field);
       if (cell) {
         const select = cell.querySelector('select');
         if (select) {
@@ -1517,9 +1104,9 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       }
     } else if (isLastColumn) {
       setIsSaveHighlighted(true);
-      apiRef.current.setCellFocus(params.id, 'actions');
+      apiRef?.current?.setCellFocus(params.id, 'actions');
     } else {
-      apiRef.current.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
+      apiRef?.current?.setCellFocus(params.id, filteredColumns[columnIndex + 1].field);
     }
   };
 
@@ -1684,11 +1271,12 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
               toolbar: {
                 locked: locked,
                 handleAddNewRow: handleAddNewRow,
-                handleRefresh: () => setRefresh(true),
+                handleRefresh: async () => setRefresh(true),
                 handleExport: fetchRowsForExport,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
                 gridColumns: gridColumns,
+                gridType: FormType.measurements,
                 dynamicButtons: [
                   ...dynamicButtons,
                   { label: 'Run Validations', tooltip: 'Re-trigger validation queries', onClick: () => setIsValidationModalOpen(true), icon: <CloudSync /> },
@@ -1704,9 +1292,15 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                     onClick: () => setIsResetValidationModalOpen(true),
                     icon: <SettingsBackupRestoreRounded />
                   }
-                ]
-              } as EditToolbarProps
+                ],
+                errorControls: { show: showErrorRows, toggle: setShowErrorRows, count: errorCount },
+                validControls: { show: showValidRows, toggle: setShowValidRows, count: validCount },
+                pendingControls: { show: showPendingRows, toggle: setShowPendingRows, count: pendingCount },
+                hidingEmpty: hidingEmpty,
+                setHidingEmpty: setHidingEmpty
+              } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
+            showToolbar
             getRowHeight={() => 'auto'}
             getRowClassName={params => `treestemstate--${params.row.userDefinedFields.split(' ').join('')}`}
             isCellEditable={() => !locked}
@@ -1798,7 +1392,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
                         </Stack>
                       ))}
                     </Stack>
-                    // <Chip key={index}>{err.validationPairs.join(', ')}</Chip>
                   ))}
                 </Stack>
               </DialogContent>

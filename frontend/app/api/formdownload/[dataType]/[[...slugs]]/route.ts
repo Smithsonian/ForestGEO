@@ -82,7 +82,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                         JOIN ${schema}.trees t ON t.SpeciesID = s.SpeciesID
                         JOIN ${schema}.stems st ON st.TreeID = t.TreeID
                         JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID
-                        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+                        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
                  WHERE q.PlotID = ?
                    AND cq.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
@@ -100,8 +100,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
       case 'quadrats':
         query = `SELECT *
                  FROM ${schema}.quadrats q
-                        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
-                 WHERE q.PlotID = ?
+                        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
+                 WHERE q.PlotID = ? AND q.IsActive IS TRUE 
                    AND cq.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({

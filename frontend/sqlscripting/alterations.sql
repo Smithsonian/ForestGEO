@@ -1,8 +1,35 @@
-alter table temporarymeasurements modify TreeTag varchar(20) null;
-alter table trees modify TreeTag varchar(20) null;
-alter table viewfulltable modify TreeTag varchar(20) null;
-alter table measurementssummary modify TreeTag varchar(20) null;
-alter table failedmeasurements modify Tag varchar(20) null;
+create table if not exists censusattribute
+(
+    CAID     int auto_increment
+        primary key,
+    Code     varchar(10) not null,
+    CensusID int         not null,
+    constraint uq_code_census
+        unique (Code, CensusID),
+    constraint fk_ca_a
+        foreign key (Code) references attributes (Code),
+    constraint fk_ca_c
+        foreign key (CensusID) references census (CensusID)
+);
+
+create table if not exists censuspersonnel (
+    CPID int primary key auto_increment,
+    PersonnelID int not null,
+    CensusID int not null,
+    constraint uq_personnel_census unique (PersonnelID, CensusID),
+    constraint fk_cp_p foreign key (PersonnelID) references personnel (PersonnelID),
+    constraint fk_cp_c foreign key (CensusID) references census (CensusID)
+);
+
+create table if not exists censusspecies (
+    CSID int primary key auto_increment,
+    SpeciesID int not null,
+    CensusID int not null,
+    constraint uq_species_census unique (SpeciesID, CensusID),
+    constraint fk_cs_s foreign key (SpeciesID) references species (SpeciesID),
+    constraint fk_cs_c foreign key (CensusID) references census (CensusID)
+);
+
 
 
 # alter table coremeasurements modify MeasuredDBH decimal(12, 6) null;

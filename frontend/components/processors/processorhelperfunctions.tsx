@@ -309,6 +309,10 @@ export async function runValidation(
         // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
         .replace(/@validationProcedureID/g, validationProcedureID.toString())
         .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
+        .replace(/censusquadrats/g, 'TEMP_CQ_PLACEHOLDER')
+        .replace(/censusspecies/g, 'TEMP_CS_PLACEHOLDER')
+        .replace(/censusattributes/g, 'TEMP_CA_PLACEHOLDER')
+        .replace(/censuspersonnel/g, 'TEMP_CP_PLACEHOLDER')
         .replace(/coremeasurements/g, `${schema}.coremeasurements`)
         .replace(/stems/g, `${schema}.stems`)
         .replace(/trees/g, `${schema}.trees`)
@@ -321,7 +325,11 @@ export async function runValidation(
         .replace(/census/g, `${schema}.census`)
         .replace(/personnel/g, `${schema}.personnel`)
         .replace(/attributes/g, `${schema}.attributes`)
-        .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`);
+        .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
+        .replace(/TEMP_CQ_PLACEHOLDER/g, 'censusquadrats')
+        .replace(/TEMP_CS_PLACEHOLDER/g, 'censusspecies')
+        .replace(/TEMP_CA_PLACEHOLDER/g, 'censusattributes')
+        .replace(/TEMP_CP_PLACEHOLDER/g, 'censuspersonnel');
 
       // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
       if (params.minDBH === null || params.maxDBH === null) {
@@ -337,7 +345,7 @@ export async function runValidation(
                JOIN
              ${schema}.stems st ON st.TreeID = t.TreeID
                JOIN
-             ${schema}.quadrats q ON st.QuadratID = q.QuadratID
+             ${schema}.quadrats q ON st.QuadratID = q.QuadratID AND q.IsActive IS TRUE
                JOIN
              ${schema}.coremeasurements cm ON cm.StemID = st.StemID
         WHERE cm.IsValidated IS NULL

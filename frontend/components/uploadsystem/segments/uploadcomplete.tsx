@@ -10,7 +10,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import moment from 'moment';
-import { FileRow } from '@/config/macros/formdetails';
+import { FileRow, FormType } from '@/config/macros/formdetails';
 import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
 
 const ROWS_PER_BATCH = 10;
@@ -121,35 +121,37 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
 
     const runAsyncTasks = async () => {
       try {
-        await fetch(`/api/formatrunquery`, {
-          body: JSON.stringify({
-            query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-            params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
-          }),
-          method: 'POST'
-        });
-        const flattened: FileRow[] = [];
-        console.log('error rows!! --> ', errorRows);
-        for (const fileName in errorRows) {
-          const fileRowSet = errorRows[fileName];
-          Object.values(fileRowSet).forEach(row => flattened.push(row));
+        if (uploadForm === FormType.measurements) {
+          await fetch(`/api/formatrunquery`, {
+            body: JSON.stringify({
+              query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+              params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
+            }),
+            method: 'POST'
+          });
+          const flattened: FileRow[] = [];
+          console.log('error rows!! --> ', errorRows);
+          for (const fileName in errorRows) {
+            const fileRowSet = errorRows[fileName];
+            Object.values(fileRowSet).forEach(row => flattened.push(row));
+          }
+          for (const row of flattened) {
+            await fetch(
+              createPostPatchQuery(
+                currentSite?.schemaName ?? '',
+                'failedmeasurements',
+                getGridID('failedmeasurements'),
+                currentPlot?.plotID,
+                currentCensus?.plotCensusNumber
+              ),
+              {
+                method: 'POST',
+                body: JSON.stringify({ newRow: row })
+              }
+            );
+          }
+          await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
         }
-        for (const row of flattened) {
-          await fetch(
-            createPostPatchQuery(
-              currentSite?.schemaName ?? '',
-              'failedmeasurements',
-              getGridID('failedmeasurements'),
-              currentPlot?.plotID,
-              currentCensus?.plotCensusNumber
-            ),
-            {
-              method: 'POST',
-              body: JSON.stringify({ newRow: row })
-            }
-          );
-        }
-        await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         setAllLoadsCompleted(true);

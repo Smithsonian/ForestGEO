@@ -10,7 +10,7 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
                COUNT(q.QuadratID) AS NumQuadrats
         FROM ${schema}.plots p
                  LEFT JOIN
-             ${schema}.quadrats q ON p.PlotID = q.PlotID
+             ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
         GROUP BY p.PlotID
             ${plotID && plotID !== 'undefined' && !isNaN(parseInt(plotID)) ? `HAVING p.PlotID = ${plotID}` : ''}`;
   } else if (fetchType === 'roles' || fetchType === 'attributes') {
@@ -19,9 +19,9 @@ const buildQuery = (schema: string, fetchType: string, plotID?: string, plotCens
   } else if (fetchType === 'quadrats') {
     return `
       SELECT * FROM ${schema}.quadrats q
-        JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+        JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
         JOIN ${schema}.census c ON cq.CensusID = c.CensusID
-        WHERE q.PlotID = ${plotID} AND c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber}`;
+        WHERE q.IsActive IS TRUE AND q.PlotID = ${plotID} AND c.PlotID = ${plotID} AND c.PlotCensusNumber = ${plotCensusNumber}`;
   } else {
     let query = `SELECT *
                  FROM ${schema}.${fetchType}`;
@@ -57,11 +57,33 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     throw new Error('fetchType was not correctly provided');
   }
 
-  const query = buildQuery(schema, dataType, plotID, plotCensusNumber, quadratID);
+  const plotIDTrimmed = plotID === 'undefined' ? undefined : plotID;
+  const plotCensusNumberTrimmed = plotCensusNumber === 'undefined' ? undefined : plotCensusNumber;
+  const quadratIDTrimmed = quadratID === 'undefined' ? undefined : quadratID;
+
+  const query = buildQuery(schema, dataType, plotIDTrimmed, plotCensusNumberTrimmed, quadratIDTrimmed);
   const connectionManager = ConnectionManager.getInstance();
 
   try {
-    const results = await connectionManager.executeQuery(query);
+    let results: any;
+    if (dataType === 'personnel') {
+      const query = `SELECT p.* FROM ${schema}.personnel p 
+      JOIN ${schema}.censuspersonnel cp ON cp.PersonnelID = p.PersonnelID
+      JOIN ${schema}.census c ON cp.CensusID = c.CensusID and c.IsActive is true
+      WHERE p.IsActive IS TRUE AND c.PlotID = ? AND c.PlotCensusNumber = ?`;
+      results = await connectionManager.executeQuery(query, [plotIDTrimmed, plotCensusNumberTrimmed]);
+    } else if (dataType === 'roles') {
+      const query = `SELECT * FROM ${schema}.roles`;
+      results = await connectionManager.executeQuery(query);
+    } else if (dataType === 'species') {
+      const query = `SELECT s.* FROM ${schema}.species s 
+      JOIN ${schema}.censusspecies cs ON cs.SpeciesID = s.SpeciesID
+      JOIN ${schema}.census c ON cs.CensusID = c.CensusID
+      WHERE s.IsActive is true and c.IsActive is true and c.PlotID = ? and c.PlotCensusNumber = ?`;
+      results = await connectionManager.executeQuery(query, [plotIDTrimmed, plotCensusNumberTrimmed]);
+    } else {
+      results = await connectionManager.executeQuery(query);
+    }
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
   } catch (error) {
     console.error('Error:', error);

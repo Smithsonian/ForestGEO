@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
-import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
+import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import CircularProgress from '@mui/joy/CircularProgress';
 
 interface VOMProps {

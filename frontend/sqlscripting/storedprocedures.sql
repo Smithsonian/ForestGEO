@@ -340,7 +340,7 @@ begin
                     )                                                          as invalid_count
     from initial_dup_filter i
              left join quadrats q ON i.QuadratName = q.QuadratName
-             left join censusquadrat cq on cq.QuadratID = q.QuadratID
+             left join censusquadrats cq on cq.QuadratID = q.QuadratID
              left join census c on cq.CensusID = c.CensusID
              left join species s ON i.SpeciesCode = s.SpeciesCode
     where i.TreeTag is not null
@@ -678,7 +678,7 @@ BEGIN
 
     DELETE FROM personnel WHERE CensusID = targetCensusID;
 
-    DELETE FROM censusquadrat WHERE CensusID = targetCensusID;
+    DELETE FROM censusquadrats WHERE CensusID = targetCensusID;
 
     DELETE FROM specieslimits WHERE CensusID = targetCensusID;
 
@@ -698,7 +698,7 @@ BEGIN
         AUTO_INCREMENT = 1;
     ALTER TABLE personnel
         AUTO_INCREMENT = 1;
-    ALTER TABLE censusquadrat
+    ALTER TABLE censusquadrats
         AUTO_INCREMENT = 1;
     ALTER TABLE specieslimits
         AUTO_INCREMENT = 1;

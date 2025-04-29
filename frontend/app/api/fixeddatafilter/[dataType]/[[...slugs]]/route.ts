@@ -4,10 +4,10 @@ import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import { GridFilterModel } from '@mui/x-data-grid';
-import { handleError } from '@/utils/errorhandler';
-import { AllTaxonomiesViewQueryConfig, handleDeleteForSlices, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
-export { PATCH } from '@/config/macros/coreapifunctions';
+import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
+
+export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
 type VisibleFilter = 'valid' | 'errors' | 'pending';
 
@@ -25,69 +25,7 @@ export async function POST(
   // trying to ensure that system correctly retains edit/add functionality -- not necessarily needed currently but better safe than sorry
   const body = await request.json();
   if (body.newRow) {
-    // required dynamic parameters: dataType (fixed),[ schema, gridID value] -> slugs
-    if (!params.slugs) throw new Error('slugs not provided');
-    const [schema, gridID, plotIDParam, censusIDParam] = params.slugs;
-    if (!schema || !gridID) throw new Error('no schema or gridID provided');
-
-    const plotID = plotIDParam ? parseInt(plotIDParam) : undefined;
-    const censusID = censusIDParam ? parseInt(censusIDParam) : undefined;
-
-    const connectionManager = ConnectionManager.getInstance();
-    const { newRow } = await request.json();
-    let insertIDs: Record<string, number> = {};
-    let transactionID: string | undefined = undefined;
-
-    try {
-      transactionID = await connectionManager.beginTransaction();
-
-      if (Object.keys(newRow).includes('isNew')) delete newRow.isNew;
-
-      const newRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-      const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-
-      // Handle SQL views with handleUpsertForSlices
-      if (params.dataType.includes('view')) {
-        let queryConfig;
-        switch (params.dataType) {
-          case 'alltaxonomiesview':
-            queryConfig = AllTaxonomiesViewQueryConfig;
-            break;
-          default:
-            throw new Error('Incorrect view call');
-        }
-
-        // Use handleUpsertForSlices and retrieve the insert IDs
-        insertIDs = await handleUpsertForSlices(connectionManager, schema, newRowData, queryConfig);
-      }
-      // Handle the case for 'attributes'
-      else if (params.dataType === 'attributes') {
-        const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-        const results = await connectionManager.executeQuery(insertQuery);
-        insertIDs = { attributes: results.insertId }; // Standardize output with table name as key
-      }
-      // Handle all other cases
-      else {
-        delete newRowData[demappedGridID];
-        if (params.dataType === 'plots') delete newRowData.NumQuadrats;
-        const insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
-        const results = await connectionManager.executeQuery(insertQuery);
-        insertIDs = { [params.dataType]: results.insertId }; // Standardize output with table name as key
-
-        // special handling needed for quadrats --> need to correlate incoming quadrats with current census
-        if (params.dataType === 'quadrats' && censusID) {
-          const cqQuery = format('INSERT INTO ?? SET ?', [`${schema}.censusquadrats`, { CensusID: censusID, QuadratID: insertIDs.quadrats }]);
-          const results = await connectionManager.executeQuery(cqQuery);
-          if (results.length === 0) throw new Error('Error inserting to censusquadrats');
-        }
-      }
-      await connectionManager.commitTransaction(transactionID ?? '');
-      return NextResponse.json({ message: 'Insert successful', createdIDs: insertIDs }, { status: HTTPResponses.OK });
-    } catch (error: any) {
-      return handleError(error, connectionManager, newRow, transactionID);
-    } finally {
-      await connectionManager.closeConnection();
-    }
+    return SINGLEPOST(request, props);
   } else {
     const filterModel: ExtendedGridFilterModel = body.filterModel;
     if (!params.slugs || params.slugs.length < 5) throw new Error('slugs not received.');
@@ -186,11 +124,11 @@ export async function POST(
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.quadrats q
-                     JOIN ${schema}.censusquadrat cq ON q.QuadratID = cq.QuadratID
+                     JOIN ${schema}.censusquadrats cq ON q.QuadratID = cq.QuadratID
                      JOIN ${schema}.census c ON cq.CensusID = c.CensusID
             WHERE q.PlotID = ?
               AND c.PlotID = ?
-              AND c.PlotCensusNumber = ? 
+              AND c.PlotCensusNumber = ? AND q.IsActive IS TRUE  
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
@@ -366,59 +304,5 @@ export async function POST(
     } finally {
       await connectionManager.closeConnection();
     }
-  }
-}
-
-// slugs: schema, gridID
-// body: full data row, only need first item from it this time though
-export async function DELETE(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
-  const params = await props.params;
-  if (!params.slugs) throw new Error('slugs not provided');
-  const [schema, gridID] = params.slugs;
-  if (!schema || !gridID) throw new Error('no schema or gridID provided');
-  let transactionID: string | undefined = undefined;
-  const connectionManager = ConnectionManager.getInstance();
-  const demappedGridID = gridID.charAt(0).toUpperCase() + gridID.substring(1);
-  const { newRow } = await request.json();
-  try {
-    transactionID = await connectionManager.beginTransaction();
-    const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
-    const { [demappedGridID]: gridIDKey } = deleteRowData;
-    // Handle deletion for views
-    if (params.dataType === 'alltaxonomiesview') {
-      // Use handleDeleteForSlices for handling deletion, taking foreign key constraints into account
-      await handleDeleteForSlices(connectionManager, schema, deleteRowData, AllTaxonomiesViewQueryConfig);
-    } else if (params.dataType === 'measurementssummary') {
-      // start with surrounding data
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.cmattributes WHERE ${demappedGridID} = ${gridIDKey}`);
-      // finally, perform core deletion
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.coremeasurements WHERE ${demappedGridID} = ${gridIDKey}`);
-    } else {
-      // for quadrats, censusquadrat needs to be cleared before quadrat can be deleted
-      if (params.dataType === 'quadrats') {
-        const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.censusquadrat`, demappedGridID, gridIDKey]);
-        await connectionManager.executeQuery(qDeleteQuery);
-      }
-      const deleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(deleteQuery);
-    }
-    await connectionManager.commitTransaction(transactionID ?? '');
-    return NextResponse.json({ message: 'Delete successful' }, { status: HTTPResponses.OK });
-  } catch (error: any) {
-    if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      await connectionManager.rollbackTransaction(transactionID ?? '');
-      const referencingTableMatch = error.message.match(/CONSTRAINT `(.*?)` FOREIGN KEY \(`(.*?)`\) REFERENCES `(.*?)`/);
-      const referencingTable = referencingTableMatch ? referencingTableMatch[3] : 'unknown';
-      return NextResponse.json(
-        {
-          message: 'Foreign key conflict detected',
-          referencingTable
-        },
-        { status: HTTPResponses.FOREIGN_KEY_CONFLICT }
-      );
-    } else return handleError(error, connectionManager, newRow, transactionID);
-  } finally {
-    await connectionManager.closeConnection();
   }
 }

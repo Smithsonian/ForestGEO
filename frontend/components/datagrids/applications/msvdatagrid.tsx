@@ -13,7 +13,7 @@ import { MeasurementsSummaryRDS } from '@/config/sqlrdsdefinitions/views';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
-import FailedMeasurementsModal from '@/components/client/failedmeasurementsmodal';
+import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import { AssignmentOutlined, CachedOutlined, RuleOutlined, UploadFileOutlined } from '@mui/icons-material';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {

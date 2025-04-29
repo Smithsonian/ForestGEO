@@ -17,7 +17,7 @@ import {
 } from '@/app/contexts/userselectionprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch, useSiteListDispatch } from '@/app/contexts/listselectionprovider';
 import { getEndpointHeaderName, siteConfig } from '@/config/macros/siteconfigs';
-import GithubFeedbackModal from '@/components/client/githubfeedbackmodal';
+import GithubFeedbackModal from '@/components/client/modals/githubfeedbackmodal';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
