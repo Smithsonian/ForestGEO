@@ -1,7 +1,7 @@
 'use client';
 
 // isolated failedmeasurements datagrid
-import React, { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { RefObject, useCallback, useEffect, useMemo, useState } from 'react';
 import { FailedMeasurementsGridColumns, preprocessor } from '@/components/client/datagridcolumns';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -16,6 +16,7 @@ import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
+import { GridApiCommunity } from '@mui/x-data-grid/internals';
 
 export default function IsolatedFailedMeasurementsDataGrid() {
   const [refresh, setRefresh] = useState(false);
@@ -327,7 +328,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
       fieldToFocus={'tag'}
       dynamicButtons={[]}
       defaultHideEmpty={false} // override default true to false -- user should see any missing fields that need correcting
-      apiRef={apiRef}
+      apiRef={apiRef as RefObject<GridApiCommunity>}
       onDataUpdate={onRowSave}
     />
   ) : (

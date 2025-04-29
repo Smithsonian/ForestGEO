@@ -21,7 +21,7 @@ import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
 import { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import CloseIcon from '@mui/icons-material/Close';
 
-import { StemGridColumns } from './datagridcolumns';
+import { StemGridColumns } from '../datagridcolumns';
 import { StemRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 

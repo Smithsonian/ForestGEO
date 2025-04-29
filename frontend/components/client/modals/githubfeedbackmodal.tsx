@@ -35,7 +35,7 @@ import { usePathname } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Grid from '@mui/material/Grid2';
+import Grid from '@mui/material/Grid';
 
 // this has been shelved -- it's a little too complicated for a first iteration.
 // saving it for a later version.

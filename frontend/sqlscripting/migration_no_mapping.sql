@@ -189,9 +189,9 @@ ON DUPLICATE KEY UPDATE
 DROP TEMPORARY TABLE tmp_personnel;
 
 -- Insert into censusquadrat with ON DUPLICATE KEY UPDATE
-INSERT INTO censusquadrat (CensusID, QuadratID)
+INSERT INTO censusquadrats (CensusID, QuadratID)
 SELECT CensusID, QuadratID
-FROM stable_bci.censusquadrat
+FROM stable_bci.censusquadrats
 ON DUPLICATE KEY UPDATE CensusID = VALUES(CensusID),
                         QuadratID = VALUES (QuadratID);
 
@@ -208,7 +208,7 @@ SELECT q.QuadratID,
        q.Area,
        IF(q.IsStandardShape = 'Y', 'standard', 'not standard')
 FROM stable_bci.quadrat q
-         LEFT JOIN stable_bci.censusquadrat cq ON q.QuadratID = cq.QuadratID
+         LEFT JOIN stable_bci.censusquadrats cq ON q.QuadratID = cq.QuadratID
          LEFT JOIN stable_bci.Coordinates co ON q.QuadratID = co.QuadratID
          LEFT JOIN stable_bci.Site s ON q.PlotID = s.PlotID
 GROUP BY q.QuadratID, q.PlotID, q.QuadratName, s.QDimX, s.QDimY, q.Area, q.IsStandardShape

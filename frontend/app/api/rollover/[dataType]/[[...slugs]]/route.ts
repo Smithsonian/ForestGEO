@@ -6,7 +6,7 @@ import ConnectionManager from '@/config/connectionmanager';
  * Handles the POST request for the rollover API endpoint, which allows users to roll over quadrat or personnel data from one census to another within a specified schema.
  *
  * @param request - The NextRequest object containing the incoming request data.
- * @param params - The route parameters, including the `dataType` (either 'quadrats' or 'personnel') and the `slugs` (an array containing the schema, plotID, sourceCensusID, and newCensusID).
+ * @param props
  * @returns A NextResponse with a success message or an error message, along with the appropriate HTTP status code.
  */
 export async function POST(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
@@ -29,24 +29,38 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
     switch (params.dataType) {
       case 'quadrats':
         query = `
-          INSERT INTO ${schema}.censusquadrat (CensusID, QuadratID)
+          INSERT INTO ${schema}.censusquadrats (CensusID, QuadratID)
           SELECT ?, q.QuadratID
           FROM ${schema}.quadrats q
-          WHERE q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
+          WHERE q.IsActive IS TRUE AND q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
         queryParams = [Number(newCensusID), ...incoming];
         await connectionManager.executeQuery(query, queryParams);
         break;
       case 'personnel':
         query = `
-          INSERT INTO ${schema}.personnel (CensusID, FirstName, LastName, RoleID)
-          SELECT 
-              ?, 
-              FirstName, 
-              LastName, 
-              RoleID
-          FROM ${schema}.personnel
-          WHERE CensusID = ? AND PersonnelID IN (${incoming.map(() => '?').join(', ')});`;
-        queryParams = [Number(newCensusID), Number(sourceCensusID), ...incoming];
+        INSERT INTO ${schema}.censuspersonnel (CensusID, PersonnelID)
+        SELECT ?, p.PersonnelID
+        FROM ${schema}.personnel p
+        WHERE p.PersonnelID IN (${incoming.map(() => '?').join(', ')});`;
+        queryParams = [Number(newCensusID), ...incoming];
+        await connectionManager.executeQuery(query, queryParams);
+        break;
+      case 'attributes':
+        query = `
+        INSERT INTO ${schema}.censusattributes (CensusID, AttributeID)
+        SELECT ?, a.Code
+        FROM ${schema}.attributes a
+        WHERE a.Code IN (${incoming.map(() => '?').join(', ')});`;
+        queryParams = [Number(newCensusID), ...incoming];
+        await connectionManager.executeQuery(query, queryParams);
+        break;
+      case 'species':
+        query = `
+        INSERT INTO ${schema}.censusspecies (CensusID, SpeciesID)
+        SELECT ?, s.SpeciesID
+        FROM ${schema}.species s
+        WHERE s.SpeciesID IN (${incoming.map(() => '?').join(', ')});`;
+        queryParams = [Number(newCensusID), ...incoming];
         await connectionManager.executeQuery(query, queryParams);
         break;
       default:

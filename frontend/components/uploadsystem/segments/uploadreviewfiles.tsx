@@ -1,7 +1,7 @@
 'use client';
 
 import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, Pagination } from '@mui/material';
-import Grid from '@mui/material/Grid2';
+import Grid from '@mui/material/Grid';
 import { Box, Checkbox, Modal, ModalClose, Typography } from '@mui/joy';
 import { DisplayParsedDataGridInline } from '@/components/uploadsystemhelpers/displayparseddatagrid';
 import Divider from '@mui/joy/Divider';

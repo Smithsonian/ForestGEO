@@ -24,38 +24,16 @@ import {
   GridRowModes,
   GridRowModesModel,
   GridRowsProp,
-  GridToolbarColumnsButton,
-  GridToolbarContainer,
-  GridToolbarFilterButton,
   GridToolbarProps,
-  GridToolbarQuickFilter,
-  useGridApiContext,
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
 import { HTTPResponses, UnifiedValidityFlags } from '@/config/macros';
-import {
-  Button,
-  Checkbox,
-  Chip,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormLabel,
-  IconButton,
-  Modal,
-  ModalDialog,
-  Skeleton,
-  Stack,
-  Switch,
-  Tooltip,
-  Typography
-} from '@mui/joy';
+import { Tooltip } from '@mui/joy';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
@@ -63,293 +41,14 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import { redirect } from 'next/navigation';
 import Box from '@mui/joy/Box';
 import { StyledDataGrid } from '@/config/styleddatagrid';
-import ConfirmationDialog from '@/components/datagrids/confirmationdialog';
+import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import { randomId } from '@mui/x-data-grid-generator';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { FormType, getTableHeaders } from '@/config/macros/formdetails';
 import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
-import { ClearIcon } from '@mui/x-date-pickers';
-import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
-import GridOnIcon from '@mui/icons-material/GridOn';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import Divider from '@mui/joy/Divider';
 import moment from 'moment/moment';
-
-const EditToolbar = (props: GridToolbarProps & Partial<EditToolbarCustomProps>) => {
-  const {
-    handleAddNewRow,
-    handleRefresh,
-    handleExportAll,
-    handleExportCSV,
-    handleQuickFilterChange,
-    handleToggleHideEmptyColumns,
-    hidingEmptyColumns,
-    filterModel,
-    dynamicButtons = [],
-    gridColumns,
-    gridType,
-    className,
-    ...other
-  } = props;
-  if (!handleAddNewRow || !handleRefresh || !handleQuickFilterChange || !handleExportAll || !handleToggleHideEmptyColumns || !handleExportCSV) return <></>;
-  const [inputValue, setInputValue] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [openExportModal, setOpenExportModal] = useState(false);
-  const [exportType, setExportType] = useState<'csv' | 'form'>('csv');
-
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(event.target.value);
-    setIsTyping(true);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      handleQuickFilterChange({
-        ...filterModel,
-        items: filterModel?.items || [],
-        quickFilterValues: inputValue.split(' ') || []
-      });
-      setIsTyping(false);
-    }
-  };
-
-  const handleClearInput = () => {
-    setInputValue('');
-    handleQuickFilterChange({
-      ...filterModel,
-      items: filterModel?.items || [],
-      quickFilterValues: []
-    });
-    setIsTyping(false);
-  };
-
-  useEffect(() => {
-    if (isTyping) {
-      const timeout = setTimeout(() => setIsTyping(false), 2000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isTyping, inputValue]);
-
-  function exportFilterModel() {
-    const jsonData = JSON.stringify(filterModel, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'results.json';
-    link.click();
-
-    URL.revokeObjectURL(url);
-  }
-
-  const apiRef = useGridApiContext();
-  const csvHeaders = gridColumns
-    ?.filter(column => !Object.keys(apiRef.current.state.columns.columnVisibilityModel).includes(column.field))
-    .map(column => column.field);
-
-  let formHeaders: string[];
-  gridType === 'alltaxonomiesview'
-    ? (formHeaders = getTableHeaders(FormType.species).map(header => header.label))
-    : gridType !== 'unifiedchangelog'
-      ? (formHeaders = getTableHeaders(Object.values(FormType).includes(gridType as FormType) ? (gridType as FormType) : FormType.arcgis_xlsx).map(
-          header => header.label
-        ))
-      : (formHeaders = []);
-  return (
-    <GridToolbarContainer className={className} {...other}>
-      <Box
-        sx={{
-          display: 'flex',
-          flex: 1,
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backgroundColor: 'warning.main',
-          borderRadius: '4px',
-          p: 2
-        }}
-      >
-        <Box sx={{ display: 'flex', flex: 1, alignItems: 'center' }}>
-          <Tooltip title={'Press Enter to apply filter'} open={isTyping} placement={'bottom'} arrow>
-            <Box display={'flex'} alignItems={'center'}>
-              <GridToolbarColumnsButton />
-              <GridToolbarFilterButton />
-              <GridToolbarQuickFilter
-                variant={'outlined'}
-                value={inputValue}
-                onKeyDown={handleKeyDown}
-                onChange={handleInputChange}
-                placeholder={'Search All Fields...'}
-                slotProps={{
-                  input: {
-                    endAdornment: null
-                  }
-                }}
-                sx={{ ml: 2 }}
-              />
-              <Tooltip title={'Clear filter'} placement={'right'}>
-                <IconButton aria-label={'clear filter'} disabled={inputValue === ''} onClick={handleClearInput} size={'sm'} sx={{ marginLeft: 1 }}>
-                  <ClearIcon fontSize={'small'} />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Tooltip>
-          <Button variant={'plain'} color={'primary'} startDecorator={<RefreshIcon />} onClick={async () => await handleRefresh()}>
-            Refresh
-          </Button>
-          <Button
-            variant={'plain'}
-            color={'primary'}
-            endDecorator={
-              <CloudDownloadIcon
-                sx={{
-                  fontSize: '1.5rem',
-                  verticalAlign: 'middle'
-                }}
-              />
-            }
-            onClick={() => setOpenExportModal(true)}
-            disabled={gridType === 'unifiedchangelog'}
-          >
-            Export as CSV...
-          </Button>
-          <Typography>
-            <Checkbox checked={hidingEmptyColumns} onChange={(event: { target: { checked: boolean } }) => handleToggleHideEmptyColumns(event.target.checked)} />
-            <strong>{hidingEmptyColumns ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>
-          </Typography>
-        </Box>
-      </Box>
-      <Stack direction={'row'} spacing={2}>
-        {dynamicButtons.map((button: any, index: number) => (
-          <Box key={index}>
-            {button.tooltip ? (
-              <Tooltip title={button.tooltip} placement={'bottom'} arrow>
-                <Button onClick={button.onClick} variant={'outlined'} color={'neutral'}>
-                  {button.label}
-                </Button>
-              </Tooltip>
-            ) : (
-              <Button onClick={button.onClick} variant={'outlined'} color={'neutral'}>
-                {button.label}
-              </Button>
-            )}
-          </Box>
-        ))}
-      </Stack>
-      <Modal
-        open={openExportModal}
-        onClose={() => setOpenExportModal(false)}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}
-      >
-        <ModalDialog
-          role={'alertdialog'}
-          sx={{
-            width: '90%',
-            maxWidth: '60vh',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            p: 3
-          }}
-        >
-          <DialogTitle>Exporting Data</DialogTitle>
-          <DialogContent
-            sx={{
-              mt: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              flexGrow: 1,
-              overflowY: 'auto'
-            }}
-          >
-            <Stack direction={'row'} sx={{ width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Stack direction={'column'}>
-                <Typography level={'body-md'}>Desired Format Type:</Typography>
-                <Typography level={'body-sm'}>You can export data in either of these formats:</Typography>
-                <Stack direction={'row'}>
-                  <Chip>
-                    <strong>Table CSV</strong>
-                  </Chip>
-                  <Chip>
-                    <strong>Form CSV</strong>
-                  </Chip>
-                </Stack>
-              </Stack>
-              <Switch
-                size={'lg'}
-                checked={exportType === 'csv'}
-                onChange={(event: React.ChangeEvent<HTMLInputElement>) => (event.target.checked ? setExportType('csv') : setExportType('form'))}
-                endDecorator={
-                  <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-                    <Skeleton loading={exportType !== 'csv'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
-                      <GridOnIcon />
-                    </Skeleton>
-                    <Typography level={'body-sm'}>
-                      <Skeleton loading={exportType !== 'csv'}>CSV</Skeleton>
-                    </Typography>
-                  </Stack>
-                }
-                startDecorator={
-                  <Stack direction={'column'} sx={{ alignItems: 'center', justifyContent: 'center' }}>
-                    <Skeleton loading={exportType !== 'form'} variant={'circular'} width={'1.5em'} height={'1.5em'}>
-                      <PictureAsPdfIcon />
-                    </Skeleton>
-                    <Typography level={'body-sm'}>
-                      <Skeleton loading={exportType !== 'form'}>Form</Skeleton>
-                    </Typography>
-                  </Stack>
-                }
-                sx={{
-                  marginRight: '1.5em',
-                  transform: 'scale(1.25)',
-                  transformOrigin: 'center'
-                }}
-              />
-            </Stack>
-            <Divider sx={{ my: 1 }} />
-            <FormLabel>Export Headers:</FormLabel>
-            <Box
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 0.5fr))',
-                gap: '0.5rem',
-                mb: 1,
-                width: '100%',
-                boxSizing: 'border-box'
-              }}
-            >
-              {exportType === 'csv'
-                ? csvHeaders?.map((header, index) => (
-                    <Chip key={index} variant={'soft'} color={'primary'}>
-                      {header}
-                    </Chip>
-                  ))
-                : formHeaders.map((label, index) => (
-                    <Chip key={index} variant={'soft'} color={'primary'}>
-                      {label}
-                    </Chip>
-                  ))}
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button
-              onClick={async () => {
-                exportType === 'csv' ? await handleExportCSV() : await handleExportAll();
-                setOpenExportModal(false);
-              }}
-            >
-              Export
-            </Button>
-            <Button onClick={() => setOpenExportModal(false)}>Cancel</Button>
-          </DialogActions>
-        </ModalDialog>
-      </Modal>
-    </GridToolbarContainer>
-  );
-};
+import { EditToolbar } from '@/components/client/datagridelements';
+import ResetViewModal from '@/components/client/modals/resetviewmodal';
 
 export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
   const {
@@ -361,7 +60,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     initialRow,
     fieldToFocus,
     dynamicButtons = [],
-    defaultHideEmpty = true,
+    defaultHideEmpty = false,
     apiRef = undefined
   } = props;
 
@@ -379,6 +78,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const [newLastPage, setNewLastPage] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [usingQuery, setUsingQuery] = useState('');
   const [hidingEmpty, setHidingEmpty] = useState(defaultHideEmpty);
   const [pendingAction, setPendingAction] = useState<PendingAction>({
@@ -853,11 +553,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         updatedRowModesModel[id] = { mode: GridRowModes.View };
       }
 
-      localApiRef.current.stopRowEditMode({ id, ignoreModifications: true });
+      localApiRef.current?.stopRowEditMode({ id, ignoreModifications: true });
 
       const oldRow = rows.find(row => String(row.id) === String(id));
 
-      const updatedRow = localApiRef.current.getRowWithUpdatedValues(id, 'anyField');
+      const updatedRow = localApiRef.current?.getRowWithUpdatedValues(id, 'anyField');
 
       if (oldRow && updatedRow) {
         setPromiseArguments({
@@ -888,7 +588,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     [locked, gridType, currentCensus, rows, openConfirmationDialog]
   );
 
-  const handleAddNewRow = useCallback(() => {
+  const handleAddNewRow = useCallback(async () => {
     if (locked) return;
     if (isNewRowAdded) return;
     const newRowCount = rowCount + 1;
@@ -1128,7 +828,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setTimeout(() => {
         const firstEditableColumn = filteredColumns.find(col => col.editable);
         if (firstEditableColumn) {
-          localApiRef.current.setCellFocus(id, firstEditableColumn.field);
+          localApiRef.current?.setCellFocus(id, firstEditableColumn.field);
         }
       });
     },
@@ -1345,6 +1045,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 gridType: gridType
               } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
+            showToolbar
             getRowHeight={() => 'auto'}
           />
         </Box>
@@ -1365,6 +1066,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             content="Are you sure you want to delete this row? This action cannot be undone."
           />
         )}
+        {isResetDialogOpen && <ResetViewModal open={isResetDialogOpen} setOpen={setIsResetDialogOpen} triggerResetView={async () => {}} />}
       </Box>
     );
   }
