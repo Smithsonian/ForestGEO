@@ -21,7 +21,7 @@ create table if not exists failedmeasurements
         primary key,
     PlotID              int            null,
     CensusID            int            null,
-    Tag                 varchar(10)    null,
+    Tag                 varchar(20)    null,
     StemTag             varchar(10)    null,
     SpCode              varchar(25)    null,
     Quadrat             varchar(255)   null,
@@ -50,7 +50,7 @@ create table if not exists measurementssummary
     SpeciesName       varchar(64)      null,
     SubspeciesName    varchar(64)      null,
     SpeciesCode       varchar(25)      null,
-    TreeTag           varchar(10)      null,
+    TreeTag           varchar(20)      null,
     StemTag           varchar(10)      null,
     StemLocalX        decimal(12, 6)   null,
     StemLocalY        decimal(12, 6)   null,
@@ -265,21 +265,23 @@ create table if not exists quadrats
 (
     QuadratID    int auto_increment
         primary key,
-    PlotID       int            null,
-    QuadratName  varchar(255)   null,
-    StartX       decimal(12, 6) null,
-    StartY       decimal(12, 6) null,
-    DimensionX   int            null,
-    DimensionY   int            null,
-    Area         decimal(12, 6) null,
-    QuadratShape varchar(255)   null,
+    PlotID       int                  null,
+    QuadratName  varchar(255)         null,
+    StartX       decimal(12, 6)       null,
+    StartY       decimal(12, 6)       null,
+    DimensionX   int                  null,
+    DimensionY   int                  null,
+    Area         decimal(12, 6)       null,
+    QuadratShape varchar(255)         null,
+    IsActive     tinyint(1) default 1 not null,
+    DeletedAt    datetime             null,
     constraint unique_quadrat_name_per_plot
         unique (PlotID, QuadratName),
     constraint Quadrats_Plots_FK
         foreign key (PlotID) references plots (PlotID)
 );
 
-create table if not exists censusquadrat
+create table if not exists censusquadrats
 (
     CQID      int auto_increment
         primary key,
@@ -553,7 +555,7 @@ create table if not exists temporarymeasurements
     BatchID         varchar(36)                         not null,
     PlotID          int                                 null,
     CensusID        int                                 null,
-    TreeTag         varchar(10)                         null,
+    TreeTag         varchar(20)                         null,
     StemTag         varchar(10)                         null,
     SpeciesCode     varchar(25)                         null,
     QuadratName     varchar(255)                        null,
@@ -606,7 +608,7 @@ create table if not exists trees
 (
     TreeID    int auto_increment
         primary key,
-    TreeTag   varchar(10) null,
+    TreeTag   varchar(20) null,
     SpeciesID int         null,
     constraint trees_TreeTag_uindex
         unique (TreeTag),
@@ -626,8 +628,6 @@ create table if not exists stems
     LocalY          decimal(12, 6) null,
     Moved           bit            null,
     StemDescription varchar(255)   null,
-    constraint stems_StemTag_uindex
-        unique (StemTag),
     constraint unique_stem_coordinates
         unique (StemTag, TreeID, QuadratID, LocalX, LocalY),
     constraint FK_Stems_Trees
@@ -844,7 +844,7 @@ create table if not exists viewfulltable
     QuadratStartY              decimal(10, 6)                                                      null,
     QuadratShape               varchar(255)                                                        null,
     TreeID                     int                                                                 null,
-    TreeTag                    varchar(10)                                                         null,
+    TreeTag                    varchar(20)                                                         null,
     StemID                     int                                                                 null,
     StemTag                    varchar(10)                                                         null,
     StemLocalX                 decimal(10, 6)                                                      null,

@@ -27,10 +27,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   const isMounted = useRef<boolean>(true);
 
   useEffect(() => {
-    // Create an AbortController instance when the component mounts
     abortControllerRef.current = new AbortController();
-
-    // Cleanup function: mark as unmounted and abort any pending requests
     return () => {
       isMounted.current = false;
       abortControllerRef.current?.abort();
@@ -38,19 +35,24 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   }, []);
 
   useEffect(() => {
+    fetch(`/api/validations/validationlist?schema=${currentSite?.schemaName}`, {
+      signal: abortControllerRef.current!.signal
+    })
+      .then(r => r.json())
+      .then(data => {
+        setValidationMessages(data.coreValidations);
+        setValidationProgress(Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.error('Error fetching validation list:', err);
+        }
+      });
+  }, [currentSite?.schemaName]);
+
+  useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
       performValidations().catch(console.error);
-    } else {
-      fetch(`/api/validations/validationlist?schema=${currentSite?.schemaName}`, { method: 'GET' })
-        .then(response => response.json())
-        .then(data => {
-          setValidationMessages(data.coreValidations);
-          const initialProgress = Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {});
-          setValidationProgress(initialProgress);
-        })
-        .catch(error => {
-          console.error('Error fetching validation messages:', error);
-        });
     }
   }, [validationMessages]);
 

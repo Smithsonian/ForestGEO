@@ -1,11 +1,9 @@
 create table if not exists attributes
 (
-    Code        varchar(10)                                                                                                     not null,
+    Code        varchar(10)                                                                                                     not null
+        primary key,
     Description varchar(255)                                                                                                    null,
-    Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null,
-    IsActive    tinyint(1)                                                                                      default 1       not null,
-    DeletedAt   datetime                                                                                                        null,
-    primary key (Code, IsActive)
+    Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null
 );
 
 create index idx_attributes_codes
@@ -351,10 +349,8 @@ create table if not exists family
 (
     FamilyID    int auto_increment
         primary key,
-    Family      varchar(32)          null,
-    ReferenceID int                  null,
-    IsActive    tinyint(1) default 1 not null,
-    DeletedAt   datetime             null,
+    Family      varchar(32) null,
+    ReferenceID int         null,
     constraint unique_families
         unique (Family),
     constraint Family_Reference_ReferenceID_fk
@@ -371,14 +367,12 @@ create table if not exists genus
 (
     GenusID        int auto_increment
         primary key,
-    FamilyID       int                  null,
-    Genus          varchar(32)          null,
-    ReferenceID    int                  null,
-    GenusAuthority varchar(32)          null,
-    IsActive       tinyint(1) default 1 not null,
-    DeletedAt      datetime             null,
+    FamilyID       int         null,
+    Genus          varchar(32) null,
+    ReferenceID    int         null,
+    GenusAuthority varchar(32) null,
     constraint unique_genus
-        unique (Genus, IsActive),
+        unique (Genus),
     constraint Genus_Family_FamilyID_fk
         foreign key (FamilyID) references family (FamilyID),
     constraint Genus_Reference_ReferenceID_fk
@@ -413,12 +407,10 @@ create table if not exists roles
 (
     RoleID          int auto_increment
         primary key,
-    RoleName        varchar(255)         null,
-    RoleDescription varchar(255)         null,
-    IsActive        tinyint(1) default 1 not null,
-    DeletedAt       datetime             null,
+    RoleName        varchar(255) null,
+    RoleDescription varchar(255) null,
     constraint unique_roles
-        unique (RoleName, IsActive)
+        unique (RoleName)
 );
 
 create table if not exists personnel
@@ -430,8 +422,6 @@ create table if not exists personnel
     RoleID      int                  null,
     IsActive    tinyint(1) default 1 not null,
     DeletedAt   datetime             null,
-    constraint personnel_FirstName_LastName_RoleID__uindex
-        unique (FirstName, LastName, IsActive),
     constraint personnel_roles_RoleID_fk
         foreign key (RoleID) references roles (RoleID)
 );
@@ -479,9 +469,6 @@ create index idx_roledescription
 
 create index idx_rolename
     on roles (RoleName);
-
-create index roles_RoleName_RoleDescription_IsActive_index
-    on roles (RoleName, RoleDescription, IsActive);
 
 create table if not exists sitespecificvalidations
 (
@@ -576,14 +563,12 @@ create table if not exists specieslimits
 (
     SpeciesLimitID int auto_increment
         primary key,
-    SpeciesID      int                  null,
-    PlotID         int                  null,
-    CensusID       int                  null,
-    LimitType      enum ('DBH')         null,
-    UpperBound     decimal(12, 6)       null,
-    LowerBound     decimal(12, 6)       null,
-    IsActive       tinyint(1) default 1 not null,
-    DeletedAt      datetime             null,
+    SpeciesID      int            null,
+    PlotID         int            null,
+    CensusID       int            null,
+    LimitType      enum ('DBH')   null,
+    UpperBound     decimal(12, 6) null,
+    LowerBound     decimal(12, 6) null,
     constraint specieslimits_census_CensusID_fk
         foreign key (CensusID) references census (CensusID),
     constraint specieslimits_plots_PlotID_fk
@@ -665,12 +650,10 @@ create table if not exists trees
 (
     TreeID    int auto_increment
         primary key,
-    TreeTag   varchar(20)          null,
-    SpeciesID int                  null,
-    IsActive  tinyint(1) default 1 not null,
-    DeletedAt datetime             null,
-    constraint trees_TreeTag_IsActive_uindex
-        unique (TreeTag, IsActive),
+    TreeTag   varchar(20) null,
+    SpeciesID int         null,
+    constraint trees_TreeTag_uindex
+        unique (TreeTag),
     constraint Trees_Species_SpeciesID_fk
         foreign key (SpeciesID) references species (SpeciesID)
 );
@@ -770,17 +753,15 @@ create table if not exists specimens
 (
     SpecimenID     int auto_increment
         primary key,
-    StemID         int                  null,
-    PersonnelID    int                  null,
-    SpecimenNumber int                  null,
-    SpeciesID      int                  null,
-    Herbarium      varchar(32)          null,
-    Voucher        smallint unsigned    null,
-    CollectionDate date                 null,
-    DeterminedBy   varchar(64)          null,
-    Description    varchar(255)         null,
-    IsActive       tinyint(1) default 1 not null,
-    DeletedAt      datetime             null,
+    StemID         int               null,
+    PersonnelID    int               null,
+    SpecimenNumber int               null,
+    SpeciesID      int               null,
+    Herbarium      varchar(32)       null,
+    Voucher        smallint unsigned null,
+    CollectionDate date              null,
+    DeterminedBy   varchar(64)       null,
+    Description    varchar(255)      null,
     constraint specimens_personnel_PersonnelID_fk
         foreign key (PersonnelID) references personnel (PersonnelID),
     constraint specimens_stems_StemID_fk

@@ -5,7 +5,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { Stack } from '@mui/material';
 import { Alert, Button, Checkbox, DialogActions, DialogContent, DialogTitle, Grid, IconButton, Modal, ModalDialog, Option, Select, Typography } from '@mui/joy';
-import { DataGrid, GridColDef, GridRowId, GridRowSelectionModel } from '@mui/x-data-grid';
+import { DataGrid, GridRowSelectionModel } from '@mui/x-data-grid';
 import { useOrgCensusListContext } from '@/app/contexts/listselectionprovider';
 import { Box } from '@mui/system';
 
@@ -64,11 +64,11 @@ const FLAG_KEY_MAP: Record<CategoryKey, keyof CensusValidationStatus> = {
   species: 'hasSpeciesData'
 };
 
-const COLUMN_MAP: Record<CategoryKey, GridColDef[]> = {
+const COLUMN_MAP: Record<CategoryKey, any[]> = {
   personnel: PersonnelGridColumns,
   quadrats: QuadratGridColumns,
-  attributes: AttributeGridColumns,
-  species: AllTaxonomiesViewGridColumns
+  attributes: [AttributeGridColumns],
+  species: [AllTaxonomiesViewGridColumns]
 };
 
 interface CategoryState<T> {
@@ -104,9 +104,6 @@ export default function RolloverModal(props: RolloverModalProps) {
   const [loading, setLoading] = useState(true);
   const [censusValidationStatus, setCensusValidationStatus] = useState<CensusValidationStatus[]>([]);
   const [relatedData, setRelatedData] = useState<any[]>([]);
-  const [rowSelection, setRowSelection] = useState<Record<CategoryKey, GridRowSelectionModel>>(
-    () => Object.fromEntries(CATEGORY_KEYS.map(k => [k, { type: 'include', ids: new Set<GridRowId>() }])) as Record<CategoryKey, GridRowSelectionModel>
-  );
 
   const currentSite = useSiteContext();
   const currentPlot = usePlotContext();
@@ -261,12 +258,10 @@ export default function RolloverModal(props: RolloverModalProps) {
   }
 
   const handleRowSelection = <K extends CategoryKey>(key: K, selectionModel: GridRowSelectionModel) => {
-    setRowSelection(m => ({ ...m, [key]: selectionModel }));
-
-    const idKey = CATEGORY_MAP[key].idKey;
-    const prev = cats[key].previous;
-    const items = prev.filter(row => selectionModel.ids.has((row as any)[idKey]));
-    updateCat(key, { selected: items });
+    const selectedIds = Array.from(selectionModel.ids);
+    const prevList = cats[key].previous;
+    const selectedItems = prevList.filter(item => selectedIds.includes(item.id!));
+    updateCat(key, { selected: selectedItems });
   };
 
   if (loading) {
@@ -368,8 +363,6 @@ export default function RolloverModal(props: RolloverModalProps) {
                               columns={COLUMN_MAP[key]}
                               pageSizeOptions={[5, 10, 25, 100]}
                               checkboxSelection
-                              getRowId={row => (row as any)[CATEGORY_MAP[key].idKey]}
-                              rowSelectionModel={rowSelection[key]}
                               onRowSelectionModelChange={model => handleRowSelection(key, model)}
                               initialState={{
                                 pagination: { paginationModel: { pageSize: 5, page: 0 } }

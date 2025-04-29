@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
           ${schema}.coremeasurements cm ON cve.CoreMeasurementID = cm.CoreMeasurementID
       JOIN 
           ${schema}.sitespecificvalidations AS ve ON cve.ValidationErrorID = ve.ValidationID
-      JOIN ${schema}.census c ON cm.CensusID = c.CensusID
+      JOIN ${schema}.census c ON cm.CensusID = c.CensusID AND c.IsActive IS TRUE
       JOIN ${schema}.plots p ON c.PlotID = p.PlotID
       WHERE p.PlotID = ? AND c.PlotCensusNumber = ?
       GROUP BY 

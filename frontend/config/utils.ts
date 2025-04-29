@@ -1,4 +1,5 @@
 import ConnectionManager from '@/config/connectionmanager';
+import { format } from 'mysql2/promise';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -47,7 +48,19 @@ export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}
                 ? `${Prefix}CMA${Suffix}`
                 : T extends `${infer Prefix}cqID${infer Suffix}`
                   ? `${Prefix}CQID${Suffix}`
-                  : T;
+                  : T extends `${infer Prefix}caID${infer Suffix}`
+                    ? `${Prefix}CAID${Suffix}`
+                    : T extends `${infer Prefix}CaID${infer Suffix}`
+                      ? `${Prefix}CAID${Suffix}`
+                      : T extends `${infer Prefix}cpID${infer Suffix}`
+                        ? `${Prefix}CPID${Suffix}`
+                        : T extends `${infer Prefix}CpID${infer Suffix}`
+                          ? `${Prefix}CPID${Suffix}`
+                          : T extends `${infer Prefix}csID${infer Suffix}`
+                            ? `${Prefix}CSID${Suffix}`
+                            : T extends `${infer Prefix}CsID${infer Suffix}`
+                              ? `${Prefix}CSID${Suffix}`
+                              : T;
 
 // Utility type to omit specific keys
 export type OmitKey<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;
@@ -159,6 +172,39 @@ export async function fetchPrimaryKey<Result>(
   return rows[0][primaryKeyColumn] as unknown as number;
 }
 
+export function buildBulkUpsertQuery<T extends Record<string, any>>(schema: string, table: string, rows: Partial<T>[], key: keyof T) {
+  if (!rows.length) {
+    throw new Error('No rows provided for bulk upsert');
+  }
+
+  // 1) All the columns we're inserting/updating (assume every row has the same set)
+  const columns = Object.keys(rows[0]);
+
+  // 2) Build placeholders: "(?,?),(?,?),(?,?)…"
+  const group = `(${columns.map(() => '?').join(',')})`;
+  const placeholders = rows.map(() => group).join(',');
+
+  // 3) flatten values: [ row0.col0, row0.col1, …, row1.col0, row1.col1, …, … ]
+  const params: any[] = [];
+  for (const row of rows) {
+    for (const col of columns) {
+      params.push(row[col]);
+    }
+  }
+
+  // 4) ON DUPLICATE KEY UPDATE clause (skip the primary key itself)
+  const updates = columns
+    .filter(c => c !== String(key))
+    .map(c => `\`${c}\` = VALUES(\`${c}\`)`)
+    .join(',');
+
+  // 5) assemble
+  const sql =
+    `INSERT INTO \`${schema}\`.\`${table}\` (` + columns.map(c => `\`${c}\``).join(',') + `) VALUES ${placeholders}` + ` ON DUPLICATE KEY UPDATE ${updates};`;
+
+  return { sql, params };
+}
+
 export async function handleUpsert<Result>(
   connectionManager: ConnectionManager,
   schema: string,
@@ -171,18 +217,20 @@ export async function handleUpsert<Result>(
   }
   let id = 0;
 
+  const trimmed = Object.fromEntries(Object.entries(data).filter(([_, value]) => value)) as unknown as Partial<Result>;
+
   try {
-    const query = createInsertOrUpdateQuery<Result>(schema, tableName, data);
-    const result = await connectionManager.executeQuery(query, Object.values(data));
+    const query = createInsertOrUpdateQuery<Result>(schema, tableName, trimmed);
+    const result = await connectionManager.executeQuery(query, Object.values(trimmed));
     id = result.insertId;
 
     if (id === 0) {
       // console.log('existing record found, updating...');
-      const fieldsToSearch = Object.keys(data).filter(field => field !== 'UserDefinedFields' && data[field as keyof Result] !== null);
+      const fieldsToSearch = Object.keys(trimmed).filter(field => field !== 'UserDefinedFields' && trimmed[field as keyof Result] !== null);
 
       const whereConditions = fieldsToSearch
         .map(field => {
-          const value = data[field as keyof Result];
+          const value = trimmed[field as keyof Result];
           if (value === null) {
             return `\`${field}\` IS NULL`;
           } else {
@@ -192,7 +240,7 @@ export async function handleUpsert<Result>(
         .join(' AND ');
 
       const values = fieldsToSearch.map(field => {
-        const value = data[field as keyof Result];
+        const value = trimmed[field as keyof Result];
         if (typeof value === 'string' && /^[+-]?\d*\.\d+$/.test(value)) {
           return parseFloat(value); // Convert to number
         }
@@ -210,13 +258,12 @@ export async function handleUpsert<Result>(
       // console.log('find existing query: ', findExistingQuery, 'values: ', values);
 
       const searchResult = await connectionManager.executeQuery(findExistingQuery, values);
-      // console.log('find existing query search result: ', searchResult);
 
       if (searchResult.length > 0) {
         id = searchResult[0][key as keyof Result] as unknown as number;
         return { id, operation: 'updated' };
       } else {
-        console.error(`Record not found after update. Data: ${JSON.stringify(data)}, Query: ${findExistingQuery}, Values: ${values}`);
+        console.error(`Record not found after update. Data: ${JSON.stringify(trimmed)}, Query: ${findExistingQuery}, Values: ${values}`);
         throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
       }
     }

@@ -1,12 +1,16 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps, SpecialBulkProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { Plot, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
 import { v4 } from 'uuid';
 import moment from 'moment/moment';
+import { buildBulkUpsertQuery } from '@/config/utils';
+import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
+import { FamilyResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -33,7 +37,6 @@ export async function POST(request: NextRequest) {
   const fileName: string = body.fileName;
   let transactionID: string | undefined = undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
-
   const connectionManager = ConnectionManager.getInstance();
   if (formType === 'measurements') {
     const batchID = v4();
@@ -94,24 +97,80 @@ export async function POST(request: NextRequest) {
     console.log('sqlpacketload: transaction started.');
     let rowId = '';
     try {
-      for (rowId in fileRowSet) {
-        const row = fileRowSet[rowId];
-        const props: InsertUpdateProcessingProps = {
+      if (formType === 'quadrats') {
+        const bulkQuadrats = Object.values(fileRowSet).map(
+          row =>
+            ({
+              QuadratName: row.quadrat,
+              PlotID: plot?.plotID,
+              StartX: row.startx,
+              StartY: row.starty,
+              DimensionX: row.dimx,
+              DimensionY: row.dimy,
+              Area: row.area,
+              QuadratShape: row.quadratshape
+            }) as Partial<QuadratResult>
+        );
+        const { sql, params } = buildBulkUpsertQuery<QuadratResult>(schema, 'quadrats', bulkQuadrats, 'QuadratID');
+        await connectionManager.executeQuery(sql, params);
+
+        // want to immediately connect these in the censusquadrats table
+        const query = `
+        INSERT INTO ${schema}.censusquadrats (CensusID, QuadratID)
+        SELECT ?, q.QuadratID
+        from ${schema}.quadrats q 
+        LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
+        WHERE q.PlotID = ? AND cq.CQID IS NULL`;
+        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, plot?.plotID]);
+      } else if (formType === 'attributes') {
+        const bulkAttributes = Object.values(fileRowSet).map(
+          row =>
+            ({
+              Code: row.code,
+              Description: row.description,
+              Status: row.status
+            }) as Partial<AttributesResult>
+        );
+        const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
+        await connectionManager.executeQuery(sql, params);
+
+        // need to associate these with census now (unregistered)
+        const query = `INSERT INTO ${schema}.censusattributes (CensusID, Code) 
+        SELECT ?, a.Code 
+        FROM ${schema}.attributes a
+        LEFT JOIN ${schema}.censusattributes ca ON ca.Code = a.Code
+        WHERE ca.CAID is null`;
+        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID]);
+      } else if (formType === 'species') {
+        const bulkProps: SpecialBulkProcessingProps = {
           schema,
-          connectionManager: connectionManager,
-          formType,
-          rowData: row,
-          plot,
-          census,
-          fullName: user
+          connectionManager,
+          rowDataSet: fileRowSet,
+          census: census
         };
-        try {
-          await insertOrUpdate(props);
-        } catch (e: any) {
-          console.error(`Error processing row for file ${fileName}:`, e.message);
-          failingRows.add(row); // saving this for future processing
+
+        await processBulkSpecies(bulkProps);
+      } else {
+        for (rowId in fileRowSet) {
+          const row = fileRowSet[rowId];
+          const props: InsertUpdateProcessingProps = {
+            schema,
+            connectionManager: connectionManager,
+            formType,
+            rowData: row,
+            plot,
+            census,
+            fullName: user
+          };
+          try {
+            await insertOrUpdate(props);
+          } catch (e: any) {
+            console.error(`Error processing row for file ${fileName}:`, e.message);
+            failingRows.add(row); // saving this for future processing
+          }
         }
       }
+
       await connectionManager.commitTransaction(transactionID ?? '');
       console.log('sqlpacketload: transaction committed');
     } catch (error: any) {

@@ -183,6 +183,12 @@ interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
 }
 
+export interface RowControl {
+  show: boolean;
+  toggle: (checked: boolean) => void;
+  count: number;
+}
+
 export interface EditToolbarCustomProps {
   handleAddNewRow?: () => Promise<void>;
   handleRefresh?: () => Promise<void>;
@@ -201,6 +207,11 @@ export interface EditToolbarCustomProps {
   currentCensus?: OrgCensus;
   gridColumns?: GridColDef[];
   gridType?: string;
+  errorControls?: RowControl;
+  validControls?: RowControl;
+  pendingControls?: RowControl;
+  hidingEmpty?: boolean;
+  setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
 }
 
 export interface IsolatedDataGridCommonProps {

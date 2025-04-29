@@ -5,18 +5,18 @@ truncate sitespecificvalidations;
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (1, 'ValidateDBHGrowthExceedsMax', 'DBH growth exceeds maximum rate of 65 mm', 'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm_present.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm_present
-         join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID
-         join census c_present on cm_present.CensusID = c_present.CensusID
-         join census c_past on cm_past.CensusID = cm_past.CensusID
+         join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID and cm_past.IsActive IS TRUE
+         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive is true
+         join census c_past on cm_past.CensusID = cm_past.CensusID and c_past.IsActive is true
          join plots p ON c_present.PlotID = p.PlotID and c_past.PlotID = p.PlotID
          join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-         join attributes a_present on a_present.Code = cma_present.Code
-         join attributes a_past on a_past.Code = cma_past.Code
+         join attributes a_present on a_present.Code = cma_present.Code and a_present.IsActive is true
+         join attributes a_past on a_past.Code = cma_past.Code and a_past.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm_present.CoreMeasurementID
                        and e.ValidationErrorID = @validationProcedureID
-where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
+where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1 and cm_present.IsActive is true
   and a_present.Status not in (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\')
   and a_past.Status not in (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\')
   and (cm_present.IsValidated is null and cm_past.IsValidated is true)
@@ -35,18 +35,18 @@ where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm_present.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm_present
-         join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID
-         join census c_present on cm_present.CensusID = c_present.CensusID
-         join census c_past on cm_past.CensusID = c_past.CensusID
+         join coremeasurements cm_past on cm_present.StemID = cm_past.StemID and cm_present.CensusID <> cm_past.CensusID and cm_past.IsActive is true
+         join census c_present on cm_present.CensusID = c_present.CensusID and c_present.IsActive is true
+         join census c_past on cm_past.CensusID = c_past.CensusID and c_past.IsActive is true
          join plots p ON c_present.PlotID = p.PlotID and c_past.PlotID = p.PlotID
          join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
-         join attributes a_present on a_present.Code = cma_present.Code
-         join attributes a_past on a_past.Code = cma_past.Code
+         join attributes a_present on a_present.Code = cma_present.Code and a_present.IsActive is true
+         join attributes a_past on a_past.Code = cma_past.Code and a_past.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm_present.CoreMeasurementID
                        and e.ValidationErrorID = @validationProcedureID
-where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
+where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1 and cm_present.IsActive is true
   and a_present.Status not in (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\')
   and a_past.Status not in (\'dead\', \'stem dead\', \'broken below\', \'missing\', \'omitted\')
   and (cm_present.IsValidated is null and cm_past.IsValidated is true)
@@ -57,13 +57,13 @@ where c_past.PlotCensusNumber = c_present.PlotCensusNumber - 1
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)', 'speciesCode', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         left join stems s on cm.StemID = s.StemID
-         left join trees t on s.TreeID = t.TreeID
-         left join species sp on t.SpeciesID = sp.SpeciesID
-         join census c on cm.CensusID = c.CensusID
+         left join stems s on cm.StemID = s.StemID and s.IsActive is true
+         left join trees t on s.TreeID = t.TreeID and t.IsActive is true
+         left join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive is true
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null
@@ -71,38 +71,38 @@ where cm.IsValidated is null
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (4, 'ValidateFindDuplicatedQuadratsByName', 'Quadrat\'s name matches existing OTHER quadrat (QuadratIDs are different but QuadratNames are the same)', 'quadratName', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID
-         join stems s on cm.StemID = s.StemID
-         join quadrats q on s.QuadratID = q.QuadratID
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
+         join stems s on cm.StemID = s.StemID and s.IsActive is true
+         join quadrats q on s.QuadratID = q.QuadratID and q.IsActive is true
          join (select QuadratName from quadrats group by QuadratName having count(distinct QuadratID) > 1) as ambigious
               on q.QuadratName = ambigious.QuadratName
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (5, 'ValidateFindDuplicateStemTreeTagCombinationsPerCensus', 'Duplicate tree (and stem) tag found in census;Duplicate stem (and tree) tag found in census', 'stemTag;treeTag', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
          join (select StemID, CensusID, count(*) AS MeasurementCount
                from coremeasurements
                group by StemID, CensusID
                having COUNT(*) > 1) dup on cm.StemID = dup.StemID and cm.CensusID = dup.CensusID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (6, 'ValidateFindMeasurementsOutsideCensusDateBoundsGroupByQuadrat', 'Outside census date bounds', 'measurementDate', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
   and (cm.MeasurementDate < c.StartDate or cm.MeasurementDate > c.EndDate)
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -110,12 +110,12 @@ where cm.IsValidated is null
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (7, 'ValidateFindStemsInTreeWithDifferentSpecies', 'Flagged;Different species', 'stemTag;speciesCode', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select min(cm.CoreMeasurementID), @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-join census c on cm.CensusID = c.CensusID
-join stems s on cm.StemID = s.StemID
-join trees t on s.TreeID = t.TreeID
-join species sp on t.SpeciesID = sp.SpeciesID
+join census c on cm.CensusID = c.CensusID and c.IsActive is true
+join stems s on cm.StemID = s.StemID and s.IsActive is true
+join trees t on s.TreeID = t.TreeID and t.IsActive is true
+join species sp on t.SpeciesID = sp.SpeciesID and sp.IsActive is true
 left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null or e.CoreMeasurementID is null
+where cm.IsValidated is null or e.CoreMeasurementID is null and cm.IsActive is true
 and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID)
 group by t.TreeTag
@@ -123,26 +123,26 @@ having count(distinct sp.SpeciesCode) > 1;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (8, 'ValidateFindStemsOutsidePlots', 'Flagged;X outside plot OR;Y outside plot', 'stemTag;stemLocalX;stemLocalY', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-join census c on cm.CensusID = c.CensusID
-join censusquadrat cq on c.CensusID = cq.CensusID
-join quadrats q on cq.QuadratID = q.QuadratID
-join stems s on cm.StemID = s.StemID
+join census c on cm.CensusID = c.CensusID and c.IsActive is true
+join censusquadrats cq on c.CensusID = cq.CensusID
+join quadrats q on cq.QuadratID = q.QuadratID and q.IsActive is true
+join stems s on cm.StemID = s.StemID and s.IsActive is true
 join plots p on c.PlotID = p.PlotID
 left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null and e.CoreMeasurementID is null
+where cm.IsValidated is null and e.CoreMeasurementID is null and cm.IsActive is true
 and ((s.LocalX + q.StartX + p.GlobalX) > (p.GlobalX + p.DimensionX)) or ((s.LocalY + q.StartY + p.GlobalY) > (p.GlobalY + p.DimensionY))
 and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (9, 'ValidateFindTreeStemsInDifferentQuadrats', 'Flagged;Flagged;Different quadrats', 'stemTag;treeTag;quadratName', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID
-         join stems s1 on cm.StemID = s1.StemID
-         join trees t on s1.TreeID = t.TreeID
-         join stems s2 on t.TreeID = s2.TreeID and s1.StemID <> s2.StemID
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
+         join stems s1 on cm.StemID = s1.StemID and s1.IsActive is true
+         join trees t on s1.TreeID = t.TreeID and t.IsActive is true
+         join stems s2 on t.TreeID = s2.TreeID and s1.StemID <> s2.StemID and s2.IsActive is true
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
   and s1.QuadratID <> s2.QuadratID
   and (@p_CensusID is null or cm.CensusID = @p_CensusID)
@@ -150,11 +150,11 @@ where cm.IsValidated is null
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (11, 'ValidateScreenMeasuredDiameterMinMax', 'Measured DBH is outside of species-defined bounds', 'measuredDBH', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join stems s on cm.StemID = s.StemID
-         join census c on cm.CensusID = c.CensusID
+         join stems s on cm.StemID = s.StemID and s.IsActive is true
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
          left join cmverrors e
                    on cm.CoreMeasurementID = e.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
   and ((@minDBH is not null and cm.MeasuredDBH < @minDBH)
     or (@maxDBH is not null and cm.MeasuredDBH > @maxDBH))
@@ -163,13 +163,13 @@ where cm.IsValidated is null
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (12, 'ValidateScreenStemsWithMeasurementsButDeadAttributes', 'Invalid DBH;Invalid HOM;DEAD-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a
-              on cma.Code = a.Code and a.Status in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\')
+              on cma.Code = a.Code and a.Status in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\') and a.IsActive is true
          left join cmverrors e
                    on cm.CoreMeasurementID = e.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
   and ((cm.MeasuredDBH is not null and cm.MeasuredDBH <> 0)
     or (cm.MeasuredHOM is not null and cm.MeasuredHOM <> 0))
@@ -179,13 +179,13 @@ where cm.IsValidated is null
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition, ChangelogDefinition, IsEnabled) VALUES (13, 'ValidateScreenStemsWithMissingMeasurementsButLiveAttributes', 'Missing DBH;Missing HOM;LIVE-state attribute(s)', 'measuredDBH;measuredHOM;attributes', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID
+         join census c on cm.CensusID = c.CensusID and c.IsActive is true
          join cmattributes cma on cm.CoreMeasurementID = cma.CoreMeasurementID
          join attributes a
-              on cma.Code = a.Code and a.Status not in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\')
+              on cma.Code = a.Code and a.Status not in (\'dead\', \'stem dead\', \'missing\', \'broken below\', \'omitted\') and a.IsActive is true
          left join cmverrors e
                    on cm.CoreMeasurementID = e.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
-where cm.IsValidated is null
+where cm.IsValidated is null and cm.IsActive is true
   and e.CoreMeasurementID is null
   and ((cm.MeasuredDBH is null or cm.MeasuredDBH = 0)
     or (cm.MeasuredHOM is null or cm.MeasuredHOM = 0))
@@ -198,7 +198,7 @@ insert into postvalidationqueries
 values ('Number of Records by Quadrat',
         'SELECT q.QuadratName, COUNT(DISTINCT cm.CoreMeasurementID) AS MeasurementCount
          FROM ${schema}.quadrats q
-         JOIN ${schema}.censusquadrat cq ON q.QuadratID = cq.QuadratID
+         JOIN ${schema}.censusquadrats cq ON q.QuadratID = cq.QuadratID
          JOIN ${schema}.stems st ON st.QuadratID = q.QuadratID
          JOIN ${schema}.coremeasurements cm ON cm.StemID = st.StemID
          WHERE cm.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
@@ -212,7 +212,7 @@ values ('Number of Records by Quadrat',
            JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
            JOIN ${schema}.attributes a ON cma.Code = a.Code
            JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
-           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+           JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
            WHERE cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};',
         'Calculating the number of total stem records for the current site, plot, and census',
         true),
@@ -223,7 +223,7 @@ values ('Number of Records by Quadrat',
            JOIN ${schema}.cmattributes cma ON cm.CoreMeasurementID = cma.CoreMeasurementID
            JOIN ${schema}.attributes a ON cma.Code = a.Code
            JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
-           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+           JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
            WHERE a.Status = ''alive''
            AND cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};',
         'Calculating the number of all live stem records for the current site, plot, and census', true),
@@ -232,7 +232,7 @@ values ('Number of Records by Quadrat',
            FROM ${schema}.trees t
            JOIN ${schema}.stems s ON s.TreeID = t.TreeID
            JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID
-           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+           JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
            WHERE cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID};',
         'Calculating the total number of all trees for the current site, plot, and census', true),
        ('All dead or missing stems and count by census',
@@ -251,7 +251,7 @@ values ('Number of Records by Quadrat',
            FROM ${schema}.trees t
            JOIN ${schema}.stems s ON t.TreeID = s.TreeID
            JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-           JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+           JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
            JOIN ${schema}.plots p ON q.PlotID = p.PlotID
                WHERE s.LocalX IS NULL
                    OR s.LocalY IS NULL
@@ -266,25 +266,25 @@ values ('Number of Records by Quadrat',
                JOIN ${schema}.stems s ON s.TreeID = t.TreeID
                JOIN ${schema}.coremeasurements cm ON cm.StemID = s.StemID
                JOIN ${schema}.quadrats q ON s.QuadratID = q.QuadratID
-               JOIN ${schema}.censusquadrat cq ON cq.QuadratID = q.QuadratID
+               JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
                WHERE cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
            GROUP BY sp.SpeciesCode, sp.SpeciesName;',
         'Finds and returns the largest DBH/HOM measurement and their host species ID', true),
        ('Checks that all trees from the last census are present',
         'SELECT t.TreeTag, sp.SpeciesCode
             FROM ${schema}.trees t
-            JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID
-            JOIN ${schema}.stems s_last ON t.TreeID = s_last.TreeID
-            JOIN ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID
-            JOIN ${schema}.quadrats q_last ON q.QuadratID = s_last.QuadratID
-            JOIN ${schema}.censusquadrat cq_last ON cq.QuadratID = q.QuadratID
-            WHERE cm_last.CensusID = ${currentCensusID} - 1
+            JOIN ${schema}.species sp ON t.SpeciesID = sp.SpeciesID AND sp.IsActive is TRUE
+            JOIN ${schema}.stems s_last ON t.TreeID = s_last.TreeID AND s.IsActive is TRUE
+            JOIN ${schema}.coremeasurements cm_last ON s_last.StemID = cm_last.StemID and cm_last.IsActive IS TRUE
+            JOIN ${schema}.quadrats q_last ON q.QuadratID = s_last.QuadratID and q.IsActive IS TRUE
+            JOIN ${schema}.censusquadrats cq_last ON cq.QuadratID = q.QuadratID
+            WHERE cm_last.CensusID = ${currentCensusID} - 1 and t.IsActive is true
            AND cq.CensusID = ${currentCensusID} AND q.PlotID = ${currentPlotID}
               AND NOT EXISTS (SELECT 1
                               FROM ${schema}.stems s_current
                                        JOIN
-                                   ${schema}.coremeasurements cm_current ON s_current.StemID = cm_current.StemID
-                              WHERE t.TreeID = s_current.TreeID
+                                   ${schema}.coremeasurements cm_current ON s_current.StemID = cm_current.StemID and cm_current.IsActive is true
+                              WHERE t.TreeID = s_current.TreeID AND s_current.IsActive is true
                                 AND cm_current.CensusID = ${currentCensusID})
             GROUP BY t.TreeTag, sp.SpeciesCode;',
         'Determining whether all trees accounted for in the last census have new measurements in the "next" measurement',
