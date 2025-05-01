@@ -6,24 +6,20 @@
                   name="ForestGEO Application Documentation"
                   start-page="Getting-Started.md">
 
-<!--    <toc-element topic="Onboarding.md">-->
-<!--        <toc-element topic="Selecting-Options.md"/>-->
-<!--        <toc-element topic="Navigable-Endpoints.md"/>-->
-<!--        <toc-element topic="Understanding-Supporting-Data.md"/>-->
-<!--        <toc-element topic="Submitting-Data.md"/>-->
-<!--        <toc-element topic="After-Adding-Measurements.md"/>-->
-<!--    </toc-element>-->
+    <!--    <toc-element topic="Onboarding.md">-->
+    <!--        <toc-element topic="Selecting-Options.md"/>-->
+    <!--        <toc-element topic="Navigable-Endpoints.md"/>-->
+    <!--        <toc-element topic="Understanding-Supporting-Data.md"/>-->
+    <!--        <toc-element topic="Submitting-Data.md"/>-->
+    <!--        <toc-element topic="After-Adding-Measurements.md"/>-->
+    <!--    </toc-element>-->
     <toc-element topic="Getting-Started.md">
-        <toc-element topic="After-Logging-In.md"/>
-        <toc-element topic="Creating-a-New-Census.md"/>
-        <toc-element topic="Adding-Supporting-Information.md"/>
-        <toc-element topic="Adding-Stem-Codes.md"/>
         <!--        <toc-element topic="Understanding-the-Dashboard.md"/>-->
-<!--        <toc-element topic="Working-with-the-Sidebar.md"/>-->
-<!--        <toc-element topic="The-Census-Hub.md"/>-->
-<!--        <toc-element topic="Submitting-Form-Data.md"/>-->
-<!--        <toc-element topic="Stem-Plot-Details.md"/>-->
-<!--        <toc-element topic="Adding-New-Information.md"/>-->
+        <!--        <toc-element topic="Working-with-the-Sidebar.md"/>-->
+        <!--        <toc-element topic="The-Census-Hub.md"/>-->
+        <!--        <toc-element topic="Submitting-Form-Data.md"/>-->
+        <!--        <toc-element topic="Stem-Plot-Details.md"/>-->
+        <!--        <toc-element topic="Adding-New-Information.md"/>-->
     </toc-element>
-<!--    <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>-->
+    <!--    <toc-element topic="Database-Setup-and-CTFSWeb-Integration.md"/>-->
 </instance-profile>

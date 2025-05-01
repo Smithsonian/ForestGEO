@@ -1,9 +1,9 @@
-drop procedure if exists RefreshViewFullTable;
 drop procedure if exists RefreshMeasurementsSummary;
-drop procedure if exists bulkingestionprocess;
-drop procedure if exists clearcensus;
-drop procedure if exists reingestfailedrows;
+drop procedure if exists RefreshViewFullTable;
 drop procedure if exists reviewfailed;
+drop procedure if exists reingestfailedrows;
+drop procedure if exists clearcensus;
+drop procedure if exists bulkingestionprocess;
 
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
@@ -287,8 +287,6 @@ begin
 
     drop temporary table if exists old_trees, multi_stems, new_recruits;
 
-    set @disable_triggers = 1;
-
     create temporary table initial_dup_filter as
     select distinct id,
                     FileID,
@@ -308,6 +306,50 @@ begin
     from temporarymeasurements
     where FileID = vFileID
       and BatchID = vBatchID;
+
+    -- 1) Are you ever losing rows because TreeTag or Date is null?
+    SELECT COUNT(*) AS missing_tag_or_date
+    FROM initial_dup_filter
+    WHERE TreeTag IS NULL
+       OR MeasurementDate IS NULL;
+
+    -- 2) How many initial rows have a matching quadrats row?
+    SELECT SUM(q.QuadratID IS NOT NULL) AS matched_quadrat,
+           SUM(q.QuadratID IS NULL)     AS no_quadrat
+    FROM initial_dup_filter i
+             LEFT JOIN quadrats q
+                       ON i.QuadratName = q.QuadratName
+                           AND q.IsActive = TRUE;
+
+    -- 3) Of those matched_quadrat rows, how many have q.PlotID = i.PlotID?
+    SELECT SUM(q.PlotID = i.PlotID)  AS plot_match,
+           SUM(q.PlotID <> i.PlotID) AS plot_mismatch
+    FROM initial_dup_filter i
+             JOIN quadrats q
+                  ON i.QuadratName = q.QuadratName
+                      AND q.IsActive = TRUE;
+
+    -- 4) How many rows have a matching species?
+    SELECT SUM(s.SpeciesID IS NOT NULL) AS matched_species,
+           SUM(s.SpeciesID IS NULL)     AS no_species
+    FROM initial_dup_filter i
+             LEFT JOIN species s
+                       ON i.SpeciesCode = s.SpeciesCode
+                           AND s.IsActive = TRUE;
+
+    -- 5) And finally the census join:
+    SELECT SUM(c.CensusID = i.CensusID) AS census_match,
+           SUM(c.CensusID IS NULL)      AS no_census
+    FROM initial_dup_filter i
+             LEFT JOIN quadrats q
+                       ON i.QuadratName = q.QuadratName
+                           AND q.IsActive = TRUE
+             LEFT JOIN censusquadrats cq
+                       ON cq.QuadratID = q.QuadratID
+             LEFT JOIN census c
+                       ON cq.CensusID = c.CensusID
+                           AND c.IsActive = TRUE;
+
 
     create temporary table filter_validity as
     select distinct i.id,
@@ -339,15 +381,17 @@ begin
                             0
                     )                                                          as invalid_count
     from initial_dup_filter i
-             left join quadrats q ON i.QuadratName = q.QuadratName
+             left join quadrats q ON i.QuadratName = q.QuadratName and q.IsActive is true
              left join censusquadrats cq on cq.QuadratID = q.QuadratID
-             left join census c on cq.CensusID = c.CensusID
-             left join species s ON i.SpeciesCode = s.SpeciesCode
+             left join census c on cq.CensusID = c.CensusID and c.IsActive is true
+             left join species s ON i.SpeciesCode = s.SpeciesCode and s.IsActive is true
     where i.TreeTag is not null
       and c.CensusID = i.CensusID
       and q.PlotID = i.PlotID
       and (q.QuadratID is not null and s.SpeciesID is not null) -- using OR will pass the row if one condition is satisfied but not the other
       and i.MeasurementDate is not null;
+
+    select count(*) as 'filter_validity' from filter_validity;
 
     create temporary table filter_validity_dup as
     select * from filter_validity;
@@ -366,6 +410,8 @@ begin
                         and cm.MeasuredDBH = fv.DBH
                         and cm.MeasuredHOM = fv.HOM
                         and cm.MeasurementDate = fv.MeasurementDate);
+
+    select count(*) as 'filtered' from filtered;
 
     insert ignore into failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes)
     select distinct PlotID,
@@ -520,14 +566,15 @@ begin
 
     -- handle old recruit insertion first:
     insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                  UserDefinedFields)
+                                  UserDefinedFields, IsActive)
     select distinct ot.CensusID,
                     s.StemID,
                     null                                      as IsValidated,
                     ot.MeasurementDate,
                     ot.DBH,
                     ot.HOM,
-                    json_object('treestemstate', 'old trees') as UserDefinedFields
+                    json_object('treestemstate', 'old trees') as UserDefinedFields,
+                    true
     from old_trees ot
              join quadrats q on q.QuadratName = ot.QuadratName and q.PlotID = ot.PlotID
              join stems s on s.StemTag = ot.StemTag and s.QuadratID = q.QuadratID
@@ -536,18 +583,21 @@ begin
                             StemID          = values(StemID),
                             MeasurementDate = values(MeasurementDate),
                             MeasuredDBH     = values(MeasuredDBH),
-                            MeasuredHOM     = values(MeasuredHOM);
+                            MeasuredHOM     = values(MeasuredHOM),
+                            IsActive        = TRUE,
+                            IsValidated     = null;
 
     -- handle multi stems insertion:
     insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                  UserDefinedFields)
+                                  UserDefinedFields, IsActive)
     select distinct ms.CensusID,
                     s.StemID,
                     null                                       as IsValidated,
                     ms.MeasurementDate,
                     ms.DBH,
                     ms.HOM,
-                    json_object('treestemstate', 'multi stem') as UserDefinedFields
+                    json_object('treestemstate', 'multi stem') as UserDefinedFields,
+                    true
     from multi_stems ms
              join quadrats q on q.QuadratName = ms.QuadratName and q.PlotID = ms.PlotID
              join stems s on s.StemTag = ms.StemTag and s.QuadratID = q.QuadratID
@@ -560,18 +610,21 @@ begin
                             StemID          = values(StemID),
                             MeasurementDate = values(MeasurementDate),
                             MeasuredDBH     = values(MeasuredDBH),
-                            MeasuredHOM     = values(MeasuredHOM);
+                            MeasuredHOM     = values(MeasuredHOM),
+                            IsActive        = TRUE,
+                            IsValidated     = null;
 
     -- handle new recruits
     insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
-                                  UserDefinedFields)
+                                  UserDefinedFields, IsActive)
     select distinct nr.CensusID,
                     s.StemID,
                     null                                        as IsValidated,
                     nr.MeasurementDate,
                     nr.DBH,
                     nr.HOM,
-                    json_object('treestemstate', 'new recruit') as UserDefinedFields
+                    json_object('treestemstate', 'new recruit') as UserDefinedFields,
+                    true
     from new_recruits nr
              join quadrats q on q.QuadratName = nr.QuadratName and q.PlotID = nr.PlotID
              join stems s on s.StemTag = nr.StemTag and s.QuadratID = q.QuadratID
@@ -584,7 +637,9 @@ begin
                             StemID          = values(StemID),
                             MeasurementDate = values(MeasurementDate),
                             MeasuredDBH     = values(MeasuredDBH),
-                            MeasuredHOM     = values(MeasuredHOM);
+                            MeasuredHOM     = values(MeasuredHOM),
+                            IsActive        = TRUE,
+                            IsValidated     = null;
 
     create temporary table tempcodes as
     select cm.CoreMeasurementID,
@@ -638,18 +693,11 @@ begin
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0;
 
-    set @disable_triggers = 0;
-
     drop temporary table if exists old_trees, multi_stems, new_recruits;
     drop temporary table if exists initial_dup_filter, treestemstates,trees_snapshot, tempcodes, treestates,
         stemstates, filtered, filter_validity, filter_validity_dup,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
 end;
-
-
-
-
-
 
 create
     definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)
@@ -672,17 +720,18 @@ BEGIN
     WHERE cm.CensusID = targetCensusID;
 
     DELETE FROM measurementssummary WHERE CensusID = targetCensusID;
-    DELETE FROM coremeasurements WHERE CensusID = targetCensusID;
+    update coremeasurements set IsActive = false, DeletedAt = now() where CensusID = targetCensusID;
 
     DELETE FROM quadratpersonnel WHERE CensusID = targetCensusID;
 
-    DELETE FROM personnel WHERE CensusID = targetCensusID;
-
+    DELETE FROM censuspersonnel WHERE CensusID = targetCensusID;
+    DELETE FROM censusattributes WHERE CensusID = targetCensusID;
     DELETE FROM censusquadrats WHERE CensusID = targetCensusID;
+    DELETE FROM censusspecies WHERE CensusID = targetCensusID;
 
     DELETE FROM specieslimits WHERE CensusID = targetCensusID;
 
-    DELETE FROM census WHERE CensusID = targetCensusID;
+    UPDATE census set IsActive = FALSE, DeletedAt = NOW() WHERE CensusID = targetCensusID;
 
     alter table failedmeasurements
         auto_increment = 1;
@@ -699,6 +748,12 @@ BEGIN
     ALTER TABLE personnel
         AUTO_INCREMENT = 1;
     ALTER TABLE censusquadrats
+        AUTO_INCREMENT = 1;
+    ALTER TABLE censusattributes
+        AUTO_INCREMENT = 1;
+    ALTER TABLE censuspersonnel
+        AUTO_INCREMENT = 1;
+    ALTER TABLE censusspecies
         AUTO_INCREMENT = 1;
     ALTER TABLE specieslimits
         AUTO_INCREMENT = 1;
@@ -801,3 +856,4 @@ begin
                                                           if(fm2.Date is null or fm2.Date = '1900-01-01', 'Missing Date', null),
                                                           if(sub.invalid_codes > 0, 'Invalid Codes', null)));
 end;
+
