@@ -147,7 +147,12 @@ jobs:
         if: ${{ success() }}
         uses: dawidd6/action-send-mail@v3
         with:
-          connection_url: smtp+starttls://${{ secrets.NOTIFS_EMAIL_SOURCE }}:${{ secrets.NOTIFS_EMAIL_PWD }}@smtp.gmail.com:587
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.NOTIFS_EMAIL_SOURCE }}
+          password: ${{ secrets.NOTIFS_EMAIL_PWD }}
+          secure: false
+
           from: "ForestGEO Automated Notifications <${{ secrets.NOTIFS_EMAIL_SOURCE }}>"
           to: ${{ steps.get_recipients.outputs.emails }}
 
