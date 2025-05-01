@@ -121,7 +121,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'census') {
-      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
+      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ? AND IsActive IS TRUE`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {
       results = await connectionManager.executeQuery(query);

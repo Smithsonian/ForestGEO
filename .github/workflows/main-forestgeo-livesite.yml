@@ -103,3 +103,68 @@ jobs:
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_PRODUCTION }}
           package: frontend/build/standalone
+
+      - name: Install MySQL client
+        run: sudo apt-get update && sudo apt-get install -y mysql-client
+
+      - name: Fetch notification recipients
+        id: get_recipients
+        env:
+          DB_HOST: ${{ secrets.AZURE_SQL_SERVER }}
+          DB_USER: ${{ secrets.AZURE_SQL_USER }}
+          DB_PASS: ${{ secrets.AZURE_SQL_PASSWORD }}
+          DB_NAME: ${{ secrets.AZURE_SQL_DATABASE }}
+        run: |
+          # grab only the email column, one per line, no headers
+          EMAILS=$(mysql --batch --skip-column-names \
+            -h "$DB_HOST" \
+            -u "$DB_USER" \
+            -p"$DB_PASS" \
+            -D "$DB_NAME" \
+            -e "SELECT Email FROM catalog.users WHERE IsAdmin IS TRUE;" \
+            | paste -sd "," -)
+          echo "emails=$EMAILS" >> $GITHUB_OUTPUT
+
+      - name: Checkout code (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect merged commit messages
+        id: collect_messages
+        run: |
+          MESSAGES=$(git log --no-merges \
+          --format='- %s' \
+          ${{ github.event.before }}..${{ github.sha }})
+
+          echo "messages<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send deployment notification
+        if: ${{ success() }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.NOTIFS_EMAIL_SOURCE }}
+          password: ${{ secrets.NOTIFS_EMAIL_PWD }}
+          secure: false
+
+          from: "ForestGEO Automated Notifications <${{ secrets.NOTIFS_EMAIL_SOURCE }}>"
+          to: ${{ steps.get_recipients.outputs.emails }}
+
+          # subject & body
+          subject: "🚀 Deployment to ${{ github.ref_name }} succeeded"
+          body: |
+            Hello ForestGEO Users,
+
+            The branch `${{ github.ref_name }}` was just deployed successfully! 
+            Please review the following commit details for more information:
+
+            • Commit SHA: `${{ github.sha }}`
+            • Commit message:
+              > ${{ steps.collect_messages.outputs.messages }}
+
+            Cheers,
+            GitHub Actions
