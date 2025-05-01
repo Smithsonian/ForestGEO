@@ -326,10 +326,10 @@ export async function runValidation(
         .replace(/personnel/g, `${schema}.personnel`)
         .replace(/attributes/g, `${schema}.attributes`)
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
-        .replace(/TEMP_CQ_PLACEHOLDER/g, 'censusquadrats')
-        .replace(/TEMP_CS_PLACEHOLDER/g, 'censusspecies')
-        .replace(/TEMP_CA_PLACEHOLDER/g, 'censusattributes')
-        .replace(/TEMP_CP_PLACEHOLDER/g, 'censuspersonnel');
+        .replace(/TEMP_CQ_PLACEHOLDER/g, `${schema}.censusquadrats`)
+        .replace(/TEMP_CS_PLACEHOLDER/g, `${schema}.censusspecies`)
+        .replace(/TEMP_CA_PLACEHOLDER/g, `${schema}.censusattributes`)
+        .replace(/TEMP_CP_PLACEHOLDER/g, `${schema}.censuspersonnel`);
 
       // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
       if (params.minDBH === null || params.maxDBH === null) {
