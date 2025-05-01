@@ -78,12 +78,12 @@ export async function GET(
         queryParams.push(page * pageSize, pageSize);
         break;
       case 'specieslimits':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} pdt WHERE pdt.SpeciesID = ? AND pdt.IsActive IS TRUE LIMIT ?, ?`;
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS pdt.* FROM ${schema}.${params.dataType} pdt WHERE pdt.SpeciesID = ? AND pdt.IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(speciesID, page * pageSize, pageSize);
         break;
       case 'unifiedchangelog':
         paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} uc
+            SELECT SQL_CALC_FOUND_ROWS uc.* FROM ${schema}.${params.dataType} uc
             JOIN ${schema}.plots p ON uc.PlotID = p.PlotID
             JOIN ${schema}.census c ON uc.CensusID = c.CensusID AND c.IsActive IS TRUE
             WHERE p.PlotID = ?
@@ -115,7 +115,7 @@ export async function GET(
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'alltaxonomiesview':
-        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} atv
+        paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv
             JOIN ${schema}.census c ON atv.CensusID = c.CensusID AND c.IsActive IS TRUE 
             WHERE c.PlotID = ? AND c.PlotCensusNumber = ? ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
