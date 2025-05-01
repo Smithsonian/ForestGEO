@@ -16,6 +16,7 @@ import { GridColDef } from '@mui/x-data-grid';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment';
 import CircularProgress from '@mui/joy/CircularProgress';
+import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
 
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
@@ -45,49 +46,7 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   });
 
   useEffect(() => {
-    async function loadOptions() {
-      const codeOpts = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes')
-        .mapData(await (await fetch(`/api/fetchall/attributes?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.code)
-        .filter((code): code is string => code !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
-        .mapData(await (await fetch(`/api/fetchall/trees?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.treeTag)
-        .filter((tag): tag is string => tag !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
-        .mapData(await (await fetch(`/api/fetchall/stems?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.stemTag)
-        .filter((stemTag): stemTag is string => stemTag !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const quadOpts = MapperFactory.getMapper<QuadratRDS, QuadratResult>('quadrats')
-        .mapData(
-          await (
-            await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-          ).json()
-        )
-        .map(i => i.quadratName)
-        .filter((quadrat): quadrat is string => quadrat !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
-        .mapData(await (await fetch(`/api/fetchall/species?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.speciesCode)
-        .filter((species): species is string => species !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      setSelectableOpts(prev => {
-        return {
-          ...prev,
-          tag: tagOpts,
-          stemtag: stemOpts,
-          quadrat: quadOpts,
-          spcode: specOpts,
-          codes: codeOpts
-        };
-      });
-    }
-
-    loadOptions().catch(console.error);
+    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(console.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   const gridColumns: GridColDef[] = useMemo(() => {
@@ -99,33 +58,7 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
             if (Object.keys(selectableOpts).includes(column.field)) {
               return (
                 <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', width: '100%', height: '100%' }}>
-                  <Autocomplete
-                    sx={{ display: 'flex', flex: 1, width: '100%', height: '100%' }}
-                    multiple={column.field === 'codes'}
-                    variant={'soft'}
-                    autoSelect
-                    autoHighlight
-                    freeSolo={column.field !== 'codes'}
-                    clearOnBlur={false}
-                    isOptionEqualToValue={(option, value) => option === value}
-                    options={[...selectableOpts[column.field]].sort((a, b) => a.localeCompare(b))}
-                    value={
-                      column.field === 'codes'
-                        ? params.value
-                          ? (params.value ?? '').split(';').filter((s: string | any[]) => s.length > 0)
-                          : []
-                        : (params.value ?? '')
-                    }
-                    onChange={(_event, value) => {
-                      if (value) {
-                        params.api.setEditCellValue({
-                          id: params.id,
-                          field: params.field,
-                          value: column.field === 'codes' && Array.isArray(value) ? value.join(';') : value
-                        });
-                      }
-                    }}
-                  />
+                  {selectableAutocomplete(params, column, selectableOpts)}
                 </Box>
               );
             } else if (column.field === 'date') {
