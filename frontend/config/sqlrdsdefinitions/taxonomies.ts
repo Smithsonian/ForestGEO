@@ -88,6 +88,7 @@ export interface FamilyRDS {
 }
 
 export type FamilyResult = ResultType<FamilyRDS>;
+
 export interface GenusRDS {
   id?: number;
   genusID?: number;

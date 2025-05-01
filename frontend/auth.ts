@@ -3,6 +3,7 @@ import NextAuth from 'next-auth';
 import authConfig from '@/auth.config';
 import MapperFactory from '@/config/datamapper';
 import { SitesRDS, SitesResult } from '@/config/sqlrdsdefinitions/zones';
+import { cookies } from 'next/headers';
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET!,
@@ -26,9 +27,8 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
     },
 
     async session({ session, token }) {
-      if (!session.user.userStatus || !session.user.sites || session.user.allsites) {
+      if (!session.user.userStatus || !session.user.sites || session.user.sites.length === 0 || !session.user.allsites || session.user.allsites.length === 0) {
         const coreURL = `${process.env.AUTH_FUNCTIONS_POLL_URL}?email=${encodeURIComponent(token.email as string)}`;
-        console.log('extracted core url: ', coreURL);
         try {
           const response = await fetch(coreURL, {
             method: 'GET'
@@ -40,6 +40,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           }
 
           const data = await response.json();
+          (await cookies()).set('user', token.email ?? ''); // save user email in server storage
           session.user.userStatus = data.userStatus;
           session.user.sites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allowedSites as SitesResult[]);
           session.user.allsites = MapperFactory.getMapper<SitesRDS, SitesResult>('sites').mapData(data.allSites as SitesResult[]);

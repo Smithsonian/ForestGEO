@@ -2,9 +2,7 @@
 
 import { GridColDef, GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { areaSelectionOptions, unitSelectionOptions } from '@/config/macros';
-import moment from 'moment/moment';
 import { Box, Input, Tooltip, Typography } from '@mui/joy';
-import { DatePicker } from '@mui/x-date-pickers';
 import React, { useEffect, useRef, useState } from 'react';
 import useEnhancedEffect from '@mui/utils/useEnhancedEffect';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
@@ -12,53 +10,6 @@ import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
-
-export const renderDatePicker = (params: GridRenderEditCellParams) => {
-  const convertedValue = params.row.date ? moment(params.row.date, 'YYYY-MM-DD') : null;
-  if (!convertedValue) return <></>;
-
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100%',
-        height: '100%',
-        padding: '0'
-      }}
-    >
-      <Input
-        size={'lg'}
-        value={convertedValue.format('MM-DD-YYYY')}
-        disabled
-        sx={{
-          textAlign: 'center',
-          width: '100%',
-          overflow: 'hidden'
-        }}
-      />
-    </Box>
-  );
-};
-
-export const renderEditDatePicker = (params: GridRenderEditCellParams) => {
-  const apiRef = useGridApiContext();
-  const { id, row } = params;
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'row', gap: '0.5em', alignItems: 'center', marginY: 1 }}>
-      <DatePicker
-        label={'Recorded Date'}
-        slotProps={{ textField: { size: 'small' } }}
-        value={moment(row.date, 'YYYY-MM-DD')}
-        onChange={newValue => {
-          apiRef.current.setEditCellValue({ id, field: 'date', value: newValue ? newValue.format('YYYY-MM-DD') : null });
-        }}
-      />
-    </Box>
-  );
-};
 
 const getClosestAreaUnit = (input: string): string | null => {
   const normalizedInput = input.trim().toLowerCase();
@@ -277,10 +228,10 @@ const InnerInput = React.forwardRef<
   const id = React.useId();
 
   return (
-    <React.Fragment>
+    <Box>
       <StyledInput {...rest} ref={ref} id={id} aria-invalid={error} />
       <StyledLabel htmlFor={id}>{noInput ? AttributeStatusOptions.join(', ') : error ? 'Invalid status' : 'Accepted!'}</StyledLabel>
-    </React.Fragment>
+    </Box>
   );
 });
 
@@ -460,56 +411,48 @@ export const SpeciesFormGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'spcode',
     headerName: 'Species Code',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'spcode'),
     flex: 1,
     editable: true
   },
   {
     field: 'family',
     headerName: 'Family',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'family'),
     flex: 1,
     editable: true
   },
   {
     field: 'genus',
     headerName: 'Genus',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'genus'),
     flex: 1,
     editable: true
   },
   {
     field: 'species',
     headerName: 'Species',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'species'),
     flex: 1,
     editable: true
   },
   {
     field: 'subspecies',
     headerName: 'Subspecies',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'subspecies'),
     flex: 1,
     editable: true
   },
   {
     field: 'idlevel',
     headerName: 'ID Level',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'idlevel'),
     flex: 1,
     editable: true
   },
   {
     field: 'authority',
     headerName: 'Authority',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'authority'),
     flex: 1,
     editable: true
   },
   {
     field: 'subspeciesauthority',
     headerName: 'Subspecies Authority',
-    // renderHeader: () => renderCustomHeader(FormType.species, 'subspeciesauthority'),
     flex: 1,
     editable: true
   }
@@ -588,39 +531,30 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'tag',
     headerName: 'Tree Tag',
-    // renderHeader: () => formatHeader('Tree', 'Tag'),
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'tag'),
     flex: 0.75,
     editable: true
   },
   {
     field: 'stemtag',
     headerName: 'Stem Tag',
-    // renderHeader: () => formatHeader('Stem', 'Tag'),
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'stemtag'),
     flex: 0.75,
     editable: true
   },
   {
     field: 'spcode',
     headerName: 'Species Code',
-    // renderHeader: () => formatHeader('Species', 'Code'),
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'spcode'),
     flex: 0.75,
     editable: true
   },
   {
     field: 'quadrat',
     headerName: 'Quadrat Name',
-    // renderHeader: () => formatHeader('Quadrat', 'Name'),
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'quadrat'),
     flex: 0.75,
     editable: true
   },
   {
     field: 'lx',
     headerName: 'X',
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'lx'),
     flex: 0.3,
     type: 'number',
     editable: true
@@ -628,7 +562,6 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'ly',
     headerName: 'Y',
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'ly'),
     flex: 0.3,
     type: 'number',
     editable: true
@@ -636,7 +569,6 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'dbh',
     headerName: 'DBH',
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'dbh'),
     flex: 0.75,
     type: 'number',
     editable: true
@@ -644,16 +576,19 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
   {
     field: 'hom',
     headerName: 'HOM',
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'hom'),
     flex: 0.75,
     type: 'number',
     editable: true
   },
   {
+    field: 'date',
+    headerName: 'Date',
+    flex: 0.5,
+    editable: true
+  },
+  {
     field: 'codes',
     headerName: 'Codes',
-    // renderHeader: () => formatHeader('Quadrat', 'Name'),
-    // renderHeader: () => renderCustomHeader(FormType.measurements, 'codes'),
     flex: 0.75,
     editable: true
   }

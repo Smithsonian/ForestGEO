@@ -136,6 +136,117 @@ export const AttributeGridColumns: GridColDef[] = standardizeGridColumns([
   }
 ]);
 
+export const FailedMeasurementsGridColumns: GridColDef[] = standardizeGridColumns([
+  {
+    field: 'id',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'failedMeasurementID',
+    headerName: 'FailedMeasurementID',
+    flex: 1,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotID',
+    headerName: 'PlotID',
+    flex: 1,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusID',
+    headerName: 'CensusID',
+    flex: 1,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'tag',
+    headerName: 'Tree Tag',
+    flex: 1,
+    type: 'string',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'stemTag',
+    headerName: 'Stem Tag',
+    flex: 1,
+    type: 'string',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'spCode',
+    headerName: 'Species Code',
+    flex: 1,
+    type: 'string',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'quadrat',
+    headerName: 'Quadrat',
+    flex: 1,
+    type: 'string',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'x',
+    headerName: 'X',
+    flex: 1,
+    type: 'number',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'y',
+    headerName: 'Y',
+    flex: 1,
+    type: 'number',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'dbh',
+    headerName: 'DBH',
+    flex: 1,
+    type: 'number',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'hom',
+    headerName: 'HOM',
+    flex: 1,
+    type: 'number',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'date',
+    headerName: 'Date',
+    flex: 1,
+    type: 'date',
+    editable: true,
+    filterable: false
+  },
+  {
+    field: 'codes',
+    headerName: 'Codes',
+    flex: 1,
+    type: 'string',
+    editable: true,
+    filterable: false
+  }
+]);
+
 export const PersonnelGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'id',
@@ -357,12 +468,12 @@ export const StemTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumn
 
 export function InputChip({
   params,
-  selectableAttributes,
-  setReloadAttributes
+  selectable,
+  reload
 }: {
   params: GridRenderEditCellParams;
-  selectableAttributes: string[];
-  setReloadAttributes: Dispatch<SetStateAction<boolean>>;
+  selectable: string[];
+  reload: Dispatch<SetStateAction<boolean>>;
 }) {
   const [selectedValues, setSelectedValues] = useState<string[]>(params.value?.replace(/\s+/g, '').split(';') ?? []);
 
@@ -370,7 +481,7 @@ export function InputChip({
     const updatedValues = selectedValues.filter(value => value !== valueToRemove);
     setSelectedValues(updatedValues);
     params.api.setEditCellValue({ id: params.id, field: 'attributes', value: updatedValues.join(';') });
-    setReloadAttributes(true);
+    reload(true);
   };
 
   return (
@@ -378,7 +489,7 @@ export function InputChip({
       <Autocomplete
         multiple
         size="sm"
-        options={selectableAttributes}
+        options={selectable}
         autoHighlight
         autoComplete
         value={selectedValues}
@@ -386,7 +497,7 @@ export function InputChip({
         onChange={(_, newValues) => {
           setSelectedValues(newValues);
           params.api.setEditCellValue({ id: params.id, field: 'attributes', value: newValues.join(';') });
-          setReloadAttributes(true);
+          reload(true);
         }}
         onKeyDown={event => {
           if (event.key === 'Enter' || event.key === 'Tab') {
@@ -415,7 +526,7 @@ export function InputChip({
   );
 }
 
-function preprocessor(params: GridPreProcessEditCellProps) {
+export function preprocessor(params: GridPreProcessEditCellProps) {
   const { props } = params;
   let newValue = props.value;
 
@@ -493,7 +604,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     editable: true
   },
   {
-    field: 'localX',
+    field: 'stemLocalX',
     headerName: 'X',
     renderHeader: () => formatHeader('X', 'Stem'),
     flex: 0.7,
@@ -506,7 +617,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
-    field: 'localY',
+    field: 'stemLocalY',
     headerName: 'Y',
     renderHeader: () => formatHeader('Y', 'Stem'),
     flex: 0.7,
@@ -524,10 +635,9 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     headerName: 'DBH',
     flex: 0.5,
     editable: true,
+    type: 'number',
     valueFormatter: (value: any) => parseFloat(Number(value).toFixed(2)),
-    filterOperators: customNumericOperators,
-    preProcessEditCellProps: params => preprocessor(params),
-    type: 'number'
+    preProcessEditCellProps: params => preprocessor(params)
   },
   {
     field: 'measuredHOM',
@@ -537,8 +647,6 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     valueFormatter: (value: any) => {
       return Number(value).toFixed(2);
     },
-    type: 'number',
-    filterOperators: customNumericOperators,
     preProcessEditCellProps: params => preprocessor(params)
   },
   {
@@ -670,55 +778,387 @@ export const RolesGridColumns: GridColDef[] = standardizeGridColumns([
     editable: true
   }
 ]);
-// Combine the column definitions
-const combineColumns = (primary: GridColDef[], secondary: GridColDef[]): GridColDef[] => {
-  const combined = [...primary];
 
-  secondary.forEach(secondaryColumn => {
-    const primaryColumnIndex = primary.findIndex(primaryColumn => primaryColumn.field === secondaryColumn.field);
-    if (primaryColumnIndex === -1) {
-      combined.push(secondaryColumn);
-    } else {
-      // Merge columns if both contain renderHeader, otherwise preserve existing properties
-      combined[primaryColumnIndex] = { ...combined[primaryColumnIndex], ...secondaryColumn };
-    }
-  });
-
-  return combined;
-};
-
-const rawColumns: GridColDef[] = combineColumns(MeasurementsSummaryViewGridColumns, StemTaxonomiesViewGridColumns);
-
-export const ViewFullTableGridColumns = rawColumns.map(column => {
-  if (column.field === 'speciesCode') {
-    return { ...column, renderHeader: () => formatHeader('Species', 'Code') };
-  } else if (column.field === 'genusAuthority') {
-    return { ...column, renderHeader: () => formatHeader('Genus', 'Authority') };
-  } else if (column.field === 'speciesAuthority') {
-    return { ...column, renderHeader: () => formatHeader('Species', 'Authority') };
-  } else if (column.field === 'subspeciesAuthority') {
-    return { ...column, renderHeader: () => formatHeader('Subspecies', 'Authority') };
-  } else if (column.field === 'speciesIDLevel') {
-    return { ...column, renderHeader: () => formatHeader('Species', 'ID Level') };
-  } else if (column.field === 'speciesFieldFamily') {
-    return { ...column, renderHeader: () => formatHeader('Species', 'Field Family') };
+export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
+  {
+    field: 'id',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'coreMeasurementID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'measuredDBH',
+    headerName: 'MeasuredDBH',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'measuredHOM',
+    headerName: 'MeasuredHOM',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotName',
+    headerName: 'PlotName',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'locationName',
+    headerName: 'LocationName',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'countryName',
+    headerName: 'CountryName',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'dimensionX',
+    headerName: 'DimensionX',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'dimensionY',
+    headerName: 'DimensionY',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotArea',
+    headerName: 'PlotArea',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotGlobalX',
+    headerName: 'PlotGlobalX',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotGlobalY',
+    headerName: 'PlotGlobalY',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotGlobalZ',
+    headerName: 'PlotGlobalZ',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotShape',
+    headerName: 'PlotShape',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotDescription',
+    headerName: 'PlotDescription',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotDefaultDimensionUnits',
+    headerName: 'PlotDefaultDimensionUnits',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotDefaultCoordinateUnits',
+    headerName: 'PlotDefaultCoordinateUnits',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotDefaultAreaUnits',
+    headerName: 'PlotDefaultAreaUnits',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotDefaultDBHUnits',
+    headerName: 'PlotDefaultDBHUnits',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotDefaultHOMUnits',
+    headerName: 'PlotDefaultHOMUnits',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusStartDate',
+    headerName: 'CensusStartDate',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusEndDate',
+    headerName: 'CensusEndDate',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'censusDescription',
+    headerName: 'CensusDescription',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'plotCensusNumber',
+    headerName: 'PlotCensusNumber',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratName',
+    headerName: 'QuadratName',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratDimensionX',
+    headerName: 'QuadratDimensionX',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratDimensionY',
+    headerName: 'QuadratDimensionY',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratArea',
+    headerName: 'QuadratArea',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratStartX',
+    headerName: 'QuadratStartX',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratStartY',
+    headerName: 'QuadratStartY',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'quadratShape',
+    headerName: 'QuadratShape',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'treeID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'treeTag',
+    headerName: 'TreeTag',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'stemID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'stemTag',
+    headerName: 'StemTag',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'stemLocalX',
+    headerName: 'StemLocalX',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'stemLocalY',
+    headerName: 'StemLocalY',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'speciesID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'speciesCode',
+    headerName: 'SpeciesCode',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'speciesName',
+    headerName: 'SpeciesName',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'subspeciesName',
+    headerName: 'SubspeciesName',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'subspeciesAuthority',
+    headerName: 'SubspeciesAuthority',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'speciesIDLevel',
+    headerName: 'SpeciesIDLevel',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'genusID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'genus',
+    headerName: 'Genus',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'genusAuthority',
+    headerName: 'GenusAuthority',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'familyID',
+    headerName: '#',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'family',
+    headerName: 'Family',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'attributes',
+    headerName: 'Attributes',
+    flex: 0.3,
+    editable: false,
+    filterable: false
+  },
+  {
+    field: 'userDefinedFields',
+    headerName: 'UserDefinedFields',
+    flex: 0.3,
+    editable: false,
+    filterable: false
   }
-  return column;
-});
-
-function formatValue(value: any): React.ReactNode {
-  if (value === null || value === undefined) {
-    return 'NULL';
-  }
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch (error) {
-      return '[Circular Object]';
-    }
-  }
-  return value.toString();
-}
+]);
 
 export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns([
   {
@@ -758,77 +1198,13 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     field: 'oldRowState',
     headerName: 'Old',
     flex: 1,
-    editable: false,
-    renderCell: params => {
-      const jsonData = params.row['oldRowState'];
-
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'neutral.softBg',
-            borderRadius: '8px',
-            padding: '8px',
-            maxHeight: '150px',
-            overflow: 'auto',
-            fontSize: '12px'
-          }}
-        >
-          {jsonData && Object.keys(jsonData).length > 0 ? (
-            Object.entries(jsonData).map(([key, value]) => (
-              <Stack direction={'row'} key={key}>
-                <Typography level={'body-md'}>
-                  <strong>{key}</strong>:{formatValue(value)}
-                </Typography>
-              </Stack>
-            ))
-          ) : (
-            <Typography level={'body-sm'} fontWeight={'bold'}>
-              No previous data available
-            </Typography>
-          )}
-        </Box>
-      );
-    }
+    editable: false
   },
   {
     field: 'newRowState',
     headerName: 'New',
     flex: 1,
-    editable: false,
-    renderCell: params => {
-      const jsonData = params.row['newRowState'];
-
-      return (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: 'neutral.softBg',
-            borderRadius: '8px',
-            padding: '8px',
-            maxHeight: '150px',
-            overflow: 'auto',
-            fontSize: '12px'
-          }}
-        >
-          {jsonData && Object.keys(jsonData).length > 0 ? (
-            Object.entries(jsonData).map(([key, value]) => (
-              <Stack direction={'row'} key={key}>
-                <Typography level={'body-md'}>
-                  <strong>{key}</strong>:{formatValue(value)}
-                </Typography>
-              </Stack>
-            ))
-          ) : (
-            <Typography level={'body-sm'} fontWeight={'bold'}>
-              No previous data available
-            </Typography>
-          )}
-        </Box>
-      );
-    }
+    editable: false
   },
   {
     field: 'changeTimestamp',
@@ -841,5 +1217,129 @@ export const UnifiedChangelogGridColumns: GridColDef[] = standardizeGridColumns(
     headerName: 'Changed By',
     flex: 0.5,
     editable: false
+  }
+]);
+
+export const AllTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumns([
+  {
+    field: 'id',
+    headerName: '#',
+    flex: 0.3,
+    editable: false
+  },
+  {
+    field: 'speciesID',
+    headerName: '#',
+    flex: 0.5,
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'speciesCode',
+    headerName: 'Species Code',
+    renderHeader: () => formatHeader('Species', 'Code'),
+    flex: 0.5,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'familyID',
+    headerName: 'Family ID',
+    flex: 0,
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'family',
+    headerName: 'Family',
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusID',
+    headerName: 'Genus ID',
+    flex: 1,
+    type: 'number',
+    editable: false
+  },
+  {
+    field: 'genus',
+    headerName: 'Genus',
+    flex: 0.75,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'genusAuthority',
+    headerName: 'Genus Auth',
+    renderHeader: () => formatHeader('Genus', 'Authority'),
+    flex: 0.75,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesName',
+    headerName: 'Species',
+    renderHeader: () => formatHeader('Species', 'Name'),
+    flex: 0.75,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesName',
+    headerName: 'Subspecies',
+    renderHeader: () => formatHeader('Subspecies', 'Name'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'idLevel',
+    headerName: 'Species ID Level',
+    renderHeader: () => formatHeader('Species', 'ID Level'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesAuthority',
+    headerName: 'Species Auth',
+    renderHeader: () => formatHeader('Species', 'Authority'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'subspeciesAuthority',
+    headerName: 'Subspecies Auth',
+    renderHeader: () => formatHeader('Subspecies', 'Authority'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'fieldFamily',
+    headerName: 'Field Family',
+    renderHeader: () => formatHeader('Field', 'Family'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'validCode',
+    headerName: 'Valid Code',
+    renderHeader: () => formatHeader('Valid', 'Code'),
+    flex: 1,
+    type: 'string',
+    editable: true
+  },
+  {
+    field: 'speciesDescription',
+    headerName: 'Species Description',
+    renderHeader: () => formatHeader('Species', 'Description'),
+    flex: 1,
+    type: 'string',
+    editable: true
   }
 ]);

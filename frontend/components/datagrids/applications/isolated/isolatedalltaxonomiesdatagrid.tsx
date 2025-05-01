@@ -1,19 +1,18 @@
 // alltaxonomiesview datagrid
 'use client';
-import { GridColDef, GridRenderEditCellParams } from '@mui/x-data-grid';
-import React, { useEffect, useState } from 'react';
+import { GridRenderEditCellParams } from '@mui/x-data-grid';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Button } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { AllTaxonomiesViewRDS } from '@/config/sqlrdsdefinitions/views';
-import { formatHeader } from '@/components/client/datagridcolumns';
+import { AllTaxonomiesViewGridColumns, formatHeader } from '@/components/client/datagridcolumns';
 import { SpeciesLimitsRDS, SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
-import { standardizeGridColumns } from '@/components/client/clientmacros';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
-import SpeciesLimitsModal from '@/components/client/specieslimitsmodal';
+import SpeciesLimitsModal from '@/components/client/modals/specieslimitsmodal';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
@@ -66,6 +65,10 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     setSelectedSpeciesRow(null);
   };
 
+  async function resetTables() {
+    await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
+  }
+
   const renderSpeciesLimitsCell = (params: GridRenderEditCellParams) => {
     const speciesLimits = allSpeciesLimits.find(limit => limit.speciesID === params.row.speciesID);
     const hasLimits = speciesLimits !== undefined && speciesLimits.upperBound !== undefined && speciesLimits.lowerBound !== undefined;
@@ -92,139 +95,21 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     );
   };
 
-  const AllTaxonomiesViewGridColumns: GridColDef[] = standardizeGridColumns([
-    {
-      field: 'id',
-      headerName: '#',
-      flex: 0.3,
-      editable: false
-    },
-    {
-      field: 'speciesID',
-      headerName: '#',
-      flex: 0.5,
-      type: 'number',
-      editable: false
-    },
-    {
-      field: 'speciesCode',
-      headerName: 'Species Code',
-      renderHeader: () => formatHeader('Species', 'Code'),
-      flex: 0.5,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'familyID',
-      headerName: 'Family ID',
-      flex: 0,
-      type: 'number',
-      editable: false
-    },
-    {
-      field: 'family',
-      headerName: 'Family',
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'genusID',
-      headerName: 'Genus ID',
-      flex: 1,
-      type: 'number',
-      editable: false
-    },
-    {
-      field: 'genus',
-      headerName: 'Genus',
-      flex: 0.75,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'genusAuthority',
-      headerName: 'Genus Auth',
-      renderHeader: () => formatHeader('Genus', 'Authority'),
-      flex: 0.75,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'speciesName',
-      headerName: 'Species',
-      renderHeader: () => formatHeader('Species', 'Name'),
-      flex: 0.75,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'subspeciesName',
-      headerName: 'Subspecies',
-      renderHeader: () => formatHeader('Subspecies', 'Name'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'speciesIDLevel',
-      headerName: 'Species ID Level',
-      renderHeader: () => formatHeader('Species', 'ID Level'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'speciesAuthority',
-      headerName: 'Species Auth',
-      renderHeader: () => formatHeader('Species', 'Authority'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'subspeciesAuthority',
-      headerName: 'Subspecies Auth',
-      renderHeader: () => formatHeader('Subspecies', 'Authority'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'fieldFamily',
-      headerName: 'Field Family',
-      renderHeader: () => formatHeader('Field', 'Family'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'validCode',
-      headerName: 'Valid Code',
-      renderHeader: () => formatHeader('Valid', 'Code'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'speciesDescription',
-      headerName: 'Species Description',
-      renderHeader: () => formatHeader('Species', 'Description'),
-      flex: 1,
-      type: 'string',
-      editable: true
-    },
-    {
-      field: 'speciesLimits',
-      headerName: 'Species Limits',
-      renderHeader: () => formatHeader('Species', 'Limits'),
-      flex: 1,
-      renderCell: renderSpeciesLimitsCell,
-      editable: false,
-      sortable: false,
-      filterable: false
-    }
-  ]);
+  const columns = useMemo(() => {
+    return [
+      ...AllTaxonomiesViewGridColumns,
+      {
+        field: 'speciesLimits',
+        headerName: 'Species Limits',
+        renderHeader: () => formatHeader('Species', 'Limits'),
+        flex: 1,
+        renderCell: renderSpeciesLimitsCell,
+        editable: false,
+        sortable: false,
+        filterable: false
+      }
+    ];
+  }, [AllTaxonomiesViewGridColumns]);
 
   return (
     <>
@@ -248,7 +133,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
 
       <IsolatedDataGridCommons
         gridType="alltaxonomiesview"
-        gridColumns={AllTaxonomiesViewGridColumns}
+        gridColumns={columns}
         refresh={refresh}
         setRefresh={setRefresh}
         initialRow={initialAllTaxonomiesViewRDSRow}
@@ -261,7 +146,15 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         }}
         dynamicButtons={[
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
+          {
+            label: 'RESET Table',
+            onClick: async () => {
+              await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
+              setRefresh(true);
+            },
+            tooltip: 'Reset all species-related tables!'
+          }
         ]}
       />
       {selectedSpeciesRow && (

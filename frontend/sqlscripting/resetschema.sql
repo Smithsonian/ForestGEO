@@ -1,7 +1,7 @@
 set foreign_key_checks = 0;
 drop table if exists attributes;
 drop table if exists census;
-drop table if exists censusquadrat;
+drop table if exists censusquadrats;
 drop table if exists cmattributes;
 drop table if exists cmverrors;
 drop table if exists coremeasurements;
@@ -11,7 +11,10 @@ drop table if exists measurementssummary;
 drop table if exists personnel;
 drop table if exists plots;
 drop table if exists postvalidationqueries;
-drop table if exists quadratpersonnel
+drop table if exists quadratpersonnel;
+drop table if exists censusattributes;
+drop table if exists censuspersonnel;
+drop table if exists censusspecies;
 drop table if exists quadrats;
 drop table if exists reference;
 drop table if exists roles;

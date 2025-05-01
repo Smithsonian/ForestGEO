@@ -3,14 +3,15 @@
 import { UploadCompleteProps } from '@/config/macros/uploadsystemmacros';
 import Typography from '@mui/joy/Typography';
 import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress, Modal, ModalDialog, Stack } from '@mui/joy';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
-import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
+import { FileRow, FormType } from '@/config/macros/formdetails';
+import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
 
 const ROWS_PER_BATCH = 10;
 
@@ -20,6 +21,8 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const [progressText, setProgressText] = useState({ census: '', plots: '', quadrats: '' });
   const [allLoadsCompleted, setAllLoadsCompleted] = useState(false);
   const [openUploadConfirmModal, setOpenUploadConfirmModal] = useState(false);
+
+  const hasRunRef = useRef(false);
 
   const { triggerRefresh } = useDataValidityContext();
 
@@ -113,15 +116,47 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     document.body.removeChild(link);
   };
   useEffect(() => {
+    if (hasRunRef.current) return;
+    hasRunRef.current = true;
+
     const runAsyncTasks = async () => {
       try {
+        if (uploadForm === FormType.measurements) {
+          await fetch(`/api/formatrunquery`, {
+            body: JSON.stringify({
+              query: `delete from ${currentSite?.schemaName}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+              params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
+            }),
+            method: 'POST'
+          });
+          const flattened: FileRow[] = [];
+          console.log('error rows!! --> ', errorRows);
+          for (const fileName in errorRows) {
+            const fileRowSet = errorRows[fileName];
+            Object.values(fileRowSet).forEach(row => flattened.push(row));
+          }
+          for (const row of flattened) {
+            await fetch(
+              createPostPatchQuery(
+                currentSite?.schemaName ?? '',
+                'failedmeasurements',
+                getGridID('failedmeasurements'),
+                currentPlot?.plotID,
+                currentCensus?.plotCensusNumber
+              ),
+              {
+                method: 'POST',
+                body: JSON.stringify({ newRow: row })
+              }
+            );
+          }
+          await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) });
+        }
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
+        setAllLoadsCompleted(true);
       } catch (error) {
         console.error(error);
-      } finally {
-        // handleCloseUploadModal();
-        setAllLoadsCompleted(true);
       }
     };
     runAsyncTasks().catch(console.error);
@@ -151,7 +186,7 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
       ) : (
         <>
           <Typography fontWeight={'bold'} variant={'solid'} level={'h1'} color={'warning'}>
-            The following rows were not uploaded due to errors:
+            The following rows were captured during pre-processing and were not uploaded:
           </Typography>
           <Box sx={{ marginBottom: 2, display: 'flex', flex: 1, flexDirection: 'row' }}>
             <Button variant="plain" onClick={downloadCSV}>
@@ -221,14 +256,12 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
               <>
                 {Object.values(errorRows).length > 0 ? (
                   <Stack direction={'column'}>
-                    <Typography level={'body-md'}>Errors were found during the upload process.</Typography>
                     <Typography level={'body-md'}>
                       All broken rows have been moved to the <code>failedmeasurements</code> table.
                     </Typography>
                   </Stack>
                 ) : (
                   <Stack direction={'column'}>
-                    <Typography level={'body-md'}>No errors were found during the upload process.</Typography>
                     <Typography level={'body-md'}>
                       No changes will be made to the the <code>failedmeasurements</code> table.
                     </Typography>
@@ -248,7 +281,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             <Button
               variant={'solid'}
               onClick={async () => {
-                // uploadForm === 'measurements' ? await uploadFailedMeasurements() : undefined;
                 setOpenUploadConfirmModal(false);
                 handleCloseUploadModal();
               }}

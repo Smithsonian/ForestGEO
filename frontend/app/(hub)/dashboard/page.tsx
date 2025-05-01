@@ -31,7 +31,6 @@ import { useEffect, useState } from 'react';
 import { UnifiedChangelogRDS } from '@/config/sqlrdsdefinitions/core';
 import moment from 'moment';
 import Avatar from '@mui/joy/Avatar';
-import { useLoading } from '@/app/contexts/loadingprovider';
 
 export default function DashboardPage() {
   const { triggerPulse, isPulsing } = useLockAnimation();
@@ -43,8 +42,6 @@ export default function DashboardPage() {
   const userEmail = session?.user?.email;
   const userRole = session?.user?.userStatus;
   const allowedSites = session?.user?.sites;
-
-  const { setLoading } = useLoading();
 
   const [changelogHistory, setChangelogHistory] = useState<UnifiedChangelogRDS[]>(Array(5));
   const [isLoading, setIsLoading] = useState(false);
@@ -62,15 +59,19 @@ export default function DashboardPage() {
         `/api/changelog/overview/unifiedchangelog/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`,
         { method: 'GET' }
       );
-      const results: UnifiedChangelogRDS[] = await response.json();
+      try {
+        const results: UnifiedChangelogRDS[] = await response.json();
 
-      // Pad the array if it has less than 5 items
-      const paddedResults = [...results];
-      while (paddedResults.length < 5) {
-        paddedResults.push({}); // Push empty objects to pad the array
+        // Pad the array if it has less than 5 items
+        const paddedResults = [...results];
+        while (paddedResults.length < 5) {
+          paddedResults.push({}); // Push empty objects to pad the array
+        }
+
+        setChangelogHistory(paddedResults);
+      } catch (e) {
+        console.log('no json response');
       }
-
-      setChangelogHistory(paddedResults);
     } catch (error) {
       console.error('Failed to load changelog history', error);
       setChangelogHistory(Array(5).fill({})); // Fallback to an empty padded array in case of an error
@@ -244,7 +245,7 @@ export default function DashboardPage() {
                           >
                             <Skeleton loading={changelog.operation === undefined} sx={{ width: '95%' }} animation={'wave'}>
                               <Typography level={'title-md'} fontWeight={'bold'} sx={{ width: '100%' }}>
-                                {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).format('YYYY-MM-DD HH:mm:ss')}
+                                {changelog.operation} ON {changelog.tableName} at {moment(changelog?.changeTimestamp).format('dddd, MMMM Do YYYY, hh:mm:ss a')}
                               </Typography>
                             </Skeleton>
                           </Box>

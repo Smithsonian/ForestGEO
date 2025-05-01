@@ -14,7 +14,6 @@ import { getColumnVisibilityModel } from '@/config/datagridhelpers';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { AttributeStatusOptions } from '@/config/sqlrdsdefinitions/core';
-import { renderDatePicker, renderEditDatePicker } from '@/components/client/formcolumns';
 
 export interface IsolatedDataGridCommonProps {
   gridType: string;
@@ -48,7 +47,7 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
   });
 
   const columns = useMemo<GridColDef[]>(() => {
-    let baseColumns: GridColDef[] = [
+    const baseColumns: GridColDef[] = [
       {
         field: 'actions',
         headerName: 'Actions',
@@ -88,29 +87,6 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
       },
       ...gridColumns
     ];
-
-    if (gridType === 'measurements') {
-      baseColumns = [
-        ...baseColumns,
-        {
-          field: 'date',
-          headerName: 'Date',
-          headerClassName: 'header',
-          flex: 1,
-          editable: true,
-          renderCell: renderDatePicker,
-          renderEditCell: renderEditDatePicker
-        },
-        {
-          field: 'codes',
-          headerName: 'Codes',
-          headerClassName: 'header',
-          flex: 1,
-          align: 'center',
-          editable: true
-        }
-      ];
-    }
 
     return baseColumns;
   }, [gridColumns, gridType, unsavedChangesRef, apiRef, setHasUnsavedRows]);
@@ -316,13 +292,13 @@ export default function IsolatedMultilineDataGridCommons(props: Readonly<Isolate
           }}
           sx={{
             [`& .${gridClasses.row}.row--removed`]: {
-              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 170, 170, 0.3)' : darken('rgba(255, 170, 170, 1)', 0.7))
+              backgroundColor: (theme: any) => (theme.palette.mode === 'light' ? 'rgba(255, 170, 170, 0.3)' : darken('rgba(255, 170, 170, 1)', 0.7))
             },
             [`& .${gridClasses.row}.row--edited`]: {
-              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 254, 176, 0.3)' : darken('rgba(255, 254, 176, 1)', 0.6))
+              backgroundColor: (theme: any) => (theme.palette.mode === 'light' ? 'rgba(255, 254, 176, 0.3)' : darken('rgba(255, 254, 176, 1)', 0.6))
             },
             [`& .${gridClasses.row}.row--invalid`]: {
-              backgroundColor: theme => (theme.palette.mode === 'light' ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.6))
+              backgroundColor: (theme: any) => (theme.palette.mode === 'light' ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.6))
             }
           }}
           loading={isSaving}

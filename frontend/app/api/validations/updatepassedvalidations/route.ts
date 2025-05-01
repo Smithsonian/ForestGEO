@@ -11,8 +11,8 @@ export async function GET(request: NextRequest) {
   const censusID = censusIDParam ? parseInt(censusIDParam) : null;
 
   try {
-    const results = await updateValidatedRows(schema, { p_CensusID: censusID, p_PlotID: plotID });
-    return new NextResponse(JSON.stringify(results), {
+    await updateValidatedRows(schema, { p_CensusID: censusID, p_PlotID: plotID });
+    return new NextResponse(JSON.stringify({}), {
       status: HTTPResponses.OK
     });
   } catch (error: any) {

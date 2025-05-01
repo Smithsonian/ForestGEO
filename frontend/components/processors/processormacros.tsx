@@ -1,31 +1,17 @@
-import { PoolConnection, PoolOptions } from 'mysql2/promise';
-import { PoolMonitor } from '@/config/poolmonitor';
+// processormacros.tsx
+import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
 import { capitalizeAndTransformField } from '@/config/utils';
 import { escape } from 'mysql2';
-
-const sqlConfig: PoolOptions = {
-  user: process.env.AZURE_SQL_USER,
-  password: process.env.AZURE_SQL_PASSWORD,
-  host: process.env.AZURE_SQL_SERVER,
-  port: parseInt(process.env.AZURE_SQL_PORT!),
-  database: process.env.AZURE_SQL_CATALOG_SCHEMA,
-  waitForConnections: true,
-  connectionLimit: 100, // Lower limit if 100 is excessive for your DB
-  queueLimit: 0, // unlimited queue size
-  keepAliveInitialDelay: 10000, // 0 by default.
-  enableKeepAlive: true, // false by default.
-  connectTimeout: 30000 // 10 seconds by default.
-};
-export const poolMonitor = new PoolMonitor(sqlConfig);
+import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
 
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   try {
     // console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
 
     // Acquire the connection and ping to validate it
-    const connection = await poolMonitor.getConnection();
+    const connection = await getPoolMonitorInstance().getConnection();
     await connection.ping(); // Use ping to check the connection
     // console.log('Connection successful');
     return connection; // Resolve the connection when successful
@@ -59,7 +45,7 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const timeout = 60000; // 60 seconds
+  const timeout = 180000; // 180 seconds
   const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
   const startTime = Date.now();
   try {

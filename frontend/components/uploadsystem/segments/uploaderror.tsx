@@ -1,4 +1,4 @@
-import { Box } from '@mui/joy';
+import { Box, Button, Typography } from '@mui/joy';
 import React from 'react';
 import { FileWithPath } from 'react-dropzone';
 import { ReviewStates, UploadErrorProps } from '@/config/macros/uploadsystemmacros';
@@ -34,30 +34,29 @@ const UploadError = (props: Readonly<UploadErrorProps>) => {
   const renderErrorAction = () => {
     switch (component) {
       case 'UploadParseFiles':
-        return <button onClick={handleParseError}>Return to Parse</button>;
+        return <Button onClick={handleParseError}>Return to Parse</Button>;
       case 'UploadReviewFiles':
-        return <button onClick={() => handleReviewError(error.file)}>Retry Review</button>;
+        return <Button onClick={() => handleReviewError(error.file)}>Retry Review</Button>;
       case 'UploadFire':
         return (
-          <div>
-            <p>
-              Please speak to an administrator. Error in file: {error.file}, row: {error.row}
-            </p>
-            <button onClick={() => handleFireError(error.file)}>Return to Review</button>
-          </div>
+          <Box>
+            <Typography level={'body-lg'} fontWeight={'bold'} color={'danger'}>
+              Please speak to an administrator. Error in file: {error}
+            </Typography>
+            <Button onClick={() => handleFireError(error.file)}>Return to Review</Button>
+          </Box>
         );
       default:
-        return <button onClick={handleReturnToStart}>Return to Start</button>;
+        return <Button onClick={handleReturnToStart}>Return to Start</Button>;
     }
   };
 
   return (
     <Box>
-      <h1>Error Occurred</h1>
-      <p>{error.message}</p>
+      <Typography level={'title-lg'}>Error Occurred</Typography>
+      <Typography level={'body-md'}>{error.message}</Typography>
       {renderErrorAction()}
-      <button onClick={resetError}>Retry</button>
-      {/* This is the new button */}
+      <Button onClick={resetError}>Retry</Button>
     </Box>
   );
 };

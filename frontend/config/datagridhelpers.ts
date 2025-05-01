@@ -5,7 +5,7 @@
 import { getQuadratHCs, Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { getAllTaxonomiesViewHCs, getAllViewFullTableViewsHCs, getMeasurementsSummaryViewHCs } from '@/config/sqlrdsdefinitions/views';
 import { getPersonnelHCs } from '@/config/sqlrdsdefinitions/personnel';
-import { getCoreMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
+import { getCoreMeasurementsHCs, getFailedMeasurementsHCs } from '@/config/sqlrdsdefinitions/core';
 import { GridColDef, GridFilterModel, GridRowId, GridRowModel, GridRowModesModel, GridRowsProp, GridSortDirection } from '@mui/x-data-grid';
 import { Dispatch, RefObject, SetStateAction } from 'react';
 import { AlertProps } from '@mui/material';
@@ -62,6 +62,10 @@ const columnVisibilityMap: Record<string, Record<string, boolean>> = {
   measurements: {
     id: false,
     ...getMeasurementsSummaryViewHCs()
+  },
+  failedmeasurements: {
+    id: false,
+    ...getFailedMeasurementsHCs()
   },
   measurementssummary: {
     id: false,
@@ -164,8 +168,10 @@ export function getGridID(gridType: string): string {
       return 'speciesID';
     case 'specieslimits':
       return 'speciesLimitID';
-    case 'validationprocedures':
+    case 'sitespecificvalidations':
       return 'validationID';
+    case 'failedmeasurements':
+      return 'failedMeasurementID';
     default:
       return 'breakage';
   }
@@ -175,6 +181,12 @@ type VisibleFilter = 'valid' | 'errors' | 'pending';
 
 interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
+}
+
+export interface RowControl {
+  show: boolean;
+  toggle: (checked: boolean) => void;
+  count: number;
 }
 
 export interface EditToolbarCustomProps {
@@ -195,6 +207,11 @@ export interface EditToolbarCustomProps {
   currentCensus?: OrgCensus;
   gridColumns?: GridColDef[];
   gridType?: string;
+  errorControls?: RowControl;
+  validControls?: RowControl;
+  pendingControls?: RowControl;
+  hidingEmpty?: boolean;
+  setHidingEmpty?: Dispatch<SetStateAction<boolean>>;
 }
 
 export interface IsolatedDataGridCommonProps {
@@ -208,8 +225,10 @@ export interface IsolatedDataGridCommonProps {
   locked?: boolean;
   selectionOptions?: { value: string | number; label: string }[];
   handleOpenSpeciesLimits?: (id: GridRowId) => void;
-  onDataUpdate?: () => void; // Add the onDataUpdate prop
+  onDataUpdate?: (updatedRow: GridRowModel) => Promise<void>; // Add the onDataUpdate prop
   clusters?: Record<string, string[]>;
+  defaultHideEmpty?: boolean;
+  apiRef?: RefObject<GridApiCommunity>;
 }
 
 export interface DataGridCommonProps {
@@ -257,7 +276,7 @@ export const CellItemContainer = styled('div')({
  * Function to determine if all entries in a column are null
  */
 export function allValuesAreNull(rows: GridRowsProp, field: string): boolean {
-  return rows.length > 0 && rows.every(row => row[field] === undefined || row[field] === null || row[field] === '');
+  return rows.length > 0 && rows.every(row => field === undefined || row[field] === undefined || row[field] === null || row[field] === '');
 }
 
 /**
@@ -301,21 +320,21 @@ export interface MeasurementsCommonsProps {
   dynamicButtons: any[];
 }
 
-export const errorMapping: Record<string, string[]> = {
-  '1': ['attributes'],
-  '2': ['measuredDBH'],
-  '3': ['measuredHOM'],
-  '4': ['treeTag', 'stemTag'],
-  '5': ['treeTag', 'stemTag', 'quadratName'],
-  '6': ['stemLocalX', 'stemLocalY'],
-  '7': ['speciesCode'],
-  '8': ['measurementDate'],
-  '9': ['treeTag', 'stemTag', 'plotCensusNumber'],
-  '10': ['treeTag', 'stemTag', 'plotCensusNumber'],
-  '11': ['quadratName'],
-  '12': ['speciesCode'],
-  '13': ['measuredDBH', 'measuredHOM']
+export const failureErrorMapping: Record<string, string[]> = {
+  'SpCode missing': ['spCode'],
+  'SpCode invalid': ['spCode'],
+  'Missing Tree Tag': ['tag'],
+  'Missing Tree and Stem Tag': ['tag', 'stemTag'],
+  'Quadrat missing': ['quadrat'],
+  'Quadrat invalid': ['quadrat'],
+  'Missing X': ['x'],
+  'Missing Y': ['y'],
+  'Missing Codes and DBH': ['codes', 'dbh'],
+  'Missing Codes and HOM': ['codes', 'hom'],
+  'Missing Date': ['date'],
+  'Invalid Codes': ['codes']
 };
+
 export const sortRowsByMeasurementDate = (rows: GridRowsProp, direction: GridSortDirection): GridRowsProp => {
   return rows.slice().sort((a, b) => {
     const dateA = new Date(a.measurementDate).getTime();

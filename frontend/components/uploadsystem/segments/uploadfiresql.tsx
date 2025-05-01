@@ -4,13 +4,13 @@ import { ReviewStates, UploadFireProps } from '@/config/macros/uploadsystemmacro
 import { FileCollectionRowSet, FileRow, FileRowSet, FormType, getTableHeaders, RequiredTableHeadersByFormType } from '@/config/macros/formdetails';
 import { Box, LinearProgress, Stack, Typography, useTheme } from '@mui/joy';
 import { useOrgCensusContext, usePlotContext, useQuadratContext } from '@/app/contexts/userselectionprovider';
-import { useSession } from 'next-auth/react';
 import Papa, { parse, ParseResult } from 'papaparse';
 import moment from 'moment';
 import PQueue from 'p-queue';
 import Divider from '@mui/joy/Divider';
 import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
+import { useSession } from 'next-auth/react';
 import { v4 } from 'uuid';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
@@ -30,19 +30,26 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const currentQuadrat = useQuadratContext();
   const [totalOperations, setTotalOperations] = useState(0);
   const [completedOperations, setCompletedOperations] = useState<number>(0);
-  const hasUploaded = useRef(false);
-  const { data: session } = useSession();
   const [totalChunks, setTotalChunks] = useState(0);
+  const [totalBatches, setTotalBatches] = useState(0);
   const [completedChunks, setCompletedChunks] = useState<number>(0);
+  const [processedChunks, setProcessedChunks] = useState<number>(0);
   const [failedRows, setFailedRows] = useState<{ [fileName: string]: Set<FileRow> }>({});
-  const [failedChunks, setFailedChunks] = useState<Set<number>>(new Set());
   const [etc, setETC] = useState('');
-  const [totalProcessingTime, setTotalProcessingTime] = useState(0);
-  const [chunkStartTime, setChunkStartTime] = useState<number>(0);
+  const [processETC, setProcessETC] = useState('');
+  const [uploaded, setUploaded] = useState<boolean>(false);
+  const [processed, setProcessed] = useState<boolean>(false);
+  const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096;
-  const connectionLimit = 10;
+  const chunkSize = 4096 * 8;
+  const connectionLimit = 50;
   const queue = new PQueue({ concurrency: connectionLimit });
+  // refs
+  const hasUploaded = useRef(false);
+  const totalCompletionTimeRef = useRef(0);
+  const totalProcessCompletionTimeRef = useRef(0);
+  const chunkStartTime = useRef(0);
+  const chunkProcessStartTime = useRef(0);
 
   const generateErrorRowId = (row: FileRow) =>
     `row-${Object.values(row)
@@ -77,33 +84,62 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   };
 
   useEffect(() => {
-    if (completedChunks < 3) {
-      setETC('Calculating...');
-      return;
+    if (uploadForm === 'measurements' && !uploaded && !processed) {
+      if (completedChunks < 3) {
+        setETC('Calculating...');
+        return;
+      }
+
+      // Update cumulative time for this chunk
+      totalCompletionTimeRef.current += performance.now() - chunkStartTime.current;
+
+      const smoothingFactor = 0.2;
+      const lastChunkTime = performance.now() - chunkStartTime.current;
+      const smoothedAvgTime = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalCompletionTimeRef.current / completedChunks);
+      const remaining = totalChunks - completedChunks;
+      const estimatedTime = smoothedAvgTime * remaining;
+
+      setETC(
+        moment.utc(estimatedTime).format('mm:ss').split(':')[0] +
+          ' minutes and ' +
+          moment.utc(estimatedTime).format('mm:ss').split(':')[1] +
+          ' seconds remaining...'
+      );
     }
+  }, [uploadForm, uploaded, processed, completedChunks, totalChunks]);
 
-    // Track cumulative processing time
-    setTotalProcessingTime(prev => prev + (performance.now() - chunkStartTime));
+  useEffect(() => {
+    if (uploadForm === 'measurements' && uploaded && !processed && processedChunks > 0) {
+      const now = performance.now();
+      const elapsed = now - chunkProcessStartTime.current;
+      totalProcessCompletionTimeRef.current += elapsed;
+      chunkProcessStartTime.current = now;
+    }
+  }, [processedChunks]);
 
-    // Calculate exponential moving average for smoother chunk time estimation
-    const smoothingFactor = 0.2; // Adjust between 0 and 1 for desired smoothing (higher = more reactive)
-    const lastChunkTime = performance.now() - chunkStartTime;
-    const smoothedAvgTimePerChunk = smoothingFactor * lastChunkTime + (1 - smoothingFactor) * (totalProcessingTime / completedChunks);
+  useEffect(() => {
+    if (uploadForm === 'measurements' && uploaded && !processed) {
+      if (processedChunks < 3) {
+        setProcessETC('Calculating...');
+        return;
+      }
 
-    // Calculate remaining chunks and ETC
-    const remainingChunks = totalChunks - completedChunks;
-    const estimatedTimeLeft = smoothedAvgTimePerChunk * remainingChunks;
+      const smoothingFactor = 0.2;
+      const currentElapsed = performance.now() - chunkProcessStartTime.current;
+      const smoothedAvgProcessTime = smoothingFactor * currentElapsed + (1 - smoothingFactor) * (totalProcessCompletionTimeRef.current / processedChunks);
+      const remainingProcessing = totalBatches - processedChunks;
+      const estimatedProcessTime = smoothedAvgProcessTime * remainingProcessing;
 
-    setETC(
-      moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[0] +
-        ' minutes and ' +
-        moment.utc(estimatedTimeLeft).format('mm:ss').split(':')[1] +
-        ' seconds remaining...'
-    );
-  }, [completedChunks, totalChunks]);
+      setProcessETC(
+        moment.utc(estimatedProcessTime).format('mm:ss').split(':')[0] +
+          ' minutes and ' +
+          moment.utc(estimatedProcessTime).format('mm:ss').split(':')[1] +
+          ' seconds remaining...'
+      );
+    }
+  }, [uploadForm, uploaded, processed, processedChunks, totalBatches]);
 
   const parseFileInChunks = async (file: File, delimiter: string) => {
-    let activeTasks = 0;
     queue.clear();
     const expectedHeaders = getTableHeaders(uploadForm!, currentPlot?.usesSubquadrats ?? false);
     const requiredHeaders = RequiredTableHeadersByFormType[uploadForm!];
@@ -117,19 +153,43 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
 
     const transformHeader = (header: string) => header.trim();
     const validateRow = (row: FileRow): boolean => {
+      const errors: string[] = [];
+      let extraData = false;
+
       const missingFields = requiredHeaders.filter(header => {
         const value = row[header.label];
         return value === null || value === '' || value === 'NA' || value === 'NULL';
       });
-
       if (missingFields.length > 0) {
+        errors.push(`Missing required fields: ${missingFields.map(f => f.label).join(', ')}`);
+      }
+
+      if (row['__parsed_extra'] !== undefined) {
+        console.log(`found extra: ${JSON.stringify(row)}`);
+        errors.push('Extra columns detected. Likely caused by final column using commas instead of semicolons');
+        extraData = true;
+      }
+
+      for (const [key, value] of Object.entries(row)) {
+        if (value !== null && !['tag', 'stemtag'].includes(key)) {
+          // tags and stemtags are NOT decimals
+          const num = parseFloat(value);
+          if (!isNaN(num) && (num < 0 || num > 999999.999999)) {
+            errors.push(`Decimal value for ${key} is out of range: ${value}`);
+          }
+        }
+      }
+
+      const rejectRow = errors.length > 0;
+      if (rejectRow) {
         parsingInvalidRows.push({
           ...row,
-          failureReason: `Missing required fields: ${missingFields.map(f => f.label).join(', ')}`
+          failureReason: errors.join('|'),
+          ...(extraData ? { excessData: row['__parsed_extra'] } : {})
         });
-        return false;
       }
-      return true;
+
+      return !rejectRow;
     };
 
     const transform = (value: string, field: string) => {
@@ -172,6 +232,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       return value;
     };
 
+    let totalRows = 0;
+
     await new Promise<void>((resolve, reject) => {
       Papa.parse<FileRow>(file, {
         delimiter: delimiter,
@@ -181,11 +243,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         transformHeader,
         transform,
         async chunk(results: ParseResult<FileRow>, parser) {
-          setChunkStartTime(performance.now());
+          chunkStartTime.current = performance.now();
+          totalRows += results.data.length;
           try {
-            if (activeTasks >= connectionLimit) {
+            if (queue.size >= connectionLimit) {
+              console.log(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
               parser.pause();
-              queue.pause();
+              // Wait until the queue is nearly empty before resuming.
+              await queue.onEmpty();
+              parser.resume();
             }
 
             const validRows: FileRow[] = [];
@@ -196,13 +262,15 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             });
 
             if (validRows.length === 0) {
+              // Increment completedChunks even if there is nothing to upload.
+              setCompletedChunks(prev => prev + 1);
               parser.resume();
               return;
             }
 
             const fileRowSet: FileRowSet = {};
-            validRows.forEach((row, index) => {
-              const rowId = `row-${completedChunks + index}`;
+            validRows.forEach(row => {
+              const rowId = `row-${v4()}`;
               fileRowSet[rowId] = row;
             });
 
@@ -210,75 +278,36 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               [file.name]: fileRowSet
             };
 
-            activeTasks++;
-
             await queue.add(async () => {
               try {
                 await uploadToSql(fileCollectionRowSet, file.name);
+                console.log('chunk upload completed.');
+                setCompletedChunks(prev => prev + 1);
               } catch (error) {
                 console.error('Chunk rollback triggered. Error uploading to SQL:', error);
-                if (failedChunks.has(completedChunks)) {
-                  return;
-                }
-                // single retry -- add this chunk back to the queue
+                console.log('starting retry...');
+                // Single retry -- add this chunk back to the queue.
                 await queue.add(async () => {
                   try {
                     await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
+                    console.log('retry worked. decrementing active tasks and moving on.');
+                    setCompletedChunks(prev => prev + 1);
                   } catch (e) {
-                    console.error('catatrophic error on retry: ', e);
-                    setFailedChunks(prev => new Set(prev).add(completedChunks));
+                    console.error('Catastrophic error on retry: ', e);
                   }
                 });
-                //
-                // try {
-                //   try {
-                //     parser.pause();
-                //     queue.pause();
-                //   } catch (e: any) {
-                //     console.error('Error pausing parser or queue:', e.message);
-                //   } finally {
-                //     await queue.onIdle(); // Ensure all pending tasks finish before proceeding
-                //   }
-                //
-                //   const batchErrorRows = await processFailedChunk(fileRowSet, file.name);
-                //
-                //   setErrorRows(prev => ({
-                //     ...prev,
-                //     [file.name]: {
-                //       ...prev[file.name],
-                //       ...batchErrorRows
-                //     }
-                //   }));
-                //
-                //   setFailedChunks(prev => new Set(prev).add(completedChunks));
-                // } catch (error) {
-                //   console.error('Critical error during chunk error handling:', error);
-                // } finally {
-                //   parser.resume();
-                //   queue.start();
-                // }
-              } finally {
-                activeTasks--;
-                setCompletedChunks(prev => {
-                  if (!failedChunks.has(prev)) {
-                    return prev + 1;
-                  }
-                  return prev;
-                });
-                if (activeTasks < connectionLimit) {
-                  parser.resume();
-                  queue.start();
-                }
               }
             });
           } catch (err) {
             console.error('Error processing chunk:', err);
-            reject(err);
+            parser.abort();
+            throw err;
           }
         },
         complete: async () => {
           await queue.onIdle();
           console.log('File parsing and upload complete');
+          console.log('total rows: ', totalRows);
           if (parsingInvalidRows.length > 0) {
             console.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
             setErrorRows(prevErrorRows => {
@@ -288,7 +317,21 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               }
 
               parsingInvalidRows.forEach(row => {
-                updatedErrorRows[file.name][generateErrorRowId(row)] = row;
+                updatedErrorRows[file.name][generateErrorRowId(row)] = {
+                  plotID: String(currentPlot?.plotID ?? -1),
+                  censusID: String(currentCensus?.dateRanges[0].censusID ?? -1),
+                  tag: row.tag,
+                  stemTag: row.stemtag,
+                  spCode: row.spcode,
+                  quadrat: row.quadrat,
+                  x: row.lx,
+                  y: row.ly,
+                  dbh: row.dbh,
+                  hom: row.hom,
+                  date: moment(row.date).format('YYYY-MM-DD'),
+                  codes: row.codes
+                };
+                console.log('updated row: ', updatedErrorRows[file.name][generateErrorRowId(row)]);
               });
 
               return updatedErrorRows;
@@ -304,29 +347,10 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     });
   };
 
-  const processFailedChunk = async (fileRowSet: FileRowSet, fileName: string) => {
-    const batchErrorRows: FileRowSet = {};
-    for (const [rowId, row] of Object.entries(fileRowSet)) {
-      if (errorRows[fileName]?.[rowId]) {
-        continue;
-      }
-      const singleRowSet: FileCollectionRowSet = {
-        [fileName]: { [rowId]: row }
-      };
-      try {
-        await uploadToSql(singleRowSet, fileName);
-      } catch (rowError) {
-        console.error(`Row ${rowId} failed during retry:`, rowError);
-        batchErrorRows[rowId] = row;
-      }
-    }
-    return batchErrorRows;
-  };
-
   const uploadToSql = useCallback(
     async (fileData: FileCollectionRowSet, fileName: string) => {
       try {
-        const response = await fetchWithTimeout(`/api/sqlpacketload`, {
+        const response = await fetch(`/api/sqlpacketload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -358,7 +382,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         }
       } catch (error) {
         console.error('Network or API error:', error);
-        throw error; // Re-throw to ensure retries or error reporting is triggered
+        throw error;
       }
     },
     [
@@ -375,94 +399,165 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   );
 
   useEffect(() => {
-    const calculateTotalOperations = () => {
-      const totalOps = acceptedFiles.length;
+    let isMounted = true;
 
-      setTotalOperations(totalOps);
-    };
+    async function runUploads() {
+      try {
+        // Calculate total operations for the UI.
+        const totalOps = acceptedFiles.length;
+        setTotalOperations(uploadForm === FormType.measurements ? totalOps * 2 : totalOps);
 
-    async function getUserID() {
-      const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
-      setUserID(await userIDResponse.json());
+        const userIDResponse = await fetch(`/api/catalog/${session?.user.name?.split(' ')[0]}/${session?.user.name?.split(' ')[1]}`, { method: 'GET' });
+        setUserID(await userIDResponse.json());
+
+        // Count chunks for each file.
+        for (const file of acceptedFiles) {
+          const count = await countTotalChunks(file as File);
+          setTotalChunks(prev => prev + count);
+        }
+
+        for (const file of acceptedFiles) {
+          const isCSV = file.name.endsWith('.csv');
+          const delimiter = isCSV ? ',' : '\t';
+          await parseFileInChunks(file as File, delimiter);
+
+          // If measurements, handle failed rows for this file.
+          // if (uploadForm === FormType.measurements && Object.values(failedRows[file.name] || {}).length > 0) {
+          //   const batchID = v4();
+          //   const rows = Object.values(failedRows[file.name] || []);
+          //   const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
+          //   const values = rows.flatMap(row => {
+          //     const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+          //     return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
+          //   });
+          //   const insertSQL = `INSERT INTO ${schema}.failedmeasurements
+          //     (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes)
+          //     VALUES ${placeholders}`;
+          //   await fetch(`/api/formatrunquery`, {
+          //     method: 'POST',
+          //     headers: { 'Content-Type': 'application/json' },
+          //     body: JSON.stringify({ query: insertSQL, params: values })
+          //   });
+          //   // Remove submitted rows.
+          //   setFailedRows(prev => {
+          //     const { [file.name]: removed, ...rest } = prev;
+          //     return rest;
+          //   });
+          // }
+          setCompletedOperations(prev => prev + 1);
+        }
+        await queue.onIdle();
+        if (isMounted) {
+          setUploaded(true);
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+        throw error;
+      }
     }
 
-    const uploadFiles = async () => {
-      calculateTotalOperations();
+    runUploads().catch(error => {
+      setUploadError(error);
+      setReviewState(ReviewStates.ERRORS);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [acceptedFiles, uploadForm, currentPlot, currentCensus, schema]);
 
-      for (const file of acceptedFiles) {
-        const count = await countTotalChunks(file as File);
-        setTotalChunks(prev => prev + count);
-      }
+  useEffect(() => {
+    if (uploadForm === FormType.measurements && uploaded && !processed && completedChunks === totalChunks) {
+      queue.clear();
 
-      for (const file of acceptedFiles) {
-        const isCSV = file.name.endsWith('.csv');
-        const delimiter = isCSV ? ',' : '\t';
+      async function runProcessBatches() {
+        setProcessedChunks(0);
+        chunkProcessStartTime.current = performance.now();
+        const response = await fetch(`/api/setupbulkprocessor/${schema}/${currentPlot?.plotID ?? -1}/${currentCensus?.dateRanges[0].censusID}`);
+        const output: { fileID: string; batchID: string }[] = await response.json();
+        const grouped: Record<string, string[]> = output.reduce(
+          (acc, { fileID, batchID }) => {
+            if (!acc[fileID]) {
+              acc[fileID] = [];
+            }
+            acc[fileID].push(batchID);
+            return acc;
+          },
+          {} as Record<string, string[]>
+        );
+        setTotalBatches(Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0));
+        for (const fileID in grouped) {
+          console.log(`Processing FileID: ${fileID}`);
+          // Map each batchID to a queued task.
+          const batchTasks = grouped[fileID].map(batchID =>
+            queue.add(async () => {
+              console.log(`  BatchID: ${batchID}`);
+              try {
+                await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
+                console.log(`Processed batch ${batchID} for file ${fileID}`);
+              } catch (e: any) {
+                // unforeseen error OR max attempts exceeded. Need to move to errors and reset the table. User should reupload
+                // clear temporarymeasurements table:
+                await fetch(`/api/formatrunquery`, {
+                  body: JSON.stringify({
+                    query: `delete from ${schema}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
+                    params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
+                  }),
+                  method: 'POST'
+                });
+                throw e;
+              } finally {
+                // Update processed chunks count
+                setProcessedChunks(prev => prev + 1);
+              }
+            })
+          );
 
-        await parseFileInChunks(file as File, delimiter);
-
-        // quickly add remaining rows to failed measurements counter, only if data is present
-        if (Object.values(failedRows[file.name]).length > 0) {
-          const batchID = v4();
-          const rows = Object.values(failedRows[file.name] ?? []);
-          const placeholders = rows.map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).join(', ');
-          const values = rows.flatMap(row => {
-            const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
-            return [file.name, batchID, currentPlot?.plotID ?? -1, currentCensus?.dateRanges[0].censusID ?? -1, ...Object.values(transformedRow)];
-          });
-          const insertSQL = `INSERT INTO ${schema}.ingest_failedmeasurements 
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
-      VALUES ${placeholders}`;
-          await fetch(`/api/formatrunquery`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: insertSQL, params: values })
-          });
-          // remove submitted rows from failedrows
-          setFailedRows(prev => {
-            const { [file.name]: removed, ...rest } = prev;
-            return rest;
+          // Optionally, queue a follow-up task that updates file-level completion once all its batches are done.
+          await queue.add(async () => {
+            await Promise.all(batchTasks);
+            setCompletedOperations(prev => prev + 1);
           });
         }
-        setCompletedOperations(prevCompleted => prevCompleted + 1);
+        await queue.onIdle();
+        // Optionally, run a combined query to update census dates.
+        const combinedQuery = `
+          UPDATE ${schema}.census c
+            JOIN (SELECT c1.PlotCensusNumber,
+                         MIN(cm.MeasurementDate) AS FirstMeasurementDate,
+                         MAX(cm.MeasurementDate) AS LastMeasurementDate
+                  FROM ${schema}.coremeasurements cm
+                         JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+                  WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
+                  GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
+          SET c.StartDate = m.FirstMeasurementDate,
+              c.EndDate   = m.LastMeasurementDate
+          WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
+        await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) });
+        setProcessed(true);
       }
 
-      await queue.onIdle();
-
-      const combinedQuery = `
-        UPDATE ${schema}.census c
-          JOIN (SELECT c1.PlotCensusNumber,
-                       MIN(cm.MeasurementDate) AS FirstMeasurementDate,
-                       MAX(cm.MeasurementDate) AS LastMeasurementDate
-                FROM ${schema}.coremeasurements cm
-                       JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
-                WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
-                GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
-        SET c.StartDate = m.FirstMeasurementDate,
-            c.EndDate   = m.LastMeasurementDate
-        WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
-      await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) }); // updating census dates after upload
-
-      setIsDataUnsaved(false);
-    };
-
-    if (!hasUploaded.current) {
-      getUserID().then(() => {
-        uploadFiles().then(() => {
-          hasUploaded.current = true;
-          // enforce timeout before continuing forward
-          const timeout = setTimeout(() => {
-            if (uploadForm === FormType.measurements) {
-              setReviewState(ReviewStates.VALIDATE);
-            } else {
-              setReviewState(ReviewStates.UPLOAD_AZURE);
-            }
-          }, 500);
-
-          return () => clearTimeout(timeout);
-        });
+      runProcessBatches().catch(error => {
+        setUploadError(error);
+        setReviewState(ReviewStates.ERRORS);
       });
     }
-  }, [hasUploaded.current, errorRows]);
+  }, [uploaded, uploadForm, completedChunks, totalChunks, schema, currentPlot, currentCensus]);
+
+  useEffect(() => {
+    if (uploadForm === FormType.measurements) {
+      if (uploaded && processed) {
+        hasUploaded.current = true;
+        setReviewState(ReviewStates.VALIDATE);
+        setIsDataUnsaved(false);
+      }
+    } else {
+      if (uploaded) {
+        hasUploaded.current = true;
+        setReviewState(ReviewStates.UPLOAD_AZURE);
+        setIsDataUnsaved(false);
+      }
+    }
+  }, [uploaded, processed, uploadForm, setReviewState, setIsDataUnsaved]);
 
   const { palette } = useTheme();
 
@@ -508,15 +603,52 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     '--LinearProgress-progressThickness': '36px'
                   }}
                 >
-                  <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
-                    LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
-                    {totalChunks - completedChunks} remaining
-                    <br />
-                    Estimated time to completion: {etc}
-                  </Typography>
+                  {completedChunks < totalChunks ? (
+                    <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                      LOADING: {`${((completedChunks / totalChunks) * 100).toFixed(2)}%`} {' | '} {completedChunks} completed out of {totalChunks} {' | '}
+                      {totalChunks - completedChunks} remaining
+                      <br />
+                      Estimated time to completion: {etc}
+                    </Typography>
+                  ) : (
+                    <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                      COMPLETED
+                    </Typography>
+                  )}
                 </LinearProgress>
+                <Divider sx={{ my: 1 }} />
+                {uploadForm === 'measurements' && totalBatches !== 0 && (
+                  <>
+                    <Typography level={'title-md'} gutterBottom>
+                      Total Processing Progress - Completed: {processedChunks}
+                    </Typography>
+                    <LinearProgress
+                      determinate
+                      variant="plain"
+                      color="primary"
+                      thickness={48}
+                      value={(processedChunks / totalBatches) * 100}
+                      sx={{
+                        '--LinearProgress-radius': '0px',
+                        '--LinearProgress-progressThickness': '36px'
+                      }}
+                    >
+                      {processedChunks < totalBatches ? (
+                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                          LOADING: {`${((processedChunks / totalBatches) * 100).toFixed(2)}%`} {' | '} {processedChunks} completed out of {totalBatches} {' | '}
+                          {totalBatches - processedChunks} remaining
+                          <br />
+                          Estimated time to completion: {processETC}
+                        </Typography>
+                      ) : (
+                        <Typography level="body-xs" sx={{ fontWeight: 'xl', mixBlendMode: 'difference' }}>
+                          PROCESSING COMPLETED
+                        </Typography>
+                      )}
+                    </LinearProgress>
+                  </>
+                )}
                 <Divider sx={{ my: 2 }} />
-
                 <Box
                   sx={{
                     display: 'flex',
@@ -531,16 +663,30 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   <Typography level="title-lg" fontWeight="bold" sx={{ mb: 2 }}>
                     Please do not exit this page! The upload will take some time to complete.
                   </Typography>
-                  <DotLottieReact
-                    src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
-                    loop
-                    autoplay
-                    themeId={palette.mode === 'dark' ? 'Dark' : undefined}
-                    style={{
-                      width: '25%',
-                      height: '25%'
-                    }}
-                  />
+                  {!uploaded && !processed && (
+                    <DotLottieReact
+                      src="https://lottie.host/61a4d60d-51b8-4603-8c31-3a0187b2ddc6/BYrv3qTBtA.lottie"
+                      loop
+                      autoplay
+                      themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                      style={{
+                        width: '40%',
+                        height: '40%'
+                      }}
+                    />
+                  )}
+                  {uploaded && !processed && (
+                    <DotLottieReact
+                      src="https://lottie.host/a63eade6-f7ba-4e21-8575-2b9597dfe741/6F8LYdqlaK.lottie"
+                      loop
+                      autoplay
+                      themeId={palette.mode === 'dark' ? 'Dark' : undefined}
+                      style={{
+                        width: '40%',
+                        height: '40%'
+                      }}
+                    />
+                  )}
                 </Box>
               </Box>
             )}

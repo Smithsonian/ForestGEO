@@ -1,20 +1,22 @@
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 import { SpecialProcessingProps } from '@/config/macros';
+import { CensusSpeciesResult } from '@/config/sqlrdsdefinitions/zones';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};
   for (const key in data) {
     if (data.hasOwnProperty(key)) {
-      cleanedData[key] = data[key] !== undefined && data[key] !== '' ? data[key] : null;
+      cleanedData[key] = data[key] !== undefined && data[key] !== '' ? data[key] : '';
     }
   }
   return cleanedData;
 }
 
 export async function processSpecies(props: Readonly<SpecialProcessingProps>): Promise<void> {
-  const { connectionManager, rowData, schema } = props;
+  const { connectionManager, rowData, schema, census } = props;
 
+  let createdSPID: number = 0;
   try {
     let familyID: number | undefined;
     if (rowData.family) {
@@ -31,15 +33,25 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
         SpeciesCode: rowData.spcode,
         SpeciesName: rowData.species,
         SubspeciesName: rowData.subspecies,
-        IDLevel: rowData.IDLevel,
+        IDLevel: rowData.idlevel,
         SpeciesAuthority: rowData.authority,
         SubspeciesAuthority: rowData.subauthority,
         GenusID: genusID
       };
 
       const cleanedSpeciesData = cleanInputData(speciesData);
-      await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID');
+      createdSPID = (await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID')).id;
     }
+    await handleUpsert<CensusSpeciesResult>(
+      connectionManager,
+      schema,
+      'censusspecies',
+      {
+        CensusID: census?.dateRanges[0].censusID,
+        SpeciesID: createdSPID
+      },
+      'CSID'
+    );
   } catch (error: any) {
     console.error('Upsert failed:', error.message);
     throw createError('Upsert failed', { error });

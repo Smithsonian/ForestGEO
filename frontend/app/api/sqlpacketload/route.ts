@@ -1,10 +1,16 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
+import { HTTPResponses, InsertUpdateProcessingProps, SpecialBulkProcessingProps } from '@/config/macros';
 import { FileRow, FileRowSet } from '@/config/macros/formdetails';
 import { NextRequest, NextResponse } from 'next/server';
-import { Plot } from '@/config/sqlrdsdefinitions/zones';
+import { Plot, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { insertOrUpdate } from '@/components/processors/processorhelperfunctions';
+import { v4 } from 'uuid';
+import moment from 'moment/moment';
+import { buildBulkUpsertQuery } from '@/config/utils';
+import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
+import { FamilyResult } from '@/config/sqlrdsdefinitions/taxonomies';
+import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -31,62 +37,173 @@ export async function POST(request: NextRequest) {
   const fileName: string = body.fileName;
   let transactionID: string | undefined = undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
-
   const connectionManager = ConnectionManager.getInstance();
-  transactionID = await connectionManager.beginTransaction();
-  console.log('sqlpacketload: transation started.');
-  let rowId = '';
-  try {
-    for (rowId in fileRowSet) {
-      const row = fileRowSet[rowId];
-      const props: InsertUpdateProcessingProps = {
-        schema,
-        connectionManager: connectionManager,
-        formType,
-        rowData: row,
-        plot,
-        census,
-        fullName: user
-      };
-      try {
-        await insertOrUpdate(props);
-      } catch (e: any) {
-        console.error(`Error processing row for file ${fileName}:`, e.message);
-        failingRows.add(row); // saving this for future processing
+  if (formType === 'measurements') {
+    const batchID = v4();
+    const placeholders = Object.values(fileRowSet ?? [])
+      .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .join(', ');
+    const values = Object.values(fileRowSet ?? []).flatMap(row => {
+      // const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
+      const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = row;
+      const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
+      return [
+        fileName,
+        batchID,
+        plot?.plotID ?? -1,
+        census?.dateRanges[0].censusID ?? -1,
+        tag,
+        stemtag,
+        spcode,
+        quadrat,
+        lx,
+        ly,
+        dbh,
+        hom,
+        formattedDate,
+        codes
+      ];
+    });
+    transactionID = await connectionManager.beginTransaction();
+    try {
+      const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements 
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
+      VALUES ${placeholders}`;
+      await connectionManager.executeQuery(insertSQL, values);
+      await connectionManager.commitTransaction(transactionID);
+      console.log(
+        await connectionManager.executeQuery(`SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [fileName, batchID])
+      );
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: `Bulk insert to SQL completed`,
+          failingRows: Array.from(failingRows)
+        }),
+        { status: HTTPResponses.OK }
+      );
+    } catch (e: any) {
+      await connectionManager.rollbackTransaction(transactionID);
+      console.error(`Error processing file ${fileName}:`, e.message);
+      return new NextResponse(
+        JSON.stringify({
+          responseMessage: `Error processing file ${fileName}: ${e.message}`,
+          failingRows: Array.from(failingRows)
+        }),
+        { status: HTTPResponses.INTERNAL_SERVER_ERROR }
+      );
+    }
+  } else {
+    transactionID = await connectionManager.beginTransaction();
+    console.log('sqlpacketload: transaction started.');
+    let rowId = '';
+    try {
+      if (formType === 'quadrats') {
+        const bulkQuadrats = Object.values(fileRowSet).map(
+          row =>
+            ({
+              QuadratName: row.quadrat,
+              PlotID: plot?.plotID,
+              StartX: row.startx,
+              StartY: row.starty,
+              DimensionX: row.dimx,
+              DimensionY: row.dimy,
+              Area: row.area,
+              QuadratShape: row.quadratshape
+            }) as Partial<QuadratResult>
+        );
+        const { sql, params } = buildBulkUpsertQuery<QuadratResult>(schema, 'quadrats', bulkQuadrats, 'QuadratID');
+        await connectionManager.executeQuery(sql, params);
+
+        // want to immediately connect these in the censusquadrats table
+        const query = `
+        INSERT INTO ${schema}.censusquadrats (CensusID, QuadratID)
+        SELECT ?, q.QuadratID
+        from ${schema}.quadrats q 
+        LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
+        WHERE q.PlotID = ? AND cq.CQID IS NULL`;
+        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, plot?.plotID]);
+      } else if (formType === 'attributes') {
+        const bulkAttributes = Object.values(fileRowSet).map(
+          row =>
+            ({
+              Code: row.code,
+              Description: row.description,
+              Status: row.status
+            }) as Partial<AttributesResult>
+        );
+        const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
+        await connectionManager.executeQuery(sql, params);
+
+        // need to associate these with census now (unregistered)
+        const query = `INSERT INTO ${schema}.censusattributes (CensusID, Code) 
+        SELECT ?, a.Code 
+        FROM ${schema}.attributes a
+        LEFT JOIN ${schema}.censusattributes ca ON ca.Code = a.Code
+        WHERE ca.CAID is null`;
+        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID]);
+      } else if (formType === 'species') {
+        const bulkProps: SpecialBulkProcessingProps = {
+          schema,
+          connectionManager,
+          rowDataSet: fileRowSet,
+          census: census
+        };
+
+        await processBulkSpecies(bulkProps);
+      } else {
+        for (rowId in fileRowSet) {
+          const row = fileRowSet[rowId];
+          const props: InsertUpdateProcessingProps = {
+            schema,
+            connectionManager: connectionManager,
+            formType,
+            rowData: row,
+            plot,
+            census,
+            fullName: user
+          };
+          try {
+            await insertOrUpdate(props);
+          } catch (e: any) {
+            console.error(`Error processing row for file ${fileName}:`, e.message);
+            failingRows.add(row); // saving this for future processing
+          }
+        }
+      }
+
+      await connectionManager.commitTransaction(transactionID ?? '');
+      console.log('sqlpacketload: transaction committed');
+    } catch (error: any) {
+      await connectionManager.rollbackTransaction(transactionID ?? '');
+      console.log('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
+      console.log(`Row ${rowId} failed processing:`, error);
+      if (error instanceof Error) {
+        console.error(`Error processing row for file ${fileName}:`, error.message);
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: `Error processing row in file ${fileName}`,
+            error: error.message,
+            failingRows: Array.from(failingRows)
+          }),
+          { status: HTTPResponses.SERVICE_UNAVAILABLE }
+        );
+      } else {
+        console.error('Unknown error processing row:', error);
+        return new NextResponse(
+          JSON.stringify({
+            responseMessage: `Unknown processing error at row, in file ${fileName}`,
+            failingRows: Array.from(failingRows)
+          }),
+          { status: HTTPResponses.SERVICE_UNAVAILABLE }
+        );
       }
     }
-    await connectionManager.commitTransaction(transactionID ?? '');
-    console.log('sqlpacketload: transaction committed');
-  } catch (error: any) {
-    await connectionManager.rollbackTransaction(transactionID ?? '');
-    console.log('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
-    console.log(`Row ${rowId} failed processing:`, error);
-    if (error instanceof Error) {
-      console.error(`Error processing row for file ${fileName}:`, error.message);
-      return new NextResponse(
-        JSON.stringify({
-          responseMessage: `Error processing row in file ${fileName}`,
-          error: error.message,
-          failingRows: Array.from(failingRows)
-        }),
-        { status: HTTPResponses.SERVICE_UNAVAILABLE }
-      );
-    } else {
-      console.error('Unknown error processing row:', error);
-      return new NextResponse(
-        JSON.stringify({
-          responseMessage: `Unknown processing error at row, in file ${fileName}`,
-          failingRows: Array.from(failingRows)
-        }),
-        { status: HTTPResponses.SERVICE_UNAVAILABLE }
-      );
-    }
+    return new NextResponse(
+      JSON.stringify({
+        responseMessage: `Bulk insert to SQL completed`,
+        failingRows: Array.from(failingRows)
+      }),
+      { status: HTTPResponses.OK }
+    );
   }
-  return new NextResponse(
-    JSON.stringify({
-      responseMessage: `Bulk insert to SQL completed`,
-      failingRows: Array.from(failingRows)
-    }),
-    { status: HTTPResponses.OK }
-  );
 }

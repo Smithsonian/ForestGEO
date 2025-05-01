@@ -122,28 +122,14 @@ export interface StemTaxonomiesViewRDS {
 }
 
 export interface ViewFullTableRDS {
-  // datagrid
   id?: number;
-  // IDs
   coreMeasurementID?: number;
+  measurementDate?: any;
+  measuredDBH?: number;
+  measuredHOM?: number;
+  description?: string;
+  isValidated?: boolean;
   plotID?: number;
-  censusID?: number;
-  quadratID?: number;
-  treeID?: number;
-  stemID?: number;
-  personnelID?: number;
-  speciesID?: number;
-  genusID?: number;
-  familyID?: number;
-
-  // coremeasurements
-  measurementDate: any;
-  measuredDBH: number;
-  measuredHOM: number;
-  description: string;
-  isValidated: boolean;
-
-  // plots
   plotName?: string;
   locationName?: string;
   countryName?: string;
@@ -155,19 +141,17 @@ export interface ViewFullTableRDS {
   plotGlobalZ?: number;
   plotShape?: string;
   plotDescription?: string;
-  defaultDimensionUnits?: string;
-  defaultCoordinateUnits?: string;
-  defaultAreaUnits?: string;
-  defaultDBHUnits?: string;
-  defaultHOMUnits?: string;
-
-  // census
+  plotDefaultDimensionUnits?: string;
+  plotDefaultCoordinateUnits?: string;
+  plotDefaultAreaUnits?: string;
+  plotDefaultDBHUnits?: string;
+  plotDefaultHOMUnits?: string;
+  censusID?: number;
   censusStartDate?: any;
   censusEndDate?: any;
   censusDescription?: string;
   plotCensusNumber?: number;
-
-  // quadrats
+  quadratID?: number;
   quadratName?: string;
   quadratDimensionX?: number;
   quadratDimensionY?: number;
@@ -175,40 +159,25 @@ export interface ViewFullTableRDS {
   quadratStartX?: number;
   quadratStartY?: number;
   quadratShape?: string;
-
-  // trees
+  treeID?: number;
   treeTag?: string;
-
-  // stems
+  stemID?: number;
   stemTag?: string;
   stemLocalX?: number;
   stemLocalY?: number;
-
-  // personnel
-  firstName?: string;
-  lastName?: string;
-
-  // roles
-  personnelRoles?: string;
-
-  // species
+  speciesID?: number;
   speciesCode?: string;
   speciesName?: string;
   subspeciesName?: string;
   subspeciesAuthority?: string;
-  idLevel?: string;
-
-  // genus
+  speciesIDLevel?: string;
+  genusID?: number;
   genus?: string;
   genusAuthority?: string;
-
-  // family
+  familyID?: number;
   family?: string;
-
-  // attributes
-  attributeCode?: string;
-  attributeDescription?: string;
-  attributeStatus?: string;
+  attributes?: string;
+  userDefinedFields?: string;
 }
 
 export type ViewFullTableResult = ResultType<ViewFullTableRDS>;
