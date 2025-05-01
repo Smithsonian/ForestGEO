@@ -43,4 +43,42 @@ This app operates along the following **core concepts**:
 3. **Census**: A census is a **date range** denoting a distinct time period where data was collected in the **Plot**
 
 With this in mind, you will need to create a census before you can begin entering data. After opening the Census
-dropdown, click on the Add New Census button to open the Census Creation popup:
+dropdown, click on the Add New Census button to open the Census Creation/Rollover popup:
+![add-new-census.png](add-new-census.png) {style="inline"}
+
+#### Census Creation/Rollover Popup
+
+![rollover-modal.png](rollover-modal.png)
+
+This popup allows you to create a new census and further offers some additional options to simplify the new census
+creation process. If you're creating a new census, but it **isn't the first census**, then you can use the Rollover
+dropdowns for each of the core data types to automatically copy over data from a previous census that hasn't changed.
+
+> When creating a new (**first**) census, please select `Confirm No Rollover` for each of the data types before clicking
+> the Confirm button.
+
+You must **either** confirm no roll over **or** select a prior census to choose from for each of the main data types.
+Additionally, you can further customize the number of rows from the selected census to roll over by pressing the
+Customize button. This will open a grid display allowing you to select/deselect rows.
+
+Creating a new census will also trigger a selection reset. Please re-select your prior selections, and you should be
+able to see your new census displayed.
+
+#### Understand the Data Types
+
+There are **four** core data types that are required before you can record measurements for a census. They are:
+
+- **Stem Codes**: A list of shorthand codes designating attributes that can assigned to a tree/stem object.
+- **Personnel**: A list of personnel working on the census. Additionally, you can add/designate roles to each user to
+  better denote how personnel are distributed job-wise across the census.
+- **Quadrats**: A breakdown of the plot into smaller area segments.
+- **Species**: A list of species found in the plot. Each species is assigned a shorthand **Species Code** to allow rapid
+  assignment when actively recording statistics in the field.
+
+#### Deleting a Census?
+
+If your permissions allow it, you may be able to highlight and click on a **Trashcan** icon along the **latest** census.
+Clicking on this will delete the census in question.
+
+> You won't be able to delete a census if it's NOT the latest census!
+
