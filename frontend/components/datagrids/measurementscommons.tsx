@@ -78,6 +78,7 @@ import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } f
 import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { debounce, EditToolbar, ExtendedGridFilterModel, VisibleFilter } from '../client/datagridelements';
+import { loadSelectableOptions } from '@/components/client/clientmacros';
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -203,47 +204,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }, [refresh]);
 
   useEffect(() => {
-    async function reloadAttributes() {
-      const response = await fetch(`/api/fetchall/attributes?schema=${currentSite?.schemaName ?? ''}`);
-      const data = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes').mapData(await response.json());
-      setSelectableAttributes(data.map(i => i.code).filter((code): code is string => code !== undefined));
-      setReloadAttrs(false);
-      const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
-        .mapData(await (await fetch(`/api/fetchall/trees?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.treeTag)
-        .filter((code): code is string => code !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
-        .mapData(await (await fetch(`/api/fetchall/stems?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.stemTag)
-        .filter((code): code is string => code !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const quadOpts = MapperFactory.getMapper<QuadratRDS, QuadratResult>('quadrats')
-        .mapData(
-          await (
-            await fetch(`/api/fetchall/quadrats/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
-          ).json()
-        )
-        .map(i => i.quadratName)
-        .filter((code): code is string => code !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
-        .mapData(await (await fetch(`/api/fetchall/species?schema=${currentSite?.schemaName ?? ''}`)).json())
-        .map(i => i.speciesCode)
-        .filter((code): code is string => code !== undefined)
-        .sort((a, b) => a.localeCompare(b));
-      setSelectableOpts(prev => {
-        return {
-          ...prev,
-          treeTag: tagOpts,
-          stemTag: stemOpts,
-          quadratName: quadOpts,
-          speciesCode: specOpts
-        };
-      });
-    }
-
-    reloadAttributes().catch(console.error);
+    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(console.error);
   }, []);
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
@@ -1185,38 +1146,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         }}
       >
         <Box sx={{ width: '100%', flexDirection: 'column' }}>
-          <Stack direction={'row'} justifyContent="space-between">
-            <Stack direction="row" spacing={2}>
-              <Typography>
-                <Checkbox
-                  checked={showErrorRows}
-                  onChange={event => setShowErrorRows(event.target.checked)}
-                  label={`Show rows failing validation: (${errorCount})`}
-                />
-              </Typography>
-              <Typography>
-                <Checkbox
-                  checked={showValidRows}
-                  onChange={event => setShowValidRows(event.target.checked)}
-                  label={`Show rows passing validation: (${validCount})`}
-                />
-              </Typography>
-              <Typography>
-                <Checkbox
-                  checked={showPendingRows}
-                  onChange={event => setShowPendingRows(event.target.checked)}
-                  label={`Show rows pending validation: (${pendingCount})`}
-                />
-              </Typography>
-              <Typography>
-                <Checkbox
-                  checked={hidingEmpty}
-                  onChange={event => setHidingEmpty(event.target.checked)}
-                  label={<strong>{hidingEmpty ? `Hiding Empty Columns` : `Hide Empty Columns`}</strong>}
-                />
-              </Typography>
-            </Stack>
-          </Stack>
           <StyledDataGrid
             apiRef={apiRef}
             sx={{ width: '100%' }}

@@ -19,17 +19,4 @@ Before you're ready to start using ForestGEO, you'll need to make sure that you 
 
 > Missing one of these? Please contact an administrator to request access!
 
-## Logging In
-
-Once you've completed this process, use this link to access the **Production**
-website: [Production URL](https://forestgeo-livesite.azurewebsites.net/)
-
-> I keep hearing about a **development website**—what's that?
->
-> > The development site is used to test features or fixes that have been completed locally but
-> > not yet tested in the Azure environment.
-> > It's not intended for use by users, and is intended
-> > to act as a testing environment.
-> > {style="warning"}
-
-**Note:** Make sure you have at least one site registered to your account in-server.
+## Getting Started with the

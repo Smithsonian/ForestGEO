@@ -27,7 +27,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/joy';
-import { useState } from 'react';
+import { ChangeEvent, useState } from 'react';
 import { AccessibilityNew, BugReport, Build, Error as ErrorIcon, Event, GitHub, Info, Person } from '@mui/icons-material';
 import { Octokit } from 'octokit';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -147,19 +147,18 @@ ${pathname}
 - **Census**: ${currentCensus ? currentCensus.plotCensusNumber : 'Not selected'}  
 `;
     // handle the issue submission logic here
-    const results = await octokit.request(`POST /repos/${owner}/${repo}/issues`, {
-      owner: owner,
-      repo: repo,
-      title: `APP-USER-GENERATED: Feedback Ticket Created for Issue Type: ${issueType}`,
+    const response = await octokit.request(`POST /repos/${owner}/${repo}/issues`, {
+      owner,
+      repo,
+      title: `APP-USER-GENERATED: Feedback Ticket: ${issueType}`,
       body: issueBody,
       labels: ['useridentifiedbug'],
-      assignees: ['siddheshraze'],
-      headers: {
-        'X-GitHub-Api-Version': '2022-11-28'
-      }
+      assignees: ['siddheshraze']
     });
-    if (results.status !== 201) throw new Error('Failed to create GitHub issue: ', results as any);
-    setCreatedIssue(results.data);
+    if (response.status !== 201) {
+      throw new Error('Failed to create GitHub issue');
+    }
+    setCreatedIssue(response.data);
     setLoading(false);
   }
 
@@ -253,7 +252,7 @@ ${pathname}
                       aria-labelledby="issue-type-selection"
                       name="issue-type"
                       value={issueType}
-                      onChange={(event: React.ChangeEvent<HTMLInputElement>) => setIssueType(event.target.value as IssueType)}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setIssueType(event.target.value as IssueType)}
                       sx={{
                         minHeight: 48,
                         padding: '4px',
@@ -331,15 +330,15 @@ ${pathname}
             </>
           )}
           {!createdIssue && loading && (
-            <>
+            <Box>
               <DialogTitle sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>Submitting issue...</DialogTitle>
               <DialogContent>
                 <LinearProgress variant="soft" />
               </DialogContent>
-            </>
+            </Box>
           )}
           {createdIssue && (
-            <>
+            <Box>
               <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Stack direction={'row'} justifyContent={'flex-start'} alignItems={'center'}>
                   <GitHub sx={{ fontSize: '2rem' }} />
@@ -363,33 +362,13 @@ ${pathname}
                   <Card variant="plain" size="sm">
                     <CardContent sx={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
                       <Tooltip title="Click here to see your new issue!">
-                        <Chip
-                          variant="soft"
-                          color={'primary'}
-                          slotProps={{
-                            action: {
-                              component: 'a',
-                              href: createdIssue.headers['location'].replace('api.github.com/repos', 'github.com'),
-                              target: '_blank',
-                              rel: 'noopener noreferrer'
-                            }
-                          }}
-                        >
-                          {createdIssue.headers['location'].replace('api.github.com/repos', 'github.com')}
+                        <Chip variant="soft" color="primary" component="a" href={createdIssue.html_url} target="_blank" rel="noopener noreferrer">
+                          View Issue
                         </Chip>
                       </Tooltip>
                     </CardContent>
                   </Card>
                 </Stack>
-                <Divider sx={{ my: '10px' }} />
-                <Card variant="plain">
-                  <CardContent>
-                    <Typography level="title-lg" sx={{ marginBottom: 1 }}>
-                      Headers
-                    </Typography>
-                    <Stack spacing={1}>{formatHeaders(createdIssue.headers)}</Stack>
-                  </CardContent>
-                </Card>
                 <Divider sx={{ my: '10px' }} />
                 <Card variant="plain">
                   <CardContent>
@@ -402,7 +381,7 @@ ${pathname}
                           Title:{' '}
                         </Typography>
                         <Chip color="primary" variant="outlined">
-                          {createdIssue.data.title}
+                          {createdIssue.title}
                         </Chip>
                       </Stack>
                     </Box>
@@ -462,7 +441,7 @@ ${pathname}
                               )
                             }}
                           >
-                            {createdIssue.data.body}
+                            {createdIssue.body}
                           </ReactMarkdown>
                         </CardContent>
                       </Card>
@@ -470,7 +449,7 @@ ${pathname}
                     <Typography level="body-md" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Event />
                       <span>
-                        <strong>Created At:</strong> {new Date(createdIssue.data.created_at).toLocaleString()}
+                        <strong>Created At:</strong> {new Date(createdIssue.created_at).toLocaleString()}
                       </span>
                     </Typography>
                     <Typography level="body-md" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -489,7 +468,7 @@ ${pathname}
                   </Button>
                 </Stack>
               </DialogActions>
-            </>
+            </Box>
           )}
         </ModalDialog>
       </ModalOverflow>

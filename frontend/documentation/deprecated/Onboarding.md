@@ -16,3 +16,7 @@ Before you can log into the application, you must complete the following steps:
 5. At least one site should be assigned to your account.
 
 Once this process is completed, you should be able to successfully log in to the website!
+
+## Setting Up Your Site
+
+In order to get your site up and running, you'll need to

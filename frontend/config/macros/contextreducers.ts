@@ -1,6 +1,6 @@
 // contextreducers.ts
 import { Dispatch } from 'react';
-import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
+import { Plot, QuadratRDS, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { submitCookie } from '@/app/actions/cookiemanager';
 
@@ -13,6 +13,8 @@ export function createEnhancedDispatch<T>(dispatch: Dispatch<LoadAction<T>>, act
       if (actionType === 'site') await submitCookie('schema', (payload[actionType] as unknown as Site)?.schemaName ?? '');
       else if (actionType === 'plot') await submitCookie('plotID', (payload[actionType] as unknown as Plot)?.plotID?.toString() ?? '');
       else if (actionType === 'census') await submitCookie('censusID', (payload[actionType] as unknown as OrgCensus)?.dateRanges[0].censusID?.toString() ?? '');
+      else if (actionType === 'quadrat') await submitCookie('quadratID', (payload[actionType] as unknown as QuadratRDS)?.quadratID?.toString() ?? '');
+      else if (actionType === 'censusList') await submitCookie('censusList', JSON.stringify(payload[actionType] as unknown as OrgCensus[]));
     }
     dispatch({ type: actionType, payload });
   };
