@@ -166,7 +166,7 @@ jobs:
 
             • Commit SHA: `${{ github.sha }}`
             • Commit message:
-              > ${{ github.event.head_commit.message }}
+              > ${{ steps.collect_messages.outputs.messages }}
 
             Cheers,
             GitHub Actions
