@@ -10,5 +10,7 @@
     <toc-element toc-title="Onboarding &amp; Getting Started">
         <toc-element topic="Getting-Started.md"/>
         <toc-element topic="Navigation-Dashboard-Tools.md"/>
+        <toc-element topic="Adding-Historical-Data.md"/>
+        <toc-element topic="Upload-Process-Breakdown.md"/>
     </toc-element>
 </instance-profile>

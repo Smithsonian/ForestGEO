@@ -22,4 +22,7 @@ This section contains interfaces for reviewing the following:
 1. Measurements taken in the current census (**View Data**)
 2. Post-Census Statistics
 3. Recent Changes
-4. 
+4. Uploaded Files
+5. View All Historical Data
+6. Validations
+

@@ -27,4 +27,8 @@
         </description>
         <accepts>Getting-Started.html</accepts>
     </rule>
+    <rule id="7b07ce55">
+        <description>Created after removal of "Adding Data" from ForestGEO Application Documentation</description>
+        <accepts>Adding-Data.html</accepts>
+    </rule>
 </rules>
