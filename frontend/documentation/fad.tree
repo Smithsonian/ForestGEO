@@ -12,5 +12,6 @@
         <toc-element topic="Navigation-Dashboard-Tools.md"/>
         <toc-element topic="Adding-Historical-Data.md"/>
         <toc-element topic="Upload-Process-Breakdown.md"/>
+        <toc-element topic="Understanding-SAPD-Datagrids.md"/>
     </toc-element>
 </instance-profile>
