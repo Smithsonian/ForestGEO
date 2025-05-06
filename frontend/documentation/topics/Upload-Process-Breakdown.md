@@ -16,7 +16,7 @@ Before you dive deeper into the upload cycle, there're some important points to 
 
 Here is the first view you'll see after clicking on the Upload button:
 
-!['upload_stage_1'](uploadstage1.png)
+!['upload_stage_1'](/images/uploadstage1.png)
 
 > If you click on the **Understanding the Headers** text, an accordion should dropdown, showing you
 > the details of the headers required for the form type
@@ -26,7 +26,7 @@ Here is the first view you'll see after clicking on the Upload button:
 
 Here's what the headers accordion will look like when uploading an `attributes` form:
 
-![stemcodesheaders.png](stemcodesheaders.png)
+![stemcodesheaders.png](/images/stemcodesheaders.png)
 
 ## Stage 2: Uploading View
 
@@ -44,7 +44,7 @@ Please navigate to the **Recently Uploaded** page after your upload completes, a
 
 After the upload completes, you'll be directed to this view:
 
-![upload-complete-view.png](upload-complete-view.png)
+![upload-complete-view.png](/images/upload-complete-view.png)
 
 ### Understanding the Preprocessing View
 
