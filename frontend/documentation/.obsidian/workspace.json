@@ -11,14 +11,10 @@
             "id": "d6efe90c6a73445d",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "topics/Upload-Process-Breakdown.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "Upload-Process-Breakdown"
+              "title": "New tab"
             }
           }
         ]
@@ -172,6 +168,10 @@
   "active": "d6efe90c6a73445d",
   "lastOpenFiles": [
     "topics/Upload-Process-Breakdown.md",
+    "topics/Adding-Historical-Data.md",
+    "images/uploadstage1.png",
+    "images/upload-complete-view.png",
+    "images/stemcodesheaders.png",
     "writerside.cfg",
     "v.list",
     "topics/starter-topic.md",
@@ -184,9 +184,6 @@
     "images/login screen.png",
     "images/logged in screen.png",
     "images/census dropdown.png",
-    "images/census 3.png",
-    "images/census 3 older.png",
-    "images/census 3 newer.png",
     "fad.tree",
     "c.list",
     "Welcome.md",

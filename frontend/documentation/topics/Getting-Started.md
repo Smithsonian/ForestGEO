@@ -10,26 +10,38 @@ Before you can log in, you must complete the following (if you haven't already):
   Computing tenant. From here, your account will be added to the ForestGEO app server, and you should be able to log in
   once then.
 
-> Currently, this is a stopgap measure. We are working on a solution to allow for ForestGEO users to log in with
-> their SI credentials.
+> Currently, this is a stopgap measure. We are working on a solution to allow for ForestGEO users to log in with their SI credentials.
 
-## Using the Application
+
+## Submitting Help Tickets
+
+In the event that you run into issues of any kind, please submit a **help ticket** by clicking on the `question mark` icon in the bottom right of the screen!
+
+![highlighted github feedback button](/images/github-feedback-button.jpg)
+
+Clicking on this button will open a form allowing you to explain the issue you're encountering!
+
+![github feedback form](/images/github-feedback-form.png)
+
+> Completing this will create a GitHub Issue ticket for further review!
+
+
 
 ### Customizing Your Plot
 
 After you log in, you'll be redirected to the dashboard. A sidebar on the left side of the window should appear, with
 dropdowns to select a **Site**. It should look something like this:
-![site-dropdown.png](site-dropdown.png){ style="inline"}
+![site-dropdown.png](/images/site-dropdown.png){ style="inline"}
 
 Once you've selected a site, you'll be able to select a **Plot**, looking something like this:
-![plot-dropdown.png](plot-dropdown.png) {style="inline"}
+![plot-dropdown.png](/images/plot-dropdown.png) {style="inline"}
 
 > Please note - the plot you'll first see is a **placeholder**! Please use the ellipsis button to open the customization
-> popup: ![plot-edit-button.png](plot-edit-button.png) {style="inline"}
+> popup: ![plot-edit-button.png](/images/plot-edit-button.png) {style="inline"}
 
 #### Plot Customization Popup
 
-![plot-custom.png](plot-custom.png)
+![plot-custom.png](/images/plot-custom.png)
 
 Use this to customize your plot! After saving, your selections will reset and the site will update itself. Please ensure
 your edits are visible when you attempt to select the plot again!
@@ -44,11 +56,11 @@ This app operates along the following **core concepts**:
 
 With this in mind, you will need to create a census before you can begin entering data. After opening the Census
 dropdown, click on the Add New Census button to open the Census Creation/Rollover popup:
-![add-new-census.png](add-new-census.png) {style="inline"}
+![add-new-census.png](/images/add-new-census.png) {style="inline"}
 
 #### Census Creation/Rollover Popup
 
-![rollover-modal.png](rollover-modal.png)
+![rollover-modal.png](/images/rollover-modal.png)
 
 This popup allows you to create a new census and further offers some additional options to simplify the new census
 creation process. If you're creating a new census, but it **isn't the first census**, then you can use the Rollover
@@ -81,4 +93,3 @@ If your permissions allow it, you may be able to highlight and click on a **Tras
 Clicking on this will delete the census in question.
 
 > You won't be able to delete a census if it's NOT the latest census!
-
