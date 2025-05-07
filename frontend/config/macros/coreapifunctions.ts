@@ -235,14 +235,17 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
         let failedTrimmed, _ignored;
+        let plotTrimmed, _ignored2;
+        let dataToUpdate;
 
         if (dataType === 'failedmeasurements') {
           ({ Hash_ID: _ignored, ...failedTrimmed } = newRowData);
           failedTrimmed['FailureReasons'] = '';
-        }
-
-        // Use failedTrimmed for failedmeasurements, otherwise use remainingProperties
-        const dataToUpdate = dataType === 'failedmeasurements' ? failedTrimmed : remainingProperties;
+          dataToUpdate = failedTrimmed;
+        } else if (dataType === 'plots') {
+          ({ NumQuadrats: _ignored2, ...plotTrimmed } = newRowData);
+          dataToUpdate = plotTrimmed;
+        } else dataToUpdate = remainingProperties;
 
         const updateQuery = format(
           `UPDATE ??
