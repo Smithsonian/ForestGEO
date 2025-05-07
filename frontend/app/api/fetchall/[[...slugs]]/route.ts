@@ -117,7 +117,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       const query = `
         SELECT p.*, COUNT(q.QuadratID) AS NumQuadrats
         FROM ${schema}.plots p 
-        JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
+        LEFT JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'census') {

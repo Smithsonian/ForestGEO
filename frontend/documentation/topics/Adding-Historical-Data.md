@@ -6,7 +6,7 @@ The first thing you'll have to do when logging into the app for the first time i
 
 The app is designed to accept file uploads (called `forms`) in either CSV or TSV format.
 
-A "complete" census is comprised of the following data types (forms):
+A "complete" census comprises the following data types (forms):
 
 - attributes
 - personnel

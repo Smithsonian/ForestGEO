@@ -11,7 +11,12 @@
         <toc-element topic="Getting-Started.md"/>
         <toc-element topic="Navigation-Dashboard-Tools.md"/>
         <toc-element topic="Adding-Historical-Data.md"/>
+    </toc-element>
+    <toc-element toc-title="Walking Through the Application">
         <toc-element topic="Upload-Process-Breakdown.md"/>
         <toc-element topic="Understanding-SAPD-Datagrids.md"/>
+    </toc-element>
+    <toc-element toc-title="Completing a Census">
+        <toc-element topic="Unlocking-the-View-Data-Page.md"/>
     </toc-element>
 </instance-profile>
