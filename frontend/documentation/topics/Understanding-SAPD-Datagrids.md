@@ -46,7 +46,7 @@ The column dropdown is fairly straightforward, and will allow you to choose the 
 
 > The columns selectable include **metadata columns**! They are not used elsewhere in the application, so please keep
 > that in mind.
-{style="warning"}
+> {style="warning"}
 
 #### Filter Dropdown:
 
@@ -55,7 +55,7 @@ The filter dropdown presents specific, customization filtration system for you t
 ![stem codes filter dropdown](stem-codes-filter-dropdown.png) {width="350"}
 
 > Each filter will only trigger after all **three** categories of the filter row are filled!
-{style="note"}
+> {style="note"}
 
 ### Search All Fields & Refresh Button
 
@@ -68,7 +68,7 @@ The `Refresh` button will trigger a **local** reload of the grid view.
 
 > This distinction is irrelevant until working with the View Data grid view. Please refer to it to take note of the
 > difference between a `local` and `global` reload.
-{style="warning"}
+> {style="warning"}
 
 ### Data Import/Export
 
@@ -121,5 +121,4 @@ Quadrats:
 
 Species List:
 
-- RESET Table: click this to reset the table entirely! 
-
+- RESET Table: click this to reset the table entirely!

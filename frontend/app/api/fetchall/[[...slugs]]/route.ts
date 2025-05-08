@@ -110,7 +110,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       JOIN ${schema}.census c ON c.CensusID = cq.CensusID and c.IsActive IS TRUE
       WHERE t.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
-    } else if (dataType === 'roles') {
+    } else if (dataType === 'roles' || dataType === 'postvalidationqueries') {
       const query = `SELECT * FROM ${schema}.${dataType}`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'plots') {
