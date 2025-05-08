@@ -76,7 +76,7 @@ The `species` form accepts the following headers:
 You can upload `species` forms by navigating to the Stem & Plot Details > Species List page and clicking on the Upload
 File icon button.
 
----- 
+---
 
 ### The `measurements` Form
 

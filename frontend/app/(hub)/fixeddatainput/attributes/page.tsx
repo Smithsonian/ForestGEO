@@ -1,11 +1,11 @@
-import RenderGridExplanations from '@/components/client/rendergridexplanations';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 import IsolatedAttributesDataGrid from '@/components/datagrids/applications/isolated/isolatedattributesdatagrid';
 import { DatagridType } from '@/config/macros/formdetails';
 
 export default function AttributesPage() {
   return (
     <>
-      <RenderGridExplanations datagridType={DatagridType.attributes} />
+      <RenderGridFormExplanations datagridType={DatagridType.attributes} />
       <IsolatedAttributesDataGrid />
     </>
   );

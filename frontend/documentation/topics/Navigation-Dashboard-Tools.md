@@ -26,4 +26,3 @@ This section contains interfaces for reviewing the following:
 4. Uploaded Files
 5. View All Historical Data
 6. Validations
-
