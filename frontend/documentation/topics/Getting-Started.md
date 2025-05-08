@@ -25,7 +25,7 @@ Clicking on this button will open a form allowing you to explain the issue you'r
 ![GitHub feedback form](github-feedback-form.png)
 
 > Completing this will create a GitHub Issue ticket for further review!
-{style="note"}
+> {style="note"}
 
 ### Customizing Your Plot
 

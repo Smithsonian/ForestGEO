@@ -2,12 +2,11 @@
 'use client';
 import { GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import React, { useEffect, useState } from 'react';
-import { useSession } from 'next-auth/react';
 import { Box, Chip, IconButton, Modal, ModalDialog, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
 import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
-import { useOrgCensusContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import CloseIcon from '@mui/icons-material/Close';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
@@ -16,11 +15,9 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 
 export default function IsolatedPersonnelDataGrid() {
   const currentSite = useSiteContext();
-  const currentCensus = useOrgCensusContext();
   const initialPersonnelRDSRow: PersonnelRDS = {
     id: 0,
     personnelID: 0,
-    censusID: currentCensus?.dateRanges[0]?.censusID,
     firstName: '',
     lastName: '',
     roleID: 0
@@ -30,7 +27,6 @@ export default function IsolatedPersonnelDataGrid() {
   const [isManualEntryFormOpen, setIsManualEntryFormOpen] = useState(false);
   const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
   const [roles, setRoles] = useState<RoleRDS[]>([]);
-  const { data: session } = useSession();
 
   useEffect(() => {
     async function fetchRoles() {
@@ -129,8 +125,7 @@ export default function IsolatedPersonnelDataGrid() {
         dynamicButtons={[
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
-          { label: 'View Quadrat Personnel', onClick: () => console.log('View Quadrat Personnel clicked') },
-          { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true) }
+          { label: 'Edit Roles', onClick: () => setIsRolesModalOpen(true), tooltip: 'Edit roles for personnel' }
         ]}
       />
     </>

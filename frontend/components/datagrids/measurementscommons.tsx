@@ -26,7 +26,6 @@ import Box from '@mui/joy/Box';
 import {
   Autocomplete,
   Button,
-  Checkbox,
   Chip,
   DialogActions,
   DialogContent,
@@ -74,8 +73,6 @@ import MapperFactory from '@/config/datamapper';
 import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import ValidationCore from '@/components/client/validationcore';
 import { ArrowRightAlt, CloudSync, GppGoodOutlined, SettingsBackupRestoreRounded } from '@mui/icons-material';
-import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { debounce, EditToolbar, ExtendedGridFilterModel, VisibleFilter } from '../client/datagridelements';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
@@ -1231,7 +1228,13 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             }}
             showToolbar
             getRowHeight={() => 'auto'}
-            getRowClassName={params => `treestemstate--${params.row.userDefinedFields.split(' ').join('')}`}
+            getRowClassName={params => {
+              try {
+                return `treestemstate--${params.row.userDefinedFields.split(' ').join('')}`;
+              } catch (e) {
+                return `treestemstate--null`;
+              }
+            }}
             isCellEditable={() => !locked}
           />
         </Box>

@@ -91,7 +91,7 @@ measurement row contains.
 As a quick review, the `measurements` data type specifies the following fields:
 
 | field   | explanation                                                | source table                 |
-|---------|------------------------------------------------------------|------------------------------|
+| ------- | ---------------------------------------------------------- | ---------------------------- |
 | tag     | the **tree's** tag (unique ID)                             | `trees`                      |
 | stemtag | the **stem's** tag (unique ID)                             | `stems`                      |
 | spcode  | the **species** code (unique ID)                           | `species`                    |
@@ -134,4 +134,3 @@ In addition to showing rows that were preemptively removed before the upload cyc
 review.
 
 > However, this will **not** be displayed within the failed row view shown during the upload cycle!
-

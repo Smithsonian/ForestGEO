@@ -398,7 +398,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
                     </Tooltip>
                   )
               )}
-              <Tooltip title={`Hide Empty Columns?`}>
+              <Tooltip title={hidingEmpty ? `Click to show empty columns!` : `Click to hide empty columns!`}>
                 <IconButton
                   variant="soft"
                   color={hidingEmpty ? 'primary' : 'neutral'}

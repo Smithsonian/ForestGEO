@@ -65,10 +65,6 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
     setSelectedSpeciesRow(null);
   };
 
-  async function resetTables() {
-    await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
-  }
-
   const renderSpeciesLimitsCell = (params: GridRenderEditCellParams) => {
     const speciesLimits = allSpeciesLimits.find(limit => limit.speciesID === params.row.speciesID);
     const hasLimits = speciesLimits !== undefined && speciesLimits.upperBound !== undefined && speciesLimits.lowerBound !== undefined;
@@ -132,6 +128,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       />
 
       <IsolatedDataGridCommons
+        defaultHideEmpty
         gridType="alltaxonomiesview"
         gridColumns={columns}
         refresh={refresh}
@@ -146,15 +143,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
         }}
         dynamicButtons={[
           { label: 'Manual Entry Form', onClick: () => setIsManualEntryFormOpen(true), tooltip: 'Submit data by filling out a form' },
-          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' },
-          {
-            label: 'RESET Table',
-            onClick: async () => {
-              await fetch(`/api/clearatv?schema=${currentSite?.schemaName ?? ''}`);
-              setRefresh(true);
-            },
-            tooltip: 'Reset all species-related tables!'
-          }
+          { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file' }
         ]}
       />
       {selectedSpeciesRow && (
