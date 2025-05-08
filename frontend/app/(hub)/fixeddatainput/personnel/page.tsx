@@ -1,11 +1,11 @@
 import IsolatedPersonnelDataGrid from '@/components/datagrids/applications/isolated/isolatedpersonneldatagrid';
 import { DatagridType } from '@/config/macros/formdetails';
-import RenderGridExplanations from '@/components/client/rendergridexplanations';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 
 export default function PersonnelPage() {
   return (
     <>
-      <RenderGridExplanations datagridType={DatagridType.personnel} />
+      <RenderGridFormExplanations datagridType={DatagridType.personnel} />
       <IsolatedPersonnelDataGrid />
     </>
   );

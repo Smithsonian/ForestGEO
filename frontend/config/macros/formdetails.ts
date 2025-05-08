@@ -191,6 +191,99 @@ export const ViewFullTableHeaders = [
   'Species Field Family'
 ];
 
+const DatagridToFormTypeMap: Record<DatagridType, FormType | undefined> = {
+  [DatagridType.attributes]: FormType.attributes,
+  [DatagridType.personnel]: FormType.personnel,
+  [DatagridType.quadrats]: FormType.quadrats,
+  [DatagridType.measurementssummaryview]: FormType.measurements,
+  [DatagridType.alltaxonomiesview]: FormType.species,
+
+  // these grid types don’t correspond to an upload form
+  [DatagridType.roles]: undefined,
+  [DatagridType.stem]: undefined,
+  [DatagridType.stemtaxonomiesview]: undefined,
+  [DatagridType.specieslimits]: undefined,
+  [DatagridType.unifiedchangelog]: undefined,
+  [DatagridType.viewfulltable]: undefined
+};
+
+const DatagridToFormHeaderMap: Record<DatagridType, Record<string, string>> = {
+  [DatagridType.attributes]: {
+    Code: 'code',
+    Description: 'description',
+    Status: 'status'
+  },
+
+  [DatagridType.personnel]: {
+    'First Name': 'firstname',
+    'Last Name': 'lastname',
+    Role: 'role',
+    'Role Description': 'roledescription'
+  },
+
+  [DatagridType.quadrats]: {
+    'Quadrat Name': 'quadrat',
+    'X (Starting)': 'startx',
+    'Y (Starting)': 'starty',
+    Area: 'area',
+    'Dimension X': 'dimx',
+    'Dimension Y': 'dimy',
+    'Quadrat Shape': 'quadratshape'
+  },
+
+  [DatagridType.measurementssummaryview]: {
+    'Quadrat Name': 'quadrat',
+    'Species Code': 'spcode',
+    'Tree Tag': 'tag',
+    'Stem Tag': 'stemtag',
+    'X (Stem)': 'lx',
+    'Y (Stem)': 'ly',
+    'DBH (Diameter at Breast Height)': 'dbh',
+    'HOM (Height of Measure)': 'hom',
+    Attributes: 'codes'
+    // Note: “Description” in the summary view has no direct upload‐form equivalent.
+  },
+
+  [DatagridType.alltaxonomiesview]: {
+    'Species Code': 'spcode',
+    Family: 'family',
+    Genus: 'genus',
+    Species: 'species',
+    Subspecies: 'subspecies',
+    'Species ID Level': 'idlevel',
+    'Species Auth': 'authority',
+    'Subspecies Auth': 'subspeciesauthority'
+    // Other taxonomy‐view columns (e.g. “Genus Auth”, “Field Family”, “Valid Code”, etc.)
+    // don’t have matching upload‐form fields and are thus omitted.
+  },
+
+  // these grids have no associated upload form:
+  [DatagridType.roles]: {},
+  [DatagridType.stem]: {},
+  [DatagridType.stemtaxonomiesview]: {},
+  [DatagridType.specieslimits]: {},
+  [DatagridType.unifiedchangelog]: {},
+  [DatagridType.viewfulltable]: {}
+};
+
+export function getFormHeaderForGridHeader(
+  grid: DatagridType,
+  headerLabel: string
+): { label: string; explanation?: string; category?: 'required' | 'optional' } | undefined {
+  const formField = DatagridToFormHeaderMap[grid]?.[headerLabel];
+  const formType = DatagridToFormTypeMap[grid];
+  if (!formType || !formField) return undefined;
+  return TableHeadersByFormType[formType].find(h => h.label === formField);
+}
+
+export function getFormForDataGrid(grid: DatagridType): FormType {
+  return DatagridToFormTypeMap[grid] ?? FormType.arcgis_xlsx;
+}
+
+export function getDataGridForForm(form: FormType): DatagridType | undefined {
+  return (Object.keys(DatagridToFormTypeMap) as DatagridType[]).find(grid => DatagridToFormTypeMap[grid] === form);
+}
+
 export const HeadersByDatagridType: Record<DatagridType, { label: string; explanation?: string; category?: 'required' | 'optional' }[]> = {
   [DatagridType.attributes]: TableHeadersByFormType[FormType.attributes].map(obj => ({
     label: obj.label.charAt(0).toUpperCase() + obj.label.substring(1),

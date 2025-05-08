@@ -1,13 +1,13 @@
 'use client';
 
-import RenderGridExplanations from '@/components/client/rendergridexplanations';
+import RenderGridFormExplanations from '@/components/client/rendergridformexplanations';
 import IsolatedUnifiedChangelogDataGrid from '@/components/datagrids/applications/isolated/isolatedunifiedchangelogdatagrid';
 import { DatagridType } from '@/config/macros/formdetails';
 
 export default function RecentChangesPage() {
   return (
     <>
-      <RenderGridExplanations datagridType={DatagridType.unifiedchangelog} />
+      <RenderGridFormExplanations datagridType={DatagridType.unifiedchangelog} />
       <IsolatedUnifiedChangelogDataGrid />
     </>
   );
