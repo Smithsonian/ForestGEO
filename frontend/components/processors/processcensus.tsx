@@ -1,7 +1,6 @@
 import moment from 'moment';
-import { createError, fetchPrimaryKey, handleUpsert } from '@/config/utils';
-import { SpeciesResult, StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { QuadratResult } from '@/config/sqlrdsdefinitions/zones';
+import { createError, handleUpsert } from '@/config/utils';
+import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialProcessingProps } from '@/config/macros';
 
@@ -15,11 +14,33 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
   console.log('rowData: ', rowData);
 
   try {
+    // prep for triggers:
+    await connectionManager.executeQuery('SET @CURRENT_CENSUS_ID = ?', [census.dateRanges[0].censusID]);
+
     // Fetch species
-    const speciesID = await fetchPrimaryKey<SpeciesResult>(schema, 'species', { SpeciesCode: spcode }, connectionManager, 'SpeciesID');
+    const [[{ SpeciesID: speciesID }]] = await connectionManager.executeQuery(
+      `SELECT cs.SpeciesID
+                FROM ${schema}.censusspecies AS cs
+                JOIN ${schema}.speciesversioning AS sv
+                  ON cs.SpeciesVersioningID = sv.SpeciesVersioningID
+               WHERE sv.SpeciesCode = ?
+                 AND cs.CensusID     = ?
+               LIMIT 1`,
+      [spcode, census.dateRanges[0].censusID]
+    );
+
     console.log('found speciesID: ', speciesID);
     // Fetch quadrat
-    const quadratID = await fetchPrimaryKey<QuadratResult>(schema, 'quadrats', { QuadratName: quadrat, PlotID: plot.plotID }, connectionManager, 'QuadratID');
+    const [[{ QuadratID: quadratID }]] = await connectionManager.executeQuery(
+      `SELECT cq.QuadratID
+              FROM ${schema}.censusquadrats AS cq
+              JOIN ${schema}.quadratsversioning AS qv
+                ON cq.QuadratsVersioningID = qv.QuadratsVersioningID
+             WHERE qv.QuadratName = ?
+               AND cq.CensusID    = ?
+             LIMIT 1`,
+      [quadrat, census.dateRanges[0].censusID]
+    );
     console.log('found quadratID: ', quadratID);
 
     if (tag) {
@@ -87,9 +108,10 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             for (const code of parsedCodes) {
               const attributeRows = await connectionManager.executeQuery(
                 `SELECT COUNT(*) as count
-                 FROM ${schema}.attributes
-                 WHERE Code = ?`,
-                [code]
+                 FROM ${schema}.censusattributes ca
+                 WHERE ca.Code = ?
+                  AND ca.CensusID = ?`,
+                [code, census.dateRanges[0].censusID]
               );
               if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
                 throw createError(`Attribute code ${code} not found or query failed.`, { code });
