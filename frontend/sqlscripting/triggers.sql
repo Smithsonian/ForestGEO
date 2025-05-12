@@ -73,13 +73,10 @@ drop trigger if exists trg_censuspersonnel_before_insert;
 drop trigger if exists trg_censusattributes_before_insert;
 drop trigger if exists trg_censusquadrats_before_insert;
 drop trigger if exists trg_censusspecies_before_insert;
-drop trigger if exists trg_censustrees_before_insert;
 drop trigger if exists trg_attributes_after_update;
 drop trigger if exists trg_personnel_after_update;
 drop trigger if exists trg_quadrats_after_update;
 drop trigger if exists trg_species_after_update;
-drop trigger if exists trg_trees_after_insert;
-drop trigger if exists trg_trees_after_update;
 
 create trigger trg_censusspecies_before_insert
     before insert
@@ -203,58 +200,6 @@ begin
     set NEW.PersonnelVersioningID = vVersionID;
 end;
 
-create trigger trg_censustrees_before_insert
-    before insert
-    on censustrees
-    for each row
-begin
-    declare vVersionID int;
-    select TreesVersioningID
-    into vVersionID
-    from treesversioning
-    where TreeID = NEW.TreeID
-      and CensusID = NEW.CensusID
-    limit 1;
-
-    if vVersionID is null then
-        insert into treesversioning (TreeID, TreeTag, SpeciesID, CensusID)
-        select t.TreeID, TreeTag, t.SpeciesID, NEW.CensusID
-        from trees t
-        where t.TreeID = NEW.TreeID;
-
-        set vVersionID = last_insert_id();
-    end if;
-
-    set NEW.TreesVersioningID = vVersionID;
-end;
-
-create trigger trg_trees_after_update
-    after update
-    on trees
-    for each row
-begin
-    declare vChanged boolean;
-
-    set vChanged =
-            not (OLD.TreeTag <=> NEW.TreeTag and OLD.SpeciesID <=> NEW.SpeciesID);
-
-    if vChanged then
-        insert into treesversioning (TreeID, TreeTag, SpeciesID, CensusID)
-        select NEW.TreeID,
-               NEW.TreeTag,
-               NEW.SpeciesID,
-               ct.CensusID
-        from censustrees ct
-                 join census c on ct.CensusID = c.CensusID and c.IsActive is true
-        where ct.TreeID = NEW.TreeID
-          and c.CensusID = @CURRENT_CENSUS_ID
-        limit 1
-        on duplicate key update TreeTag   = values(TreeTag),
-                                SpeciesID = values(SpeciesID);
-    end if;
-end;
-
-
 create trigger trg_personnel_after_update
     after update
     on personnel
@@ -274,8 +219,7 @@ begin
                NEW.RoleID
         from censuspersonnel cp
                  join census c on cp.CensusID = c.CensusID and c.IsActive is true
-        where cp.PersonnelID = NEW.PersonnelID
-          and c.CensusID = @CURRENT_CENSUS_ID
+        where cp.PersonnelID = NEW.PersonnelID and c.CensusID = @CURRENT_CENSUS_ID
         limit 1
         on duplicate key update FirstName = values(FirstName),
                                 LastName  = values(LastName),
@@ -298,8 +242,7 @@ begin
         select NEW.Code, NEW.Description, NEW.Status, ca.CensusID
         from censusattributes ca
                  join census c on ca.CensusID = c.CensusID and c.IsActive is true
-        where ca.Code = NEW.Code
-          and c.CensusID = @CURRENT_CENSUS_ID
+        where ca.Code = NEW.Code and c.CensusID = @CURRENT_CENSUS_ID
         limit 1
         on duplicate key update Description = values(Description), Status = values(Status);
     end if;
@@ -336,8 +279,7 @@ begin
                cq.CensusID
         from censusquadrats cq
                  join census c on cq.CensusID = c.CensusID and c.IsActive is true
-        where cq.QuadratID = NEW.QuadratID
-          and c.CensusID = @CURRENT_CENSUS_ID
+        where cq.QuadratID = NEW.QuadratID and c.CensusID = @CURRENT_CENSUS_ID
         limit 1
         on duplicate key update PlotID       = values(PlotID),
                                 QuadratName  = values(QuadratName),
@@ -388,8 +330,7 @@ begin
                cs.CensusID
         from censusspecies cs
                  join census c on cs.CensusID = c.CensusID and c.IsActive is true
-        where cs.SpeciesID = NEW.SpeciesID
-          and c.CensusID = @CURRENT_CENSUS_ID
+        where cs.SpeciesID = NEW.SpeciesID and c.CensusID = @CURRENT_CENSUS_ID
         limit 1
         on duplicate key update GenusID             = values(GenusID),
                                 SpeciesCode         = values(SpeciesCode),
@@ -404,9 +345,6 @@ begin
                                 ReferenceID         = values(ReferenceID);
     end if;
 end;
-
-
--- if @disable_triggers is null or @disable_triggers = 0 then
 
 # -- MySQL dump 10.13  Distrib 8.3.0, for macos14.2 (x86_64)
 # --
