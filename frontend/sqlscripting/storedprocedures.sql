@@ -702,7 +702,6 @@ end;
 create
     definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)
 BEGIN
-    SET @disable_triggers = 1;
     set foreign_key_checks = 0;
     START TRANSACTION;
 
@@ -720,7 +719,7 @@ BEGIN
     WHERE cm.CensusID = targetCensusID;
 
     DELETE FROM measurementssummary WHERE CensusID = targetCensusID;
-    update coremeasurements set IsActive = false, DeletedAt = now() where CensusID = targetCensusID;
+    delete from coremeasurements where CensusID = targetCensusID;
 
     DELETE FROM quadratpersonnel WHERE CensusID = targetCensusID;
 
@@ -731,7 +730,7 @@ BEGIN
 
     DELETE FROM specieslimits WHERE CensusID = targetCensusID;
 
-    UPDATE census set IsActive = FALSE, DeletedAt = NOW() WHERE CensusID = targetCensusID;
+    delete from census WHERE CensusID = targetCensusID;
 
     alter table failedmeasurements
         auto_increment = 1;
@@ -761,7 +760,6 @@ BEGIN
         AUTO_INCREMENT = 1;
     COMMIT;
 
-    SET @disable_triggers = 0;
     set foreign_key_checks = 1;
 END;
 
