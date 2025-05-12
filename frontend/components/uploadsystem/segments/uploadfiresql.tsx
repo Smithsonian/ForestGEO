@@ -317,21 +317,30 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               }
 
               parsingInvalidRows.forEach(row => {
-                updatedErrorRows[file.name][generateErrorRowId(row)] = {
-                  plotID: String(currentPlot?.plotID ?? -1),
-                  censusID: String(currentCensus?.dateRanges[0].censusID ?? -1),
-                  tag: row.tag,
-                  stemTag: row.stemtag,
-                  spCode: row.spcode,
-                  quadrat: row.quadrat,
-                  x: row.lx,
-                  y: row.ly,
-                  dbh: row.dbh,
-                  hom: row.hom,
-                  date: moment(row.date).format('YYYY-MM-DD'),
-                  codes: row.codes
-                };
-                console.log('updated row: ', updatedErrorRows[file.name][generateErrorRowId(row)]);
+                if (uploadForm === 'measurements') {
+                  updatedErrorRows[file.name][generateErrorRowId(row)] = {
+                    plotID: String(currentPlot?.plotID ?? -1),
+                    censusID: String(currentCensus?.dateRanges[0].censusID ?? -1),
+                    tag: row.tag,
+                    stemTag: row.stemtag,
+                    spCode: row.spcode,
+                    quadrat: row.quadrat,
+                    x: row.lx,
+                    y: row.ly,
+                    dbh: row.dbh,
+                    hom: row.hom,
+                    date: moment(row.date).format('YYYY-MM-DD'),
+                    codes: row.codes
+                  };
+                } else {
+                  const id = generateErrorRowId(row);
+                  const stringifiedRow = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String(v)]));
+                  updatedErrorRows[file.name][id] = {
+                    ...stringifiedRow,
+                    plotID: String(currentPlot?.plotID ?? -1),
+                    censusID: String(currentCensus?.dateRanges[0].censusID ?? -1)
+                  };
+                }
               });
 
               return updatedErrorRows;

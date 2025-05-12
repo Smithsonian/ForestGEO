@@ -8,6 +8,7 @@ import { HTTPResponses } from '@/config/macros';
 import { handleError } from '@/utils/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CensusSpeciesResult } from '@/config/sqlrdsdefinitions/zones';
+import { cookies } from 'next/headers';
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
@@ -19,6 +20,21 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
   const { newRow, oldRow } = await request.json();
   let updateIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
+
+  function getVersionID(dataType: string): string {
+    switch (dataType) {
+      case 'attributes':
+        return 'AttributesVersioningID';
+      case 'personnel':
+        return 'PersonnelVersioningID';
+      case 'quadrats':
+        return 'QuadratsVersioningID';
+      case 'species':
+        return 'SpeciesVersioningID';
+      default:
+        return 'breakage';
+    }
+  }
 
   try {
     transactionID = await connectionManager.beginTransaction();
@@ -163,58 +179,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           );
         }
 
-        /*
-        const fieldGroups = {
-          coremeasurements: ['measuredDBH', 'measuredHOM', 'measurementDate'],
-          quadrats: ['quadratName'],
-          trees: ['treeTag'],
-          stems: ['stemTag', 'stemLocalX', 'stemLocalY'],
-          species: ['speciesName', 'subspeciesName', 'speciesCode']
-        };
-
-        // Initialize a flag for changes
-        let changesFound = false;
-
-        // Helper function to handle updates
-        const handleUpdate = async (groupName: keyof typeof fieldGroups, tableName: string, idColumn: string, idValue: any) => {
-          console.log('updating: ', groupName);
-          const matchingFields = Object.keys(updatedFields).reduce(
-            (acc, key) => {
-              if (fieldGroups[groupName].includes(key)) {
-                acc[key] = updatedFields[key];
-              }
-              return acc;
-            },
-            {} as Partial<typeof updatedFields>
-          );
-
-          if (Object.keys(matchingFields).length > 0) {
-            changesFound = true;
-            if (groupName === 'stems') {
-              // need to correct for key matching
-              if (matchingFields.stemLocalX) {
-                matchingFields.localX = matchingFields.stemLocalX;
-                delete matchingFields.stemLocalX;
-              }
-              if (matchingFields.stemLocalY) {
-                matchingFields.localY = matchingFields.stemLocalY;
-                delete matchingFields.stemLocalY;
-              }
-            }
-            const demappedData = MapperFactory.getMapper<any, any>(groupName).demapData([matchingFields])[0];
-            const query = format('UPDATE ?? SET ? WHERE ?? = ?', [`${schema}.${tableName}`, demappedData, idColumn, idValue]);
-            await connectionManager.executeQuery(query);
-          }
-        };
-
-        // Process each group
-        await handleUpdate('coremeasurements', 'coremeasurements', 'CoreMeasurementID', coreMeasurementID);
-        await handleUpdate('quadrats', 'quadrats', 'QuadratID', quadratID);
-        await handleUpdate('trees', 'trees', 'TreeID', treeID);
-        await handleUpdate('stems', 'stems', 'StemID', stemID);
-        await handleUpdate('species', 'species', 'SpeciesID', speciesID);
-          */
-
         // Reset validation status and clear errors if changes were made
         if (changesFound) {
           const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
@@ -236,6 +200,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
 
         let failedTrimmed, _ignored;
         let plotTrimmed, _ignored2;
+        let specTrimmed, _ignored3;
         let dataToUpdate;
 
         if (dataType === 'failedmeasurements') {
@@ -245,6 +210,10 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         } else if (dataType === 'plots') {
           ({ NumQuadrats: _ignored2, ...plotTrimmed } = newRowData);
           dataToUpdate = plotTrimmed;
+        } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(dataType)) {
+          const key = getVersionID(dataType);
+          ({ [key]: _ignored3, CensusID: _ignored2, ...specTrimmed } = newRowData);
+          dataToUpdate = specTrimmed;
         } else dataToUpdate = remainingProperties;
 
         const updateQuery = format(
@@ -253,7 +222,10 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
            WHERE ?? = ?`,
           [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
         );
-
+        // set session var in case, connect to original transaction ID
+        const censusID = parseInt((await cookies()).get('censusID')?.value ?? '0');
+        console.log('cookies stored: ', censusID);
+        await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         // Execute the UPDATE query
         await connectionManager.executeQuery(updateQuery);
 

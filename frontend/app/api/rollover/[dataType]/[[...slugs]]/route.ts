@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           WHERE q.IsActive IS TRUE AND q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
           queryParams = [Number(newCensusID), ...incoming];
         } else {
-          query = `INSERT IGNORE ${schema}.censusquadrats (CensusID, QuadratID)
+          query = `INSERT IGNORE INTO ${schema}.censusquadrats (CensusID, QuadratID)
           SELECT ?, q.QuadratID 
           FROM ${schema}.quadrats q
           JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           WHERE p.IsActive IS TRUE AND p.PersonnelID IN (${incoming.map(() => '?').join(', ')});`;
           queryParams = [Number(newCensusID), ...incoming];
         } else {
-          query = `INSERT IGNORE ${schema}.censuspersonnel (CensusID, PersonnelID)
+          query = `INSERT IGNORE INTO ${schema}.censuspersonnel (CensusID, PersonnelID)
           SELECT ?, p.PersonnelID 
           FROM ${schema}.personnel p
           JOIN ${schema}.censuspersonnel cp ON cp.PersonnelID = p.PersonnelID
@@ -69,13 +69,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       case 'attributes':
         if (incoming.length !== 0) {
           query = `
-          INSERT IGNORE INTO ${schema}.censusattributes (CensusID, AttributeID)
+          INSERT IGNORE INTO ${schema}.censusattributes (CensusID, Code)
           SELECT ?, a.Code
           FROM ${schema}.attributes a
           WHERE a.Code IN (${incoming.map(() => '?').join(', ')});`;
           queryParams = [Number(newCensusID), ...incoming];
         } else {
-          query = `INSERT IGNORE ${schema}.censusattributes (CensusID, Code)
+          query = `INSERT IGNORE INTO ${schema}.censusattributes (CensusID, Code)
           SELECT ?, a.Code
           FROM ${schema}.attributes a
           JOIN ${schema}.censusattributes ca ON ca.Code = a.Code
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           WHERE s.SpeciesID IN (${incoming.map(() => '?').join(', ')});`;
           queryParams = [Number(newCensusID), ...incoming];
         } else {
-          query = `INSERT IGNORE ${schema}.censusspecies (CensusID, SpeciesID)
+          query = `INSERT IGNORE INTO ${schema}.censusspecies (CensusID, SpeciesID)
           SELECT ?, s.SpeciesID
           FROM ${schema}.species s
           JOIN ${schema}.censusspecies cs ON cs.SpeciesID = s.SpeciesID
