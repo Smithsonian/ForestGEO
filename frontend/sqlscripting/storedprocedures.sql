@@ -281,6 +281,11 @@ END;
 create
     definer = azureroot@`%` procedure bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
 begin
+    SET @CURRENT_CENSUS_ID = (SELECT CensusID
+                              FROM temporarymeasurements
+                              WHERE FileID = vFileID
+                                AND BatchID = vBatchID
+                              LIMIT 1);
     drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
         stemstates, filtered, filter_validity, filter_validity_dup,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids;
@@ -314,41 +319,46 @@ begin
        OR MeasurementDate IS NULL;
 
     -- 2) How many initial rows have a matching quadrats row?
-    SELECT SUM(q.QuadratID IS NOT NULL) AS matched_quadrat,
-           SUM(q.QuadratID IS NULL)     AS no_quadrat
-    FROM initial_dup_filter i
-             LEFT JOIN quadrats q
-                       ON i.QuadratName = q.QuadratName
-                           AND q.IsActive = TRUE;
+    SELECT SUM(qv.QuadratsVersioningID IS NOT NULL) AS matched_quadrat,
+           SUM(qv.QuadratsVersioningID IS NULL)     AS no_quadrat
+    FROM initial_dup_filter AS i
+             LEFT JOIN quadrats AS qm
+                       ON qm.QuadratName = i.QuadratName
+                           AND qm.IsActive = TRUE
+             LEFT JOIN censusquadrats AS cq
+                       ON cq.QuadratID = qm.QuadratID
+                           AND cq.CensusID = i.CensusID
+             LEFT JOIN quadratsversioning AS qv
+                       ON qv.QuadratsVersioningID = cq.QuadratsVersioningID;
 
     -- 3) Of those matched_quadrat rows, how many have q.PlotID = i.PlotID?
-    SELECT SUM(q.PlotID = i.PlotID)  AS plot_match,
-           SUM(q.PlotID <> i.PlotID) AS plot_mismatch
+    SELECT SUM(qv.PlotID = i.PlotID)  AS plot_match,
+           SUM(qv.PlotID <> i.PlotID) AS plot_mismatch
     FROM initial_dup_filter i
-             JOIN quadrats q
-                  ON i.QuadratName = q.QuadratName
-                      AND q.IsActive = TRUE;
+             LEFT JOIN quadrats qm ON qm.QuadratName = i.QuadratName AND qm.IsActive = TRUE
+             LEFT JOIN censusquadrats cq ON cq.QuadratID = qm.QuadratID AND cq.CensusID = i.CensusID
+             LEFT JOIN quadratsversioning qv
+                       ON qv.QuadratsVersioningID = cq.QuadratsVersioningID;
 
     -- 4) How many rows have a matching species?
-    SELECT SUM(s.SpeciesID IS NOT NULL) AS matched_species,
-           SUM(s.SpeciesID IS NULL)     AS no_species
-    FROM initial_dup_filter i
-             LEFT JOIN species s
-                       ON i.SpeciesCode = s.SpeciesCode
-                           AND s.IsActive = TRUE;
+    SELECT SUM(sv.SpeciesVersioningID IS NOT NULL) AS matched_species,
+           SUM(sv.SpeciesVersioningID IS NULL)     AS no_species
+    FROM initial_dup_filter AS i
+             LEFT JOIN species AS sm
+                       ON sm.SpeciesCode = i.SpeciesCode
+                           AND sm.IsActive = TRUE
+             LEFT JOIN censusspecies AS cs
+                       ON cs.SpeciesID = sm.SpeciesID
+                           AND cs.CensusID = i.CensusID
+             LEFT JOIN speciesversioning AS sv
+                       ON sv.SpeciesVersioningID = cs.SpeciesVersioningID;
 
     -- 5) And finally the census join:
-    SELECT SUM(c.CensusID = i.CensusID) AS census_match,
-           SUM(c.CensusID IS NULL)      AS no_census
+    SELECT SUM(cq.CensusID = i.CensusID) AS census_match,
+           SUM(cq.CensusID IS NULL)      AS no_census
     FROM initial_dup_filter i
-             LEFT JOIN quadrats q
-                       ON i.QuadratName = q.QuadratName
-                           AND q.IsActive = TRUE
-             LEFT JOIN censusquadrats cq
-                       ON cq.QuadratID = q.QuadratID
-             LEFT JOIN census c
-                       ON cq.CensusID = c.CensusID
-                           AND c.IsActive = TRUE;
+             LEFT JOIN quadrats qm ON qm.QuadratName = i.QuadratName AND qm.IsActive = TRUE
+             LEFT JOIN censusquadrats cq ON cq.QuadratID = qm.QuadratID AND cq.CensusID = i.CensusID;
 
 
     create temporary table filter_validity as
@@ -370,25 +380,38 @@ begin
                     if((((i.DBH = 0) or (i.HOM = 0)) and
                         (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
                     ifnull(
-                            (select sum(if(a.Code is null, 1, 0))
+                            (select sum(if(av.Code is null, 1, 0))
                              from json_table(
                                           if(i.Codes is null or trim(i.Codes) = '', '[]',
                                              concat('["', replace(trim(i.Codes), ';', '","'), '"]')
                                           ),
                                           '$[*]' columns ( code varchar(10) path '$')
                                   ) jt
-                                      left join attributes a on a.Code = jt.code),
+                                      LEFT JOIN censusattributes cav
+                                                ON cav.Code = jt.code
+                                                    AND cav.CensusID = i.CensusID
+                                      LEFT JOIN attributesversioning av
+                                                ON av.AttributesVersioningID = cav.AttributesVersioningID),
                             0
                     )                                                          as invalid_count
     from initial_dup_filter i
-             left join quadrats q ON i.QuadratName = q.QuadratName and q.IsActive is true
-             left join censusquadrats cq on cq.QuadratID = q.QuadratID
-             left join census c on cq.CensusID = c.CensusID and c.IsActive is true
-             left join species s ON i.SpeciesCode = s.SpeciesCode and s.IsActive is true
-    where i.TreeTag is not null
-      and c.CensusID = i.CensusID
-      and q.PlotID = i.PlotID
-      and (q.QuadratID is not null and s.SpeciesID is not null) -- using OR will pass the row if one condition is satisfied but not the other
+             JOIN quadrats qm
+                  ON qm.QuadratName = i.QuadratName AND qm.IsActive = TRUE
+             JOIN censusquadrats cq
+                  ON cq.QuadratID = qm.QuadratID AND cq.CensusID = i.CensusID
+             JOIN quadratsversioning qv
+                  ON qv.QuadratID = cq.QuadratID
+             JOIN species s2
+                  ON s2.SpeciesCode = i.SpeciesCode AND s2.IsActive = TRUE
+             JOIN censusspecies cs
+                  ON cs.SpeciesID = s2.SpeciesID AND cs.CensusID = i.CensusID
+             JOIN speciesversioning sv
+                  ON sv.SpeciesVersioningID = cs.SpeciesVersioningID
+             JOIN census c
+                  ON c.CensusID = i.CensusID AND c.IsActive = TRUE
+    WHERE i.TreeTag IS NOT NULL
+      AND qv.PlotID = i.PlotID
+      AND i.MeasurementDate IS NOT NULL
       and i.MeasurementDate is not null;
 
     select count(*) as 'filter_validity' from filter_validity;

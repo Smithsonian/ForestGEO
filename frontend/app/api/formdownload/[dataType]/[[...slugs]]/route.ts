@@ -147,7 +147,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                   cm.MeasuredHOM                                      AS MeasuredHOM,
                   cm.MeasurementDate                                  AS MeasurementDate,
                   (
-                    SELECT GROUP_CONCAT(av.Code, ':' ,av.Description SEPARATOR '; ')
+                    SELECT GROUP_CONCAT(av.Code SEPARATOR '; ')
                     FROM ${schema}.cmattributes ca
                     JOIN ${schema}.censusattributes cav
                       ON cav.Code = ca.Code
@@ -168,7 +168,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                AND cq.CensusID = ?
               JOIN ${schema}.quadratsversioning qv 
                 ON qv.QuadratsVersioningID = cq.QuadratsVersioningID
-              JOIN ${schema}.plots p ON p.PlotID = q.PlotID
+              JOIN ${schema}.plots p ON p.PlotID = qv.PlotID
               JOIN ${schema}.censusspecies AS cs
                 ON cs.SpeciesID = t.SpeciesID
                AND cs.CensusID   = ?
