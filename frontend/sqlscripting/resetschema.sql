@@ -16,7 +16,7 @@ truncate family;
 truncate genus;
 truncate measurementssummary;
 truncate personnel;
-truncate plots;
+# truncate plots;
 truncate postvalidationqueries;
 truncate quadratpersonnel;
 truncate censusattributes;
