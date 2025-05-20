@@ -34,9 +34,6 @@ import Avatar from '@mui/joy/Avatar';
 import { CensusLogo, PlotLogo } from '@/components/icons';
 import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
-
-import RolloverModal from './client/modals/rollovermodal';
-import RolloverStemsModal from './client/modals/rolloverstemsmodal';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
 import { DeleteForever, MoreHoriz } from '@mui/icons-material';
@@ -238,40 +235,6 @@ export default function Sidebar(props: SidebarProps) {
       resizeObserver.disconnect();
     };
   }, [currentSite, currentPlot, currentCensus]);
-  const handleOpenNewCensus = async () => {
-    if (currentSite === undefined || currentSite.schemaName === undefined || currentPlot === undefined || currentPlot.plotID === undefined)
-      throw new Error('new census start date was not set OR plot is undefined');
-    setIsRolloverModalOpen(true);
-  };
-
-  const handleConfirmRollover = async (rolledOverPersonnel: boolean, rolledOverQuadrats: boolean) => {
-    if (!rolledOverPersonnel && !rolledOverQuadrats) {
-      // didn't roll over anything, need to create a new census still:
-      // createdCensusID is undefined here
-      const highestPlotCensusNumber =
-        censusListContext && censusListContext.length > 0
-          ? censusListContext.reduce(
-              (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
-              censusListContext[0]?.plotCensusNumber ?? 0
-            )
-          : 0;
-
-      const mapper = new OrgCensusToCensusResultMapper();
-      const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
-      if (!newCensusID) throw new Error('census creation failure');
-      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
-    } else {
-      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
-      // if (rolledOverQuadrats) { // passing census list loading trigger to stems rollover function:
-      //   setIsRolloverStemsModalOpen(true);
-      // } else setCensusListLoaded(false);
-      // rollover of stems functionality created from testing component initially used to test personnel/quadrat rollover
-      // (seemed a shame to just delete it when I could just rename the references stems)
-      // will be added in the event that it is requested
-    }
-    setIsRolloverModalOpen(false);
-    setCensusListLoaded(false);
-  };
 
   const handleConfirmStemsRollover = async (rolledOverStems: boolean) => {
     // assumption: new census has already been created, BUT census list has not been reloaded
@@ -462,9 +425,34 @@ export default function Sidebar(props: SidebarProps) {
             size="sm"
             color="primary"
             data-testid={'add-new-census-button'}
-            onClick={event => {
+            onClick={async event => {
               event.stopPropagation();
-              handleOpenNewCensus();
+              const highestPlotCensusNumber =
+                censusListContext && censusListContext.length > 0
+                  ? censusListContext.reduce(
+                      (max, census) => ((census?.plotCensusNumber ?? 0) > max ? (census?.plotCensusNumber ?? 0) : max),
+                      censusListContext[0]?.plotCensusNumber ?? 0
+                    )
+                  : 0;
+
+              const mapper = new OrgCensusToCensusResultMapper();
+              const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, highestPlotCensusNumber + 1);
+              if (!newCensusID) throw new Error('census creation failure');
+              await new Promise(resolve => setTimeout(resolve, 300)); // debounce
+
+              await Promise.all(
+                ['attributes', 'personnel', 'quadrats', 'species'].map(async key => {
+                  await fetch(
+                    `/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${currentCensus?.dateRanges[0].censusID}/${newCensusID}`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ incoming: {} })
+                    }
+                  );
+                })
+              );
+              setCensusListLoaded(false);
             }}
           >
             <AddIcon />
@@ -1034,8 +1022,6 @@ export default function Sidebar(props: SidebarProps) {
               </Box>
             </Box>
           </Box>
-          <RolloverModal open={isRolloverModalOpen} onClose={() => setIsRolloverModalOpen(false)} onConfirm={handleConfirmRollover} />
-          <RolloverStemsModal open={isRolloverStemsModalOpen} onClose={() => setIsRolloverStemsModalOpen(false)} onConfirm={handleConfirmStemsRollover} />
           <Divider orientation={'horizontal'} sx={{ mb: 2, mt: 2 }} />
           <LoginLogout />
         </Box>

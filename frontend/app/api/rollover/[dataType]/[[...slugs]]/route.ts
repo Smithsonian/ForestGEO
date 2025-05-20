@@ -28,79 +28,40 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
 
     switch (params.dataType) {
       case 'quadrats':
-        if (incoming.length !== 0) {
-          query = `
-          INSERT IGNORE INTO ${schema}.censusquadrats (CensusID, QuadratID)
-          SELECT ?, q.QuadratID
-          FROM ${schema}.quadrats q
-          WHERE q.IsActive IS TRUE AND q.QuadratID IN (${incoming.map(() => '?').join(', ')});`;
-          queryParams = [Number(newCensusID), ...incoming];
-        } else {
-          query = `INSERT IGNORE INTO ${schema}.censusquadrats (CensusID, QuadratID)
-          SELECT ?, q.QuadratID 
-          FROM ${schema}.quadrats q
-          JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-          JOIN ${schema}.census c ON cq.CensusID = c.CensusID 
-          WHERE q.IsActive IS TRUE AND c.IsActive IS TRUE AND c.CensusID = ?;`;
-          queryParams = [Number(newCensusID), Number(sourceCensusID)];
-        }
+        query = `INSERT INTO ${schema}.censusquadrats (CensusID, QuadratID) 
+        SELECT distinct ?, q.QuadratID
+        from ${schema}.quadrats q                                                                                                    
+        LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID and cq.CensusID = ?
+        WHERE q.PlotID = ? and q.IsActive is true AND cq.CQID IS NULL;`;
+        queryParams = [Number(newCensusID), Number(newCensusID), Number(plotID)];
         console.log('rollover query: ', format(query, queryParams));
         await connectionManager.executeQuery(query, queryParams);
         break;
       case 'personnel':
-        if (incoming.length !== 0) {
-          query = `
-          INSERT IGNORE INTO ${schema}.censuspersonnel (CensusID, PersonnelID)
-          SELECT ?, p.PersonnelID
+        query = `INSERT IGNORE INTO ${schema}.censuspersonnel (CensusID, PersonnelID)
+          SELECT distinct ?, p.PersonnelID 
           FROM ${schema}.personnel p
-          WHERE p.IsActive IS TRUE AND p.PersonnelID IN (${incoming.map(() => '?').join(', ')});`;
-          queryParams = [Number(newCensusID), ...incoming];
-        } else {
-          query = `INSERT IGNORE INTO ${schema}.censuspersonnel (CensusID, PersonnelID)
-          SELECT ?, p.PersonnelID 
-          FROM ${schema}.personnel p
-          JOIN ${schema}.censuspersonnel cp ON cp.PersonnelID = p.PersonnelID
-          JOIN ${schema}.census c ON cp.CensusID = c.CensusID 
-          WHERE p.IsActive IS TRUE AND c.IsActive IS TRUE AND c.CensusID = ?;`;
-          queryParams = [Number(newCensusID), Number(sourceCensusID)];
-        }
+          left join ${schema}.censuspersonnel cp ON cp.PersonnelID = p.PersonnelID and cp.CensusID = ?
+          WHERE p.IsActive IS TRUE and cp.CPID IS NULL;`;
+        queryParams = [Number(newCensusID), Number(newCensusID)];
         await connectionManager.executeQuery(query, queryParams);
         break;
       case 'attributes':
-        if (incoming.length !== 0) {
-          query = `
-          INSERT IGNORE INTO ${schema}.censusattributes (CensusID, Code)
-          SELECT ?, a.Code
+        query = `INSERT IGNORE INTO ${schema}.censusattributes (CensusID, Code)
+          SELECT distinct ?, a.Code
           FROM ${schema}.attributes a
-          WHERE a.Code IN (${incoming.map(() => '?').join(', ')});`;
-          queryParams = [Number(newCensusID), ...incoming];
-        } else {
-          query = `INSERT IGNORE INTO ${schema}.censusattributes (CensusID, Code)
-          SELECT ?, a.Code
-          FROM ${schema}.attributes a
-          JOIN ${schema}.censusattributes ca ON ca.Code = a.Code
-          JOIN ${schema}.census c ON ca.CensusID = c.CensusID 
-          WHERE a.IsActive IS TRUE AND c.IsActive IS TRUE AND c.CensusID = ?;`;
-          queryParams = [Number(newCensusID), Number(sourceCensusID)];
-        }
+          left join ${schema}.censusattributes ca on ca.Code = a.Code and ca.CensusID = ?
+          WHERE a.IsActive IS TRUE and ca.CAID is null`;
+        queryParams = [Number(newCensusID), Number(newCensusID)];
         await connectionManager.executeQuery(query, queryParams);
         break;
       case 'species':
-        if (incoming.length !== 0) {
-          query = `INSERT IGNORE INTO ${schema}.censusspecies (CensusID, SpeciesID)
-          SELECT ?, s.SpeciesID
+        query = `INSERT IGNORE INTO ${schema}.censusspecies (CensusID, SpeciesID)
+          SELECT distinct ?, s.SpeciesID
           FROM ${schema}.species s
-          WHERE s.SpeciesID IN (${incoming.map(() => '?').join(', ')});`;
-          queryParams = [Number(newCensusID), ...incoming];
-        } else {
-          query = `INSERT IGNORE INTO ${schema}.censusspecies (CensusID, SpeciesID)
-          SELECT ?, s.SpeciesID
-          FROM ${schema}.species s
-          JOIN ${schema}.censusspecies cs ON cs.SpeciesID = s.SpeciesID
-          JOIN ${schema}.census c ON cs.CensusID = c.CensusID 
-          WHERE s.IsActive IS TRUE AND c.IsActive IS TRUE AND c.CensusID = ?;`;
-          queryParams = [Number(newCensusID), Number(sourceCensusID)];
-        }
+          left join ${schema}.censusspecies cs on cs.SpeciesID = s.SpeciesID and cs.CensusID = ?
+          WHERE s.IsActive IS TRUE and cs.CSID is null;`;
+        queryParams = [Number(newCensusID), Number(newCensusID)];
         await connectionManager.executeQuery(query, queryParams);
         break;
       default:
