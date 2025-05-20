@@ -117,11 +117,11 @@ export async function POST(request: NextRequest) {
         // want to immediately connect these in the censusquadrats table
         const query = `
         INSERT INTO ${schema}.censusquadrats (CensusID, QuadratID)
-        SELECT ?, q.QuadratID
+        SELECT distinct ?, q.QuadratID
         from ${schema}.quadrats q 
-        LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-        WHERE q.PlotID = ? AND cq.CQID IS NULL`;
-        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, plot?.plotID]);
+        LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID and cq.CensusID = ?
+        WHERE q.PlotID = ? and q.IsActive is true AND cq.CQID IS NULL`;
+        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID, plot?.plotID]);
       } else if (formType === 'attributes') {
         const bulkAttributes = Object.values(fileRowSet).map(
           row =>
@@ -138,9 +138,9 @@ export async function POST(request: NextRequest) {
         const query = `INSERT INTO ${schema}.censusattributes (CensusID, Code) 
         SELECT ?, a.Code 
         FROM ${schema}.attributes a
-        LEFT JOIN ${schema}.censusattributes ca ON ca.Code = a.Code
-        WHERE ca.CAID is null`;
-        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID]);
+        LEFT JOIN ${schema}.censusattributes ca ON ca.Code = a.Code and ca.CensusID = ?
+        WHERE a.IsActive is true and ca.CAID is null`;
+        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID]);
       } else if (formType === 'species') {
         const bulkProps: SpecialBulkProcessingProps = {
           schema,
