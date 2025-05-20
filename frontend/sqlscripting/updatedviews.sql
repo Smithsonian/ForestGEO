@@ -1,3 +1,4 @@
+
 DROP VIEW IF EXISTS alltaxonomiesview;
 
 CREATE VIEW alltaxonomiesview AS
