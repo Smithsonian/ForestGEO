@@ -12,7 +12,9 @@
             "type": "leaf",
             "state": {
               "type": "empty",
-              "state": {}
+              "state": {},
+              "icon": "lucide-file",
+              "title": "New tab"
             }
           }
         ]
@@ -34,8 +36,11 @@
             "state": {
               "type": "file-explorer",
               "state": {
-                "sortOrder": "alphabetical"
-              }
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
             }
           },
           {
@@ -50,7 +55,9 @@
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical"
-              }
+              },
+              "icon": "lucide-search",
+              "title": "Search"
             }
           },
           {
@@ -58,14 +65,17 @@
             "type": "leaf",
             "state": {
               "type": "bookmarks",
-              "state": {}
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
             }
           }
         ]
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 300,
+    "collapsed": true
   },
   "right": {
     "id": "f0f88531dd78b5ac",
@@ -81,6 +91,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "topics/Upload-Process-Breakdown.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -88,7 +99,9 @@
                 "searchQuery": "",
                 "backlinkCollapsed": false,
                 "unlinkedCollapsed": true
-              }
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for Upload-Process-Breakdown"
             }
           },
           {
@@ -97,9 +110,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "topics/Upload-Process-Breakdown.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
-              }
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from Upload-Process-Breakdown"
             }
           },
           {
@@ -109,8 +125,12 @@
               "type": "tag",
               "state": {
                 "sortOrder": "frequency",
-                "useHierarchy": true
-              }
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
             }
           },
           {
@@ -118,7 +138,14 @@
             "type": "leaf",
             "state": {
               "type": "outline",
-              "state": {}
+              "state": {
+                "file": "topics/Upload-Process-Breakdown.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of Upload-Process-Breakdown"
             }
           }
         ]
@@ -140,6 +167,11 @@
   },
   "active": "d6efe90c6a73445d",
   "lastOpenFiles": [
+    "topics/Upload-Process-Breakdown.md",
+    "topics/Adding-Historical-Data.md",
+    "images/uploadstage1.png",
+    "images/upload-complete-view.png",
+    "images/stemcodesheaders.png",
     "writerside.cfg",
     "v.list",
     "topics/starter-topic.md",
@@ -152,9 +184,6 @@
     "images/login screen.png",
     "images/logged in screen.png",
     "images/census dropdown.png",
-    "images/census 3.png",
-    "images/census 3 older.png",
-    "images/census 3 newer.png",
     "fad.tree",
     "c.list",
     "Welcome.md",

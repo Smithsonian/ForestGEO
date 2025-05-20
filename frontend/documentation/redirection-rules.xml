@@ -21,4 +21,14 @@
         <description>Created after removal of "Stem Codes" from ForestGEO Application Documentation</description>
         <accepts>Stem-Codes.html</accepts>
     </rule>
+    <rule id="7e4fe503">
+        <description>Created after removal of "Before Using the Website/Logging In" from ForestGEO Application
+            Documentation
+        </description>
+        <accepts>Getting-Started.html</accepts>
+    </rule>
+    <rule id="7b07ce55">
+        <description>Created after removal of "Adding Data" from ForestGEO Application Documentation</description>
+        <accepts>Adding-Data.html</accepts>
+    </rule>
 </rules>

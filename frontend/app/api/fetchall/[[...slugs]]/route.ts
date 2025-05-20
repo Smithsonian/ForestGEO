@@ -110,18 +110,18 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       JOIN ${schema}.census c ON c.CensusID = cq.CensusID and c.IsActive IS TRUE
       WHERE t.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
-    } else if (dataType === 'roles') {
+    } else if (dataType === 'roles' || dataType === 'postvalidationqueries') {
       const query = `SELECT * FROM ${schema}.${dataType}`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'plots') {
       const query = `
         SELECT p.*, COUNT(q.QuadratID) AS NumQuadrats
         FROM ${schema}.plots p 
-        JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
+        LEFT JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'census') {
-      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
+      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ? AND IsActive IS TRUE`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {
       results = await connectionManager.executeQuery(query);

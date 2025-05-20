@@ -928,12 +928,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   const filteredColumns = useMemo(() => {
     if (hidingEmpty) return filterColumns(rows, columns);
-    return columns;
+    else return columns;
   }, [rows, columns, hidingEmpty]);
-
-  const handleToggleHidingColumns = (checked: boolean) => {
-    setHidingEmpty(checked);
-  };
 
   const handleCellDoubleClick: GridEventListener<'cellDoubleClick'> = params => {
     if (locked) return;
@@ -1036,13 +1032,13 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
                 handleRefresh: handleRefresh,
                 handleExportAll: fetchFullData,
                 handleExportCSV: exportAllCSV,
-                hidingEmptyColumns: hidingEmpty,
-                handleToggleHideEmptyColumns: handleToggleHidingColumns,
                 handleQuickFilterChange: onQuickFilterChange,
                 filterModel: filterModel,
                 dynamicButtons: dynamicButtons,
                 gridColumns: gridColumns,
-                gridType: gridType
+                gridType: gridType,
+                hidingEmpty: hidingEmpty,
+                setHidingEmpty: setHidingEmpty
               } as GridToolbarProps & Partial<EditToolbarCustomProps>
             }}
             showToolbar

@@ -132,6 +132,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       />
 
       <IsolatedDataGridCommons
+        defaultHideEmpty
         gridType="alltaxonomiesview"
         gridColumns={columns}
         refresh={refresh}
