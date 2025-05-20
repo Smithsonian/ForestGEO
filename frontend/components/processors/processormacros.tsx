@@ -45,7 +45,7 @@ export async function getConn() {
 }
 
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
-  const timeout = 180000; // 180 seconds
+  const timeout = 360000; // 360 seconds
   const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
   const startTime = Date.now();
   try {
