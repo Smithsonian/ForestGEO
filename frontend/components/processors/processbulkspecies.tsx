@@ -58,8 +58,8 @@ export async function processBulkSpecies(props: Readonly<SpecialBulkProcessingPr
   await connectionManager.executeQuery(speciesSQL);
   const csUpdate = `INSERT INTO ${schema}.censusspecies (CensusID, SpeciesID)
   SELECT ?, s.SpeciesID FROM ${schema}.species s
-  LEFT JOIN ${schema}.censusspecies cs ON cs.SpeciesID = s.SpeciesID
+  LEFT JOIN ${schema}.censusspecies cs ON cs.SpeciesID = s.SpeciesID and cs.CensusID = ?
   WHERE cs.CSID IS NULL;`;
-  await connectionManager.executeQuery(csUpdate, [census?.dateRanges[0].censusID]);
+  await connectionManager.executeQuery(csUpdate, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID]);
   await connectionManager.executeQuery(`DROP TEMPORARY TABLE IF EXISTS ${schema}.stagingspecies;`);
 }

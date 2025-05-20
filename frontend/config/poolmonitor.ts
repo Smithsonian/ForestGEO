@@ -82,16 +82,15 @@ export class PoolMonitor {
     try {
       if (!this.isPoolClosed()) {
         // only log if pool is not closed
-        const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE TIME > ${bufferTime} AND USER <> 'event_scheduler';`);
+        const [rows]: any[] = await this.pool.query(`SELECT * FROM information_schema.processlist WHERE INFO IS NULL AND USER <> 'event_scheduler';`);
         if (rows.length > 0) {
-          console.log(chalk.cyan('Active MySQL Processes:'));
-          console.table(rows);
+          console.log(chalk.cyan(`Active MySQL Processes: ${rows.length}`));
 
           const { liveIds, sleepingIds } = rows.reduce(
             (acc: any, process: any) => {
               if (process.COMMAND !== 'Sleep') {
                 acc.liveIds.push(process.ID);
-              } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime * 2) {
+              } else if (process.COMMAND === 'Sleep' && process.TIME > bufferTime) {
                 acc.sleepingIds.push(process.ID);
               }
               return acc;

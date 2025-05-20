@@ -309,6 +309,12 @@ export async function runValidation(
         // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
         .replace(/@validationProcedureID/g, validationProcedureID.toString())
         .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
+        .replace(/attributesversioning/g, 'TEMP_AV_PLACEHOLDER')
+        .replace(/personnelversioning/g, 'TEMP_CV_PLACEHOLDER')
+        .replace(/quadratsversioning/g, 'TEMP_QV_PLACEHOLDER')
+        .replace(/speciesversioning/g, 'TEMP_SV_PLACEHOLDER')
+        .replace(/treesversioning/g, 'TEMP_TV_PLACEHOLDER')
+        .replace(/censustrees/g, 'TEMP_CT_PLACEHOLDER')
         .replace(/censusquadrats/g, 'TEMP_CQ_PLACEHOLDER')
         .replace(/censusspecies/g, 'TEMP_CS_PLACEHOLDER')
         .replace(/censusattributes/g, 'TEMP_CA_PLACEHOLDER')
@@ -328,8 +334,14 @@ export async function runValidation(
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
         .replace(/TEMP_CQ_PLACEHOLDER/g, `${schema}.censusquadrats`)
         .replace(/TEMP_CS_PLACEHOLDER/g, `${schema}.censusspecies`)
+        .replace(/TEMP_CT_PLACEHOLDER/g, `${schema}.censustrees`)
         .replace(/TEMP_CA_PLACEHOLDER/g, `${schema}.censusattributes`)
-        .replace(/TEMP_CP_PLACEHOLDER/g, `${schema}.censuspersonnel`);
+        .replace(/TEMP_CP_PLACEHOLDER/g, `${schema}.censuspersonnel`)
+        .replace(/TEMP_AV_PLACEHOLDER/g, `${schema}.attributesversioning`)
+        .replace(/TEMP_CV_PLACEHOLDER/g, `${schema}.personnelversioning`)
+        .replace(/TEMP_QV_PLACEHOLDER/g, `${schema}.quadratsversioning`)
+        .replace(/TEMP_SV_PLACEHOLDER/g, `${schema}.speciesversioning`)
+        .replace(/TEMP_TV_PLACEHOLDER/g, `${schema}.treesversioning`);
 
       // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
       if (params.minDBH === null || params.maxDBH === null) {

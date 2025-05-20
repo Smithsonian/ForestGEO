@@ -68,6 +68,13 @@ export const StyledDataGrid = styled(DataGrid)(({ theme }) => ({
       backgroundColor: theme.palette.primary.softActiveBg
     }
   },
+  '& .treestemstate--oldtree': {
+    backgroundColor: theme.palette.success.softBg,
+    '&:hover': { backgroundColor: theme.palette.success.softHoverBg },
+    '&.Mui-selected': {
+      backgroundColor: theme.palette.success.softActiveBg
+    }
+  },
   '& .treestemstate--oldtrees': {
     backgroundColor: theme.palette.success.softBg,
     '&:hover': { backgroundColor: theme.palette.success.softHoverBg },

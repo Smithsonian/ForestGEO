@@ -41,8 +41,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const [processed, setProcessed] = useState<boolean>(false);
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
-  const chunkSize = 4096 * 8;
-  const connectionLimit = 50;
+  const chunkSize = 4096 * 16;
+  const connectionLimit = 5;
   const queue = new PQueue({ concurrency: connectionLimit });
   // refs
   const hasUploaded = useRef(false);
@@ -305,7 +305,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
         },
         complete: async () => {
-          await queue.onIdle();
+          await queue.onEmpty();
           console.log('File parsing and upload complete');
           console.log('total rows: ', totalRows);
           if (parsingInvalidRows.length > 0) {
@@ -455,7 +455,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           // }
           setCompletedOperations(prev => prev + 1);
         }
-        await queue.onIdle();
+        await queue.onEmpty();
         if (isMounted) {
           setUploaded(true);
         }
@@ -527,7 +527,9 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             setCompletedOperations(prev => prev + 1);
           });
         }
-        await queue.onIdle();
+        await queue.onEmpty();
+        // trigger collapser ONCE
+        await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`);
         // Optionally, run a combined query to update census dates.
         const combinedQuery = `
           UPDATE ${schema}.census c
