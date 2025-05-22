@@ -49,8 +49,7 @@ export function getCoreMeasurementsHCs(): ColumnStates {
   return {
     censusID: false,
     stemID: false,
-    description: false,
-    userDefinedFields: false
+    description: false
   };
 }
 
