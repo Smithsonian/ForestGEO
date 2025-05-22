@@ -108,8 +108,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   const localApiRef = apiRef === undefined ? useGridApiRef() : apiRef;
 
   useEffect(() => {
-    console.log('updated rows: ', rows);
-  }, [rows]);
+    if (rowCount < paginationModel.pageSize) setHidingEmpty(false);
+  }, [rowCount]);
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
@@ -153,7 +153,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
         currentPlot?.plotID,
         currentCensus?.plotCensusNumber
       );
-      console.log('temp query: ', tempQuery);
       const tempBody = await (
         await fetch(tempQuery, {
           method: 'POST',
@@ -161,12 +160,10 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           body: JSON.stringify({ filterModel })
         })
       ).json();
-      console.log('tempBody', tempBody);
       const tempFQuery = tempBody.finishedQuery
         .replace(/\bSQL_CALC_FOUND_ROWS\b\s*/i, '')
         .replace(/\bLIMIT\s+\d+\s*,\s*\d+/i, '')
         .trim();
-      console.log('tempfquery: ', tempFQuery);
       const results = await (
         await fetch(`/api/runquery`, {
           method: 'POST',
@@ -174,8 +171,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
           body: JSON.stringify(tempFQuery)
         })
       ).json();
-      console.log('export results: ', results);
-
       const jsonData = JSON.stringify(results, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
