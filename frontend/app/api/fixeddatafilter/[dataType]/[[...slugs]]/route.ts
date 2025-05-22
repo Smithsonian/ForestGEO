@@ -3,17 +3,11 @@ import ConnectionManager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
-import { GridFilterModel } from '@mui/x-data-grid';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
+import { ExtendedGridFilterModel } from '@/config/datagridhelpers';
 
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
-
-type VisibleFilter = 'valid' | 'errors' | 'pending';
-
-interface ExtendedGridFilterModel extends GridFilterModel {
-  visible: VisibleFilter[];
-}
 
 export async function POST(
   request: NextRequest,
@@ -170,7 +164,6 @@ export async function POST(
         case 'measurementssummaryview':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'vft');
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'vft');
-
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS vft.*
             FROM ${schema}.${params.dataType} vft
@@ -196,6 +189,14 @@ export async function POST(
                       .filter(Boolean)
                       .join(' OR ')})`
                   : ''
+              }
+              ${
+                filterModel.tss.length > 0
+                  ? ` AND (${filterModel.tss
+                      .map(tss => `JSON_CONTAINS(UserDefinedFields, JSON_QUOTE('${tss}'), '$.treestemstate') = 1`)
+                      .filter(Boolean)
+                      .join(' OR ')})`
+                  : ``
               }
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}
             ORDER BY vft.MeasurementDate ASC`;

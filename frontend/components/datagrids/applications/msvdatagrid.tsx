@@ -1,3 +1,4 @@
+// msvdatagrid.tsx
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -14,7 +15,7 @@ import MultilineModal from '@/components/datagrids/applications/multiline/multil
 import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
-import { AssignmentOutlined, CachedOutlined, RuleOutlined, UploadFileOutlined } from '@mui/icons-material';
+import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -179,9 +180,9 @@ export default function MeasurementsSummaryViewDataGrid() {
             icon: <AssignmentOutlined />
           },
           { label: 'Upload', onClick: () => setIsUploadModalOpen(true), tooltip: 'Submit data by uploading a CSV file', icon: <UploadFileOutlined /> },
-          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> },
-          { label: 'Review Failed Msmts', onClick: () => setOpenFSM(true), tooltip: 'Review and correct failed measurements.', icon: <RuleOutlined /> }
+          { label: 'Reset View', onClick: async () => await reloadMSV(), tooltip: 'Manually reload the view', icon: <CachedOutlined /> }
         ]}
+        failedTrigger={() => setOpenFSM(true)}
       />
       <Collapse in={openAlert || openViewResetAlert} sx={{ width: '100%' }}>
         <Snackbar

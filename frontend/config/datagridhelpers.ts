@@ -177,10 +177,12 @@ export function getGridID(gridType: string): string {
   }
 }
 
-type VisibleFilter = 'valid' | 'errors' | 'pending';
+export type VisibleFilter = 'valid' | 'errors' | 'pending';
+export type TSSFilter = 'multi stem' | 'old tree' | 'new recruit';
 
-interface ExtendedGridFilterModel extends GridFilterModel {
+export interface ExtendedGridFilterModel extends GridFilterModel {
   visible: VisibleFilter[];
+  tss: TSSFilter[];
 }
 
 export interface RowControl {
@@ -315,9 +317,10 @@ export interface MeasurementsCommonsProps {
   shouldAddRowAfterFetch: boolean;
   setShouldAddRowAfterFetch: Dispatch<SetStateAction<boolean>>;
   addNewRowToGrid: () => void;
+  dynamicButtons: any[];
+  failedTrigger: () => void;
   handleSelectQuadrat?: (quadratID: number | null) => void;
   locked?: boolean;
-  dynamicButtons: any[];
 }
 
 export const failureErrorMapping: Record<string, string[]> = {

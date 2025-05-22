@@ -558,7 +558,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'quadratName',
     headerName: 'Quadrat',
     renderHeader: () => formatHeader('Quadrat', 'Name'),
-    flex: 0.8,
+    flex: 0.6,
     editable: true
   },
   {
@@ -572,7 +572,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     field: 'speciesCode',
     headerName: 'Species Code',
     renderHeader: () => formatHeader('Species', 'Code'),
-    flex: 1.2,
+    flex: 0.7,
     editable: true
   },
   {
@@ -655,7 +655,7 @@ export const MeasurementsSummaryViewGridColumns: GridColDef[] = standardizeGridC
     flex: 0.6,
     editable: true
   },
-  { field: 'attributes', headerName: 'Attributes', flex: 1, editable: true }
+  { field: 'attributes', headerName: 'Attributes', flex: 0.7, editable: true }
 ]);
 
 export const StemGridColumns: GridColDef[] = standardizeGridColumns([
@@ -1147,13 +1147,6 @@ export const ViewFullTableGridColumns: GridColDef[] = standardizeGridColumns([
   {
     field: 'attributes',
     headerName: 'Attributes',
-    flex: 0.3,
-    editable: false,
-    filterable: false
-  },
-  {
-    field: 'userDefinedFields',
-    headerName: 'UserDefinedFields',
     flex: 0.3,
     editable: false,
     filterable: false

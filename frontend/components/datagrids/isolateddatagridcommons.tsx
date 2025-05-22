@@ -1010,7 +1010,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             onPaginationModelChange={setPaginationModel}
             paginationModel={paginationModel}
             rowCount={rowCount}
-            pageSizeOptions={[paginationModel.pageSize]}
+            pageSizeOptions={[paginationModel.pageSize, paginationModel.pageSize * 5, paginationModel.pageSize * 10]}
             onFilterModelChange={newFilterModel => {
               setFilterModel(prevModel => ({
                 ...prevModel,
