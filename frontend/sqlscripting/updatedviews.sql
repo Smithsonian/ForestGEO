@@ -1,4 +1,3 @@
-
 DROP VIEW IF EXISTS alltaxonomiesview;
 CREATE VIEW alltaxonomiesview AS
 SELECT sv.SpeciesID           AS SpeciesID,
