@@ -226,7 +226,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         const censusID = parseInt((await cookies()).get('censusID')?.value ?? '0');
         console.log('cookies stored: ', censusID);
         await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
-        // Execute the UPDATE query
         await connectionManager.executeQuery(updateQuery);
 
         // For non-view tables, standardize the response format
@@ -373,29 +372,33 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {
+    const cookieStore = await cookies();
+    const storedCensusID = parseInt(cookieStore.get('censusID')?.value ?? '0');
     transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
     // census-correlated tables need cleared first
-    if (['attributes', 'quadrats', 'species', 'personnel'].includes(params.dataType)) {
-      const qDeleteQuery = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.census${params.dataType}`, demappedGridID, gridIDKey]);
-      await connectionManager.executeQuery(qDeleteQuery);
-      const softDelete = format(`UPDATE ?? SET IsActive = FALSE WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
+    if (['attributes', 'quadrats', 'species', 'personnel', 'trees'].includes(params.dataType)) {
+      const softDelete = format(`DELETE FROM ?? WHERE ?? = ? AND CensusID = ?`, [
+        `${schema}.${params.dataType}versioning`,
+        demappedGridID,
+        gridIDKey,
+        storedCensusID
+      ]);
       await connectionManager.executeQuery(softDelete);
     } else if (params.dataType === 'alltaxonomiesview') {
       const { SpeciesID } = deleteRowData;
-      const softDelete = format(`UPDATE ?? SET IsActive = FALSE WHERE ?? = ?`, [`${schema}.${params.dataType}`, 'SpeciesID', SpeciesID]);
-      await connectionManager.executeQuery(softDelete);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.speciesversioning WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
     } else if (params.dataType === 'measurementssummary') {
       // start with surrounding data
       await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
       await connectionManager.executeQuery(`DELETE FROM ${schema}.cmattributes WHERE ${demappedGridID} = ${gridIDKey}`);
       // finally, perform core SOFT deletion
-      await connectionManager.executeQuery(`UPDATE ${schema}.coremeasurements SET IsActive = FALSE WHERE ${demappedGridID} = ${gridIDKey}`);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.coremeasurements WHERE ${demappedGridID} = ${gridIDKey}`);
     } else {
-      const softDelete = format(`UPDATE ?? SET ? WHERE ?? = ?`, [`${schema}.${params.dataType}`, { IsActive: false }, demappedGridID, gridIDKey]);
+      const softDelete = format(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.${params.dataType}`, demappedGridID, gridIDKey]);
       await connectionManager.executeQuery(softDelete);
     }
     await connectionManager.commitTransaction(transactionID ?? '');

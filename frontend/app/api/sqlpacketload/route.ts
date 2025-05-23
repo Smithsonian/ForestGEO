@@ -35,17 +35,17 @@ export async function POST(request: NextRequest) {
   const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet;
   const fileName: string = body.fileName;
-  let transactionID: string | undefined = undefined;
+  let transactionID: string | undefined;
   const failingRows: Set<FileRow> = new Set<FileRow>();
   const connectionManager = ConnectionManager.getInstance();
   if (formType === 'measurements') {
     const batchID = v4();
     const placeholders = Object.values(fileRowSet ?? [])
-      .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .map(() => `(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .join(', ');
     const values = Object.values(fileRowSet ?? []).flatMap(row => {
       // const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
-      const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = row;
+      const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
       const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
       return [
         fileName,
@@ -61,13 +61,14 @@ export async function POST(request: NextRequest) {
         dbh,
         hom,
         formattedDate,
-        codes
+        codes,
+        comments
       ];
     });
     transactionID = await connectionManager.beginTransaction();
     try {
       const insertSQL = `INSERT IGNORE INTO ${schema}.temporarymeasurements 
-      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes) 
+      (FileID, BatchID, PlotID, CensusID, TreeTag, StemTag, SpeciesCode, QuadratName, LocalX, LocalY, DBH, HOM, MeasurementDate, Codes, Comments) 
       VALUES ${placeholders}`;
       await connectionManager.executeQuery(insertSQL, values);
       await connectionManager.commitTransaction(transactionID);
@@ -133,7 +134,6 @@ export async function POST(request: NextRequest) {
         );
         const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
         await connectionManager.executeQuery(sql, params);
-
         // need to associate these with census now (unregistered)
         const query = `INSERT INTO ${schema}.censusattributes (CensusID, Code) 
         SELECT ?, a.Code 
@@ -148,7 +148,6 @@ export async function POST(request: NextRequest) {
           rowDataSet: fileRowSet,
           census: census
         };
-
         await processBulkSpecies(bulkProps);
       } else {
         for (rowId in fileRowSet) {

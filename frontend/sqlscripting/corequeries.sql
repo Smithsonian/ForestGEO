@@ -33,7 +33,15 @@ where c_past.PlotCensusNumber >= 1
   and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null
   and cm_past.MeasuredDBH > 0
-  and (cm_present.MeasuredDBH - cm_past.MeasuredDBH) / cm_past.MeasuredDBH > 0.65;', '', true);
+  and (cm_present.MeasuredDBH - cm_past.MeasuredDBH) * (case p.DefaultDBHUnits
+                                                            when \'km\' THEN 1000000
+                                                            when \'hm\' THEN 100000
+                                                            when \'dam\' THEN 10000
+                                                            when \'m\' THEN 1000
+                                                            when \'dm\' THEN 100
+                                                            when \'cm\' THEN 10
+                                                            when \'mm\' THEN 1
+                                                            else 1 end) > 65;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
 VALUES (2, 'ValidateDBHShrinkageExceedsMax', 'DBH shrinkage exceeds maximum rate of 5 percent', 'measuredDBH', '
@@ -60,7 +68,7 @@ where c_past.PlotCensusNumber >= 1
   and (@p_CensusID IS NULL OR cm_present.CensusID = @p_CensusID)
   and (@p_PlotID IS NULL OR c_present.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null and cm_past.MeasuredDBH > 0
-  and (cm_present.MeasuredDBH < cm_past.MeasuredDBH * 0.95);', '', true);
+  and (cm_present.MeasuredDBH < (cm_past.MeasuredDBH * 0.95));', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
 VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not defined in species table)',
