@@ -29,7 +29,11 @@ export default function UploadParseFiles(props: Readonly<UploadParseFilesProps>)
   return (
     <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
       <Stack direction={'column'} sx={{ display: 'flex', flexDirection: 'column', mb: 10 }}>
-        <Typography>You have selected {uploadForm}. Please ensure that your file has the following headers (in any order) before continuing.</Typography>
+        <Typography>You have selected: </Typography>
+        <Chip size={'lg'} variant={'solid'} color={'success'}>
+          {uploadForm}
+        </Chip>
+        <Typography> Please ensure that your file has the following headers (in any order) before continuing.</Typography>
         <Chip variant={'soft'} size={'lg'}>
           <Typography level={'body-md'}>
             Note: Headers with{' '}

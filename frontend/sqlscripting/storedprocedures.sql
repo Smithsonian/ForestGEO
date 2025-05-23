@@ -319,7 +319,8 @@ begin
                     DBH,
                     HOM,
                     MeasurementDate,
-                    Codes
+                    Codes,
+                    Comments
     from temporarymeasurements
     where FileID = vFileID
       and BatchID = vBatchID
@@ -341,6 +342,7 @@ begin
                     ifnull(i.HOM, 0)                                           as HOM,
                     i.MeasurementDate                                          as MeasurementDate,
                     i.Codes                                                    as Codes,
+                    i.Comments                                                 as Comments,
                     if((((i.DBH = 0) or (i.HOM = 0)) and
                         (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
                     ifnull(
@@ -380,7 +382,8 @@ begin
                         and cm.MeasuredHOM = fv.HOM
                         and cm.MeasurementDate = fv.MeasurementDate);
 
-    insert ignore into failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes)
+    insert ignore into failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
+                                           Comments)
     select distinct PlotID,
                     CensusID,
                     nullif(TreeTag, '')                   as Tag,
@@ -392,7 +395,8 @@ begin
                     nullif(DBH, 0)                        as DBH,
                     nullif(HOM, 0)                        as HOM,
                     nullif(MeasurementDate, '1900-01-01') as MeasurementDate,
-                    nullif(Codes, '')                     as Codes
+                    nullif(Codes, '')                     as Codes,
+                    nullif(Comments, '')                  as Comments
     from (
              -- Condition 1: Rows that appear in filter_validity with invalid codes.
              select fv.PlotID,
@@ -406,7 +410,8 @@ begin
                     fv.DBH,
                     fv.HOM,
                     fv.MeasurementDate,
-                    fv.Codes
+                    fv.Codes,
+                    fv.Comments
              from (select * from filter_validity) fv
              where fv.invalid_count > 0
 
@@ -424,7 +429,8 @@ begin
                     coalesce(tm.DBH, -1),
                     coalesce(tm.HOM, -1),
                     coalesce(tm.MeasurementDate, '1900-01-01'),
-                    coalesce(tm.Codes, '')
+                    coalesce(tm.Codes, ''),
+                    coalesce(tm.Comments, '')
              from temporarymeasurements tm
              where tm.BatchID = vBatchID
                and tm.FileID = vFileID
@@ -493,7 +499,7 @@ begin
                             LocalY    = values(LocalY);
 
     -- handle old recruit insertion first:
-    insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM,
+    insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description,
                                   UserDefinedFields, IsActive)
     select distinct f.CensusID,
                     s.StemID,
@@ -501,6 +507,7 @@ begin
                     f.MeasurementDate,
                     f.DBH                                 as MeasuredDBH,
                     f.HOM                                 as MeasuredHOM,
+                    f.Comments                            as Comments,
                     json_object('treestemstate', f.state) as UserDefinedFields,
                     true                                  as IsActive
     from (select id,
@@ -511,6 +518,7 @@ begin
                  MeasurementDate,
                  DBH,
                  HOM,
+                 Comments,
                  'old tree' as state,
                  SpeciesCode
           from old_trees
@@ -523,6 +531,7 @@ begin
                  MeasurementDate,
                  DBH,
                  HOM,
+                 Comments,
                  'multi stem' as state,
                  SpeciesCode
           from multi_stems
@@ -535,6 +544,7 @@ begin
                  MeasurementDate,
                  DBH,
                  HOM,
+                 Comments,
                  'new recruit' as state,
                  SpeciesCode
           from new_recruits) as f
@@ -547,6 +557,7 @@ begin
                             MeasurementDate   = values(MeasurementDate),
                             MeasuredDBH       = values(MeasuredDBH),
                             MeasuredHOM       = values(MeasuredHOM),
+                            Description       = values(Description),
                             IsActive          = values(IsActive),
                             IsValidated       = values(IsValidated),
                             UserDefinedFields = values(UserDefinedFields);

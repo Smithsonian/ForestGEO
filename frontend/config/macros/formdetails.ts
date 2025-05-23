@@ -105,7 +105,8 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'dbh', explanation: 'The diameter at breast height (DBH) of the tree', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'date', explanation: 'The date of the measurement', category: 'required' },
-    { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' }
+    { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' },
+    { label: 'comments', explanation: 'Comments about the measurement', category: 'optional' }
   ],
   [FormType.arcgis_xlsx]: arcgisHeaders
 };
