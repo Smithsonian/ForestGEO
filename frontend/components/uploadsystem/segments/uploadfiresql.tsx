@@ -330,7 +330,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                     dbh: row.dbh,
                     hom: row.hom,
                     date: moment(row.date).format('YYYY-MM-DD'),
-                    codes: row.codes
+                    codes: row.codes,
+                    comments: row.comments
                   };
                 } else {
                   const id = generateErrorRowId(row);
