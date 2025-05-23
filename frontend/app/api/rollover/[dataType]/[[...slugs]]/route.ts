@@ -10,7 +10,7 @@ import { format } from 'mysql2/promise';
  * @param props
  * @returns A NextResponse with a success message or an error message, along with the appropriate HTTP status code.
  */
-export async function POST(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
+export async function POST(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
   if (!params.slugs) throw new Error('slugs not provided');
   const [schema, plotID, sourceCensusID, newCensusID] = params.slugs;
@@ -19,8 +19,6 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
   const connectionManager = ConnectionManager.getInstance();
   let transactionID: string | undefined = undefined;
   try {
-    const { incoming } = await request.json();
-
     let query = ``;
     let queryParams = [];
 
@@ -32,7 +30,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
         SELECT distinct ?, q.QuadratID
         from ${schema}.quadrats q                                                                                                    
         LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID and cq.CensusID = ?
-        WHERE q.PlotID = ? and q.IsActive is true AND cq.CQID IS NULL;`;
+        WHERE q.PlotID = ? AND cq.CQID IS NULL;`;
         queryParams = [Number(newCensusID), Number(newCensusID), Number(plotID)];
         console.log('rollover query: ', format(query, queryParams));
         await connectionManager.executeQuery(query, queryParams);
@@ -42,16 +40,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           SELECT distinct ?, p.PersonnelID 
           FROM ${schema}.personnel p
           left join ${schema}.censuspersonnel cp ON cp.PersonnelID = p.PersonnelID and cp.CensusID = ?
-          WHERE p.IsActive IS TRUE and cp.CPID IS NULL;`;
+          WHERE cp.CPID IS NULL;`;
         queryParams = [Number(newCensusID), Number(newCensusID)];
         await connectionManager.executeQuery(query, queryParams);
         break;
       case 'attributes':
-        query = `INSERT IGNORE INTO ${schema}.censusattributes (CensusID, Code)
-          SELECT distinct ?, a.Code
+        query = `INSERT IGNORE INTO ${schema}.censusattributes (CensusID, AttributeID)
+          SELECT distinct ?, a.AttributeID
           FROM ${schema}.attributes a
-          left join ${schema}.censusattributes ca on ca.Code = a.Code and ca.CensusID = ?
-          WHERE a.IsActive IS TRUE and ca.CAID is null`;
+          left join ${schema}.censusattributes ca on ca.AttributeID = a.AttributeID and ca.CensusID = ?
+          WHERE ca.CAID is null`;
         queryParams = [Number(newCensusID), Number(newCensusID)];
         await connectionManager.executeQuery(query, queryParams);
         break;
@@ -60,7 +58,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
           SELECT distinct ?, s.SpeciesID
           FROM ${schema}.species s
           left join ${schema}.censusspecies cs on cs.SpeciesID = s.SpeciesID and cs.CensusID = ?
-          WHERE s.IsActive IS TRUE and cs.CSID is null;`;
+          WHERE cs.CSID is null;`;
+        queryParams = [Number(newCensusID), Number(newCensusID)];
+        await connectionManager.executeQuery(query, queryParams);
+        break;
+      case 'stems':
+        query = `INSERT IGNORE INTO censusstems (CensusID, StemID)
+          SELECT distinct ?, s.StemID
+          FROM ${schema}.stems s
+          left join ${schema}.censusstems cs on cs.StemID = s.StemID and cs.CensusID = ?
+          WHERE cs.CSTID is null;`;
         queryParams = [Number(newCensusID), Number(newCensusID)];
         await connectionManager.executeQuery(query, queryParams);
         break;

@@ -149,7 +149,7 @@ export function getGridID(gridType: string): string {
     case 'viewfulltable': // materialized view --> should not be modified
       return 'coreMeasurementID';
     case 'attributes':
-      return 'code';
+      return 'attributeID';
     case 'census':
       return 'censusID';
     case 'personnel':

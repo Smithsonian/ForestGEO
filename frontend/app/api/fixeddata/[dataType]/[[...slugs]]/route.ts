@@ -17,7 +17,7 @@ function getGridID(gridType: string): string {
     case 'viewfulltable': // materialized view --> should not be modified
       return 'coreMeasurementID';
     case 'attributes':
-      return 'code';
+      return 'attributeID';
     case 'census':
       return 'censusID';
     case 'personnel':
@@ -71,23 +71,6 @@ export async function GET(
   const cookieStore = await cookies();
   const storedCensusList: OrgCensus[] = JSON.parse(cookieStore.get('censusList')?.value ?? JSON.stringify([]));
   const storedMax = storedCensusList.filter(c => c !== undefined)?.reduce((prev, curr) => (curr.plotCensusNumber > prev.plotCensusNumber ? curr : prev));
-  const isCensusMax = storedMax?.plotCensusNumber === plotCensusNumber;
-
-  function getVersionID(dataType: string): string {
-    switch (dataType) {
-      case 'attributes':
-        return 'AttributesVersioningID';
-      case 'personnel':
-        return 'PersonnelVersioningID';
-      case 'quadrats':
-        return 'QuadratsVersioningID';
-      case 'species':
-        return 'SpeciesVersioningID';
-      default:
-        return 'breakage';
-    }
-  }
-
   try {
     let paginatedQuery = ``;
     const queryParams: any[] = [];
@@ -129,15 +112,10 @@ export async function GET(
       case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS dtv.*
-              FROM ${schema}.${params.dataType}versioning dtv
-              JOIN ${schema}.census${params.dataType} cx ON dtv.${getVersionID(params.dataType)} = cx.${getVersionID(params.dataType)}
+              FROM ${schema}.${params.dataType} dtv
+              JOIN ${schema}.census${params.dataType} cx ON dtv.${getGridID(params.dataType)} = cx.${getGridID(params.dataType)}
               JOIN ${schema}.census c ON cx.CensusID = c.CensusID
-              ${
-                isCensusMax
-                  ? ` JOIN ${schema}.${params.dataType} dtmaster ON dtmaster.${demappedGridID} = dtv.${demappedGridID} AND dtmaster.IsActive IS TRUE `
-                  : ' '
-              }
-            WHERE c.PlotID = ? AND c.PlotCensusNumber = ? AND c.IsActive IS TRUE ORDER BY dtv.${demappedGridID} ASC LIMIT ?, ?;`;
+            WHERE c.PlotID = ? AND c.PlotCensusNumber = ? ORDER BY dtv.${demappedGridID} ASC LIMIT ?, ?;`;
         queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'alltaxonomiesview':
@@ -173,7 +151,7 @@ export async function GET(
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS *
             FROM ${schema}.census
-            WHERE PlotID = ? AND IsActive IS TRUE LIMIT ?, ?`;
+            WHERE PlotID = ? LIMIT ?, ?`;
         queryParams.push(plotID, page * pageSize, pageSize);
         break;
       default:

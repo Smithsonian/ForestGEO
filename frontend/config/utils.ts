@@ -1,5 +1,4 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { format } from 'mysql2/promise';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -60,7 +59,11 @@ export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}
                             ? `${Prefix}CSID${Suffix}`
                             : T extends `${infer Prefix}CsID${infer Suffix}`
                               ? `${Prefix}CSID${Suffix}`
-                              : T;
+                              : T extends `${infer Prefix}cstID${infer Suffix}`
+                                ? `${Prefix}CSTID${Suffix}`
+                                : T extends `${infer Prefix}CstID${infer Suffix}`
+                                  ? `${Prefix}CSTID${Suffix}`
+                                  : T;
 
 // Utility type to omit specific keys
 export type OmitKey<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;

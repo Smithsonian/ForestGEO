@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   function getGridID(gridType: string): string {
     switch (gridType.trim()) {
       case 'attributes':
-        return 'Code';
+        return 'AttributeID';
       case 'personnel':
         return 'PersonnelID';
       case 'quadrats':
@@ -44,57 +44,30 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     }
   }
 
-  function getGridVersionID(gridType: string): string {
-    switch (gridType.trim()) {
-      case 'attributes':
-        return 'AttributesVersioningID';
-      case 'personnel':
-        return 'PersonnelVersioningID';
-      case 'quadrats':
-        return 'QuadratsVersioningID';
-      case 'species':
-        return 'SpeciesVersioningID';
-      default:
-        return 'breakage';
-    }
-  }
-
   try {
     let results: any;
-    if (['personnel', 'quadrats', 'species', 'attributes'].includes(dataType)) {
-      // versioning has been added for the testing schema. gonna test against this:
-      const storedMax = storedCensusList.filter(c => c !== undefined)?.reduce((prev, curr) => (curr.plotCensusNumber > prev.plotCensusNumber ? curr : prev));
-      const isCensusMax = storedPCN === storedMax?.plotCensusNumber;
-      const query = `SELECT dtv.* FROM ${schema}.${dataType}versioning dtv
-        JOIN ${schema}.census${dataType} cdt ON dtv.${getGridVersionID(dataType)} = cdt.${getGridVersionID(dataType)}
-        JOIN ${schema}.census c ON cdt.CensusID = c.CensusID and c.IsActive IS TRUE
-        ${isCensusMax ? ` JOIN ${schema}.${dataType} dtmaster ON dtmaster.${getGridID(dataType)} = dtv.${getGridID(dataType)} AND dtmaster.IsActive IS TRUE` : ''}
+    if (['personnel', 'quadrats', 'species', 'attributes', 'stems'].includes(dataType)) {
+      const query = `SELECT dt.* from ${schema}.${dataType} dt
+        JOIN ${schema}.census${dataType} cdt ON dt.${getGridID(dataType)} = cdt.${getGridID(dataType)}
+        JOIN ${schema}.census c ON cdt.CensusID = c.CensusID
         WHERE c.PlotID = ? AND c.PlotCensusNumber = ?`;
-      results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
-    } else if (dataType === 'stems') {
-      const query = `SELECT st.* FROM ${schema}.stems st 
-      JOIN ${schema}.quadrats q ON q.QuadratID = st.QuadratID and q.IsActive IS TRUE
-      JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-      JOIN ${schema}.census c ON c.CensusID = cq.CensusID and c.IsActive IS TRUE
-      WHERE st.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
     } else if (dataType === 'trees') {
       const query = `SELECT t.* from ${schema}.trees t 
-      JOIN ${schema}.stems s ON t.TreeID = s.TreeID AND s.IsActive IS TRUE
-      JOIN ${schema}.quadrats q ON q.QuadratID = s.QuadratID and q.IsActive IS TRUE
-      JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID
-      JOIN ${schema}.census c ON c.CensusID = cq.CensusID and c.IsActive IS TRUE
-      WHERE t.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
+      JOIN ${schema}.stems s ON t.TreeID = s.TreeID 
+      JOIN ${schema}.censusstems cst on cst.StemID = s.StemID
+      JOIN ${schema}.census c ON c.CensusID = cst.CensusID
+      WHERE c.PlotID = ? AND c.PlotCensusNumber = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
     } else if (dataType === 'plots') {
       const query = `
         SELECT p.*, COUNT(q.QuadratID) AS NumQuadrats
         FROM ${schema}.plots p 
-        LEFT JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
+        LEFT JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID 
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'census') {
-      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ? AND IsActive IS TRUE`;
+      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {
       const query = `SELECT * FROM ${schema}.${dataType}`;

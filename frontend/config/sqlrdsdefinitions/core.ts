@@ -56,7 +56,6 @@ export function getCoreMeasurementsHCs(): ColumnStates {
 export interface StagingCoreMeasurementsRDS {
   id?: number;
   stagingMeasurementID?: number;
-  censusID?: number;
   stemID?: number;
   measuredDBH?: number;
   measuredHOM?: number;
@@ -77,7 +76,7 @@ export interface CMAttributesRDS {
   id?: number;
   cmaID?: number;
   coreMeasurementID?: number;
-  code?: string;
+  attributeID?: number;
 }
 
 export type CMAttributesResult = ResultType<CMAttributesRDS>;
@@ -86,7 +85,7 @@ export interface CMAttributesStagingRDS {
   id?: number;
   stagingMeasurementAttributeID?: number;
   stagingMeasurementID?: number;
-  code?: string;
+  stagingAttributeID?: number;
 }
 
 export type CMAttributesStagingResult = ResultType<CMAttributesStagingRDS>;
@@ -120,15 +119,14 @@ export const validateAttributesRow: ValidationFunction = (row: FileRow) => {
 
 export interface AttributesRDS {
   id?: number;
+  attributeID?: number;
   code?: string;
   description?: string;
   status?: string;
 }
 
 export type AttributesResult = ResultType<AttributesRDS>;
-export const initialAttributesRDSRow = createInitialObject<AttributesRDS>();
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
-export const attributesFields = ['code', 'description', 'status'];
 
 export interface UnifiedChangelogRDS {
   id?: number;

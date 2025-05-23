@@ -97,7 +97,7 @@ export async function handleUpsertForSlices<Result>(
     console.log('after fields in slice rowData: ', rowData);
 
     // Check if we need to propagate a foreign key from a prior slice
-    const prevSlice = getPreviousSlice(sliceKey, config.slices);
+    const prevSlice = getPreviousSlice(sliceKey);
     console.log('prevSlice: ', prevSlice);
     if (prevSlice && insertedIds[prevSlice]) {
       const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
@@ -118,74 +118,13 @@ export async function handleUpsertForSlices<Result>(
 }
 
 // Helper function to get the immediate previous slice based on dependencies
-function getPreviousSlice(currentSlice: string, slices: Record<string, any>): string | null {
+function getPreviousSlice(currentSlice: string): string | null {
   const dependencyOrder = ['family', 'genus', 'species', 'trees', 'stems']; // Order based on dependencies
   const currentIndex = dependencyOrder.indexOf(currentSlice);
-
   if (currentIndex > 0) {
     return dependencyOrder[currentIndex - 1]; // Return the slice that comes immediately before the current one
   }
-
   return null; // No previous slice if it's the first one
-}
-
-// Helper function to get the immediate previous slice based on dependencies
-export async function handleDeleteForSlices<Result>(
-  connectionManager: ConnectionManager,
-  schema: string,
-  rowData: Partial<Result>,
-  config: UpdateQueryConfig
-): Promise<void> {
-  // Iterate over the slices in reverse order to handle foreign key constraints
-  const sliceKeys = Object.keys(config.slices).reverse();
-
-  for (const sliceKey of sliceKeys) {
-    const { range, primaryKey } = config.slices[sliceKey];
-
-    const fieldsInSlice = config.fieldList.slice(range[0], range[1]);
-
-    // Build the row data for this slice
-    const deleteConditions: Partial<Result> = {};
-    fieldsInSlice.forEach(field => {
-      deleteConditions[field as keyof Result] = rowData[field as keyof Result];
-    });
-
-    // Ensure that a primary key is present for deletion
-    const primaryKeyValue = rowData[primaryKey as keyof Result];
-    if (!primaryKeyValue) {
-      console.error(`Primary key ${primaryKey} is missing in rowData for slice: ${sliceKey}`);
-      throw new Error(`Primary key ${primaryKey} is required for deletion in ${sliceKey}.`);
-    }
-
-    // If the slice is 'species', check for foreign key constraints in related tables (e.g., 'trees')
-    if (sliceKey === 'species') {
-      const deleteFromRelatedTableQuery = `
-        DELETE FROM \`${schema}\`.trees
-        WHERE \`SpeciesID\` = ?;
-      `;
-      try {
-        await connectionManager.executeQuery(deleteFromRelatedTableQuery, [primaryKeyValue]);
-      } catch (error) {
-        console.error(`Error deleting related rows from trees for SpeciesID ${primaryKeyValue}:`, error);
-        throw new Error(`Failed to delete related rows from trees for SpeciesID ${primaryKeyValue}.`);
-      }
-    }
-
-    // Perform the deletion based on the primary key
-    const deleteQuery = `
-      DELETE FROM \`${schema}\`.\`${sliceKey}\`
-      WHERE \`${primaryKey}\` = ?;
-    `;
-
-    try {
-      // Use runQuery helper for executing the delete query
-      await connectionManager.executeQuery(deleteQuery, [primaryKeyValue]);
-    } catch (error) {
-      console.error(`Error during deletion in ${sliceKey}:`, error);
-      throw new Error(`Failed to delete from ${sliceKey}. Please check the logs for details.`);
-    }
-  }
-  console.log('Deletion completed successfully.');
 }
 
 // Field definitions and configurations
@@ -237,39 +176,12 @@ const measurementSummaryViewFields = [
   'Description',
   'Attributes'
 ];
-
-export const MeasurementsSummaryViewQueryConfig: UpdateQueryConfig = {
-  fieldList: measurementSummaryViewFields,
-  slices: {
-    quadrats: { range: [0, 1], primaryKey: 'QuadratID' },
-    species: { range: [1, 4], primaryKey: 'SpeciesID' },
-    trees: { range: [4, 5], primaryKey: 'TreeID' },
-    stems: { range: [5, 9], primaryKey: 'StemID' },
-    coremeasurements: { range: [9, measurementSummaryViewFields.length - 1], primaryKey: 'CoreMeasurementID' },
-    cmattributes: { range: [measurementSummaryViewFields.length - 1, measurementSummaryViewFields.length], primaryKey: 'CMAID' }
-  }
-};
-
 export const AllTaxonomiesViewQueryConfig: UpdateQueryConfig = {
   fieldList: allTaxonomiesFields,
   slices: {
     family: { range: [0, 1], primaryKey: 'FamilyID' },
     genus: { range: [1, 3], primaryKey: 'GenusID' },
     species: { range: [3, allTaxonomiesFields.length], primaryKey: 'SpeciesID' }
-  }
-};
-
-export const StemTaxonomiesViewQueryConfig: UpdateQueryConfig = {
-  fieldList: stemTaxonomiesViewFields,
-  slices: {
-    family: { range: [2, 3], primaryKey: 'FamilyID' },
-    genus: { range: [3, 5], primaryKey: 'GenusID' },
-    species: {
-      range: [5, stemTaxonomiesViewFields.length],
-      primaryKey: 'SpeciesID'
-    },
-    trees: { range: [0, 1], primaryKey: 'TreeID' },
-    stems: { range: [1, 2], primaryKey: 'StemID' }
   }
 };
 
@@ -309,12 +221,7 @@ export async function runValidation(
         // .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL')
         .replace(/@validationProcedureID/g, validationProcedureID.toString())
         .replace(/cmattributes/g, 'TEMP_CMATTRIBUTES_PLACEHOLDER')
-        .replace(/attributesversioning/g, 'TEMP_AV_PLACEHOLDER')
-        .replace(/personnelversioning/g, 'TEMP_CV_PLACEHOLDER')
-        .replace(/quadratsversioning/g, 'TEMP_QV_PLACEHOLDER')
-        .replace(/speciesversioning/g, 'TEMP_SV_PLACEHOLDER')
-        .replace(/treesversioning/g, 'TEMP_TV_PLACEHOLDER')
-        .replace(/censustrees/g, 'TEMP_CT_PLACEHOLDER')
+        .replace(/censusstems/g, 'TEMP_CST_PLACEHOLDER')
         .replace(/censusquadrats/g, 'TEMP_CQ_PLACEHOLDER')
         .replace(/censusspecies/g, 'TEMP_CS_PLACEHOLDER')
         .replace(/censusattributes/g, 'TEMP_CA_PLACEHOLDER')
@@ -334,14 +241,9 @@ export async function runValidation(
         .replace(/TEMP_CMATTRIBUTES_PLACEHOLDER/g, `${schema}.cmattributes`)
         .replace(/TEMP_CQ_PLACEHOLDER/g, `${schema}.censusquadrats`)
         .replace(/TEMP_CS_PLACEHOLDER/g, `${schema}.censusspecies`)
-        .replace(/TEMP_CT_PLACEHOLDER/g, `${schema}.censustrees`)
+        .replace(/TEMP_CST_PLACEHOLDER/g, `${schema}.censusstems`)
         .replace(/TEMP_CA_PLACEHOLDER/g, `${schema}.censusattributes`)
-        .replace(/TEMP_CP_PLACEHOLDER/g, `${schema}.censuspersonnel`)
-        .replace(/TEMP_AV_PLACEHOLDER/g, `${schema}.attributesversioning`)
-        .replace(/TEMP_CV_PLACEHOLDER/g, `${schema}.personnelversioning`)
-        .replace(/TEMP_QV_PLACEHOLDER/g, `${schema}.quadratsversioning`)
-        .replace(/TEMP_SV_PLACEHOLDER/g, `${schema}.speciesversioning`)
-        .replace(/TEMP_TV_PLACEHOLDER/g, `${schema}.treesversioning`);
+        .replace(/TEMP_CP_PLACEHOLDER/g, `${schema}.censuspersonnel`);
 
       // Advanced handling: If minDBH, maxDBH, minHOM, or maxHOM are null, dynamically fetch the species-specific limits.
       if (params.minDBH === null || params.maxDBH === null) {
@@ -414,16 +316,9 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
   UPDATE ${schema}.coremeasurements cm
   JOIN ${schema}.census c ON cm.CensusID = c.CensusID
   SET cm.IsValidated = CASE
-    WHEN NOT EXISTS (
-      SELECT 1
-      FROM ${schema}.cmverrors cme
-      WHERE cme.CoreMeasurementID = cm.CoreMeasurementID
-    ) THEN TRUE
-    ELSE FALSE
-  END
-  WHERE cm.IsValidated IS NULL
-    AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID})
-    AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
+    WHEN NOT EXISTS (SELECT 1 FROM ${schema}.cmverrors cme WHERE cme.CoreMeasurementID = cm.CoreMeasurementID) THEN TRUE
+    ELSE FALSE END 
+    WHERE cm.IsValidated IS NULL AND (${params.p_CensusID} IS NULL OR c.CensusID = ${params.p_CensusID}) AND (${params.p_PlotID} IS NULL OR c.PlotID = ${params.p_PlotID});
     `;
 
   try {

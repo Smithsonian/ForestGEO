@@ -46,10 +46,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           av.Code         AS code,
           av.Description  AS description,
           av.Status       AS status
-        FROM ${schema}.attributesversioning AS av
+        FROM ${schema}.attributes AS av
         JOIN ${schema}.censusattributes AS ca
-          ON av.AttributesVersioningID = ca.AttributesVersioningID
-        JOIN ${schema}.census c ON ca.CensusID = c.CensusID and c.IsActive IS TRUE 
+          ON av.AttributeID = ca.AttributeID
+        JOIN ${schema}.census c ON ca.CensusID = c.CensusID 
         WHERE c.PlotID = ? AND c.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         mappedResults = MapperFactory.getMapper<any, any>('attributes').mapData(results);
@@ -65,10 +65,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           pv.LastName        AS lastname,
           r.RoleName         AS role,
           r.RoleDescription  AS roledescription
-        FROM ${schema}.personnelversioning AS pv
+        FROM ${schema}.personnel AS pv
         JOIN ${schema}.censuspersonnel AS cp
-          ON pv.PersonnelVersioningID = cp.PersonnelVersioningID
-        JOIN ${schema}.census c ON cp.CensusID = c.CensusID and c.IsActive IS TRUE
+          ON pv.PersonnelID = cp.PersonnelID
+        JOIN ${schema}.census c ON cp.CensusID = c.CensusID 
         JOIN ${schema}.roles AS r
           ON pv.RoleID = r.RoleID
         WHERE c.PlotID = ? AND c.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
@@ -90,10 +90,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           sv.IDLevel             AS idlevel,
           sv.SpeciesAuthority    AS authority,
           sv.SubspeciesAuthority AS subspeciesauthority
-        FROM ${schema}.speciesversioning AS sv
+        FROM ${schema}.species AS sv
         JOIN ${schema}.censusspecies AS cs
-          ON sv.SpeciesVersioningID = cs.SpeciesVersioningID
-        JOIN ${schema}.census c ON cs.CensusID = c.CensusID and c.IsActive IS TRUE
+          ON sv.SpeciesID = cs.SpeciesID
+        JOIN ${schema}.census c ON cs.CensusID = c.CensusID 
         LEFT JOIN ${schema}.genus AS g
           ON sv.GenusID = g.GenusID
         LEFT JOIN ${schema}.family AS f
@@ -120,10 +120,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
           qv.DimensionY   AS dimy,
           qv.Area         AS area,
           qv.QuadratShape AS quadratshape
-        FROM ${schema}.quadratsversioning AS qv
+        FROM ${schema}.quadrats AS qv
         JOIN ${schema}.censusquadrats AS cq
-          ON qv.QuadratsVersioningID = cq.QuadratsVersioningID
-        JOIN ${schema}.census c ON cq.CensusID = c.CensusID and c.IsActive IS TRUE
+          ON qv.QuadratID = cq.QuadratID
+        JOIN ${schema}.census c ON cq.CensusID = c.CensusID 
         WHERE c.PlotID = ? AND c.CensusID = ? ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [plotID, censusID]);
         formMappedResults = results.map((row: any) => ({
@@ -149,8 +149,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                   (
                     SELECT GROUP_CONCAT(av.Code SEPARATOR '; ')
                     FROM ${schema}.cmattributes ca
-                    JOIN ${schema}.censusattributes cav ON cav.Code = ca.Code AND cav.CensusID = ?
-                    JOIN ${schema}.attributesversioning av ON av.AttributesVersioningID = cav.AttributesVersioningID
+                    JOIN ${schema}.censusattributes cav ON cav.AttributeID = ca.AttributeID AND cav.CensusID = ?
+                    JOIN ${schema}.attributes av ON av.AttributeID = cav.AttributeID
                     WHERE ca.CoreMeasurementID = cm.CoreMeasurementID
                   ) as Codes,
                   (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, ':', vp.Description) SEPARATOR '; ')
@@ -158,14 +158,15 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
                    JOIN ${schema}.cmverrors cmv ON cmv.ValidationErrorID = vp.ValidationID
                    WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
               FROM ${schema}.coremeasurements cm
-              JOIN ${schema}.stems st ON st.StemID = cm.StemID
-              JOIN ${schema}.treesversioning tv ON tv.TreeID = st.TreeID
+              JOIN ${schema}.censusstems cst ON cst.CensusID = cm.CensusID and cst.StemID = cm.StemID
+              JOIN ${schema}.stems st ON st.StemID = cst.StemID
+              JOIN ${schema}.trees tv ON tv.TreeID = st.TreeID
               JOIN ${schema}.censusquadrats cq ON cq.QuadratID = st.QuadratID AND cq.CensusID = ?
-              JOIN ${schema}.quadratsversioning qv ON qv.QuadratsVersioningID = cq.QuadratsVersioningID
+              JOIN ${schema}.quadrats qv ON qv.QuadratID = cq.QuadratID
               JOIN ${schema}.plots p ON p.PlotID = qv.PlotID
               JOIN ${schema}.censusspecies AS cs ON cs.SpeciesID = t.SpeciesID AND cs.CensusID   = ?
-              JOIN ${schema}.speciesversioning sv ON sv.SpeciesVersioningID = cs.SpeciesVersioningID
-              JOIN ${schema}.census c ON cq.CensusID = c.CensusID AND cs.CensusID = c.CensusID AND c.IsActive IS TRUE
+              JOIN ${schema}.species sv ON sv.SpeciesID = cs.SpeciesID
+              JOIN ${schema}.census c ON cq.CensusID = c.CensusID AND cs.CensusID = c.CensusID 
               WHERE p.PlotID = ? AND cm.CensusID = ? ${
                 filterModel.visible.length > 0
                   ? ` AND (${filterModel.visible

@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
         SELECT distinct ?, q.QuadratID
         from ${schema}.quadrats q 
         LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID and cq.CensusID = ?
-        WHERE q.PlotID = ? and q.IsActive is true AND cq.CQID IS NULL`;
+        WHERE q.PlotID = ? AND cq.CQID IS NULL`;
         await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID, plot?.plotID]);
       } else if (formType === 'attributes') {
         const bulkAttributes = Object.values(fileRowSet).map(
@@ -131,15 +131,15 @@ export async function POST(request: NextRequest) {
               Status: row.status
             }) as Partial<AttributesResult>
         );
-        const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
+        const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'AttributeID');
         await connectionManager.executeQuery(sql, params);
 
         // need to associate these with census now (unregistered)
-        const query = `INSERT INTO ${schema}.censusattributes (CensusID, Code) 
-        SELECT ?, a.Code 
+        const query = `INSERT INTO ${schema}.censusattributes (CensusID, AttributeID) 
+        SELECT ?, a.AttributeID 
         FROM ${schema}.attributes a
-        LEFT JOIN ${schema}.censusattributes ca ON ca.Code = a.Code and ca.CensusID = ?
-        WHERE a.IsActive is true and ca.CAID is null`;
+        LEFT JOIN ${schema}.censusattributes ca ON ca.AttributeID = a.AttributeID and ca.CensusID = ?
+        WHERE ca.CAID is null`;
         await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID]);
       } else if (formType === 'species') {
         const bulkProps: SpecialBulkProcessingProps = {

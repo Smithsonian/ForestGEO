@@ -21,8 +21,8 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const [[{ SpeciesID: speciesID }]] = await connectionManager.executeQuery(
       `SELECT cs.SpeciesID
                 FROM ${schema}.censusspecies AS cs
-                JOIN ${schema}.speciesversioning AS sv
-                  ON cs.SpeciesVersioningID = sv.SpeciesVersioningID
+                JOIN ${schema}.species AS sv
+                  ON cs.SpeciesID = sv.SpeciesID
                WHERE sv.SpeciesCode = ?
                  AND cs.CensusID     = ?
                LIMIT 1`,
@@ -34,8 +34,8 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     const [[{ QuadratID: quadratID }]] = await connectionManager.executeQuery(
       `SELECT cq.QuadratID
               FROM ${schema}.censusquadrats AS cq
-              JOIN ${schema}.quadratsversioning AS qv
-                ON cq.QuadratsVersioningID = qv.QuadratsVersioningID
+              JOIN ${schema}.quadrats AS qv
+                ON cq.QuadratID = qv.QuadratID
              WHERE qv.QuadratName = ?
                AND cq.CensusID    = ?
              LIMIT 1`,
@@ -54,6 +54,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
+
         // Handle Stem Upsert
         const stemSearch: Partial<StemResult> = {
           StemTag: stemtag,
@@ -78,7 +79,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
         // Handle Core Measurement Upsert
         const coreMeasurementSearch: Partial<CoreMeasurementsResult> = {
-          CensusID: census.dateRanges[0].censusID,
           StemID: stemID,
           IsValidated: null,
           MeasurementDate: date && moment(date).isValid() ? moment.utc(date).format('YYYY-MM-DD') : null,
@@ -109,14 +109,25 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
               const attributeRows = await connectionManager.executeQuery(
                 `SELECT COUNT(*) as count
                  FROM ${schema}.censusattributes ca
-                 WHERE ca.Code = ?
+                 JOIN ${schema}.attributes a ON a.AttributeID = ca.AttributeID
+                 WHERE a.Code = ?
                   AND ca.CensusID = ?`,
                 [code, census.dateRanges[0].censusID]
               );
               if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
                 throw createError(`Attribute code ${code} not found or query failed.`, { code });
               }
-              await handleUpsert<CMAttributesResult>(connectionManager, schema, 'cmattributes', { CoreMeasurementID: coreMeasurementID, Code: code }, 'CMAID');
+              const attributeID = (await connectionManager.executeQuery(`SELECT AttributeID FROM ${schema}.attributes WHERE Code = ?`, [code]))[0].AttributeID;
+              await handleUpsert<CMAttributesResult>(
+                connectionManager,
+                schema,
+                'cmattributes',
+                {
+                  CoreMeasurementID: coreMeasurementID,
+                  AttributeID: attributeID
+                },
+                'CMAID'
+              );
             }
           }
         }

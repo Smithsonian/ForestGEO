@@ -105,39 +105,3 @@ export function getQuadratHCs(): ColumnStates {
     censusID: false
   };
 }
-
-export interface CensusQuadratRDS {
-  id?: number;
-  cqID?: number;
-  quadratID?: number;
-  censusID?: number;
-}
-
-export type CensusQuadratResult = ResultType<CensusQuadratRDS>;
-
-export interface CensusAttributesRDS {
-  id?: number;
-  caID?: number;
-  quadratID?: number;
-  code?: string;
-}
-
-export type CensusAttributesResult = ResultType<CensusAttributesRDS>;
-
-export interface CensusPersonnelRDS {
-  id?: number;
-  cpID?: number;
-  personnelID?: number;
-  censusID?: number;
-}
-
-export type CensusPersonnelResult = ResultType<CensusPersonnelRDS>;
-
-export interface CensusSpeciesRDS {
-  id?: number;
-  csID?: number;
-  speciesID?: number;
-  censusID?: number;
-}
-
-export type CensusSpeciesResult = ResultType<CensusSpeciesRDS>;

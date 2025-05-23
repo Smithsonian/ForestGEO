@@ -49,7 +49,7 @@ const defaultCVS: CensusValidationStatus = {
 const CATEGORY_MAP = {
   personnel: { idKey: 'personnelID', displayName: 'Personnel' },
   quadrats: { idKey: 'quadratID', displayName: 'Quadrats' },
-  attributes: { idKey: 'code', displayName: 'Attributes' },
+  attributes: { idKey: 'attributeID', displayName: 'Attributes' },
   species: { idKey: 'speciesID', displayName: 'Species' }
 } as const;
 

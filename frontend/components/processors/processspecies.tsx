@@ -1,7 +1,6 @@
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 import { SpecialProcessingProps } from '@/config/macros';
-import { CensusSpeciesResult } from '@/config/sqlrdsdefinitions/zones';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};
@@ -42,7 +41,7 @@ export async function processSpecies(props: Readonly<SpecialProcessingProps>): P
       const cleanedSpeciesData = cleanInputData(speciesData);
       createdSPID = (await handleUpsert<SpeciesResult>(connectionManager, schema, 'species', cleanedSpeciesData, 'SpeciesID')).id;
     }
-    await handleUpsert<CensusSpeciesResult>(
+    await handleUpsert<any>(
       connectionManager,
       schema,
       'censusspecies',
