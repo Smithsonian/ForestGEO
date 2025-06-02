@@ -320,7 +320,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
         const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
         await connectionManager.executeQuery(insertQuery);
         const caQuery = format(`INSERT IGNORE INTO ?? SET ?`, [
-          `${schema}.${params.dataType}`,
+          `${schema}.census${params.dataType}`,
           {
             CensusID: censusID,
             [demappedGridID]: newRowData[demappedGridID]
