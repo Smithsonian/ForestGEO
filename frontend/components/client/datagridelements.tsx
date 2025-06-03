@@ -508,7 +508,7 @@ export const EditToolbar = (props: GridSlotProps['toolbar']) => {
               }}
             >
               <DialogTitle>
-                <Typography level={'h3'}>Exporting Data</Typography>
+                Exporting Data
               </DialogTitle>
               <DialogContent
                 sx={{
