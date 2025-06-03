@@ -106,7 +106,7 @@ export const TableHeadersByFormType: Record<FormType, { label: string; explanati
     { label: 'hom', explanation: 'The height (from ground) where the measurement was taken', category: 'optional' }, // optional -- dead stems should not be measured
     { label: 'date', explanation: 'The date of the measurement', category: 'required' },
     { label: 'codes', explanation: 'The attribute codes associated with the measurement and stem', category: 'optional' },
-    { label: 'comments', explanation: 'Comments about the measurement', category: 'optional' }
+    { label: 'comments', explanation: 'Comments about the measurement', category: 'optional' } // optional - users should be able to submit comments if needed
   ],
   [FormType.arcgis_xlsx]: arcgisHeaders
 };

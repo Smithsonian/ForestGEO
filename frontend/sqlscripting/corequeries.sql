@@ -75,18 +75,18 @@ VALUES (3, 'ValidateFindAllInvalidSpeciesCodes', 'Species Code is invalid (not d
         'speciesCode', 'insert into cmverrors (CoreMeasurementID, ValidationErrorID)
 select distinct cm.CoreMeasurementID, @validationProcedureID as ValidationErrorID
 from coremeasurements cm
-         join census c on cm.CensusID = c.CensusID and c.IsActive is true
-         left join stems s on cm.StemID = s.StemID and s.IsActive is true
-         left join censustrees ct on ct.CensusID = c.CensusID and ct.TreeID = s.TreeID
-         left join treesversioning tv on tv.TreesVersioningID = ct.TreesVersioningID
-         left join censusspecies cs on cs.SpeciesID = tv.SpeciesID and cs.CensusID = c.CensusID
+         join census c on cm.CensusID = c.CensusID and c.IsActive = TRUE
+         join stems s on cm.StemID = s.StemID and s.IsActive = TRUE
+         join censustrees ct on ct.CensusID = c.CensusID and ct.TreeID = s.TreeID
+         join treesversioning tv on tv.TreesVersioningID = ct.TreesVersioningID
+         join censusspecies cs on cs.SpeciesID = tv.SpeciesID and cs.CensusID = c.CensusID
          left join speciesversioning sv on sv.SpeciesVersioningID = cs.SpeciesVersioningID
          left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and cm.IsActive is true
   and (@p_CensusID is null or c.CensusID = @p_CensusID)
   and (@p_PlotID is null or c.PlotID = @p_PlotID)
   and e.CoreMeasurementID is null
-  and (sv.SpeciesVersioningID is null or tv.TreesVersioningID is null or s.StemID is null);', '', true);
+  and sv.SpeciesVersioningID is null;', '', true);
 INSERT INTO sitespecificvalidations (ValidationID, ProcedureName, Description, Criteria, Definition,
                                      ChangelogDefinition, IsEnabled)
 VALUES (4, 'ValidateFindDuplicatedQuadratsByName',
@@ -173,6 +173,10 @@ join stems s on cm.StemID = s.StemID and s.IsActive is true
 join plots p on c.PlotID = p.PlotID
 left join cmverrors e on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID
 where cm.IsValidated is null and e.CoreMeasurementID is null and cm.IsActive is true
+and s.LocalX is not null and s.LocalY is not null
+and qv.StartX is not null and qv.StartY is not null
+and p.GlobalX is not null and p.GlobalY is not null
+and p.DimensionX is not null and p.DimensionY is not null
 and ((s.LocalX + qv.StartX + p.GlobalX) > (p.GlobalX + p.DimensionX)) or ((s.LocalY + qv.StartY + p.GlobalY) > (p.GlobalY + p.DimensionY))
 and (@p_CensusID is null or cm.CensusID = @p_CensusID)
 and (@p_PlotID is null or c.PlotID = @p_PlotID);', '', true);

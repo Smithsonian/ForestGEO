@@ -208,10 +208,15 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         ...(showErrorRows ? (['errors'] as VisibleFilter[]) : []),
         ...(showValidRows ? (['valid'] as VisibleFilter[]) : []),
         ...(showPendingRows ? (['pending'] as VisibleFilter[]) : [])
+      ],
+      tss: [
+        ...(showOT ? (['old tree'] as TSSFilter[]) : []),
+        ...(showMS ? (['multi stem'] as TSSFilter[]) : []),
+        ...(showNR ? (['new recruit'] as TSSFilter[]) : [])
       ]
     }));
     setRefresh(true);
-  }, [showErrorRows, showValidRows, showPendingRows]);
+  }, [showErrorRows, showValidRows, showPendingRows, showOT, showMS, showNR]);
 
   useEffect(() => {
     if (refresh) {
@@ -337,7 +342,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           )
         })
       ).json();
-      const headers = Object.keys(results[0]).filter(
+      const headers = Object.keys(results[0] ?? []).filter(
         header => !['CoreMeasurementID', 'StemID', 'TreeID', 'SpeciesID', 'QuadratID', 'PlotID', 'CensusID'].includes(header)
       );
       let csvRows = headers.join(',') + '\n';

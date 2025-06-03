@@ -2,16 +2,52 @@
 
 Welcome to the ForestGEO Data Processing Application!
 
+## About
+
+The goal of this application is to allow you to record and analyze past and current census data for established global
+sites worldwide. By either directly entering data or uploading CSV/TSV files (conforming to defined constraints), you
+can save historical data and run validations or analysis on it as you complete a census.
+
+### Summary of Operations
+
+The app is intended to be used as follows:
+
+1. You must be **assigned** as site by an administrator
+2. You must **edit** or **request upload** of plots within that site.
+3. Create a census through the dropdown
+4. Populate your fixed data:
+   - Stem Codes
+   - Personnel
+   - Quadrats
+   - Species List
+5. Once you've completed this, the **View Data** link should become available to use
+6. Upload or Enter **measurements** information within the **View Data** page
+7. Validate and edit (if needed) your measurements information
+   - If you **upload** measurements, they will automatically be validated!
+8. Once you've entered measurements, the **Post-Census Statistics** link should become available to use
+9. Use this to perform **analyses** on your data to derive conclusions on your census
+10. If you have permissions, use the **Validations** page to enable, disable, or edit validations
+
 ## Logging In
 
 Before you can log in, you must complete the following (if you haven't already):
 
-- You must create a Microsoft (non-SI) account, and an administrator must invite you to the Smithsonian Research
-  Computing tenant. From here, your account will be added to the ForestGEO app server, and you should be able to log in
-  once then.
+- You must create a **personal** Microsoft (non-SI) account (if you don't have one already)
+- An administrator must invite you to the Smithsonian Research Computing tenant.
+- From here, your account will be added to the ForestGEO app server
+- An administrator must assign at least one site to you
+
+Once these steps are finished, you should be able to login to the application and successfully use the site.
 
 > Currently, this is a stopgap measure. We are working on a solution to allow for ForestGEO users to log in with their
 > SI credentials.
+
+### Logging Into the Website
+
+In order to log into the website proper, please navigate to the **production** website instance, available
+at [](https://forestgeo-livesite.azurewebsites.net).
+
+Click on the icon: ![login icon view](mui-login-icon.svg) to log in!
 
 ## Submitting Help Tickets
 
