@@ -1,4 +1,4 @@
-import { createInitialObject, ResultType } from '@/config/utils';
+import { ResultType } from '@/config/utils';
 import { RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 import { ColumnStates } from '@/config/macros';
 
@@ -19,7 +19,6 @@ export interface SpeciesRDS {
 }
 
 export type SpeciesResult = ResultType<SpeciesRDS>;
-export const initialSpeciesRDSRow = createInitialObject<SpeciesRDS>();
 
 export interface SpeciesLimitsRDS {
   id?: number;

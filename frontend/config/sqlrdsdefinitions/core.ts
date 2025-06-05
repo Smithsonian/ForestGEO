@@ -1,5 +1,5 @@
 import { ColumnStates } from '@/config/macros';
-import { createInitialObject, ResultType } from '@/config/utils';
+import { ResultType } from '@/config/utils';
 import { FileRow, RowValidationErrors, ValidationFunction } from '@/config/macros/formdetails';
 
 export interface CoreMeasurementsRDS {
@@ -32,6 +32,7 @@ export interface FailedMeasurementsRDS {
   hom?: number;
   date?: Date | null;
   codes?: string;
+  description?: string;
   failureReasons?: string;
 }
 
@@ -126,9 +127,7 @@ export interface AttributesRDS {
 }
 
 export type AttributesResult = ResultType<AttributesRDS>;
-export const initialAttributesRDSRow = createInitialObject<AttributesRDS>();
 export const AttributeStatusOptions = ['alive', 'alive-not measured', 'dead', 'missing', 'broken below', 'stem dead'];
-export const attributesFields = ['code', 'description', 'status'];
 
 export interface UnifiedChangelogRDS {
   id?: number;

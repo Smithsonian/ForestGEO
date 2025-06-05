@@ -1,4 +1,4 @@
-import { createInitialObject, ResultType } from '@/config/utils';
+import { ResultType } from '@/config/utils';
 
 export interface PostValidationQueriesRDS {
   id?: number;
@@ -27,7 +27,6 @@ export interface ValidationProceduresRDS {
 }
 
 export type ValidationProceduresResult = ResultType<ValidationProceduresRDS>;
-export const initialValidationProcedure = createInitialObject<ValidationProceduresRDS>();
 
 export interface ValidationChangelogRDS {
   id?: number;

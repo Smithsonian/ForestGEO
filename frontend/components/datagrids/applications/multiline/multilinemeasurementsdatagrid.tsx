@@ -5,12 +5,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import IsolatedMultilineDataGridCommons from '@/components/datagrids/isolatedmultilinedatagridcommons';
 import { MeasurementsFormGridColumns } from '@/components/client/formcolumns';
 import { DataGridSignals, FormType } from '@/config/macros/formdetails';
-import { Autocomplete, Box } from '@mui/joy';
+import { Box } from '@mui/joy';
 import RenderFormExplanations from '@/components/client/renderformexplanations';
-import MapperFactory from '@/config/datamapper';
-import { AttributesRDS, AttributesResult } from '@/config/sqlrdsdefinitions/core';
-import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { GridColDef } from '@mui/x-data-grid';
 import { DatePicker } from '@mui/x-date-pickers';
@@ -31,7 +27,8 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
     dbh: 0,
     hom: 0,
     date: null,
-    codes: ''
+    codes: '',
+    description: ''
   };
   const [refresh, setRefresh] = useState(false);
   const currentSite = useSiteContext();

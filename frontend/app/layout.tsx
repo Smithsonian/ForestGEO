@@ -9,6 +9,7 @@ import { DataValidityProvider } from '@/app/contexts/datavalidityprovider';
 
 import { Providers } from './providers';
 import { LockAnimationProvider } from './contexts/lockanimationcontext';
+import ClearCookiesOnUnload from '@/components/client/clearcookiesonunload';
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="icon" href="icon.jpg" />
       </head>
       <body>
+        <ClearCookiesOnUnload />
         <Providers>
           <LoadingProvider>
             <GlobalLoadingIndicator />

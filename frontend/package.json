@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "next dev --turbo",
-    "build": "next lint --fix --quiet && prettier --write . --log-level silent && next build --debug",
+    "build": "rm -rf build && next lint --fix --quiet && prettier --write . --log-level silent && next build --debug",
     "start": "node build/standalone/server.js -p 3000",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",

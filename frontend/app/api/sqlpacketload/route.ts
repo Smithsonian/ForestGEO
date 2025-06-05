@@ -9,7 +9,6 @@ import { v4 } from 'uuid';
 import moment from 'moment/moment';
 import { buildBulkUpsertQuery } from '@/config/utils';
 import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
-import { FamilyResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 
 export async function POST(request: NextRequest) {

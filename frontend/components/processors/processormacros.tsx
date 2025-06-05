@@ -7,17 +7,21 @@ import { escape } from 'mysql2';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
 
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
+  let connection: PoolConnection | null = null;
   try {
     // console.log(`Attempting to get SQL connection. Try number: ${tries + 1}`);
 
     // Acquire the connection and ping to validate it
-    const connection = await getPoolMonitorInstance().getConnection();
+    connection = await getPoolMonitorInstance().getConnection();
     await connection.ping(); // Use ping to check the connection
-    // console.log('Connection successful');
     return connection; // Resolve the connection when successful
   } catch (err) {
     console.error(`Connection attempt ${tries + 1} failed:`, err);
-
+    if (connection) {
+      try {
+        connection.release();
+      } catch (_) {}
+    }
     if (tries === 5) {
       console.error('!!! Cannot connect !!! Error:', err);
       throw err;

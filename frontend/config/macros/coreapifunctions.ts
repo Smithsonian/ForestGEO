@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { AllTaxonomiesViewQueryConfig, handleUpsertForSlices } from '@/components/processors/processorhelperfunctions';
 import MapperFactory from '@/config/datamapper';
-import { getUpdatedValues, handleUpsert } from '@/config/utils';
+import { createError, getUpdatedValues, handleUpsert } from '@/config/utils';
 import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import { handleError } from '@/utils/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CensusSpeciesResult } from '@/config/sqlrdsdefinitions/zones';
-import { cookies } from 'next/headers';
+import { getCookie } from '@/app/actions/cookiemanager';
+import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
@@ -35,6 +36,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         return 'breakage';
     }
   }
+
+  const storedCensusID = parseInt((await getCookie('censusID')) ?? '0');
 
   try {
     transactionID = await connectionManager.beginTransaction();
@@ -179,6 +182,40 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           );
         }
 
+        if (updatedFields.Attributes) {
+          const parsedCodes = updatedFields.Attributes.split(';')
+            .map((code: string) => code.trim())
+            .filter(Boolean);
+          // clear existing connections
+          await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID]);
+          if (parsedCodes.length === 0) {
+            console.error('No valid attribute codes found:', updatedFields.Attributes);
+          } else {
+            for (const code of parsedCodes) {
+              const attributeRows = await connectionManager.executeQuery(
+                `SELECT COUNT(*) as count
+                 FROM ${schema}.censusattributes ca
+                 WHERE ca.Code = ?
+                  AND ca.CensusID = ?`,
+                [code, storedCensusID]
+              );
+              if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
+                throw createError(`Attribute code ${code} not found or query failed.`, { code });
+              }
+              await handleUpsert<CMAttributesResult>(
+                connectionManager,
+                schema,
+                'cmattributes',
+                {
+                  CoreMeasurementID: mappedOldRow.CoreMeasurementID,
+                  Code: code
+                },
+                'CMAID'
+              );
+            }
+          }
+        }
+
         // Reset validation status and clear errors if changes were made
         if (changesFound) {
           const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
@@ -223,8 +260,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
         );
         // set session var in case, connect to original transaction ID
-        const censusID = parseInt((await cookies()).get('censusID')?.value ?? '0');
-        console.log('cookies stored: ', censusID);
+        const censusID = parseInt((await getCookie('censusList')) ?? '0');
         await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         await connectionManager.executeQuery(updateQuery);
 
@@ -372,8 +408,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {
-    const cookieStore = await cookies();
-    const storedCensusID = parseInt(cookieStore.get('censusID')?.value ?? '0');
+    const storedCensusID = parseInt((await getCookie('censusID')) ?? '0');
     transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for tables
