@@ -6,13 +6,10 @@ import { FailedMeasurementsGridColumns, preprocessor } from '@/components/client
 import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { GridColDef, GridRenderEditCellParams, GridRowModel, useGridApiRef } from '@mui/x-data-grid';
-import MapperFactory from '@/config/datamapper';
-import { AttributesRDS, AttributesResult, FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
+import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import { EditMeasurements } from '@/components/datagrids/measurementscommons';
-import { Autocomplete, Box, Chip, Stack, Typography } from '@mui/joy';
+import { Box, Chip, Stack, Typography } from '@mui/joy';
 import { failureErrorMapping } from '@/config/datagridhelpers';
-import { SpeciesRDS, SpeciesResult, StemRDS, StemResult, TreeRDS, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
@@ -52,6 +49,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
     hom: 0,
     date: null,
     codes: '',
+    description: '',
     failureReasons: ''
   };
 

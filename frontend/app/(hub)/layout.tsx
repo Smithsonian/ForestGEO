@@ -324,7 +324,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') {
       import('@axe-core/react').then(axe => {
-        axe.default(React, ReactDOM, 1000);
+        axe.default(React, ReactDOM, 1000).then(() => {});
       });
     }
   }, []);

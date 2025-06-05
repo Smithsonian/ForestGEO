@@ -1,5 +1,4 @@
 import ConnectionManager from '@/config/connectionmanager';
-import { format } from 'mysql2/promise';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -32,41 +31,53 @@ export type CapitalizeFirstLetter<T extends string> = T extends `${infer F}${inf
 // Utility type to transform 'dbh' and 'hom' to uppercase
 export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}CqID${infer Suffix}`
   ? `${Prefix}CQID${Suffix}`
-  : T extends `${infer Prefix}dbh${infer Suffix}`
-    ? `${Prefix}DBH${Suffix}`
-    : T extends `${infer Prefix}Dbh${infer Suffix}`
-      ? `${Prefix}DBH${Suffix}`
-      : T extends `${infer Prefix}hom${infer Suffix}`
-        ? `${Prefix}HOM${Suffix}`
-        : T extends `${infer Prefix}Hom${infer Suffix}`
-          ? `${Prefix}HOM${Suffix}`
-          : T extends `${infer Prefix}Id${infer Suffix}`
-            ? `${Prefix}ID${Suffix}`
-            : T extends `${infer Prefix}cma${infer Suffix}`
-              ? `${Prefix}CMA${Suffix}`
-              : T extends `${infer Prefix}Cma${infer Suffix}`
-                ? `${Prefix}CMA${Suffix}`
-                : T extends `${infer Prefix}cqID${infer Suffix}`
-                  ? `${Prefix}CQID${Suffix}`
-                  : T extends `${infer Prefix}caID${infer Suffix}`
-                    ? `${Prefix}CAID${Suffix}`
-                    : T extends `${infer Prefix}CaID${infer Suffix}`
-                      ? `${Prefix}CAID${Suffix}`
-                      : T extends `${infer Prefix}cpID${infer Suffix}`
-                        ? `${Prefix}CPID${Suffix}`
-                        : T extends `${infer Prefix}CpID${infer Suffix}`
-                          ? `${Prefix}CPID${Suffix}`
-                          : T extends `${infer Prefix}csID${infer Suffix}`
-                            ? `${Prefix}CSID${Suffix}`
-                            : T extends `${infer Prefix}CsID${infer Suffix}`
-                              ? `${Prefix}CSID${Suffix}`
-                              : T;
+  : T extends `${infer Prefix}defaultUOMDBH${infer Suffix}`
+    ? `${infer Prefix}DefaultUOMDBH${infer Suffix}`
+    : T extends `${infer Prefix}defaultUOMHOM${infer Suffix}`
+      ? `${infer Prefix}DefaultUOMHOM${infer Suffix}`
+      : T extends `${infer Prefix}dbh${infer Suffix}`
+        ? `${Prefix}DBH${Suffix}`
+        : T extends `${infer Prefix}Dbh${infer Suffix}`
+          ? `${Prefix}DBH${Suffix}`
+          : T extends `${infer Prefix}hom${infer Suffix}`
+            ? `${Prefix}HOM${Suffix}`
+            : T extends `${infer Prefix}Hom${infer Suffix}`
+              ? `${Prefix}HOM${Suffix}`
+              : T extends `${infer Prefix}Id${infer Suffix}`
+                ? `${Prefix}ID${Suffix}`
+                : T extends `${infer Prefix}cma${infer Suffix}`
+                  ? `${Prefix}CMA${Suffix}`
+                  : T extends `${infer Prefix}Cma${infer Suffix}`
+                    ? `${Prefix}CMA${Suffix}`
+                    : T extends `${infer Prefix}cqID${infer Suffix}`
+                      ? `${Prefix}CQID${Suffix}`
+                      : T extends `${infer Prefix}caID${infer Suffix}`
+                        ? `${Prefix}CAID${Suffix}`
+                        : T extends `${infer Prefix}CaID${infer Suffix}`
+                          ? `${Prefix}CAID${Suffix}`
+                          : T extends `${infer Prefix}cpID${infer Suffix}`
+                            ? `${Prefix}CPID${Suffix}`
+                            : T extends `${infer Prefix}CpID${infer Suffix}`
+                              ? `${Prefix}CPID${Suffix}`
+                              : T extends `${infer Prefix}csID${infer Suffix}`
+                                ? `${Prefix}CSID${Suffix}`
+                                : T extends `${infer Prefix}CsID${infer Suffix}`
+                                  ? `${Prefix}CSID${Suffix}`
+                                  : T extends `${infer Prefix}sqDimX${infer Suffix}`
+                                    ? `${infer Prefix}SQDimX${infer Suffix}`
+                                    : T extends `${infer Prefix}SqDimX${infer Suffix}`
+                                      ? `${infer Prefix}SQDimX${infer Suffix}`
+                                      : T extends `${infer Prefix}sqDimY${infer Suffix}`
+                                        ? `${infer Prefix}SQDimY${infer Suffix}`
+                                        : T extends `${infer Prefix}SqDimY${infer Suffix}`
+                                          ? `${infer Prefix}SQDimY${infer Suffix}`
+                                          : T;
 
 // Utility type to omit specific keys
 export type OmitKey<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;
 
 // Utility type to create a Result type from an RDS type
-export type ResultType<RDS, K extends keyof any = 'id'> = {
+export type ResultType<RDS, K extends keyof any = 'id' | '_pk'> = {
   [P in keyof OmitKey<RDS, K> as TransformSpecialCases<CapitalizeFirstLetter<P & string>>]: any;
 };
 
