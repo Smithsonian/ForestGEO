@@ -3,8 +3,8 @@ import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { cookies } from 'next/headers';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { getCookie } from '@/app/actions/cookiemanager';
 
 export { POST, PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
@@ -68,8 +68,7 @@ export async function GET(
 
   const connectionManager = ConnectionManager.getInstance();
 
-  const cookieStore = await cookies();
-  const storedCensusList: OrgCensus[] = JSON.parse(cookieStore.get('censusList')?.value ?? JSON.stringify([]));
+  const storedCensusList: OrgCensus[] = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
   const storedMax = storedCensusList.filter(c => c !== undefined)?.reduce((prev, curr) => (curr.plotCensusNumber > prev.plotCensusNumber ? curr : prev));
   const isCensusMax = storedMax?.plotCensusNumber === plotCensusNumber;
 

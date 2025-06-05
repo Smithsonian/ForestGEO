@@ -6,7 +6,7 @@ import { Box, Button, DialogActions, DialogContent, DialogTitle, LinearProgress,
 import React, { useEffect, useRef, useState } from 'react';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useOrgCensusListDispatch, usePlotListDispatch, useQuadratListDispatch } from '@/app/contexts/listselectionprovider';
-import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import { useOrgCensusContext, useOrgCensusDispatch, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
 import moment from 'moment';
@@ -31,11 +31,12 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
   const currentCensus = useOrgCensusContext();
 
   const censusListDispatch = useOrgCensusListDispatch();
+  const censusDispatch = useOrgCensusDispatch();
   const plotListDispatch = usePlotListDispatch();
   const quadratListDispatch = useQuadratListDispatch();
 
   const loadCensusData = async () => {
-    if (!currentPlot) return;
+    if (!currentPlot || !censusDispatch) return;
 
     setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
     const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
@@ -46,6 +47,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     if (censusListDispatch) {
       await censusListDispatch({ censusList });
     }
+
+    const existingCensus = censusList.find(census => census.dateRanges[0].censusID === currentCensus?.dateRanges[0].censusID);
+    if (existingCensus) await censusDispatch({ census: existingCensus });
     setProgress(prev => ({ ...prev, census: 100 }));
     setProgressText(prev => ({ ...prev, census: 'Census data loaded.' }));
   };

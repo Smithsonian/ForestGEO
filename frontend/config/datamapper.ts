@@ -56,6 +56,7 @@ import {
   UnifiedChangelogRDS,
   UnifiedChangelogResult
 } from '@/config/sqlrdsdefinitions/core';
+import { AdminSiteRDS, AdminSiteResult, AdminUserRDS, AdminUserResult } from '@/config/sqlrdsdefinitions/admin';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -128,6 +129,10 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
 
     // Existing transformations for DBH, HOM, CMA, and ID
     return key
+      .replace(/sqDimX/gi, 'SQDimX')
+      .replace(/sqDimY/gi, 'SQDimY')
+      .replace(/defaultUOMDBH/gi, 'DefaultUOMDBH')
+      .replace(/defaultUOMHOM/gi, 'DefaultUOMHOM')
       .replace(/dbh/gi, 'DBH')
       .replace(/hom/gi, 'HOM')
       .replace(/cma/gi, 'CMA')
@@ -138,9 +143,13 @@ export class GenericMapper<RDS, Result> implements IDataMapper<RDS, Result> {
   private detransformSpecialCases(key: string): string {
     if (key === 'MeasuredDBH') return 'measuredDBH';
     if (key === 'MeasuredHOM') return 'measuredHOM';
+    if (key === 'DefaultUOMHOM') return 'defaultUOMHOM';
+    if (key === 'DefaultUOMDBH') return 'defaultUOMDBH';
     return (
       key
         // Add reverse transformation for ValidCode
+        .replace(/SQDimX/gi, 'sqDimX')
+        .replace(/SQDimY/gi, 'sqDimY')
         .replace(/DBH/gi, 'dbh')
         .replace(/HOM/gi, 'hom')
         .replace(/IDLevel/gi, 'idLevel')
@@ -281,6 +290,11 @@ class MapperFactory {
       case 'viewfulltable':
       case 'viewfulltableview':
         return new GenericMapper<ViewFullTableRDS, ViewFullTableResult>() as unknown as IDataMapper<RDS, Result>;
+      // admin
+      case 'users':
+        return new GenericMapper<AdminUserRDS, AdminUserResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'sites':
+        return new GenericMapper<AdminSiteRDS, AdminSiteResult>() as unknown as IDataMapper<RDS, Result>;
       default:
         throw new Error('Mapper not found for type: ' + type);
     }

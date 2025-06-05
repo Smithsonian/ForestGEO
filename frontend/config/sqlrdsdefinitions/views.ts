@@ -21,6 +21,10 @@ export interface AllTaxonomiesViewRDS {
   description?: string;
 }
 
+export const AllTaxonomiesView = {
+  _pk: 'SpeciesID' as const
+};
+
 export type AllTaxonomiesViewResult = ResultType<AllTaxonomiesViewRDS>;
 
 export function getAllTaxonomiesViewHCs(): ColumnStates {
@@ -85,18 +89,6 @@ export type MeasurementsSummaryStagingRDS = MeasurementsSummaryRDS & {
   isSelected?: boolean;
   submissionDate?: Date;
 };
-
-export type _MeasurementsSummaryStagingResult = ResultType<MeasurementsSummaryStagingRDS>;
-
-export function _getMeasurementsSummaryStagingViewHCs(): ColumnStates {
-  return {
-    ...getMeasurementsSummaryViewHCs(),
-    submittedBy: false,
-    isReviewed: false,
-    isSelected: false,
-    submissionDate: false
-  };
-}
 
 export interface StemTaxonomiesViewRDS {
   id?: number;

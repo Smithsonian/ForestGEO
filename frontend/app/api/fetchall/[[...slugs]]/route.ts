@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { cookies } from 'next/headers';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { getCookie } from '@/app/actions/cookiemanager';
 
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
@@ -18,12 +18,11 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
     throw new Error('fetchType was not correctly provided');
   }
 
-  const cookieStore = await cookies();
-  const storedCensusList: OrgCensus[] = JSON.parse(cookieStore.get('censusList')?.value ?? JSON.stringify([]));
-  const storedPlotID = parseInt(cookieStore.get('plotID')?.value ?? '0');
+  const storedCensusList: OrgCensus[] = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
+  const storedPlotID = parseInt((await getCookie('plotID')) ?? '0');
   const storedPCN =
     storedCensusList.find(
-      (oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(dr => dr.censusID === parseInt(cookieStore.get('censusID')?.value ?? '0'))
+      (oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(async dr => dr.censusID === parseInt((await getCookie('censusID')) ?? '0'))
     )?.plotCensusNumber ?? 0;
 
   const connectionManager = ConnectionManager.getInstance();
