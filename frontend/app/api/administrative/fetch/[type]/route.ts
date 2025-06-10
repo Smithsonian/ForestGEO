@@ -4,10 +4,10 @@ import { getCookie } from '@/app/actions/cookiemanager';
 import MapperFactory from '@/config/datamapper';
 import { HTTPResponses } from '@/config/macros';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ type: string }> }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = await getCookie('user');
+  const email = request.nextUrl.searchParams.get('email') ?? (await getCookie('user'));
   if (!email) throw new Error('no email found in cookies.');
 
   try {
@@ -34,7 +34,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ type
 export async function POST(request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = await getCookie('user');
+  const email = request.nextUrl.searchParams.get('email') ?? (await getCookie('user'));
   if (!email) throw new Error('no email found in cookies.');
 
   const { newRow } = await request.json();
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ type
 export async function PATCH(request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = await getCookie('user');
+  const email = request.nextUrl.searchParams.get('email') ?? (await getCookie('user'));
   if (!email) throw new Error('no email found in cookies.');
 
   const gridID = type === 'sites' ? 'SiteID' : type == 'users' ? 'UserID' : 'UserSiteRelationID';

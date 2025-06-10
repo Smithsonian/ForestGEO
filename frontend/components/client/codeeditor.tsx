@@ -1,11 +1,12 @@
+// codeeditor.tsx
 'use client';
 
-import React, { Dispatch, SetStateAction, useRef } from 'react';
-import { Box } from '@mui/joy';
-import { useCodeMirror } from '@uiw/react-codemirror';
+import React, { Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { basicSetup } from 'codemirror';
 import { sql } from '@codemirror/lang-sql';
+import { format as sqlFormat } from 'sql-formatter';
 import { autocompletion, CompletionContext } from '@codemirror/autocomplete';
+import CodeMirror, { EditorView, ViewUpdate } from '@uiw/react-codemirror';
 
 type CodeEditorProps = {
   value: string;
@@ -16,8 +17,25 @@ type CodeEditorProps = {
   readOnly?: boolean;
 };
 
-const CodeEditor: React.FC<CodeEditorProps> = ({ value, setValue, schemaDetails = [], height = '60vh', isDarkMode = false, readOnly = false }) => {
-  const editorContainerRef = useRef<HTMLDivElement | null>(null);
+const CodeEditor: React.FC<CodeEditorProps> = ({ value, setValue, schemaDetails = [], height = 'auto', isDarkMode = false, readOnly = false }) => {
+  const [editorValue, setEditorValue] = useState(() => sqlFormat(value, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' }));
+
+  useEffect(() => {
+    setEditorValue(sqlFormat(value, { language: 'mysql', tabWidth: 2, keywordCase: 'preserve' }));
+  }, [value]);
+
+  const autoHeightExt = EditorView.updateListener.of((update: ViewUpdate) => {
+    if (update.docChanged || update.viewportChanged) {
+      const lines = update.state.doc.lines;
+      const lineHeight = update.view.defaultLineHeight;
+      update.view.dom.style.height = `${lines * lineHeight}px`;
+      update.view.requestMeasure();
+    }
+  });
+
+  const cmHeight = height === 'auto' ? undefined : typeof height === 'number' ? `${height}px` : height;
+
+  const lineWrapExt = EditorView.lineWrapping;
 
   // Autocomplete Suggestions
   const autocompleteExtension = autocompletion({
@@ -49,18 +67,19 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ value, setValue, schemaDetails 
     ]
   });
 
-  // Initialize CodeMirror
-  useCodeMirror({
-    container: editorContainerRef.current,
-    value,
-    height: height.toString(),
-    extensions: [basicSetup, sql(), autocompleteExtension],
-    theme: isDarkMode ? 'dark' : 'light',
-    onChange: setValue,
-    readOnly
-  });
-
-  return <Box ref={editorContainerRef} sx={{ width: '100%', height: '100%' }} />;
+  return (
+    <CodeMirror
+      value={editorValue}
+      {...(cmHeight ? { height: cmHeight } : {})}
+      extensions={[basicSetup, sql(), autocompleteExtension, lineWrapExt, autoHeightExt]}
+      theme={isDarkMode ? 'dark' : 'light'}
+      onChange={val => {
+        if (setValue) setValue(val);
+        setEditorValue(val);
+      }}
+      readOnly={readOnly}
+    />
+  );
 };
 
 export default CodeEditor;

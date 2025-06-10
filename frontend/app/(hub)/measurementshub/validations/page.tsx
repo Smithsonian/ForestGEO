@@ -10,6 +10,8 @@ import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
+const ValidationRow = dynamic(() => import('@/components/validationrow'), { ssr: false });
+
 export default function ValidationsPage() {
   const { data: session } = useSession();
   const currentSite = useSiteContext();
@@ -36,8 +38,6 @@ export default function ValidationsPage() {
     }),
     [currentSite?.schemaName, currentPlot?.plotID, currentCensus?.dateRanges]
   );
-
-  const ValidationRow = dynamic(() => import('@/components/validationrow'), { ssr: false });
 
   const [expandedValidationID, setExpandedValidationID] = useState<number | null>(null);
 
@@ -84,7 +84,7 @@ export default function ValidationsPage() {
         <TableBody>
           {globalValidations?.map((validation, index) => (
             <ValidationRow
-              key={index}
+              key={validation.validationID}
               validation={validation}
               onSaveChanges={handleSaveChanges}
               schemaDetails={schemaData?.schema || []}

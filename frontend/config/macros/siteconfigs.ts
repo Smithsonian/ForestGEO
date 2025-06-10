@@ -42,8 +42,7 @@ export const validityMapping: ValidityMapping = {
   '/attributes': 'attributes',
   '/personnel': 'personnel',
   '/alltaxonomies': 'species',
-  '/quadrats': 'quadrats',
-  '/quadratpersonnel': 'quadratpersonnel'
+  '/quadrats': 'quadrats'
 };
 
 export const siteConfigNav: SiteConfigProps[] = [
