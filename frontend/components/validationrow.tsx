@@ -1,3 +1,4 @@
+// validationrow.tsx
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
@@ -43,24 +44,29 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const originalScriptContent = useRef<string>(validation.definition ?? '');
 
-  const handleEditClick = () => {
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
     originalScriptContent.current = scriptContent ?? '';
     setIsEditing(true);
     handleExpandClick(validation.validationID!); // Ensure expansion happens
   };
 
-  const handleCancelChanges = () => {
+  const handleCancelChanges = (e: React.MouseEvent) => {
+    e.stopPropagation();
     setScriptContent(originalScriptContent.current);
     setIsEditing(false);
   };
 
-  const handleSaveChanges = async () => {
+  const handleSaveChanges = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     const updatedValidation = { ...validation, definition: scriptContent };
     await onSaveChanges(updatedValidation);
     setIsEditing(false);
   };
 
   const formattedDescription = validation.description?.replace(/(DBH|HOM)([A-Z])/g, '$1 $2').replace(/([a-z])([A-Z])/g, '$1 $2');
+
+  const open = expandedValidationID === validation.validationID;
 
   return (
     <TableRow sx={{ borderBottom: 'unset' }}>
@@ -116,22 +122,22 @@ const ValidationRow: React.FC<ValidationRowProps> = ({
         }}
       >
         <Box
+          onClick={e => e.stopPropagation()}
           sx={{
             width: '100%',
-            maxHeight: expandedValidationID === validation.validationID ? '300px' : '60px',
-            transition: 'height 0.3s ease-in-out',
-            overflow: 'hidden',
+            ...(open ? {} : { maxHeight: '60px', overflow: 'hidden' }),
+            transition: 'max-height 0.3s ease',
             display: 'flex',
             flexDirection: 'column'
           }}
         >
           {expandedValidationID === validation.validationID ? (
-            <Box sx={{ width: '100%', height: '300px', flexGrow: 1 }}>
+            <Box sx={{ width: '100%', height: '100%', flexGrow: 1 }}>
               <CodeEditor
                 value={scriptContent ?? ''}
+                height={'auto'}
                 setValue={debouncedSetScriptContent}
                 schemaDetails={memoizedSchemaDetails}
-                height="300px"
                 isDarkMode={isDarkMode}
                 readOnly={!isEditing}
               />

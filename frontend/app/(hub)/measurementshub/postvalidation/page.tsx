@@ -1,3 +1,4 @@
+// postvalidation/page.tsx
 'use client';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
@@ -8,6 +9,8 @@ import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from
 import { Done } from '@mui/icons-material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import dynamic from 'next/dynamic';
+
+const PostValidationRow = dynamic(() => import('@/components/client/postvalidationrow'), { ssr: false });
 
 export default function PostValidationPage() {
   const currentSite = useSiteContext();
@@ -24,8 +27,6 @@ export default function PostValidationPage() {
     currentCensusID: currentCensus?.dateRanges[0].censusID
   };
   const { setLoading } = useLoading();
-
-  const PostValidationRow = dynamic(() => import('@/components/client/postvalidationrow'), { ssr: false });
 
   const enabledPostValidations = postValidations.filter(query => query.isEnabled);
   const disabledPostValidations = postValidations.filter(query => !query.isEnabled);

@@ -1,3 +1,4 @@
+// postvalidationrow.tsx
 'use client';
 import React from 'react';
 import { Box, Collapse, TableCell, TableRow, Typography } from '@mui/material';
@@ -8,7 +9,6 @@ import { Checkbox, IconButton, Textarea, Tooltip } from '@mui/joy';
 import { Done } from '@mui/icons-material';
 import moment from 'moment/moment';
 import { darken } from '@mui/system';
-import dynamic from 'next/dynamic';
 import CodeEditor from '@/components/client/codeeditor';
 
 interface PostValidationRowProps {
@@ -37,8 +37,6 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
   schemaDetails
 }) => {
   const formattedResults = JSON.stringify(JSON.parse(postValidation.lastRunResult ?? '{}'), null, 2);
-  const CustomMonacoEditor = dynamic(() => import('@/components/client/codeeditor'), { ssr: false });
-
   const successColor = !isDarkMode ? 'rgba(54, 163, 46, 0.3)' : darken('rgba(54,163,46,0.6)', 0.7);
   const failureColor = !isDarkMode ? 'rgba(255, 0, 0, 0.3)' : darken('rgba(255,0,0,0.6)', 0.7);
 
@@ -181,11 +179,11 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
               sx={{
                 margin: 1,
                 flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
                 width: '100%',
-                maxWidth: '100%',
-                overflow: 'auto'
+                ...(expanded ? {} : { maxHeight: '60px', overflow: 'hidden' }),
+                transition: 'max-height 0.3s ease',
+                display: 'flex',
+                flexDirection: 'column'
               }}
             >
               <Typography variant="h6" gutterBottom>
@@ -195,7 +193,7 @@ const PostValidationRow: React.FC<PostValidationRowProps> = ({
                 value={formattedResults ?? ''}
                 setValue={undefined}
                 schemaDetails={schemaDetails}
-                height={formattedResults ? `${Math.min(300, 20 * formattedResults.split('\n').length)}px` : undefined}
+                height={'auto'}
                 isDarkMode={isDarkMode}
                 readOnly={true}
               />

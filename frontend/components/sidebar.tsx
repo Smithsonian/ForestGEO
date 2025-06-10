@@ -52,7 +52,7 @@ import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
-import { DeleteForever, MoreHoriz } from '@mui/icons-material';
+import { DeleteForever, MoreHoriz, Settings } from '@mui/icons-material';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 
 export interface SimpleTogglerProps {
@@ -161,9 +161,6 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
-  const [isRolloverStemsModalOpen, setIsRolloverStemsModalOpen] = useState(false);
-
   const { siteListLoaded, setCensusListLoaded, setManualReset } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -252,16 +249,6 @@ export default function Sidebar(props: SidebarProps) {
       resizeObserver.disconnect();
     };
   }, [currentSite, currentPlot, currentCensus]);
-
-  const handleConfirmStemsRollover = async (rolledOverStems: boolean) => {
-    // assumption: new census has already been created, BUT census list has not been reloaded
-    // stored in createdCensusID
-    // additional note: dialog handles actual rollover process. do not need to perform any API calls here.
-    // --> stem rollover will not be triggered if quadrats are NOT rolled over
-    setIsRolloverStemsModalOpen(false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    setCensusListLoaded(false);
-  };
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (siteDispatch) {

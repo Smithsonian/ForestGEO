@@ -61,7 +61,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     fieldToFocus,
     dynamicButtons = [],
     defaultHideEmpty = false,
-    apiRef = undefined
+    apiRef = undefined,
+    adminEmail = undefined
   } = props;
 
   const [rows, setRows] = useState([initialRow] as GridRowsProp);
@@ -494,7 +495,8 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       const rowToDelete = rows.find(row => String(row.id) === String(id));
       if (!rowToDelete) return;
 
-      const deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
+      let deleteQuery = createDeleteQuery(currentSite?.schemaName ?? '', gridType, getGridID(gridType), rowToDelete.id);
+      if (adminEmail) deleteQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
 
       try {
         const response = await fetch(deleteQuery, {
@@ -618,7 +620,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
 
   const fetchPaginatedData = async (pageToFetch: number) => {
     setLoading(true);
-    const paginatedQuery =
+    let paginatedQuery =
       (filterModel.items && filterModel.items.length > 0) || (filterModel.quickFilterValues && filterModel.quickFilterValues.length > 0)
         ? createQFFetchQuery(
             currentSite?.schemaName ?? '',
@@ -638,6 +640,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
             currentCensus?.plotCensusNumber,
             currentQuadrat?.quadratID
           );
+    if (adminEmail) paginatedQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
     try {
       const response = await fetch(paginatedQuery, {
         method:
@@ -655,7 +658,7 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       setUsingQuery(data.finishedQuery);
 
       if (isNewRowAdded && pageToFetch === newLastPage) {
-        handleAddNewRow();
+        await handleAddNewRow();
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -678,11 +681,11 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
   ): Promise<GridRowModel> => {
     const gridID = getGridID(gridType);
     if ('date' in newRow) newRow.date = moment(newRow.date).format('YYYY-MM-DD');
-    const fetchProcessQuery =
+    let fetchProcessQuery =
       gridType !== 'quadrats'
         ? createPostPatchQuery(schemaName ?? '', gridType, gridID)
         : createPostPatchQuery(schemaName ?? '', gridType, gridID, currentPlot?.plotID, currentCensus?.dateRanges[0].censusID);
-
+    if (adminEmail) fetchProcessQuery = `/api/administrative/fetch/${gridType}?email=${encodeURIComponent(adminEmail)}`;
     try {
       setLoading(true);
       const response = await fetch(fetchProcessQuery, {
