@@ -234,20 +234,20 @@ export default function RolloverModal(props: RolloverModalProps) {
       const newCensusID = await mapper.startNewCensus(currentSite?.schemaName ?? '', currentPlot?.plotID ?? 0, maxPlot + 1);
       if (!newCensusID) throw new Error('Failed to create new census');
 
-      await Promise.all(
-        entries.map(async ([key, c]) => {
-          if (!c.rollover) return;
-
-          const list = c.customize ? c.selected : c.previous;
-          const ids = list.map(item => (item as any)[CATEGORY_MAP[key].idKey]).filter(Boolean);
-
-          await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${c.census.censusID}/${newCensusID}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ incoming: ids })
-          });
-        })
-      );
+      // await Promise.all(
+      //   entries.map(async ([key, c]) => {
+      //     if (!c.rollover) return;
+      //
+      //     const list = c.customize ? c.selected : c.previous;
+      //     const ids = list.map(item => (item as any)[CATEGORY_MAP[key].idKey]).filter(Boolean);
+      //
+      //     await fetch(`/api/rollover/${key}/${currentSite!.schemaName}/${currentPlot!.plotID}/${c.census.censusID}/${newCensusID}`, {
+      //       method: 'POST',
+      //       headers: { 'Content-Type': 'application/json' },
+      //       body: JSON.stringify({ incoming: ids })
+      //     });
+      //   })
+      // );
 
       onConfirm(cats.personnel.rollover, cats.quadrats.rollover, cats.attributes.rollover, cats.species.rollover, newCensusID);
       resetState();

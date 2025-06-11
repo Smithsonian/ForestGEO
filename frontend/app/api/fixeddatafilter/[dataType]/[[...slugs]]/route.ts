@@ -93,10 +93,7 @@ export async function POST(
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS p.*
             FROM ${schema}.${params.dataType} p
-                     JOIN ${schema}.census c ON p.CensusID = c.CensusID
-            WHERE c.PlotID = ?
-              AND c.PlotCensusNumber = ? 
-              ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
+            ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
           break;
         case 'unifiedchangelog':
@@ -119,13 +116,9 @@ export async function POST(
           paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS q.*
             FROM ${schema}.quadrats q
-                     JOIN ${schema}.censusquadrats cq ON q.QuadratID = cq.QuadratID
-                     JOIN ${schema}.census c ON cq.CensusID = c.CensusID
-            WHERE q.PlotID = ?
-              AND c.PlotID = ?
-              AND c.PlotCensusNumber = ? AND q.IsActive IS TRUE  
+            WHERE q.PlotID = ? AND q.IsActive IS TRUE  
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-          queryParams.push(plotID, plotID, plotCensusNumber, page * pageSize, pageSize);
+          queryParams.push(plotID, page * pageSize, pageSize);
           break;
         case 'personnelrole':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'p');

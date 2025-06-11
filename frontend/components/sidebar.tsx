@@ -52,7 +52,7 @@ import { RainbowIcon } from '@/styles/rainbowicon';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { Plot, Site } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
-import { DeleteForever, MoreHoriz, Settings } from '@mui/icons-material';
+import { DeleteForever, MoreHoriz } from '@mui/icons-material';
 import PlotCardModal from '@/components/client/modals/plotcardmodal';
 
 export interface SimpleTogglerProps {

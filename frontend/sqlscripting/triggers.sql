@@ -81,330 +81,69 @@ drop trigger if exists trg_species_after_update;
 drop trigger if exists trg_trees_after_insert;
 drop trigger if exists trg_trees_after_update;
 
-create trigger trg_censusspecies_before_insert
-    before insert
-    on censusspecies
-    for each row
-begin
-    declare vVersionID int;
-    select SpeciesVersioningID
-    into vVersionID
-    from speciesversioning
-    where SpeciesID = NEW.SpeciesID
-      and CensusID = NEW.CensusID
-    limit 1;
+# create trigger trg_censusspecies_before_insert
+#     before insert
+#     on censusspecies
+#     for each row
+# begin
+#     declare vVersionID int;
+#     select SpeciesVersioningID
+#     into vVersionID
+#     from speciesversioning
+#     where SpeciesID = NEW.SpeciesID
+#       and CensusID = NEW.CensusID
+#     limit 1;
+#
+#     if vVersionID is null then
+#         insert into speciesversioning (SpeciesID, CensusID, GenusID, SpeciesCode, SpeciesName, SubspeciesName, IDLevel,
+#                                        SpeciesAuthority, SubspeciesAuthority, FieldFamily, Description, ValidCode,
+#                                        ReferenceID)
+#         select s.SpeciesID,
+#                NEW.CensusID,
+#                s.GenusID,
+#                s.SpeciesCode,
+#                s.SpeciesName,
+#                s.SubspeciesName,
+#                s.IDLevel,
+#                s.SpeciesAuthority,
+#                s.SubspeciesAuthority,
+#                s.FieldFamily,
+#                s.Description,
+#                s.ValidCode,
+#                s.ReferenceID
+#         from species s
+#         where s.SpeciesID = NEW.SpeciesID;
+#
+#         set vVersionID = last_insert_id();
+#     end if;
+#     set NEW.SpeciesVersioningID = vVersionID;
+# end;
 
-    if vVersionID is null then
-        insert into speciesversioning (SpeciesID, CensusID, GenusID, SpeciesCode, SpeciesName, SubspeciesName, IDLevel,
-                                       SpeciesAuthority, SubspeciesAuthority, FieldFamily, Description, ValidCode,
-                                       ReferenceID)
-        select s.SpeciesID,
-               NEW.CensusID,
-               s.GenusID,
-               s.SpeciesCode,
-               s.SpeciesName,
-               s.SubspeciesName,
-               s.IDLevel,
-               s.SpeciesAuthority,
-               s.SubspeciesAuthority,
-               s.FieldFamily,
-               s.Description,
-               s.ValidCode,
-               s.ReferenceID
-        from species s
-        where s.SpeciesID = NEW.SpeciesID;
-
-        set vVersionID = last_insert_id();
-    end if;
-    set NEW.SpeciesVersioningID = vVersionID;
-end;
-
-create trigger trg_censusquadrats_before_insert
-    before insert
-    on censusquadrats
-    for each row
-begin
-    declare vVersionID int;
-    select QuadratsVersioningID
-    into vVersionID
-    from quadratsversioning
-    where QuadratID = NEW.QuadratID
-      and CensusID = NEW.CensusID
-    limit 1;
-
-    if vVersionID is null then
-        insert into quadratsversioning (QuadratID, CensusID, PlotID, QuadratName, StartX, StartY, DimensionX,
-                                        DimensionY, Area,
-                                        QuadratShape)
-        select q.QuadratID,
-               NEW.CensusID,
-               q.PlotID,
-               q.QuadratName,
-               q.StartX,
-               q.StartY,
-               q.DimensionX,
-               q.DimensionY,
-               q.Area,
-               q.QuadratShape
-        from quadrats q
-        where q.QuadratID = NEW.QuadratID;
-
-        set vVersionID = last_insert_id();
-    end if;
-    set NEW.QuadratsVersioningID = vVersionID;
-end;
-
-create trigger trg_censusattributes_before_insert
-    before insert
-    on censusattributes
-    for each row
-begin
-    declare vVersionID int;
-    select AttributesVersioningID
-    into vVersionID
-    from attributesversioning
-    where Code = NEW.Code
-      and CensusID = NEW.CensusID
-    limit 1;
-
-    if vVersionID is null then
-        insert into attributesversioning (Code, CensusID, Description, Status)
-        select a.Code, NEW.CensusID, a.Description, a.Status
-        from attributes a
-        where a.Code = NEW.Code;
-
-        set vVersionID = last_insert_id();
-    end if;
-
-    set NEW.AttributesVersioningID = vVersionID;
-end;
-
-create trigger trg_censuspersonnel_before_insert
-    before insert
-    on censuspersonnel
-    for each row
-begin
-    declare vVersionID int;
-    select PersonnelVersioningID
-    into vVersionID
-    from personnelversioning
-    where PersonnelID = NEW.PersonnelID
-      and CensusID = NEW.CensusID
-    limit 1;
-
-    if vVersionID is null then
-        insert into personnelversioning (PersonnelID, CensusID, FirstName, LastName, RoleID)
-        select p.PersonnelID, NEW.CensusID, p.FirstName, p.LastName, p.RoleID
-        from personnel p
-        where p.PersonnelID = NEW.PersonnelID;
-        set vVersionID = last_insert_id();
-    end if;
-
-    set NEW.PersonnelVersioningID = vVersionID;
-end;
-
-create trigger trg_censustrees_before_insert
-    before insert
-    on censustrees
-    for each row
-begin
-    declare vVersionID int;
-    select TreesVersioningID
-    into vVersionID
-    from treesversioning
-    where TreeID = NEW.TreeID
-      and CensusID = NEW.CensusID
-    limit 1;
-
-    if vVersionID is null then
-        insert into treesversioning (TreeID, TreeTag, SpeciesID, CensusID)
-        select t.TreeID, TreeTag, t.SpeciesID, NEW.CensusID
-        from trees t
-        where t.TreeID = NEW.TreeID;
-
-        set vVersionID = last_insert_id();
-    end if;
-
-    set NEW.TreesVersioningID = vVersionID;
-end;
-
-create trigger trg_trees_after_update
-    after update
-    on trees
-    for each row
-begin
-    declare vChanged boolean;
-
-    set vChanged =
-            not (OLD.TreeTag <=> NEW.TreeTag and OLD.SpeciesID <=> NEW.SpeciesID);
-
-    if vChanged then
-        insert into treesversioning (TreeID, TreeTag, SpeciesID, CensusID)
-        select NEW.TreeID,
-               NEW.TreeTag,
-               NEW.SpeciesID,
-               ct.CensusID
-        from censustrees ct
-                 join census c on ct.CensusID = c.CensusID and c.IsActive is true
-        where ct.TreeID = NEW.TreeID
-          and c.CensusID = @CURRENT_CENSUS_ID
-        limit 1
-        on duplicate key update TreeTag   = values(TreeTag),
-                                SpeciesID = values(SpeciesID);
-    end if;
-end;
-
-
-create trigger trg_personnel_after_update
-    after update
-    on personnel
-    for each row
-begin
-    declare vChanged boolean;
-
-    set vChanged =
-            not (OLD.FirstName <=> NEW.FirstName and OLD.LastName <=> NEW.LastName and OLD.RoleID <=> NEW.RoleID);
-
-    if vChanged then
-        insert into personnelversioning (PersonnelID, CensusID, FirstName, LastName, RoleID)
-        select NEW.PersonnelID,
-               cp.CensusID,
-               NEW.FirstName,
-               NEW.LastName,
-               NEW.RoleID
-        from censuspersonnel cp
-                 join census c on cp.CensusID = c.CensusID and c.IsActive is true
-        where cp.PersonnelID = NEW.PersonnelID
-          and c.CensusID = @CURRENT_CENSUS_ID
-        limit 1
-        on duplicate key update FirstName = values(FirstName),
-                                LastName  = values(LastName),
-                                RoleID    = values(RoleID);
-    end if;
-end;
-
-
-create trigger trg_attributes_after_update
-    after update
-    on attributes
-    for each row
-begin
-    declare vChanged boolean;
-
-    set vChanged = not (OLD.Description <=> NEW.Description and OLD.Status <=> NEW.Status);
-
-    if vChanged then
-        insert into attributesversioning (Code, Description, Status, CensusID)
-        select NEW.Code, NEW.Description, NEW.Status, ca.CensusID
-        from censusattributes ca
-                 join census c on ca.CensusID = c.CensusID and c.IsActive is true
-        where ca.Code = NEW.Code
-          and c.CensusID = @CURRENT_CENSUS_ID
-        limit 1
-        on duplicate key update Description = values(Description), Status = values(Status);
-    end if;
-end;
-
-
-create trigger trg_quadrats_after_update
-    after update
-    on quadrats
-    for each row
-begin
-    declare vChanged boolean;
-
-    set vChanged = not (OLD.PlotID <=> NEW.PlotID
-        and OLD.StartX <=> NEW.StartX
-        and OLD.StartY <=> NEW.StartY
-        and OLD.DimensionX <=> NEW.DimensionX
-        and OLD.DimensionY <=> NEW.DimensionY
-        and OLD.Area <=> NEW.Area
-        and OLD.QuadratShape <=> NEW.QuadratShape);
-
-    if vChanged then
-        insert into quadratsversioning (QuadratID, PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area,
-                                        QuadratShape, CensusID)
-        select NEW.QuadratID,
-               NEW.PlotID,
-               NEW.QuadratName,
-               NEW.StartX,
-               NEW.StartY,
-               NEW.DimensionX,
-               NEW.DimensionY,
-               NEW.Area,
-               NEW.QuadratShape,
-               cq.CensusID
-        from censusquadrats cq
-                 join census c on cq.CensusID = c.CensusID and c.IsActive is true
-        where cq.QuadratID = NEW.QuadratID
-          and c.CensusID = @CURRENT_CENSUS_ID
-        limit 1
-        on duplicate key update PlotID       = values(PlotID),
-                                QuadratName  = values(QuadratName),
-                                StartX       = values(StartX),
-                                StartY       = values(StartY),
-                                DimensionX   = values(DimensionX),
-                                DimensionY   = values(DimensionY),
-                                Area         = values(Area),
-                                QuadratShape = values(QuadratShape);
-    end if;
-end;
-
-create trigger trg_species_after_update
-    after update
-    on species
-    for each row
-begin
-    declare vChanged boolean;
-
-    set vChanged = not (OLD.GenusID <=> NEW.GenusID
-        and OLD.SpeciesCode <=> NEW.SpeciesCode
-        and OLD.SpeciesName <=> NEW.SpeciesName
-        and OLD.SubspeciesName <=> NEW.SubspeciesName
-        and OLD.IDLevel <=> NEW.IDLevel
-        and OLD.SpeciesAuthority <=> NEW.SpeciesAuthority
-        and OLD.SubspeciesAuthority <=> NEW.SubspeciesAuthority
-        and OLD.FieldFamily <=> NEW.FieldFamily
-        and OLD.Description <=> NEW.Description
-        and OLD.ValidCode <=> NEW.ValidCode
-        and OLD.ReferenceID <=> NEW.ReferenceID);
-
-    if vChanged then
-        insert into speciesversioning (SpeciesID, GenusID, SpeciesCode, SpeciesName, SubspeciesName, IDLevel,
-                                       SpeciesAuthority, SubspeciesAuthority, FieldFamily, Description, ValidCode,
-                                       ReferenceID, CensusID)
-        select NEW.SpeciesID,
-               NEW.GenusID,
-               NEW.SpeciesCode,
-               NEW.SpeciesName,
-               NEW.SubspeciesName,
-               NEW.IDLevel,
-               NEW.SpeciesAuthority,
-               NEW.SubspeciesAuthority,
-               NEW.FieldFamily,
-               NEW.Description,
-               NEW.ValidCode,
-               NEW.ReferenceID,
-               cs.CensusID
-        from censusspecies cs
-                 join census c on cs.CensusID = c.CensusID and c.IsActive is true
-        where cs.SpeciesID = NEW.SpeciesID
-          and c.CensusID = @CURRENT_CENSUS_ID
-        limit 1
-        on duplicate key update GenusID             = values(GenusID),
-                                SpeciesCode         = values(SpeciesCode),
-                                SpeciesName         = values(SpeciesName),
-                                SubspeciesName      = values(SubspeciesName),
-                                IDLevel             = values(IDLevel),
-                                SpeciesAuthority    = values(SpeciesAuthority),
-                                SubspeciesAuthority = values(SubspeciesAuthority),
-                                FieldFamily         = values(FieldFamily),
-                                Description         = values(Description),
-                                ValidCode           = values(ValidCode),
-                                ReferenceID         = values(ReferenceID);
-    end if;
-end;
-
+# create trigger trg_trees_after_update
+#     after update
+#     on trees
+#     for each row
+# begin
+#     declare vChanged boolean;
+#
+#     set vChanged =
+#             not (OLD.TreeTag <=> NEW.TreeTag and OLD.SpeciesID <=> NEW.SpeciesID);
+#
+#     if vChanged then
+#         insert into treesversioning (TreeID, TreeTag, SpeciesID, CensusID)
+#         select NEW.TreeID,
+#                NEW.TreeTag,
+#                NEW.SpeciesID,
+#                ct.CensusID
+#         from censustrees ct
+#                  join census c on ct.CensusID = c.CensusID and c.IsActive is true
+#         where ct.TreeID = NEW.TreeID
+#           and c.CensusID = @CURRENT_CENSUS_ID
+#         limit 1
+#         on duplicate key update TreeTag   = values(TreeTag),
+#                                 SpeciesID = values(SpeciesID);
+#     end if;
+# end;
 
 -- if @disable_triggers is null or @disable_triggers = 0 then
 

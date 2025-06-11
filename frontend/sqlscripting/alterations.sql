@@ -11,7 +11,8 @@ alter table species
 
 alter table species
     add constraint SpeciesCode
-        unique (SpeciesCode, SpeciesName, SubspeciesName, IsActive, `IDLevel`, SpeciesAuthority, SubspeciesAuthority, FieldFamily, Description);
+        unique (SpeciesCode, SpeciesName, SubspeciesName, IsActive, `IDLevel`, SpeciesAuthority, SubspeciesAuthority,
+                FieldFamily, Description);
 
 alter table species
     drop key species_SpeciesCode_IsActive_uindex;

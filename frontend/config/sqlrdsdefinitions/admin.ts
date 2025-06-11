@@ -6,7 +6,9 @@ export interface AdminUserRDS {
   lastName?: string;
   firstName?: string;
   email?: string;
+  notifications?: boolean;
   userStatus?: string;
+  userSites?: string;
 }
 
 export type AdminUserResult = ResultType<AdminUserRDS>;

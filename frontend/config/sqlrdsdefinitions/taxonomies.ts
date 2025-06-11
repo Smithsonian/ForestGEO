@@ -114,6 +114,7 @@ export interface StemRDS {
   stemID?: number;
   treeID?: number;
   quadratID?: number;
+  censusID?: number;
   stemNumber?: number;
   stemTag?: string;
   localX?: number;
@@ -129,6 +130,7 @@ export interface TreeRDS {
   treeID?: number;
   treeTag?: string;
   speciesID?: number;
+  censusID?: number;
 }
 
 export type TreeResult = ResultType<TreeRDS>;
