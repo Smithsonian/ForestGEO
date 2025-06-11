@@ -333,9 +333,9 @@ export async function runValidation(
                JOIN
              ${schema}.species sp ON sp.SpeciesID = sl.SpeciesID
                JOIN
-             ${schema}.trees t ON t.SpeciesID = sp.SpeciesID
+             ${schema}.trees t ON t.SpeciesID = sp.SpeciesID and t.CensusID = sl.CensusID
                JOIN
-             ${schema}.stems st ON st.TreeID = t.TreeID
+             ${schema}.stems st ON st.TreeID = t.TreeID and st.CensusID = sl.CensusID
                JOIN
              ${schema}.quadrats q ON st.QuadratID = q.QuadratID AND q.IsActive IS TRUE
                JOIN
