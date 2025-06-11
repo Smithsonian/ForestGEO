@@ -45,8 +45,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
     } else if (dataType === 'trees') {
       const query = `SELECT t.* from ${schema}.trees t 
-      JOIN ${schema}.stems s ON t.TreeID = s.TreeID AND s.IsActive IS TRUE
-      JOIN ${schema}.census c ON c.CensusID = s.CensusID and c.IsActive IS TRUE
+      JOIN ${schema}.census c ON c.CensusID = t.CensusID and c.IsActive IS TRUE
       WHERE t.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
     } else if (dataType === 'plots') {
