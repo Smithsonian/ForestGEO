@@ -20,17 +20,17 @@ export async function GET(request: NextRequest) {
         FROM
             ${schema}.coremeasurements cm
                 INNER JOIN
-            ${schema}.stems st ON cm.StemID = st.StemID
+            ${schema}.census c ON cm.CensusID = c.CensusID
                 INNER JOIN
-            ${schema}.trees t ON st.TreeID = t.TreeID
+            ${schema}.stems st ON cm.StemID = st.StemID and st.CensusID = c.CensusID
+                INNER JOIN
+            ${schema}.trees t ON st.TreeID = t.TreeID and t.CensusID = c.CensusID
                 INNER JOIN
             ${schema}.species s ON t.SpeciesID = s.SpeciesID
                 INNER JOIN
             ${schema}.quadrats q ON st.QuadratID = q.QuadratID
                 INNER JOIN
-            ${schema}.plots p ON q.PlotID = p.PlotID AND q.IsActive IS TRUE
-                INNER JOIN
-            ${schema}.census c ON cm.CensusID = c.CensusID
+            ${schema}.plots p ON q.PlotID = p.PlotID 
         WHERE
             cm.CoreMeasurementID = ?;`;
     const results = await connectionManager.executeQuery(query, [cmID]);
