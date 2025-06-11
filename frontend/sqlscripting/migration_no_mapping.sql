@@ -123,33 +123,33 @@ WHERE CAST(StartDate AS CHAR(10)) = '0000-00-00';
 
 -- Insert into census with ON DUPLICATE KEY UPDATE, using UNION between census and censusbackup
 INSERT INTO census (CensusID, PlotID, StartDate, EndDate, Description, PlotCensusNumber)
-SELECT
-    c.CensusID,
-    c.PlotID,
-    COALESCE(MIN(d.ExactDate), c.StartDate) AS StartDate,
-    COALESCE(MAX(d.ExactDate), c.EndDate) AS EndDate,
-    LEFT(c.Description, 65535) AS Description,
-    c.PlotCensusNumber
+SELECT c.CensusID,
+       c.PlotID,
+       COALESCE(MIN(d.ExactDate), c.StartDate) AS StartDate,
+       COALESCE(MAX(d.ExactDate), c.EndDate)   AS EndDate,
+       LEFT(c.Description, 65535)              AS Description,
+       c.PlotCensusNumber
 FROM (
-    -- Combine census and censusbackup using UNION
-    SELECT
-        CensusID, PlotID, StartDate, EndDate, Description, PlotCensusNumber
-    FROM stable_bci.census
-) c
-LEFT JOIN stable_bci.dbh d ON c.CensusID = d.CensusID
-GROUP BY
-    c.CensusID,
-    c.PlotID,
-    c.StartDate,
-    c.EndDate,
-    c.Description,
-    c.PlotCensusNumber
-ON DUPLICATE KEY UPDATE
-    PlotID           = VALUES(PlotID),
-    StartDate        = VALUES(StartDate),
-    EndDate          = VALUES(EndDate),
-    Description      = IF(VALUES(Description) != '', VALUES(Description), census.Description),
-    PlotCensusNumber = VALUES(PlotCensusNumber);
+         -- Combine census and censusbackup using UNION
+         SELECT CensusID,
+                PlotID,
+                StartDate,
+                EndDate,
+                Description,
+                PlotCensusNumber
+         FROM stable_bci.census) c
+         LEFT JOIN stable_bci.dbh d ON c.CensusID = d.CensusID
+GROUP BY c.CensusID,
+         c.PlotID,
+         c.StartDate,
+         c.EndDate,
+         c.Description,
+         c.PlotCensusNumber
+ON DUPLICATE KEY UPDATE PlotID           = VALUES(PlotID),
+                        StartDate        = VALUES(StartDate),
+                        EndDate          = VALUES(EndDate),
+                        Description      = IF(VALUES(Description) != '', VALUES(Description), census.Description),
+                        PlotCensusNumber = VALUES(PlotCensusNumber);
 
 -- Insert into roles table
 INSERT INTO roles (RoleID, RoleName, RoleDescription)
@@ -161,29 +161,24 @@ ON DUPLICATE KEY UPDATE RoleName        = VALUES(RoleName),
 -- Insert into personnel, ensuring each personnel is re-added for each CensusID with new PersonnelID
 -- Step 1: Create a temporary table to hold the intermediate results
 CREATE TEMPORARY TABLE tmp_personnel
-SELECT
-    c.CensusID,
-    p.FirstName,
-    p.LastName,
-    pr.RoleID
-FROM
-    stable_bci.personnel p
-CROSS JOIN
-    stable_bci.census c
-JOIN
-    stable_bci.personnelrole pr ON p.PersonnelID = pr.PersonnelID;
+SELECT c.CensusID,
+       p.FirstName,
+       p.LastName,
+       pr.RoleID
+FROM stable_bci.personnel p
+         CROSS JOIN
+     stable_bci.census c
+         JOIN
+     stable_bci.personnelrole pr ON p.PersonnelID = pr.PersonnelID;
 
 -- Step 2: Insert into personnel from the temporary table, handling duplicates
 INSERT INTO personnel (CensusID, FirstName, LastName, RoleID)
-SELECT
-    CensusID,
-    FirstName,
-    LastName,
-    RoleID
-FROM
-    tmp_personnel
-ON DUPLICATE KEY UPDATE
-    RoleID = VALUES(RoleID);
+SELECT CensusID,
+       FirstName,
+       LastName,
+       RoleID
+FROM tmp_personnel
+ON DUPLICATE KEY UPDATE RoleID = VALUES(RoleID);
 
 -- Step 3: Drop the temporary table
 DROP TEMPORARY TABLE tmp_personnel;
@@ -192,8 +187,8 @@ DROP TEMPORARY TABLE tmp_personnel;
 INSERT INTO censusquadrats (CensusID, QuadratID)
 SELECT CensusID, QuadratID
 FROM stable_bci.censusquadrats
-ON DUPLICATE KEY UPDATE CensusID = VALUES(CensusID),
-                        QuadratID = VALUES (QuadratID);
+ON DUPLICATE KEY UPDATE CensusID  = VALUES(CensusID),
+                        QuadratID = VALUES(QuadratID);
 
 -- Insert into quadrats with ON DUPLICATE KEY UPDATE
 INSERT INTO quadrats (QuadratID, PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY,
@@ -212,14 +207,14 @@ FROM stable_bci.quadrat q
          LEFT JOIN stable_bci.Coordinates co ON q.QuadratID = co.QuadratID
          LEFT JOIN stable_bci.Site s ON q.PlotID = s.PlotID
 GROUP BY q.QuadratID, q.PlotID, q.QuadratName, s.QDimX, s.QDimY, q.Area, q.IsStandardShape
-ON DUPLICATE KEY UPDATE PlotID          = VALUES(PlotID),
-                        QuadratName     = IF(VALUES(QuadratName) != '', VALUES(QuadratName), quadrats.QuadratName),
-                        StartX          = VALUES(StartX),
-                        StartY          = VALUES(StartY),
-                        DimensionX      = VALUES(DimensionX),
-                        DimensionY      = VALUES(DimensionY),
-                        Area            = VALUES(Area),
-                        QuadratShape    = VALUES(QuadratShape)
+ON DUPLICATE KEY UPDATE PlotID       = VALUES(PlotID),
+                        QuadratName  = IF(VALUES(QuadratName) != '', VALUES(QuadratName), quadrats.QuadratName),
+                        StartX       = VALUES(StartX),
+                        StartY       = VALUES(StartY),
+                        DimensionX   = VALUES(DimensionX),
+                        DimensionY   = VALUES(DimensionY),
+                        Area         = VALUES(Area),
+                        QuadratShape = VALUES(QuadratShape)
 
 -- Insert into trees with ON DUPLICATE KEY UPDATE
 INSERT INTO trees (TreeID, TreeTag, SpeciesID)
@@ -238,7 +233,7 @@ SELECT s.StemID,
        s.StemTag,
        MIN(s.QX),
        MIN(s.QY),
-       IF(s.Moved = 'Y', 1, 0)                                                 AS Moved,
+       IF(s.Moved = 'Y', 1, 0) AS Moved,
        LEFT(s.StemDescription, 65535)
 FROM stable_bci.stem s
          LEFT JOIN stable_bci.quadrat q ON q.QuadratID = s.QuadratID
@@ -257,31 +252,33 @@ ON DUPLICATE KEY UPDATE TreeID          = VALUES(TreeID),
 -- Insert into coremeasurements with ON DUPLICATE KEY UPDATE
 INSERT INTO coremeasurements (CoreMeasurementID, CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH,
                               MeasuredHOM, Description, UserDefinedFields)
-SELECT
-    dbh.DBHID,
-    dbh.CensusID,
-    dbh.StemID,
-    NULL,  -- Placeholder for IsValidated
-    dbh.ExactDate,
-    CAST(dbh.DBH AS DECIMAL(10, 6)),
-    CAST(dbh.HOM AS DECIMAL(10, 6)),
-    LEFT(dbh.Comments, 65535),
-    NULL   -- Placeholder for UserDefinedFields
+SELECT dbh.DBHID,
+       dbh.CensusID,
+       dbh.StemID,
+       NULL, -- Placeholder for IsValidated
+       dbh.ExactDate,
+       CAST(dbh.DBH AS DECIMAL(10, 6)),
+       CAST(dbh.HOM AS DECIMAL(10, 6)),
+       LEFT(dbh.Comments, 65535),
+       NULL  -- Placeholder for UserDefinedFields
 FROM (
-    -- Combine dbh and dbhbackup using UNION
-    SELECT
-        DBHID, CensusID, StemID, DBH, HOM, ExactDate, Comments
-    FROM stable_bci.dbh
-) dbh
-ON DUPLICATE KEY UPDATE
-    StemID            = VALUES(StemID),
-    IsValidated       = VALUES(IsValidated),
-    MeasurementDate   = VALUES(MeasurementDate),
-    MeasuredDBH       = VALUES(MeasuredDBH),
-    MeasuredHOM       = VALUES(MeasuredHOM),
-    Description       = IF(VALUES(Description) != '', VALUES(Description),
-                           coremeasurements.Description),
-    UserDefinedFields = VALUES(UserDefinedFields);
+         -- Combine dbh and dbhbackup using UNION
+         SELECT DBHID,
+                CensusID,
+                StemID,
+                DBH,
+                HOM,
+                ExactDate,
+                Comments
+         FROM stable_bci.dbh) dbh
+ON DUPLICATE KEY UPDATE StemID            = VALUES(StemID),
+                        IsValidated       = VALUES(IsValidated),
+                        MeasurementDate   = VALUES(MeasurementDate),
+                        MeasuredDBH       = VALUES(MeasuredDBH),
+                        MeasuredHOM       = VALUES(MeasuredHOM),
+                        Description       = IF(VALUES(Description) != '', VALUES(Description),
+                                               coremeasurements.Description),
+                        UserDefinedFields = VALUES(UserDefinedFields);
 
 
 -- Insert into quadratpersonnel with ON DUPLICATE KEY UPDATE
@@ -306,20 +303,18 @@ ON DUPLICATE KEY UPDATE Description = IF(VALUES(Description) != '', VALUES(Descr
 
 -- Insert into cmattributes with ON DUPLICATE KEY UPDATE
 INSERT INTO cmattributes (CMAID, CoreMeasurementID, Code)
-SELECT
-    dbha.DBHAttID,
-    dbha.DBHID,
-    ta.TSMCode
+SELECT dbha.DBHAttID,
+       dbha.DBHID,
+       ta.TSMCode
 FROM (
-    -- Combine dbhattributes and dbhattributes_backup using UNION
-    SELECT
-        DBHAttID, DBHID, TSMID
-    FROM stable_bci.dbhattributes
-) dbha
-JOIN stable_bci.tsmattributes ta ON dbha.TSMID = ta.TSMID
-ON DUPLICATE KEY UPDATE
-    CoreMeasurementID = VALUES(CoreMeasurementID),
-    Code              = VALUES(Code);
+         -- Combine dbhattributes and dbhattributes_backup using UNION
+         SELECT DBHAttID,
+                DBHID,
+                TSMID
+         FROM stable_bci.dbhattributes) dbha
+         JOIN stable_bci.tsmattributes ta ON dbha.TSMID = ta.TSMID
+ON DUPLICATE KEY UPDATE CoreMeasurementID = VALUES(CoreMeasurementID),
+                        Code              = VALUES(Code);
 
 -- Insert into specimens with ON DUPLICATE KEY UPDATE
 INSERT INTO specimens (SpecimenID, StemID, PersonnelID, SpecimenNumber, SpeciesID, Herbarium, Voucher, CollectionDate,

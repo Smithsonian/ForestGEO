@@ -17,35 +17,6 @@ create index idx_attributes_description
 create index idx_attributes_status
     on attributes (Status);
 
-create table if not exists attributesversioning
-(
-    AttributesVersioningID int auto_increment
-        primary key,
-    Code                   varchar(10)                                                                                                     not null,
-    Description            varchar(255)                                                                                                    null,
-    Status                 enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null,
-    CensusID               int                                                                                                             not null,
-    constraint uq_attribute_snapshot
-        unique (Code, CensusID),
-    constraint fk_av_aid_attr
-        foreign key (Code) references attributes (Code)
-);
-
-create index attributesversioning_Description_index
-    on attributesversioning (Description);
-
-create index attributesversioning_Status_index
-    on attributesversioning (Status);
-
-create index fk_av_cid_attr
-    on attributesversioning (CensusID);
-
-create index idx_av_attribute
-    on attributesversioning (Code);
-
-create index ix_av_cid_code
-    on attributesversioning (Code);
-
 create table if not exists failedmeasurements
 (
     FailedMeasurementID int auto_increment
@@ -62,6 +33,7 @@ create table if not exists failedmeasurements
     HOM                 decimal(12, 6) null,
     Date                date           null,
     Codes               varchar(255)   null,
+    Comments            text           null,
     FailureReasons      text           null,
     hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
                                                       `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`, `Codes`))) stored,
@@ -216,41 +188,6 @@ create index idx_plotid
 create index idx_startdate
     on census (StartDate);
 
-create table if not exists censusattributes
-(
-    CAID                   int auto_increment
-        primary key,
-    Code                   varchar(10) not null,
-    CensusID               int         not null,
-    AttributesVersioningID int         null,
-    constraint uq_code_census
-        unique (Code, CensusID),
-    constraint fk_av_attribute_version
-        foreign key (AttributesVersioningID) references attributesversioning (AttributesVersioningID)
-            on delete cascade,
-    constraint fk_ca_a
-        foreign key (Code) references attributes (Code)
-            on delete cascade,
-    constraint fk_ca_c
-        foreign key (CensusID) references census (CensusID)
-            on delete cascade
-);
-
-create index censusattributes_AttributesVersioningID_index
-    on censusattributes (AttributesVersioningID);
-
-create index censusattributes_CAID_index
-    on censusattributes (CAID);
-
-create index censusattributes_CensusID_index
-    on censusattributes (CensusID);
-
-create index censusattributes_Code_CensusID_AttributesVersioningID_index
-    on censusattributes (Code, CensusID, AttributesVersioningID);
-
-create index censusattributes_Code_index
-    on censusattributes (Code);
-
 create index idx_area
     on plots (Area);
 
@@ -378,85 +315,6 @@ create index idx_startx
 create index idx_starty
     on quadrats (StartY);
 
-create table if not exists quadratsversioning
-(
-    QuadratsVersioningID int auto_increment
-        primary key,
-    QuadratID            int            not null,
-    PlotID               int            null,
-    QuadratName          varchar(255)   null,
-    StartX               decimal(12, 6) null,
-    StartY               decimal(12, 6) null,
-    DimensionX           int            null,
-    DimensionY           int            null,
-    Area                 decimal(12, 6) null,
-    QuadratShape         varchar(255)   null,
-    CensusID             int            not null,
-    constraint uq_quadrat_snapshot
-        unique (QuadratID, CensusID),
-    constraint fk_qv_qid_quadrat
-        foreign key (QuadratID) references quadrats (QuadratID)
-);
-
-create table if not exists censusquadrats
-(
-    CQID                 int auto_increment
-        primary key,
-    CensusID             int null,
-    QuadratID            int null,
-    QuadratsVersioningID int null,
-    constraint CensusID
-        unique (CensusID, QuadratID),
-    constraint cq_census_censusid_fk
-        foreign key (CensusID) references census (CensusID)
-            on delete cascade,
-    constraint cq_quadrats_quadratid_fk
-        foreign key (QuadratID) references quadrats (QuadratID)
-            on delete cascade,
-    constraint fk_qv_quadrat_version
-        foreign key (QuadratsVersioningID) references quadratsversioning (QuadratsVersioningID)
-            on delete cascade
-);
-
-create index censusquadrats_CQID_index
-    on censusquadrats (CQID);
-
-create index censusquadrats_CensusID_index
-    on censusquadrats (CensusID);
-
-create index censusquadrats_QuadratID_CensusID_QuadratsVersioningID_index
-    on censusquadrats (QuadratID, CensusID, QuadratsVersioningID);
-
-create index censusquadrats_QuadratID_index
-    on censusquadrats (QuadratID);
-
-create index censusquadrats_QuadratsVersioningID_index
-    on censusquadrats (QuadratsVersioningID);
-
-create index idx_cq_cid_qid
-    on censusquadrats (CensusID, QuadratID);
-
-create index idx_cq_cid_qvid
-    on censusquadrats (CensusID, QuadratsVersioningID);
-
-create index fk_qv_cid_census
-    on quadratsversioning (CensusID);
-
-create index idx_qv_cid_qn_qid
-    on quadratsversioning (QuadratName, QuadratID);
-
-create index idx_qv_quadrat
-    on quadratsversioning (QuadratID);
-
-create index ix_qv_cid_quadratname
-    on quadratsversioning (QuadratName, QuadratID);
-
-create index quadratsversioning_QuadratsVersioningID_CensusID_QuadratID_index
-    on quadratsversioning (QuadratsVersioningID, QuadratID);
-
-create index quadratsversioning_QuadratsVersioningID_index
-    on quadratsversioning (QuadratsVersioningID);
-
 create table if not exists reference
 (
     ReferenceID       int auto_increment
@@ -568,71 +426,6 @@ create index idx_lastname
 
 create index idx_roleid
     on personnel (RoleID);
-
-create table if not exists personnelversioning
-(
-    PersonnelVersioningID int auto_increment
-        primary key,
-    PersonnelID           int         not null,
-    FirstName             varchar(50) null,
-    LastName              varchar(50) null,
-    RoleID                int         null,
-    CensusID              int         not null,
-    constraint uq_person_snapshot
-        unique (PersonnelID, CensusID),
-    constraint fk_pv_pid_person
-        foreign key (PersonnelID) references personnel (PersonnelID)
-);
-
-create table if not exists censuspersonnel
-(
-    CPID                  int auto_increment
-        primary key,
-    PersonnelID           int not null,
-    CensusID              int not null,
-    PersonnelVersioningID int null,
-    constraint uq_personnel_census
-        unique (PersonnelID, CensusID),
-    constraint fk_cp_c
-        foreign key (CensusID) references census (CensusID)
-            on delete cascade,
-    constraint fk_cp_p
-        foreign key (PersonnelID) references personnel (PersonnelID)
-            on delete cascade,
-    constraint fk_cp_personnel_version
-        foreign key (PersonnelVersioningID) references personnelversioning (PersonnelVersioningID)
-            on delete cascade
-);
-
-create index censuspersonnel_CPID_index
-    on censuspersonnel (CPID);
-
-create index censuspersonnel_CensusID_index
-    on censuspersonnel (CensusID);
-
-create index censuspersonnel_Code_CensusID_PersonnelVersioningID_index
-    on censuspersonnel (PersonnelID, CensusID, PersonnelVersioningID);
-
-create index censuspersonnel_PersonnelID_index
-    on censuspersonnel (PersonnelID);
-
-create index censuspersonnel_PersonnelVersioningID_index
-    on censuspersonnel (PersonnelVersioningID);
-
-create index fk_pv_cid_person
-    on personnelversioning (CensusID);
-
-create index idx_pv_person
-    on personnelversioning (PersonnelID);
-
-create index personnelversioning_PersonnelID_CensusID_index
-    on personnelversioning (PersonnelID);
-
-create index personnelversioning_PersonnelVersioningID_CensusID_index
-    on personnelversioning (PersonnelVersioningID);
-
-create index personnelversioning_PersonnelVersioningID_PersonnelID_index
-    on personnelversioning (PersonnelVersioningID, PersonnelID);
 
 create table if not exists quadratpersonnel
 (
@@ -770,73 +563,6 @@ create index idx_speciesid
 create index idx_upperbound
     on specieslimits (UpperBound);
 
-create table if not exists speciesversioning
-(
-    SpeciesVersioningID int auto_increment
-        primary key,
-    SpeciesID           int          not null,
-    GenusID             int          null,
-    SpeciesCode         varchar(25)  null,
-    SpeciesName         varchar(64)  null,
-    SubspeciesName      varchar(64)  null,
-    IDLevel             varchar(20)  null,
-    SpeciesAuthority    varchar(128) null,
-    SubspeciesAuthority varchar(128) null,
-    FieldFamily         varchar(32)  null,
-    Description         varchar(255) null,
-    ValidCode           varchar(255) null,
-    ReferenceID         int          null,
-    CensusID            int          not null,
-    constraint uq_species_snapshot
-        unique (SpeciesID, CensusID),
-    constraint fk_sv_sid_species
-        foreign key (SpeciesID) references species (SpeciesID)
-);
-
-create table if not exists censusspecies
-(
-    CSID                int auto_increment
-        primary key,
-    SpeciesID           int not null,
-    CensusID            int not null,
-    SpeciesVersioningID int null,
-    constraint uq_species_census
-        unique (SpeciesID, CensusID),
-    constraint fk_cs_c
-        foreign key (CensusID) references census (CensusID)
-            on delete cascade,
-    constraint fk_cs_s
-        foreign key (SpeciesID) references species (SpeciesID)
-            on delete cascade,
-    constraint fk_sv_species_version
-        foreign key (SpeciesVersioningID) references speciesversioning (SpeciesVersioningID)
-            on delete cascade
-);
-
-create index censusspecies_CSID_index
-    on censusspecies (CSID);
-
-create index censusspecies_CensusID_index
-    on censusspecies (CensusID);
-
-create index censusspecies_SpeciesID_CensusID_SpeciesVersioningID_index
-    on censusspecies (SpeciesID, CensusID, SpeciesVersioningID);
-
-create index censusspecies_SpeciesID_index
-    on censusspecies (SpeciesID);
-
-create index censusspecies_SpeciesVersioningID_index
-    on censusspecies (SpeciesVersioningID);
-
-create index fk_sv_cid_species
-    on speciesversioning (CensusID);
-
-create index idx_sv_species
-    on speciesversioning (SpeciesID);
-
-create index ix_sv_cid_speciescode
-    on speciesversioning (SpeciesCode, SpeciesVersioningID);
-
 create table if not exists temporarymeasurements
 (
     id              bigint unsigned auto_increment
@@ -854,6 +580,7 @@ create table if not exists temporarymeasurements
     DBH             decimal(12, 6)                      null,
     HOM             decimal(12, 6)                      null,
     MeasurementDate date                                null,
+    Comments        text                                null,
     Codes           varchar(255)                        null,
     UploadedAt      timestamp default CURRENT_TIMESTAMP null
 );
@@ -909,12 +636,16 @@ create table if not exists trees
         primary key,
     TreeTag   varchar(20)          null,
     SpeciesID int                  null,
+    CensusID  int                  null,
     IsActive  tinyint(1) default 1 not null,
     DeletedAt datetime             null,
     constraint trees_TreeTag_IsActive_uindex
         unique (TreeTag, IsActive),
     constraint Trees_Species_SpeciesID_fk
         foreign key (SpeciesID) references species (SpeciesID)
+            on delete cascade,
+    constraint trees_census_CensusID_fk
+        foreign key (CensusID) references census (CensusID)
             on delete cascade
 );
 
@@ -924,6 +655,7 @@ create table if not exists stems
         primary key,
     TreeID          int                  null,
     QuadratID       int                  null,
+    CensusID        int                  null,
     StemNumber      int                  null,
     StemTag         varchar(10)          null,
     LocalX          decimal(12, 6)       null,
@@ -936,6 +668,9 @@ create table if not exists stems
         unique (StemTag, TreeID, QuadratID, LocalX, LocalY, IsActive),
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID)
+            on delete cascade,
+    constraint stems_census_CensusID_fk
+        foreign key (CensusID) references census (CensusID)
             on delete cascade,
     constraint stems_quadrats_QuadratID_fk
         foreign key (QuadratID) references quadrats (QuadratID)
@@ -1086,78 +821,6 @@ create index idx_speciesid
 
 create index trees_TreeTag_index
     on trees (TreeTag);
-
-create table if not exists treesversioning
-(
-    TreesVersioningID int auto_increment
-        primary key,
-    TreeID            int         not null,
-    TreeTag           varchar(20) null,
-    SpeciesID         int         null,
-    CensusID          int         not null,
-    constraint uq_tree_snapshot
-        unique (TreeID, CensusID),
-    constraint fk_tv_tree
-        foreign key (TreeID) references trees (TreeID)
-            on delete cascade
-);
-
-
-create index idx_tv_cid_tid
-    on treesversioning (CensusID, TreeID);
-
-create index idx_tv_vid_cid
-    on treesversioning (TreesVersioningID, CensusID);
-
-create index ix_tv_cid_treetag_treeid
-    on treesversioning (CensusID, TreeTag, TreeID);
-
-create index treesversioning_CensusID_TreeID_index
-    on treesversioning (CensusID, TreeID);
-
-create index treesversioning_TreesVersioningID_CensusID_TreeID_index
-    on treesversioning (TreesVersioningID, CensusID, TreeID);
-
-create index treesversioning_TreesVersioningID_CensusID_index
-    on treesversioning (TreesVersioningID, CensusID);
-
-create table if not exists censustrees
-(
-    CTID              int auto_increment
-        primary key,
-    TreeID            int not null,
-    CensusID          int not null,
-    TreesVersioningID int null,
-    constraint uq_treeid_census
-        unique (TreeID, CensusID),
-    constraint fk_ct_census_version
-        foreign key (CensusID) references census (CensusID)
-            on delete cascade,
-    constraint fk_ct_tree_version
-        foreign key (TreesVersioningID, CensusID) references treesversioning (TreesVersioningID, CensusID)
-            on delete cascade
-);
-
-create index censustrees_CTID_index
-    on censustrees (CTID);
-
-create index censustrees_CensusID_index
-    on censustrees (CensusID);
-
-create index censustrees_TreeID_CensusID_TreesVersioningID_index
-    on censustrees (TreeID, CensusID, TreesVersioningID);
-
-create index censustrees_TreesID_index
-    on censustrees (TreeID);
-
-create index censustrees_TreesVersioningID_index
-    on censustrees (TreesVersioningID);
-
-create index idx_ct_cid_tid
-    on censustrees (CensusID, TreeID);
-
-create index idx_ct_cid_tvid
-    on censustrees (CensusID, TreesVersioningID);
 
 create table if not exists unifiedchangelog
 (

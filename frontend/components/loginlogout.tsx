@@ -72,7 +72,11 @@ export const LoginLogout = () => {
             <Skeleton loading={status == 'loading'}>{session?.user?.email ? session?.user?.email : ''}</Skeleton>
           </Typography>
         </Box>
-        <IconButton onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)} size="sm">
+        <IconButton
+          disabled={['global', 'db admin'].includes(session?.user.userStatus ?? '')}
+          onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
+          size="sm"
+        >
           <Skeleton loading={status == 'loading'}>
             <Settings />
           </Skeleton>
@@ -108,7 +112,7 @@ export const LoginLogout = () => {
           </MenuItem>
           <MenuItem
             onClick={() => {
-              router.push('/admin/usersiteassignments');
+              router.push('/admin/usersiterelations');
               setAnchorSettings(null);
             }}
           >
