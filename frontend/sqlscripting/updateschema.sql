@@ -44,13 +44,13 @@ CREATE INDEX idx_treeid ON measurementssummary (TreeID);
 CREATE INDEX idx_treetag ON measurementssummary (TreeTag);
 
 ALTER TABLE plots
-    CHANGE COLUMN DimensionUnits DefaultDimensionUnits ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm',
-    CHANGE COLUMN CoordinateUnits DefaultCoordinateUnits ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm',
-    CHANGE COLUMN AreaUnits DefaultAreaUnits ENUM('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') DEFAULT 'm2';
+    CHANGE COLUMN DimensionUnits DefaultDimensionUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm',
+    CHANGE COLUMN CoordinateUnits DefaultCoordinateUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm',
+    CHANGE COLUMN AreaUnits DefaultAreaUnits ENUM ('km2', 'hm2', 'dam2', 'm2', 'dm2', 'cm2', 'mm2') DEFAULT 'm2';
 
 ALTER TABLE plots
-    ADD COLUMN DefaultDBHUnits ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'mm' NOT NULL,
-    ADD COLUMN DefaultHOMUnits ENUM('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm' NOT NULL;
+    ADD COLUMN DefaultDBHUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'mm' NOT NULL,
+    ADD COLUMN DefaultHOMUnits ENUM ('km', 'hm', 'dam', 'm', 'dm', 'cm', 'mm') DEFAULT 'm'  NOT NULL;
 
 CREATE INDEX idx_area ON plots (Area);
 CREATE INDEX idx_countryname ON plots (CountryName);

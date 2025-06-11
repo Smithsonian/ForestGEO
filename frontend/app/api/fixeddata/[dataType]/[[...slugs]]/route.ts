@@ -127,17 +127,10 @@ export async function GET(
       case 'personnel':
       case 'quadrats':
         paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS dtv.*
-              FROM ${schema}.${params.dataType}versioning dtv
-              JOIN ${schema}.census${params.dataType} cx ON dtv.${getVersionID(params.dataType)} = cx.${getVersionID(params.dataType)}
-              JOIN ${schema}.census c ON cx.CensusID = c.CensusID
-              ${
-                isCensusMax
-                  ? ` JOIN ${schema}.${params.dataType} dtmaster ON dtmaster.${demappedGridID} = dtv.${demappedGridID} AND dtmaster.IsActive IS TRUE `
-                  : ' '
-              }
-            WHERE c.PlotID = ? AND c.PlotCensusNumber = ? AND c.IsActive IS TRUE ORDER BY dtv.${demappedGridID} ASC LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+            SELECT SQL_CALC_FOUND_ROWS dt.*
+              FROM ${schema}.${params.dataType} dt
+            ORDER BY dt.${demappedGridID} ASC LIMIT ?, ?;`;
+        queryParams.push(page * pageSize, pageSize);
         break;
       case 'alltaxonomiesview':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv
@@ -149,24 +142,6 @@ export async function GET(
       case 'roles':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS * FROM ${schema}.${params.dataType} WHERE IsActive IS TRUE LIMIT ?, ?`;
         queryParams.push(page * pageSize, pageSize);
-        break;
-      case 'personnelrole':
-        paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS 
-            p.PersonnelID,
-            c.CensusID,
-            p.FirstName,
-            p.LastName,
-            r.RoleName,
-            r.RoleDescription
-        FROM 
-            personnel p
-        LEFT JOIN 
-            roles r ON p.RoleID = r.RoleID
-        JOIN censuspersonnel cp ON cp.PersonnelID = p.PersonnelID
-        JOIN census c ON cp.CensusID = c.CensusID AND c.IsActive IS TRUE
-        WHERE c.PlotID = ? AND c.PlotCensusNumber = ? LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
         break;
       case 'census':
         paginatedQuery = `

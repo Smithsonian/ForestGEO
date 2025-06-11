@@ -1,7 +1,6 @@
 import { createError, handleUpsert } from '@/config/utils';
 import { PersonnelResult, RoleResult } from '@/config/sqlrdsdefinitions/personnel';
 import { SpecialProcessingProps } from '@/config/macros';
-import { CensusPersonnelResult } from '@/config/sqlrdsdefinitions/zones';
 
 export async function processPersonnel(props: Readonly<SpecialProcessingProps>) {
   const { connectionManager, rowData, schema, census } = props;
@@ -35,18 +34,7 @@ export async function processPersonnel(props: Readonly<SpecialProcessingProps>) 
       RoleID: roleID
     };
 
-    const { id: personnelID } = await handleUpsert<PersonnelResult>(connectionManager, schema, 'personnel', personnelData, 'PersonnelID');
-
-    await handleUpsert<CensusPersonnelResult>(
-      connectionManager,
-      schema,
-      'censuspersonnel',
-      {
-        CensusID: census.dateRanges[0].censusID,
-        PersonnelID: personnelID
-      },
-      'CPID'
-    );
+    await handleUpsert<PersonnelResult>(connectionManager, schema, 'personnel', personnelData, 'PersonnelID');
   } catch (error: any) {
     console.error('Upsert failed:', error.message);
     throw createError('Upsert failed', { error });

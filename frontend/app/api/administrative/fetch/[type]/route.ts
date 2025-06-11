@@ -7,16 +7,19 @@ import { HTTPResponses } from '@/config/macros';
 export async function GET(request: NextRequest, props: { params: Promise<{ type: string }> }) {
   const { type } = await props.params;
   const connectionManager = ConnectionManager.getInstance();
-  const email = request.nextUrl.searchParams.get('email') ?? (await getCookie('user'));
-  if (!email) throw new Error('no email found in cookies.');
 
   try {
     let query = '';
     switch (type) {
       case 'users':
-        query = `SELECT u.*, GROUP_CONCAT(s.SiteName ORDER BY s.SiteName SEPARATOR ';') AS SiteNames 
-                 FROM catalog.users u
-                   LEFT JOIN catalog.usersiterelations ur ON u.UserID = ur.UserID
+        query = `SELECT u.LastName as LastName, 
+                        u.FirstName as FirstName, 
+                        u.Email as Email, 
+                        u.IsAdmin as Notifications, 
+                        u.UserStatus as UserStatus, 
+                        GROUP_CONCAT(s.SiteID ORDER BY s.SiteID SEPARATOR ';') AS UserSites 
+                 FROM catalog.users u 
+                   LEFT JOIN catalog.usersiterelations ur ON u.UserID = ur.UserID 
                  LEFT JOIN catalog.sites s ON ur.SiteID = s.SiteID 
                  GROUP BY u.UserID;`;
         break;
