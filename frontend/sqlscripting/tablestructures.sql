@@ -33,7 +33,6 @@ create table if not exists failedmeasurements
     HOM                 decimal(12, 6) null,
     Date                date           null,
     Codes               varchar(255)   null,
-    Comments            text           null,
     FailureReasons      text           null,
     hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
                                                       `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`, `Codes`))) stored,
@@ -580,7 +579,6 @@ create table if not exists temporarymeasurements
     DBH             decimal(12, 6)                      null,
     HOM             decimal(12, 6)                      null,
     MeasurementDate date                                null,
-    Comments        text                                null,
     Codes           varchar(255)                        null,
     UploadedAt      timestamp default CURRENT_TIMESTAMP null
 );
@@ -644,9 +642,9 @@ create table if not exists trees
     constraint Trees_Species_SpeciesID_fk
         foreign key (SpeciesID) references species (SpeciesID)
             on delete cascade,
-    constraint trees_census_CensusID_fk
+    constraint trees_census_CensusID_fk_2
         foreign key (CensusID) references census (CensusID)
-            on delete cascade
+            on update cascade on delete cascade
 );
 
 create table if not exists stems
@@ -669,9 +667,9 @@ create table if not exists stems
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID)
             on delete cascade,
-    constraint stems_census_CensusID_fk
+    constraint stems_census_CensusID_fk_2
         foreign key (CensusID) references census (CensusID)
-            on delete cascade,
+            on update cascade on delete cascade,
     constraint stems_quadrats_QuadratID_fk
         foreign key (QuadratID) references quadrats (QuadratID)
             on delete cascade
