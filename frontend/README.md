@@ -5,7 +5,7 @@ Institution's Forest Global Earth Observatory (ForestGEO). ForestGEO is a global
 network, unparalleled in size and scope, comprised of ecologists and research sites dedicated to
 advancing long-term study of the world's forests. The ForestGEO app aims to empower researchers with
 an efficient means of recording, validating, and publishing forest health data.  
-Learn more about ForestGEO [at their website](https://www.forestgeo.si.edu/).
+Learn more about ForestGEO [at their website](https://forestgeo.si.edu/).
 
 ## Setting up for Local Development
 
