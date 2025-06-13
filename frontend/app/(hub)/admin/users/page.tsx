@@ -1,8 +1,9 @@
 'use client';
 
-import { Box, Button, Checkbox, Input, Option, Select, Table } from '@mui/joy';
+import { Box, Button, Checkbox, Input, Option, Select, Stack, Table } from '@mui/joy';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
+import { v4 } from 'uuid';
 
 type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[] };
 
@@ -40,8 +41,15 @@ export default function UserSettingsPage() {
       });
     }
 
-    if (users.length === 0) fetchUsers().then(out => setUsers(out));
-    baseUsers.current = users;
+    fetchUsers()
+      .then(out => setUsers(out))
+      .then(() => {
+        baseUsers.current = users;
+      });
+  }, []);
+
+  useEffect(() => {
+    if (users.length > 0 && baseUsers.current.length === 0) baseUsers.current = JSON.parse(JSON.stringify(users));
   }, [users]);
 
   function onTextFieldChange(e: ChangeEvent<HTMLInputElement>, uSite: UserWithSite) {
@@ -57,9 +65,29 @@ export default function UserSettingsPage() {
     );
   }
 
-  // user control: CRUD users --> catalog.users + catalog.usersiterelations
   return (
     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <Stack direction={'row'} gap={1}>
+        <Button disabled={JSON.stringify(users) === JSON.stringify(baseUsers.current)} onClick={() => setUsers(baseUsers.current)}>
+          Discard Changes
+        </Button>
+        <Button
+          disabled={JSON.stringify(users) === JSON.stringify(baseUsers.current)}
+          onClick={async () => {
+            users.map(async user => {
+              if (JSON.stringify(user) !== JSON.stringify(baseUsers.current.find(i => i.userID === user.userID))) {
+                // current !== baseline, update
+                await fetch(`/api/administrative/fetch/users`, {
+                  method: 'PATCH',
+                  body: JSON.stringify({ newRow: user, oldRow: baseUsers.current.find(i => i.userID === user.userID) })
+                });
+              }
+            });
+          }}
+        >
+          Save Changes
+        </Button>
+      </Stack>
       <Table>
         <thead>
           <tr>
@@ -73,7 +101,7 @@ export default function UserSettingsPage() {
         </thead>
         <tbody>
           {users.map(u => (
-            <tr key={u.userID}>
+            <tr key={v4()}>
               <td>
                 <Input name={'firstName'} value={u.firstName} onChange={e => onTextFieldChange(e, u)} />
               </td>
@@ -89,17 +117,20 @@ export default function UserSettingsPage() {
               <td>
                 <Select
                   name={'userStatus'}
-                  onChange={(event, newValue) => {
-                    const fakeEvent = {
-                      target: {
-                        name: event?.currentTarget.getAttribute('name'),
-                        value: newValue,
-                        type: undefined,
-                        checked: undefined
-                      }
-                    } as unknown as ChangeEvent<HTMLInputElement>;
-
-                    onTextFieldChange(fakeEvent, u);
+                  value={u.userStatus}
+                  onChange={(_event, newValue) => {
+                    if (newValue) {
+                      setUsers(prev =>
+                        prev.map(i =>
+                          i.userID === u.userID
+                            ? {
+                                ...i,
+                                userStatus: newValue
+                              }
+                            : u
+                        )
+                      );
+                    }
                   }}
                 >
                   <Option value={'global'}>Global</Option>
@@ -129,16 +160,6 @@ export default function UserSettingsPage() {
           ))}
         </tbody>
       </Table>
-      <Button disabled={JSON.stringify(users) === JSON.stringify(baseUsers.current)} onClick={() => setUsers(baseUsers.current)}>
-        Discard Changes
-      </Button>
-      <Button
-        disabled={JSON.stringify(users) !== JSON.stringify(baseUsers.current)}
-        onClick={async () => {
-          const objs = users.flatMap(u => u.userSites.map(s => ({ UserID: u.userID!, SiteID: s.siteID! })));
-          await fetch(`/api/administrative/fetch/usersiterelations`, { method: 'DELETE' });
-        }}
-      ></Button>
     </Box>
   );
 }

@@ -73,7 +73,7 @@ export const LoginLogout = () => {
           </Typography>
         </Box>
         <IconButton
-          disabled={['global', 'db admin'].includes(session?.user.userStatus ?? '')}
+          disabled={!['global', 'db admin'].includes(session?.user.userStatus ?? '')}
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           size="sm"
         >
