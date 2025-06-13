@@ -35,27 +35,27 @@ BEGIN
                                             Errors)
     SELECT cm.CoreMeasurementID                                 AS CoreMeasurementID,
            st.StemID                                            AS StemID,
-           tv.TreeID                                            AS TreeID,
-           sv.SpeciesID                                         AS SpeciesID,
-           qv.QuadratID                                         AS QuadratID,
-           COALESCE(qv.PlotID, 0)                               AS PlotID,
+           t.TreeID                                             AS TreeID,
+           sp.SpeciesID                                         AS SpeciesID,
+           q.QuadratID                                          AS QuadratID,
+           COALESCE(q.PlotID, 0)                                AS PlotID,
            COALESCE(cm.CensusID, 0)                             AS CensusID,
-           sv.SpeciesName                                       AS SpeciesName,
-           sv.SubspeciesName                                    AS SubspeciesName,
-           sv.SpeciesCode                                       AS SpeciesCode,
-           tv.TreeTag                                           AS TreeTag,
+           sp.SpeciesName                                       AS SpeciesName,
+           sp.SubspeciesName                                    AS SubspeciesName,
+           sp.SpeciesCode                                       AS SpeciesCode,
+           t.TreeTag                                            AS TreeTag,
            st.StemTag                                           AS StemTag,
            st.LocalX                                            AS StemLocalX,
            st.LocalY                                            AS StemLocalY,
-           qv.QuadratName                                       AS QuadratName,
+           q.QuadratName                                        AS QuadratName,
            cm.MeasurementDate                                   AS MeasurementDate,
            cm.MeasuredDBH                                       AS MeasuredDBH,
            cm.MeasuredHOM                                       AS MeasuredHOM,
            cm.IsValidated                                       AS IsValidated,
            cm.Description                                       AS Description,
-           (SELECT GROUP_CONCAT(DISTINCT av.Code SEPARATOR '; ')
+           (SELECT GROUP_CONCAT(DISTINCT a.Code SEPARATOR '; ')
             FROM cmattributes ca
-                     left join attributesversioning av on av.Code = ca.Code
+                     left join attributes a on a.Code = ca.Code
             WHERE ca.CoreMeasurementID = cm.CoreMeasurementID)  AS Attributes,
            cm.UserDefinedFields                                 AS UserDefinedFields,
            (SELECT GROUP_CONCAT(CONCAT(vp.ProcedureName, '->', vp.Description) SEPARATOR ';')
@@ -64,10 +64,10 @@ BEGIN
             WHERE cmv.CoreMeasurementID = cm.CoreMeasurementID) AS Errors
     FROM coremeasurements cm
              join census c ON cm.CensusID = c.CensusID
-             join stems st ON cm.StemID = st.StemID
-             join treesversioning tv on tv.CensusID = c.CensusID and tv.TreeID = st.TreeID
-             join speciesversioning sv on c.CensusID = sv.CensusID and tv.SpeciesID = sv.SpeciesID
-             join quadratsversioning qv on qv.CensusID = c.CensusID and qv.QuadratID = st.QuadratID;
+             join stems st ON cm.StemID = st.StemID and st.CensusID = c.CensusID
+             join trees t on t.CensusID = c.CensusID and t.TreeID = st.TreeID
+             join species sp on t.SpeciesID = sp.SpeciesID
+             join quadrats q on q.QuadratID = st.QuadratID;
 
     -- Re-enable foreign key checks
     SET foreign_key_checks = 1;
@@ -215,45 +215,10 @@ begin
     create temporary table if not exists missing_trees engine = memory as
     select t.TreeID
     from trees t
-             left join treesversioning tv on t.TreeID = tv.TreeID
-    where tv.TreesVersioningID is null
-      and t.TreeID is not null;
+    where t.CensusID is null;
 
-    insert into censustrees (TreeID, CensusID)
-    select TreeID, vCensusID
-    from missing_trees
-    on duplicate key update TreeID            = values(TreeID),
-                            CensusID          = values(CensusID),
-                            TreesVersioningID = values(TreesVersioningID);
-
+    update trees set CensusID = vCensusID where TreeID in (select TreeID from missing_trees);
     drop temporary table if exists missing_trees;
-
-    #     set foreign_key_checks = 0;
-#
-#     call RefreshMeasurementsSummary();
-#
-#     create temporary table if not exists dup_cms engine = memory as
-#     select ms1.CoreMeasurementID
-#     from measurementssummary ms1
-#              inner join measurementssummary ms2 on ms1.QuadratName = ms2.QuadratName and
-#                                                    ms1.CensusID = ms2.CensusID and
-#                                                    ms1.StemID = ms2.StemID and
-#                                                    ms1.MeasuredDBH <=> ms2.MeasuredDBH and
-#                                                    ms1.MeasuredHOM <=> ms2.MeasuredHOM and
-#                                                    ms1.MeasurementDate = ms2.MeasurementDate and
-#                                                    ms1.Attributes <=> ms2.Attributes and
-#                                                    ms1.CoreMeasurementID > ms2.CoreMeasurementID;
-#
-#     delete ca
-#     from cmattributes ca
-#              join dup_cms dc on ca.CoreMeasurementID = dc.CoreMeasurementID;
-#
-#     delete cm
-#     from coremeasurements cm
-#              join dup_cms dc on cm.CoreMeasurementID = dc.CoreMeasurementID;
-#
-#     drop temporary table if exists dup_cms;
-#     set foreign_key_checks = 1;
 
     update coremeasurements set MeasuredDBH = null where MeasuredDBH = 0;
     update coremeasurements set MeasuredHOM = null where MeasuredHOM = 0;
@@ -276,29 +241,21 @@ begin
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
         tmp_trees, tmp_quads, tmp_species, tmp_existing_stems;
 
-    CREATE TEMPORARY TABLE tmp_trees ENGINE = MEMORY AS
-    SELECT ct.TreeID, tv.TreeTag, tv.TreesVersioningID
-    FROM censustrees ct
-             JOIN treesversioning tv
-                  ON ct.TreesVersioningID = tv.TreesVersioningID
-    WHERE ct.CensusID = @CURRENT_CENSUS_ID;
-    CREATE INDEX idx_tmp_trees_tag ON tmp_trees (TreeTag);
+    create temporary table tmp_trees engine = memory as
+    select t.TreeID, t.TreeTag
+    from trees t
+    where t.CensusID = @CURRENT_CENSUS_ID;
+    create index idx_tmp_trees_tag on tmp_trees (TreeTag);
 
-    CREATE TEMPORARY TABLE tmp_quads ENGINE = MEMORY AS
-    SELECT cq.QuadratID, qv.QuadratsVersioningID, qv.QuadratName
-    FROM censusquadrats cq
-             JOIN quadratsversioning qv
-                  ON cq.QuadratsVersioningID = qv.QuadratsVersioningID
-    WHERE cq.CensusID = @CURRENT_CENSUS_ID;
-    CREATE INDEX idx_tmp_quads_name ON tmp_quads (QuadratName);
+    create temporary table tmp_quads engine = memory as
+    select q.QuadratID, q.QuadratName
+    from quadrats q;
+    create index idx_tmp_quads_name on tmp_quads (QuadratName);
 
-    CREATE TEMPORARY TABLE tmp_species ENGINE = MEMORY AS
-    SELECT cs.SpeciesID, sv.SpeciesVersioningID, sv.SpeciesCode
-    FROM censusspecies cs
-             JOIN speciesversioning sv
-                  ON cs.SpeciesVersioningID = sv.SpeciesVersioningID
-    WHERE cs.CensusID = @CURRENT_CENSUS_ID;
-    CREATE INDEX idx_tmp_spec_code ON tmp_species (SpeciesCode);
+    create temporary table tmp_species engine = memory as
+    select s.SpeciesID, s.SpeciesCode
+    from species s;
+    create index idx_tmp_spec_code on tmp_species (SpeciesCode);
 
     create temporary table tmp_existing_stems engine = memory as
     select StemID, TreeID, QuadratID, StemTag from stems;
@@ -346,24 +303,23 @@ begin
                     if((((i.DBH = 0) or (i.HOM = 0)) and
                         (i.Codes is null or trim(i.Codes) = '')), false, true) as Valid,
                     ifnull(
-                            (select sum(if(av.Code is null, 1, 0))
+                            (select sum(if(a.Code is null, 1, 0))
                              from json_table(
                                           if(i.Codes is null or trim(i.Codes) = '', '[]',
                                              concat('["', replace(trim(i.Codes), ';', '","'), '"]')
                                           ),
                                           '$[*]' columns ( code varchar(10) path '$')
                                   ) jt
-                                      left join attributesversioning av
-                                                on av.Code = jt.code and
-                                                   av.CensusID = i.CensusID),
+                                      left join attributes a
+                                                on a.Code = jt.code),
                             0
                     )                                                          as invalid_count
     from initial_dup_filter i
              left join tmp_quads tq on tq.QuadratName = i.QuadratName
              left join tmp_species ts on ts.SpeciesCode = i.SpeciesCode
     where i.TreeTag is not null
-      and (tq.QuadratsVersioningID is not null and
-           ts.SpeciesVersioningID is not null) -- using OR will pass the row if one condition is satisfied but not the other
+      and (tq.QuadratID is not null and
+           ts.SpeciesID is not null) -- using OR will pass the row if one condition is satisfied but not the other
       and i.MeasurementDate is not null;
 
     create temporary table filter_validity_dup engine = memory as
@@ -461,12 +417,12 @@ begin
              left join tmp_trees tt on tt.TreeTag = f.TreeTag
              left join multi_stems ms on ms.id = f.id
              left join old_trees ot on ot.id = f.id
-    where tt.TreesVersioningID is null
+    where tt.TreeID is null
       and ms.id is null
       and ot.id is null;
 
-    insert into trees (TreeTag, SpeciesID)
-    select distinct binary f.TreeTag, ts.SpeciesID
+    insert into trees (TreeTag, SpeciesID, CensusID)
+    select distinct binary f.TreeTag, ts.SpeciesID, @CURRENT_CENSUS_ID
     from (select TreeTag, SpeciesCode, CensusID
           from old_trees
           union all
@@ -479,8 +435,8 @@ begin
     where f.CensusID = @CURRENT_CENSUS_ID
     on duplicate key update TreeTag = values(TreeTag), SpeciesID = values(SpeciesID);
 
-    insert into stems (TreeID, QuadratID, StemTag, LocalX, LocalY)
-    select distinct t.TreeID, tq.QuadratID, f.StemTag, f.LocalX, f.LocalY
+    insert into stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY)
+    select distinct t.TreeID, tq.QuadratID, @CURRENT_CENSUS_ID, f.StemTag, f.LocalX, f.LocalY
     from (select TreeTag, QuadratName, StemTag, LocalX, LocalY, CensusID, SpeciesCode
           from old_trees
           union all
@@ -507,7 +463,7 @@ begin
                     f.MeasurementDate,
                     f.DBH                                 as MeasuredDBH,
                     f.HOM                                 as MeasuredHOM,
-                    f.Comments                            as Comments,
+                    f.Comments                            as Description,
                     json_object('treestemstate', f.state) as UserDefinedFields,
                     true                                  as IsActive
     from (select id,
@@ -550,8 +506,9 @@ begin
           from new_recruits) as f
              join tmp_quads tq on tq.QuadratName = f.QuadratName
              join tmp_species ts on ts.SpeciesCode = f.SpeciesCode
-             join trees t on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID
-             join stems s on s.StemTag = f.StemTag and s.QuadratID = tq.QuadratID and s.TreeID = t.TreeID
+             join trees t on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID and t.CensusID = f.CensusID
+             join stems s on s.StemTag = f.StemTag and s.QuadratID = tq.QuadratID and s.TreeID = t.TreeID and
+                             s.CensusID = f.CensusID
     on duplicate key update CensusID          = values(CensusID),
                             StemID            = values(StemID),
                             MeasurementDate   = values(MeasurementDate),
@@ -690,30 +647,24 @@ begin
     UPDATE failedmeasurements AS fm2
         -- species version snapshot
         LEFT JOIN (SELECT fm.FailedMeasurementID,
-                          sv.SpeciesVersioningID
+                          s.SpeciesID
                    FROM failedmeasurements fm
-                            LEFT JOIN speciesversioning sv
-                                      ON sv.SpeciesCode = fm.SpCode
-                            LEFT JOIN censusspecies cs
-                                      ON cs.SpeciesVersioningID = sv.SpeciesVersioningID
-                                          AND cs.CensusID = fm.CensusID) AS ssub
+                            LEFT JOIN species s
+                                      ON s.SpeciesCode = fm.SpCode) AS ssub
         ON ssub.FailedMeasurementID = fm2.FailedMeasurementID
 
         -- quadrat version snapshot
         LEFT JOIN (SELECT fm.FailedMeasurementID,
-                          qv.QuadratsVersioningID
+                          q.QuadratID
                    FROM failedmeasurements fm
-                            LEFT JOIN quadratsversioning qv
-                                      ON qv.QuadratName = fm.Quadrat
-                                          AND qv.PlotID = fm.PlotID
-                            LEFT JOIN censusquadrats cq
-                                      ON cq.QuadratsVersioningID = qv.QuadratsVersioningID
-                                          AND cq.CensusID = fm.CensusID) AS qsub
+                            LEFT JOIN quadrats q
+                                      ON q.QuadratName = fm.Quadrat
+                                          AND q.PlotID = fm.PlotID) AS qsub
         ON qsub.FailedMeasurementID = fm2.FailedMeasurementID
 
         -- invalid‐codes count via censusattributes → attributesversioning
         LEFT JOIN (SELECT fm.FailedMeasurementID,
-                          IFNULL((SELECT SUM(IF(av.Code IS NULL, 1, 0))
+                          IFNULL((SELECT SUM(IF(a.Code IS NULL, 1, 0))
                                   FROM JSON_TABLE(
                                                IF(fm.Codes IS NULL OR TRIM(fm.Codes) = '',
                                                   '[]',
@@ -721,11 +672,8 @@ begin
                                                ),
                                                '$[*]' COLUMNS (code VARCHAR(10) PATH '$')
                                        ) AS jt
-                                           LEFT JOIN censusattributes cav
-                                                     ON cav.Code = jt.code
-                                                         AND cav.CensusID = fm.CensusID
-                                           LEFT JOIN attributesversioning av
-                                                     ON av.AttributesVersioningID = cav.AttributesVersioningID),
+                                           LEFT JOIN attributes a
+                                                     ON a.Code = jt.code),
                                  0) AS invalid_codes
                    FROM failedmeasurements fm) AS csub
         ON csub.FailedMeasurementID = fm2.FailedMeasurementID
@@ -734,11 +682,11 @@ begin
     SET fm2.FailureReasons = TRIM(BOTH '|' FROM CONCAT_WS('|',
                                                           IF(fm2.SpCode IS NULL OR fm2.SpCode = '', 'SpCode missing', NULL),
                                                           IF(fm2.SpCode IS NOT NULL AND
-                                                             ssub.SpeciesVersioningID IS NULL,
+                                                             ssub.SpeciesID IS NULL,
                                                              'SpCode invalid', NULL),
                                                           IF(fm2.Quadrat IS NULL OR fm2.Quadrat = '', 'Quadrat missing', NULL),
                                                           IF(fm2.Quadrat IS NOT NULL AND
-                                                             qsub.QuadratsVersioningID IS NULL,
+                                                             qsub.QuadratID IS NULL,
                                                              'Quadrat invalid', NULL),
                                                           IF(fm2.X IS NULL OR fm2.X IN (0, -1), 'Missing X', NULL),
                                                           IF(fm2.Y IS NULL OR fm2.Y IN (0, -1), 'Missing Y', NULL),

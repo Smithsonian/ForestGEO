@@ -231,6 +231,7 @@ export interface IsolatedDataGridCommonProps {
   clusters?: Record<string, string[]>;
   defaultHideEmpty?: boolean;
   apiRef?: RefObject<GridApiCommunity>;
+  adminEmail?: string; // need to distinguish between admin and non-admin users --> should ONLY be populated for admin datagrids
 }
 
 export interface DataGridCommonProps {

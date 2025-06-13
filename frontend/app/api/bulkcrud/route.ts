@@ -6,6 +6,7 @@ import { HTTPResponses, InsertUpdateProcessingProps } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { Plot } from '@/config/sqlrdsdefinitions/zones';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
+import { v4 } from 'uuid';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -24,19 +25,44 @@ export async function POST(request: NextRequest) {
   let transactionID: string | undefined = undefined;
   try {
     transactionID = await connectionManager.beginTransaction();
-    for (const rowID in rows) {
-      const rowData = rows[rowID];
-      const props: InsertUpdateProcessingProps = {
-        schema,
-        connectionManager: connectionManager,
-        formType: dataType,
-        rowData,
-        plot: plot,
-        census: census,
-        quadratID: undefined,
-        fullName: undefined
-      };
-      await insertOrUpdate(props);
+    if (['measurementssummary', 'measurementssummaryview'].includes(dataType)) {
+      const batchID = v4();
+      await connectionManager.executeQuery(`INSERT INTO ?? SET ?`, [
+        `${schema}.temporarymeasurements`,
+        Object.values(rows).map(row => ({
+          FileID: 'sample_bulk_insert.csv',
+          BatchID: batchID,
+          PlotID: plot.plotID,
+          CensusID: census.dateRanges[0].censusID,
+          TreeTag: row.tag,
+          StemTag: row.stemtag,
+          SpeciesCode: row.spcode,
+          QuadratName: row.quadrat,
+          LocalX: row.lx,
+          LocalY: row.ly,
+          DBH: row.dbh,
+          HOM: row.hom,
+          MeasurementDate: row.date,
+          Codes: row.codes,
+          Comments: row.description
+        }))
+      ]);
+      await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, ['sample_bulk_insert.csv', batchID]);
+    } else {
+      for (const rowID in rows) {
+        const rowData = rows[rowID];
+        const props: InsertUpdateProcessingProps = {
+          schema,
+          connectionManager: connectionManager,
+          formType: dataType,
+          rowData,
+          plot: plot,
+          census: census,
+          quadratID: undefined,
+          fullName: undefined
+        };
+        await insertOrUpdate(props);
+      }
     }
     await connectionManager.commitTransaction(transactionID ?? '');
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });

@@ -19,34 +19,25 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
 
     // Fetch species
     const [[{ SpeciesID: speciesID }]] = await connectionManager.executeQuery(
-      `SELECT cs.SpeciesID
-                FROM ${schema}.censusspecies AS cs
-                JOIN ${schema}.speciesversioning AS sv
-                  ON cs.SpeciesVersioningID = sv.SpeciesVersioningID
-               WHERE sv.SpeciesCode = ?
-                 AND cs.CensusID     = ?
-               LIMIT 1`,
-      [spcode, census.dateRanges[0].censusID]
+      `SELECT s.SpeciesID FROM ${schema}.species s
+              WHERE s.SpeciesCode = ? LIMIT 1`,
+      [spcode]
     );
 
     console.log('found speciesID: ', speciesID);
     // Fetch quadrat
     const [[{ QuadratID: quadratID }]] = await connectionManager.executeQuery(
-      `SELECT cq.QuadratID
-              FROM ${schema}.censusquadrats AS cq
-              JOIN ${schema}.quadratsversioning AS qv
-                ON cq.QuadratsVersioningID = qv.QuadratsVersioningID
-             WHERE qv.QuadratName = ?
-               AND cq.CensusID    = ?
-             LIMIT 1`,
-      [quadrat, census.dateRanges[0].censusID]
+      `SELECT q.QuadratID FROM ${schema}.quadrats q 
+             WHERE q.QuadratName = ? LIMIT 1`,
+      [quadrat]
     );
     console.log('found quadratID: ', quadratID);
 
     if (tag) {
       const tagSearch: Partial<TreeResult> = {
         TreeTag: tag,
-        SpeciesID: speciesID
+        SpeciesID: speciesID,
+        CensusID: census.dateRanges[0].censusID
       };
       // Handle Tree Upsert
       const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(connectionManager, schema, 'trees', tagSearch, 'TreeID');
@@ -59,6 +50,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           StemTag: stemtag,
           TreeID: treeID,
           QuadratID: quadratID,
+          CensusID: census.dateRanges[0].censusID,
           LocalX: lx,
           LocalY: ly
         };
@@ -108,10 +100,9 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             for (const code of parsedCodes) {
               const attributeRows = await connectionManager.executeQuery(
                 `SELECT COUNT(*) as count
-                 FROM ${schema}.censusattributes ca
-                 WHERE ca.Code = ?
-                  AND ca.CensusID = ?`,
-                [code, census.dateRanges[0].censusID]
+                 FROM ${schema}.attributes 
+                 WHERE Code = ?`,
+                [code]
               );
               if (!attributeRows || attributeRows.length === 0 || !attributeRows[0].count) {
                 throw createError(`Attribute code ${code} not found or query failed.`, { code });

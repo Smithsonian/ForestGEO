@@ -9,7 +9,6 @@ import { v4 } from 'uuid';
 import moment from 'moment/moment';
 import { buildBulkUpsertQuery } from '@/config/utils';
 import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
-import { FamilyResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 
 export async function POST(request: NextRequest) {
@@ -114,15 +113,6 @@ export async function POST(request: NextRequest) {
         );
         const { sql, params } = buildBulkUpsertQuery<QuadratResult>(schema, 'quadrats', bulkQuadrats, 'QuadratID');
         await connectionManager.executeQuery(sql, params);
-
-        // want to immediately connect these in the censusquadrats table
-        const query = `
-        INSERT INTO ${schema}.censusquadrats (CensusID, QuadratID)
-        SELECT distinct ?, q.QuadratID
-        from ${schema}.quadrats q 
-        LEFT JOIN ${schema}.censusquadrats cq ON cq.QuadratID = q.QuadratID and cq.CensusID = ?
-        WHERE q.PlotID = ? and q.IsActive is true AND cq.CQID IS NULL`;
-        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID, plot?.plotID]);
       } else if (formType === 'attributes') {
         const bulkAttributes = Object.values(fileRowSet).map(
           row =>
@@ -134,13 +124,6 @@ export async function POST(request: NextRequest) {
         );
         const { sql, params } = buildBulkUpsertQuery<AttributesResult>(schema, 'attributes', bulkAttributes, 'Code');
         await connectionManager.executeQuery(sql, params);
-        // need to associate these with census now (unregistered)
-        const query = `INSERT INTO ${schema}.censusattributes (CensusID, Code) 
-        SELECT ?, a.Code 
-        FROM ${schema}.attributes a
-        LEFT JOIN ${schema}.censusattributes ca ON ca.Code = a.Code and ca.CensusID = ?
-        WHERE a.IsActive is true and ca.CAID is null`;
-        await connectionManager.executeQuery(query, [census?.dateRanges[0].censusID, census?.dateRanges[0].censusID]);
       } else if (formType === 'species') {
         const bulkProps: SpecialBulkProcessingProps = {
           schema,

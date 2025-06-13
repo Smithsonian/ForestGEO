@@ -591,5 +591,11 @@ export const MeasurementsFormGridColumns: GridColDef[] = standardizeGridColumns(
     headerName: 'Codes',
     flex: 0.75,
     editable: true
+  },
+  {
+    field: 'description',
+    headerName: 'Description',
+    flex: 0.75,
+    editable: true
   }
 ]);

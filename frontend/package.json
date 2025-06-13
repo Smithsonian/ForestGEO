@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "next dev --turbo",
-    "build": "next lint --fix --quiet && prettier --write . --log-level silent && next build --debug",
+    "build": "rm -rf build && next lint --fix --quiet && prettier --write . --log-level silent && next build --debug",
     "start": "node build/standalone/server.js -p 3000",
     "bs": "next build; npm run start",
     "bswin": "npm run build ; npm run start",
@@ -84,6 +84,7 @@
     "react-dropzone": "^14.3.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "sql-formatter": "^15.6.3",
     "style-loader": "^4.0.0",
     "swr": "^2.3.3",
     "tailwind-variants": "^1.0.0",

@@ -21,7 +21,23 @@ import {
   useSiteDispatch
 } from '@/app/contexts/userselectionprovider';
 import { usePathname, useRouter } from 'next/navigation';
-import { Badge, IconButton, Menu, MenuItem, SelectOption, Stack, Tooltip } from '@mui/joy';
+import {
+  Badge,
+  Button,
+  Chip,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  Menu,
+  MenuItem,
+  Modal,
+  ModalClose,
+  ModalDialog,
+  SelectOption,
+  Stack,
+  Tooltip
+} from '@mui/joy';
 import AddIcon from '@mui/icons-material/Add';
 import Select from '@mui/joy/Select';
 import Option from '@mui/joy/Option';
@@ -145,9 +161,6 @@ export default function Sidebar(props: SidebarProps) {
   const [propertiesToggle, setPropertiesToggle] = useState(true);
   const [formsToggle, setFormsToggle] = useState(true);
 
-  const [isRolloverModalOpen, setIsRolloverModalOpen] = useState(false);
-  const [isRolloverStemsModalOpen, setIsRolloverStemsModalOpen] = useState(false);
-
   const { siteListLoaded, setCensusListLoaded, setManualReset } = props;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -158,6 +171,7 @@ export default function Sidebar(props: SidebarProps) {
   const [isSiteDropdownOpen, setSiteDropdownOpen] = useState(false);
   const [isPlotDropdownOpen, setPlotDropdownOpen] = useState(false);
   const [isCensusDropdownOpen, setCensusDropdownOpen] = useState(false);
+  const [isClearDropdownOpen, setIsClearDropdownOpen] = useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorPlotEdit(event.currentTarget);
@@ -235,16 +249,6 @@ export default function Sidebar(props: SidebarProps) {
       resizeObserver.disconnect();
     };
   }, [currentSite, currentPlot, currentCensus]);
-
-  const handleConfirmStemsRollover = async (rolledOverStems: boolean) => {
-    // assumption: new census has already been created, BUT census list has not been reloaded
-    // stored in createdCensusID
-    // additional note: dialog handles actual rollover process. do not need to perform any API calls here.
-    // --> stem rollover will not be triggered if quadrats are NOT rolled over
-    setIsRolloverStemsModalOpen(false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    setCensusListLoaded(false);
-  };
 
   const handleSiteSelection = async (selectedSite: Site | undefined) => {
     if (siteDispatch) {
@@ -500,8 +504,7 @@ export default function Sidebar(props: SidebarProps) {
                 variant={'soft'}
                 color={'danger'}
                 onClick={async () => {
-                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${item?.dateRanges[0].censusID}`);
-                  setManualReset(true);
+                  setIsClearDropdownOpen(true);
                 }}
                 disabled={(item?.plotCensusNumber ?? 0) < censusListContext?.reduce((currentMax, item) => Math.max(currentMax, item?.plotCensusNumber ?? 0), 0)}
               >
@@ -1050,6 +1053,48 @@ export default function Sidebar(props: SidebarProps) {
             setManualReset={setManualReset}
           />
         )}
+        <Modal open={isClearDropdownOpen} onClose={() => setIsClearDropdownOpen(!isClearDropdownOpen)}>
+          <ModalDialog role={'alertdialog'}>
+            <ModalClose />
+            <DialogTitle>Delete this census?</DialogTitle>
+            <DialogContent>
+              Please choose from the following options:
+              <Stack direction={'row'}>
+                <Chip>Partial Deletion</Chip>
+                <Typography>
+                  : Delete <strong>only measurements</strong>
+                </Typography>
+              </Stack>
+              <Stack direction={'row'}>
+                <Chip>Full Deletion</Chip>
+                <Typography>
+                  : Delete <strong>measurements and fixed data</strong>
+                </Typography>
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                onClick={async () => {
+                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=msmts`);
+                  setIsClearDropdownOpen(!isClearDropdownOpen);
+                  setManualReset(true);
+                }}
+              >
+                Partial Deletion
+              </Button>
+              <Button
+                onClick={async () => {
+                  await fetch(`/api/clearcensus?schema=${currentSite?.schemaName}&censusID=${currentCensus?.dateRanges[0].censusID}&type=full`);
+                  setIsClearDropdownOpen(!isClearDropdownOpen);
+                  setManualReset(true);
+                }}
+              >
+                Full Deletion
+              </Button>
+              <Button onClick={() => setIsClearDropdownOpen(false)}>Cancel</Button>
+            </DialogActions>
+          </ModalDialog>
+        </Modal>
       </Stack>
     </>
   );

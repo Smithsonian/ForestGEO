@@ -7,8 +7,8 @@ import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import { handleError } from '@/utils/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
-import { CensusSpeciesResult } from '@/config/sqlrdsdefinitions/zones';
-import { cookies } from 'next/headers';
+import { getCookie } from '@/app/actions/cookiemanager';
+import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
@@ -20,21 +20,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
   const { newRow, oldRow } = await request.json();
   let updateIDs: Record<string, number> = {};
   let transactionID: string | undefined = undefined;
-
-  function getVersionID(dataType: string): string {
-    switch (dataType) {
-      case 'attributes':
-        return 'AttributesVersioningID';
-      case 'personnel':
-        return 'PersonnelVersioningID';
-      case 'quadrats':
-        return 'QuadratsVersioningID';
-      case 'species':
-        return 'SpeciesVersioningID';
-      default:
-        return 'breakage';
-    }
-  }
 
   try {
     transactionID = await connectionManager.beginTransaction();
@@ -179,6 +164,30 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           );
         }
 
+        if (updatedFields.Attributes) {
+          const parsedCodes = updatedFields.Attributes.split(';')
+            .map((code: string) => code.trim())
+            .filter(Boolean);
+          // clear existing connections
+          await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID]);
+          if (parsedCodes.length === 0) {
+            console.error('No valid attribute codes found:', updatedFields.Attributes);
+          } else {
+            for (const code of parsedCodes) {
+              await handleUpsert<CMAttributesResult>(
+                connectionManager,
+                schema,
+                'cmattributes',
+                {
+                  CoreMeasurementID: mappedOldRow.CoreMeasurementID,
+                  Code: code
+                },
+                'CMAID'
+              );
+            }
+          }
+        }
+
         // Reset validation status and clear errors if changes were made
         if (changesFound) {
           const resetValidationQuery = format('UPDATE ?? SET ?? = ? WHERE ?? = ?', [
@@ -211,11 +220,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           ({ NumQuadrats: _ignored2, ...plotTrimmed } = newRowData);
           dataToUpdate = plotTrimmed;
         } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(dataType)) {
-          const key = getVersionID(dataType);
-          ({ [key]: _ignored3, CensusID: _ignored2, ...specTrimmed } = newRowData);
+          ({ CensusID: _ignored2, ...specTrimmed } = newRowData);
           dataToUpdate = specTrimmed;
         } else dataToUpdate = remainingProperties;
-
         const updateQuery = format(
           `UPDATE ??
            SET ?
@@ -223,8 +230,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
         );
         // set session var in case, connect to original transaction ID
-        const censusID = parseInt((await cookies()).get('censusID')?.value ?? '0');
-        console.log('cookies stored: ', censusID);
+        const censusID = parseInt((await getCookie('censusList')) ?? '0');
         await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         await connectionManager.executeQuery(updateQuery);
 
@@ -285,7 +291,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       );
 
       // species handler
-      const { id: newSpeciesID } = await handleUpsert<SpeciesResult>(
+      await handleUpsert<SpeciesResult>(
         connectionManager,
         schema,
         'species',
@@ -303,45 +309,14 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
         },
         'SpeciesID'
       );
-
-      // associate with census:
-      await handleUpsert<CensusSpeciesResult>(
-        connectionManager,
-        schema,
-        'censusspecies',
-        {
-          CensusID: censusID,
-          SpeciesID: newSpeciesID
-        },
-        'CSID'
-      );
     } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
       if (params.dataType === 'attributes') {
         const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
         await connectionManager.executeQuery(insertQuery);
-        const caQuery = format(`INSERT IGNORE INTO ?? SET ?`, [
-          `${schema}.${params.dataType}`,
-          {
-            CensusID: censusID,
-            [demappedGridID]: newRowData[demappedGridID]
-          }
-        ]);
-        const results = await connectionManager.executeQuery(caQuery);
-        if (results.length === 0) throw new Error('Error inserting into censusattribute');
       } else {
         const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData; // separate out PK
         const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
-        const results = await connectionManager.executeQuery(insertQuery);
-        insertIDs = { [params.dataType]: results.insertId }; // Standardize output with table name as key
-        const cqQuery = format(`INSERT IGNORE INTO ?? SET ?`, [
-          `${schema}.census${params.dataType}`,
-          {
-            CensusID: censusID,
-            [demappedGridID]: insertIDs[params.dataType]
-          }
-        ]);
-        const cqResults = await connectionManager.executeQuery(cqQuery);
-        if (cqResults.length === 0) throw new Error(`Error inserting into census junction table for ${params.dataType}`);
+        await connectionManager.executeQuery(insertQuery);
       }
     } else {
       // Handle all other cases
@@ -372,25 +347,16 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ da
   const { newRow } = await request.json();
   let transactionID: string | undefined = undefined;
   try {
-    const cookieStore = await cookies();
-    const storedCensusID = parseInt(cookieStore.get('censusID')?.value ?? '0');
+    const storedCensusID = parseInt((await getCookie('censusID')) ?? '0');
     transactionID = await connectionManager.beginTransaction();
 
     // Handle deletion for tables
     const deleteRowData = MapperFactory.getMapper<any, any>(params.dataType).demapData([newRow])[0];
     const { [demappedGridID]: gridIDKey } = deleteRowData;
     // census-correlated tables need cleared first
-    if (['attributes', 'quadrats', 'species', 'personnel', 'trees'].includes(params.dataType)) {
-      const softDelete = format(`DELETE FROM ?? WHERE ?? = ? AND CensusID = ?`, [
-        `${schema}.${params.dataType}versioning`,
-        demappedGridID,
-        gridIDKey,
-        storedCensusID
-      ]);
-      await connectionManager.executeQuery(softDelete);
-    } else if (params.dataType === 'alltaxonomiesview') {
+    if (params.dataType === 'alltaxonomiesview') {
       const { SpeciesID } = deleteRowData;
-      await connectionManager.executeQuery(`DELETE FROM ${schema}.speciesversioning WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
+      await connectionManager.executeQuery(`DELETE FROM ${schema}.species WHERE SpeciesID = ? AND CensusID = ?`, [SpeciesID, storedCensusID]);
     } else if (params.dataType === 'measurementssummary') {
       // start with surrounding data
       await connectionManager.executeQuery(`DELETE FROM ${schema}.cmverrors WHERE ${demappedGridID} = ${gridIDKey}`);
