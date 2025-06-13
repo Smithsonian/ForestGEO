@@ -21,7 +21,7 @@ export default auth(async function middleware(request: NextRequest) {
   const session = await nextAuthMiddleware(); // Fetch session once
 
   const isAuthenticated = !!session;
-  const isProtectedRoute = ['/dashboard', '/measurementshub', '/fixeddatainput'].some(route => url.pathname.startsWith(route));
+  const isProtectedRoute = ['/admin', '/dashboard', '/measurementshub', '/fixeddatainput'].some(route => url.pathname.startsWith(route));
 
   if (isProtectedRoute && !isAuthenticated) {
     // Redirect unauthenticated users trying to access protected routes
@@ -43,5 +43,5 @@ export default auth(async function middleware(request: NextRequest) {
 });
 
 export const config = {
-  matcher: ['/', '/dashboard/:path*', '/measurementshub/:path*', '/fixeddatainput/:path*']
+  matcher: ['/', '/admin/:path*', '/dashboard/:path*', '/measurementshub/:path*', '/fixeddatainput/:path*']
 };
