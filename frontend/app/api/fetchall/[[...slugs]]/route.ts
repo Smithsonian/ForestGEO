@@ -38,15 +38,10 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
   const connectionManager = ConnectionManager.getInstance();
   try {
     let results: any;
-    if (dataType === 'stems') {
-      const query = `SELECT st.* FROM ${schema}.stems st 
+    if (dataType === 'stems' || dataType === 'trees') {
+      const query = `SELECT st.* FROM ${schema}.${dataType} st 
       JOIN ${schema}.census c ON c.CensusID = st.CensusID and c.IsActive IS TRUE
       WHERE st.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
-      results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
-    } else if (dataType === 'trees') {
-      const query = `SELECT t.* from ${schema}.trees t 
-      JOIN ${schema}.census c ON c.CensusID = t.CensusID and c.IsActive IS TRUE
-      WHERE t.IsActive IS TRUE and c.PlotID = ? AND c.PlotCensusNumber = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID, storedPCN]);
     } else if (dataType === 'plots') {
       const query = `
@@ -56,7 +51,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
     } else if (dataType === 'census') {
-      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ? AND IsActive IS TRUE`;
+      const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {
       const query = `SELECT * FROM ${schema}.${dataType}`;

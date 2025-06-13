@@ -50,7 +50,6 @@ from coremeasurements cm_present
          join census c_past on cm_past.CensusID = c_past.CensusID and c_past.IsActive is true
          join plots p ON c_present.PlotID = p.PlotID and c_past.PlotID = p.PlotID
          join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
-         join cmattributes cma_present on cma_present.CoreMeasurementID = cm_present.CoreMeasurementID
          join attributes a_present on a_present.Code = cma_present.Code
          join cmattributes cma_past on cma_past.CoreMeasurementID = cm_past.CoreMeasurementID
          join attributes a_past on a_past.Code = cma_past.Code
@@ -94,7 +93,7 @@ from coremeasurements cm
          join (select s2.CensusID, q2.QuadratName
                from quadrats q2
                     join stems s2 on q2.QuadratID = s2.QuadratID
-               group by s2.CensusID, s2.QuadratName
+               group by s2.CensusID, q2.QuadratName
                having count(distinct q2.QuadratID) > 1) as ambiguous
          left join cmverrors e
                    on e.CoreMeasurementID = cm.CoreMeasurementID and e.ValidationErrorID = @validationProcedureID

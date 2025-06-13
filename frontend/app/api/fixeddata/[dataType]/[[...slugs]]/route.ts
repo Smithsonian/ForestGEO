@@ -134,9 +134,8 @@ export async function GET(
         break;
       case 'alltaxonomiesview':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv
-            JOIN ${schema}.census c ON atv.CensusID = c.CensusID AND c.IsActive IS TRUE 
-            WHERE c.PlotID = ? AND c.PlotCensusNumber = ? ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
-        queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
+            ORDER BY atv.SpeciesCode ASC LIMIT ?, ?;`;
+        queryParams.push(page * pageSize, pageSize);
         break;
       case 'stems':
       case 'roles':
