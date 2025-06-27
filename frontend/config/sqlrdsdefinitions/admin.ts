@@ -31,7 +31,9 @@ export interface AdminUserSiteRelationRDS {
   id?: number;
   userSiteRelationID?: number;
   userID?: number;
+  userName?: string;
   siteID?: number;
+  siteName?: string;
 }
 
 export type AdminUserSiteRelationResult = ResultType<AdminUserSiteRelationRDS>;
