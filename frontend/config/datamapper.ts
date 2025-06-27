@@ -57,6 +57,7 @@ import {
   UnifiedChangelogResult
 } from '@/config/sqlrdsdefinitions/core';
 import { AdminSiteRDS, AdminSiteResult, AdminUserRDS, AdminUserResult } from '@/config/sqlrdsdefinitions/admin';
+import { AdminUserSiteRelationRDS, AdminUserSiteRelationResult } from './sqlrdsdefinitions/admin';
 
 export function parseDate(date: any): Date | undefined {
   if (!date) return undefined;
@@ -261,8 +262,6 @@ class MapperFactory {
         return new GenericMapper<QuadratPersonnelRDS, QuadratPersonnelResult>() as unknown as IDataMapper<RDS, Result>;
       case 'quadrats':
         return new GenericMapper<QuadratRDS, QuadratResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'sites':
-        return new SitesMapper() as any;
       case 'family':
         return new GenericMapper<FamilyRDS, FamilyResult>() as unknown as IDataMapper<RDS, Result>;
       case 'genus':
@@ -295,6 +294,8 @@ class MapperFactory {
         return new GenericMapper<AdminUserRDS, AdminUserResult>() as unknown as IDataMapper<RDS, Result>;
       case 'sites':
         return new GenericMapper<AdminSiteRDS, AdminSiteResult>() as unknown as IDataMapper<RDS, Result>;
+      case 'usersiterelations':
+        return new GenericMapper<AdminUserSiteRelationRDS, AdminUserSiteRelationResult>() as unknown as IDataMapper<RDS, Result>;
       default:
         throw new Error('Mapper not found for type: ' + type);
     }

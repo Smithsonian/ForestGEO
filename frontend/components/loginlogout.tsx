@@ -73,7 +73,8 @@ export const LoginLogout = () => {
           </Typography>
         </Box>
         <IconButton
-          disabled={!['global', 'db admin'].includes(session?.user.userStatus ?? '')}
+          // disabled={!['global', 'db admin'].includes(session?.user.userStatus ?? '')}
+          disabled
           onClick={event => setAnchorSettings(anchorSettings ? null : event.currentTarget)}
           size="sm"
         >
@@ -112,7 +113,7 @@ export const LoginLogout = () => {
           </MenuItem>
           <MenuItem
             onClick={() => {
-              router.push('/admin/usersiterelations');
+              router.push('/admin/userstosites');
               setAnchorSettings(null);
             }}
           >
