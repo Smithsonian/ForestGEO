@@ -304,7 +304,7 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
 
   // Handle redirection if contexts are reset (i.e., no site, plot, or census) and user is not on the dashboard
   useEffect(() => {
-    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard') {
+    if (currentSite === undefined && currentPlot === undefined && currentCensus === undefined && pathname !== '/dashboard' && !pathname.includes('admin')) {
       redirect('/dashboard');
     }
   }, [pathname, currentSite, currentPlot, currentCensus]);
