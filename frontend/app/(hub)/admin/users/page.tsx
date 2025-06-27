@@ -1,9 +1,8 @@
 'use client';
 
 import { Box, Button, Checkbox, Input, Option, Select, Stack, Table } from '@mui/joy';
-import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
-import { v4 } from 'uuid';
 
 type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[] };
 
@@ -23,7 +22,7 @@ export default function UserSettingsPage() {
       const siteMap: Record<number, AdminSiteRDS> = {};
       tempSites.forEach(site => (siteMap[site.siteID ?? 0] = site));
 
-      return tempUsers.map(u => {
+      const mappedUsers: UserWithSite[] = tempUsers.map(u => {
         const ids =
           u.userSites
             ?.split(';')
@@ -39,18 +38,13 @@ export default function UserSettingsPage() {
           userSites: ids.map(i => siteMap[i]).filter(Boolean)
         };
       });
+
+      setUsers(mappedUsers);
+      baseUsers.current = mappedUsers;
     }
 
-    fetchUsers()
-      .then(out => setUsers(out))
-      .then(() => {
-        baseUsers.current = users;
-      });
+    fetchUsers().catch(console.error);
   }, []);
-
-  useEffect(() => {
-    if (users.length > 0 && baseUsers.current.length === 0) baseUsers.current = JSON.parse(JSON.stringify(users));
-  }, [users]);
 
   function onTextFieldChange(e: ChangeEvent<HTMLInputElement>, uSite: UserWithSite) {
     setUsers(prev =>
@@ -65,24 +59,55 @@ export default function UserSettingsPage() {
     );
   }
 
+  const safeJoin = (arr?: { siteID?: number }[]) =>
+    (arr ?? [])
+      .map(s => s.siteID ?? -1)
+      .sort((a, b) => a - b)
+      .join(',');
+
+  function isUserChanged(u: UserWithSite, b?: UserWithSite): boolean {
+    if (!b) return true;
+    return (
+      u.firstName !== b.firstName ||
+      u.lastName !== b.lastName ||
+      u.email !== b.email ||
+      u.notifications !== b.notifications ||
+      u.userStatus !== b.userStatus ||
+      safeJoin(u.userSites) !== safeJoin(b.userSites)
+    );
+  }
+
+  const baseUsersMap = useMemo(() => new Map(baseUsers.current.map(u => [u.userID, u])), [users]);
+
+  const foundChanges = useMemo(() => {
+    return users.some(u => isUserChanged(u, baseUsersMap.get(u.userID)));
+  }, [users]);
+
   return (
     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%' }}>
       <Stack direction={'row'} gap={1}>
-        <Button disabled={JSON.stringify(users) === JSON.stringify(baseUsers.current)} onClick={() => setUsers(baseUsers.current)}>
+        <Button disabled={!foundChanges} onClick={() => setUsers(baseUsers.current)}>
           Discard Changes
         </Button>
         <Button
-          disabled={JSON.stringify(users) === JSON.stringify(baseUsers.current)}
+          disabled={!foundChanges}
           onClick={async () => {
-            users.map(async user => {
-              if (JSON.stringify(user) !== JSON.stringify(baseUsers.current.find(i => i.userID === user.userID))) {
-                // current !== baseline, update
-                await fetch(`/api/administrative/fetch/users`, {
-                  method: 'PATCH',
-                  body: JSON.stringify({ newRow: user, oldRow: baseUsers.current.find(i => i.userID === user.userID) })
-                });
-              }
-            });
+            const baseMap = new Map(baseUsers.current.map(u => [u.userID, u]));
+            const updates = await Promise.all(
+              users.map(async user => {
+                const oldUser = baseMap.get(user.userID);
+                if (JSON.stringify(user) !== JSON.stringify(oldUser)) {
+                  await fetch(`/api/administrative/fetch/users`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ newRow: user, oldRow: oldUser }),
+                    headers: { 'Content-Type': 'application/json' }
+                  });
+                  return user;
+                }
+                return oldUser;
+              })
+            );
+            baseUsers.current = updates.filter((u): u is UserWithSite => !!u);
           }}
         >
           Save Changes
@@ -96,12 +121,12 @@ export default function UserSettingsPage() {
             <th>Email</th>
             <th>Notifications</th>
             <th>User Status</th>
-            <th>Sites</th>
+            {/*<th>Sites</th>*/}
           </tr>
         </thead>
         <tbody>
-          {users.map(u => (
-            <tr key={v4()}>
+          {(users as UserWithSite[]).map(u => (
+            <tr key={u.userID!}>
               <td>
                 <Input name={'firstName'} value={u.firstName} onChange={e => onTextFieldChange(e, u)} />
               </td>
@@ -127,7 +152,7 @@ export default function UserSettingsPage() {
                                 ...i,
                                 userStatus: newValue
                               }
-                            : u
+                            : i
                         )
                       );
                     }
@@ -139,23 +164,32 @@ export default function UserSettingsPage() {
                   <Option value={'field crew'}>Field Crew</Option>
                 </Select>
               </td>
-              <td>
-                <Select
-                  name={'userSites'}
-                  multiple
-                  value={u.userSites.map(s => s.siteID!)}
-                  onChange={(_event, value) => {
-                    const selectedSites = value.map(v => sites.find(s => s.siteID === v));
-                    setUsers(prev => ({ ...prev, userSites: selectedSites }));
-                  }}
-                >
-                  {sites.map(s => (
-                    <Option key={s.siteID} value={s.siteID}>
-                      {s.siteName}
-                    </Option>
-                  ))}
-                </Select>
-              </td>
+              {/*<td>*/}
+              {/*  <Select*/}
+              {/*    name={'userSites'}*/}
+              {/*    multiple*/}
+              {/*    value={u.userSites.map(s => s.siteID!)}*/}
+              {/*    onChange={(_event, value) => {*/}
+              {/*      const selectedSites = value.map(v => sites.find(s => s.siteID === v));*/}
+              {/*      setUsers(prev =>*/}
+              {/*        prev.map(i =>*/}
+              {/*          i.userID === u.userID*/}
+              {/*            ? {*/}
+              {/*                ...i,*/}
+              {/*                userSites: selectedSites.filter((s): s is AdminSiteRDS => !!s)*/}
+              {/*              }*/}
+              {/*            : i*/}
+              {/*        )*/}
+              {/*      );*/}
+              {/*    }}*/}
+              {/*  >*/}
+              {/*    {sites.map(s => (*/}
+              {/*      <Option key={s.siteID} value={s.siteID}>*/}
+              {/*        {s.siteName}*/}
+              {/*      </Option>*/}
+              {/*    ))}*/}
+              {/*  </Select>*/}
+              {/*</td>*/}
             </tr>
           ))}
         </tbody>
