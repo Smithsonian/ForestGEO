@@ -125,7 +125,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
         }));
         return new NextResponse(JSON.stringify(formMappedResults), { status: HTTPResponses.OK });
       case 'measurements':
-        query = `SELECT st.StemTag                                    AS StemTag,
+        query = `SELECT
+                  st.StemID                                           AS StemID,
+                  t.TreeID                                            AS TreeID,
+                  st.StemTag                                          AS StemTag,
                   t.TreeTag                                           AS TreeTag,
                   sp.SpeciesCode                                      AS SpeciesCode,
                   q.QuadratName                                       AS QuadratName,
@@ -181,6 +184,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
         results = await connectionManager.executeQuery(query, [censusID, plotID]);
         formMappedResults = results.map((row: any) => ({
+          stemID: row.StemID,
+          treeID: row.TreeID,
           tag: row.TreeTag,
           stemtag: row.StemTag,
           spcode: row.SpeciesCode,
