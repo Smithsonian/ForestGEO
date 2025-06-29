@@ -272,7 +272,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           .map(row => row.label)
           .join(',') + '\n';
       data.forEach((row: any) => {
-        const values = getTableHeaders(FormType.measurements)
+        const values = [...getTableHeaders(FormType.measurements), { label: 'stemID' }, { label: 'treeID' }]
           .map(rowHeader => rowHeader.label)
           .map(header => row[header])
           .map(value => {
@@ -342,12 +342,11 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           )
         })
       ).json();
-      const headers = Object.keys(results[0] ?? []).filter(
-        header => !['CoreMeasurementID', 'StemID', 'TreeID', 'SpeciesID', 'QuadratID', 'PlotID', 'CensusID'].includes(header)
-      );
+      const headers = Object.keys(results[0] ?? []).filter(header => !['CoreMeasurementID', 'SpeciesID', 'QuadratID', 'PlotID', 'CensusID'].includes(header));
       let csvRows = headers.join(',') + '\n';
       Object.entries(results).forEach(([_, row]) => {
         const rowValues = headers.map(header => {
+          if (header === 'StemID' || header === 'TreeID') return Number(row[header]);
           if (header === 'IsValidated') return bitToBoolean(row[header]);
           if (header === 'MeasurementDate') return moment(new Date(row[header as keyof MeasurementsSummaryResult])).format('YYYY-MM-DD');
           if (Object.prototype.toString.call(row[header as keyof MeasurementsSummaryResult]) === '[object Object]')
