@@ -1059,7 +1059,7 @@ export default function Sidebar(props: SidebarProps) {
             <DialogTitle>Delete this census?</DialogTitle>
             <DialogContent>
               Please choose from the following options:
-              <Stack direction={'row'}>
+              <Stack direction={'row'}>a
                 <Chip>Partial Deletion</Chip>
                 <Typography>
                   : Delete <strong>only measurements</strong>
