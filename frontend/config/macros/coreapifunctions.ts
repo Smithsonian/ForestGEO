@@ -311,11 +311,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       );
     } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(params.dataType)) {
       if (params.dataType === 'attributes') {
-        const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
+        const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
         await connectionManager.executeQuery(insertQuery);
       } else {
         const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData; // separate out PK
-        const insertQuery = format(`INSERT IGNORE INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
+        const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
         await connectionManager.executeQuery(insertQuery);
       }
     } else {

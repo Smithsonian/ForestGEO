@@ -1,10 +1,12 @@
+drop procedure if exists bulkingestioncollapser;
+drop procedure if exists bulkingestionprocess;
+drop procedure if exists clearcensusfull;
+drop procedure if exists clearcensusmsmts;
 drop procedure if exists RefreshMeasurementsSummary;
 drop procedure if exists RefreshViewFullTable;
-drop procedure if exists bulkingestionprocess;
-drop procedure if exists clearcensus;
 drop procedure if exists reingestfailedrows;
 drop procedure if exists reviewfailed;
-drop procedure if exists bulkingestioncollapser;
+
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
 BEGIN
@@ -552,7 +554,71 @@ begin
 end;
 
 create
-    definer = azureroot@`%` procedure clearcensus(IN targetCensusID int)
+    definer = azureroot@`%` procedure clearcensusfull(IN targetCensusID int)
+BEGIN
+    declare vCountCensus int;
+    set foreign_key_checks = 0;
+    START TRANSACTION;
+    DELETE
+    FROM temporarymeasurements
+    WHERE CensusID = targetCensusID;
+
+    DELETE
+    FROM failedmeasurements
+    WHERE CensusID = targetCensusID;
+
+    delete cma.*
+    from cmattributes cma
+             join coremeasurements cm on cma.CoreMeasurementID = cm.CoreMeasurementID
+    where cm.CensusID = targetCensusID;
+
+    delete cmv.*
+    from cmverrors cmv
+             join coremeasurements cm on cmv.CoreMeasurementID = cm.CoreMeasurementID
+    where cm.CensusID = targetCensusID;
+
+    DELETE
+    FROM measurementssummary
+    WHERE CensusID = targetCensusID;
+
+    delete from stems where CensusID = targetCensusID;
+
+    delete from trees where CensusID = targetCensusID;
+
+    select count(*) into vCountCensus from census;
+
+    if vCountCensus = 1 then
+        -- there's only one census. if so, clear all fixed data tables as well to "fully" clean the census
+        truncate attributes;
+        truncate personnel;
+        truncate roles;
+        truncate quadrats;
+        truncate species;
+        truncate specieslimits;
+        truncate genus;
+        truncate family;
+        truncate reference;
+        truncate unifiedchangelog;
+    end if;
+
+    DELETE
+    FROM census
+    WHERE CensusID = targetCensusID;
+
+    ALTER TABLE temporarymeasurements
+        AUTO_INCREMENT = 1;
+    ALTER TABLE failedmeasurements
+        AUTO_INCREMENT = 1;
+    ALTER TABLE measurementssummary
+        AUTO_INCREMENT = 1;
+    ALTER TABLE census
+        AUTO_INCREMENT = 1;
+    COMMIT;
+    set foreign_key_checks = 1;
+END;
+
+create
+    definer = azureroot@`%` procedure clearcensusmsmts(IN targetCensusID int)
 BEGIN
     START TRANSACTION;
 
@@ -700,4 +766,5 @@ begin
                                                           IF(csub.invalid_codes > 0, 'Invalid Codes', NULL)
                                                 ));
 end;
+
 
