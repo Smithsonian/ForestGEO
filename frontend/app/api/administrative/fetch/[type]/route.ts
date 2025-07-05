@@ -108,7 +108,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ ty
     await connectionManager.commitTransaction(transactionID);
     return new NextResponse(JSON.stringify({ message: 'Successfully deleted' }), { status: HTTPResponses.OK });
   } catch (e) {
-    if (transactionID) await connectionManager.commitTransaction(transactionID);
+    if (transactionID) await connectionManager.rollbackTransaction(transactionID);
     return NextResponse.json({ message: `Deletion failed` }, { status: HTTPResponses.INVALID_REQUEST });
   }
 }

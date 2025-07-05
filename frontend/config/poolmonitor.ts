@@ -11,10 +11,23 @@ export class PoolMonitor {
 
   constructor(config: PoolOptions) {
     this.config = config;
-    this.pool = createPool(config);
+    this.pool = createPool({
+      ...config,
+      waitForConnections: true,
+      connectionLimit: config.connectionLimit ?? 10,
+      queueLimit: 0
+    });
     this.poolClosed = false;
-
     console.log(chalk.cyan('PoolMonitor initialized.'));
+    this.pool.on('connection', async (conn: PoolConnection) => {
+      try {
+        await conn.query(`SET SESSION wait_timeout=60, interactive_timeout=60`);
+      } catch (e) {
+        console.warn(chalk.yellow('Could not set session timeout on new conn'), e);
+      }
+      this.resetInactivityTimer();
+    });
+
     this.monitorPoolHealth();
     this.resetInactivityTimer();
   }
@@ -22,15 +35,12 @@ export class PoolMonitor {
   public async getConnection(): Promise<PoolConnection> {
     try {
       if (this.poolClosed) {
-        // console.log(chalk.yellow('Reinitializing pool for new activity.'));
         await this.reinitializePool();
-        ``;
       }
 
-      // console.log(chalk.cyan('Requesting new connection...'));
       const connection = await this.pool.getConnection();
-      // console.log(chalk.green(`Connection acquired: ${connection.threadId}`));
-      this.resetInactivityTimer(); // Reset inactivity timer on new activity
+      connection.on('query', () => this.resetInactivityTimer());
+      connection.on('release', () => this.resetInactivityTimer());
       return connection;
     } catch (error) {
       console.error(chalk.red('Error acquiring connection:', error));
@@ -69,6 +79,10 @@ export class PoolMonitor {
       await this.closeAllConnections();
       this.pool = createPool(this.config);
       this.poolClosed = false;
+      this.pool.on('connection', async (conn: PoolConnection) => {
+        await conn.query(`SET SESSION wait_timeout=60, interactive_timeout=60`);
+        this.resetInactivityTimer();
+      });
       console.log(chalk.cyan('Connection pool reinitialized.'));
     } catch (error) {
       console.error(chalk.red('Error during reinitialization:', error));
