@@ -6,7 +6,6 @@ drop procedure if exists RefreshMeasurementsSummary;
 drop procedure if exists RefreshViewFullTable;
 drop procedure if exists reingestfailedrows;
 drop procedure if exists reviewfailed;
-
 create
     definer = azureroot@`%` procedure RefreshMeasurementsSummary()
 BEGIN
@@ -246,7 +245,7 @@ begin
     create temporary table tmp_trees engine = memory as
     select t.TreeID, t.TreeTag
     from trees t
-    where t.CensusID = @CURRENT_CENSUS_ID;
+    where t.CensusID < @CURRENT_CENSUS_ID;
     create index idx_tmp_trees_tag on tmp_trees (TreeTag);
 
     create temporary table tmp_quads engine = memory as
@@ -260,7 +259,7 @@ begin
     create index idx_tmp_spec_code on tmp_species (SpeciesCode);
 
     create temporary table tmp_existing_stems engine = memory as
-    select StemID, TreeID, QuadratID, StemTag from stems;
+    select StemID, TreeID, QuadratID, StemTag from stems where CensusID < @CURRENT_CENSUS_ID;
     create index idx_tmp_es_tree_stem ON tmp_existing_stems (TreeID, StemTag);
 
     create temporary table initial_dup_filter engine = memory as
@@ -766,5 +765,4 @@ begin
                                                           IF(csub.invalid_codes > 0, 'Invalid Codes', NULL)
                                                 ));
 end;
-
 
