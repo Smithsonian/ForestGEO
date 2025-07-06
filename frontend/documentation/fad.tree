@@ -16,7 +16,5 @@
         <toc-element topic="Upload-Process-Breakdown.md"/>
         <toc-element topic="Understanding-SAPD-Datagrids.md"/>
     </toc-element>
-    <toc-element toc-title="Completing a Census">
-        <toc-element topic="Unlocking-the-View-Data-Page.md"/>
-    </toc-element>
+    <toc-element topic="Validations-Statistics.md"/>
 </instance-profile>

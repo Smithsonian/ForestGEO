@@ -31,4 +31,10 @@
         <description>Created after removal of "Adding Data" from ForestGEO Application Documentation</description>
         <accepts>Adding-Data.html</accepts>
     </rule>
+    <rule id="3adc723c">
+        <description>Created after removal of "A Deeper Dive into the View Data Page" from ForestGEO Application
+            Documentation
+        </description>
+        <accepts>Unlocking-the-View-Data-Page.html</accepts>
+    </rule>
 </rules>
