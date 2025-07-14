@@ -10,6 +10,7 @@ import moment from 'moment/moment';
 import { buildBulkUpsertQuery } from '@/config/utils';
 import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import { processBulkSpecies } from '@/components/processors/processbulkspecies';
+import { getCookie } from '@/app/actions/cookiemanager';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -31,6 +32,8 @@ export async function POST(request: NextRequest) {
   const formType: string = body.formType;
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
+  const censusCookie = Number((await getCookie('censusID')) ?? census?.dateRanges[0].censusID ?? -1);
+  console.log('batch trigger. censusid: ', censusCookie);
   const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet;
   const fileName: string = body.fileName;
@@ -46,23 +49,7 @@ export async function POST(request: NextRequest) {
       // const transformedRow = { ...row, date: row.date ? moment(row.date).format('YYYY-MM-DD') : row.date };
       const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes, comments } = row;
       const formattedDate = date ? moment(date).format('YYYY-MM-DD') : date;
-      return [
-        fileName,
-        batchID,
-        plot?.plotID ?? -1,
-        census?.dateRanges[0].censusID ?? -1,
-        tag,
-        stemtag,
-        spcode,
-        quadrat,
-        lx,
-        ly,
-        dbh,
-        hom,
-        formattedDate,
-        codes,
-        comments
-      ];
+      return [fileName, batchID, plot?.plotID ?? -1, censusCookie, tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, formattedDate, codes, comments];
     });
     transactionID = await connectionManager.beginTransaction();
     try {

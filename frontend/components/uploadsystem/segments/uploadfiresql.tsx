@@ -42,7 +42,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
   const { data: session } = useSession();
   const [userID, setUserID] = useState<number | null>(null);
   const chunkSize = 4096 * 16;
-  const connectionLimit = 5;
+  const connectionLimit = 20;
   const queue = new PQueue({ concurrency: connectionLimit });
   // refs
   const hasUploaded = useRef(false);
@@ -504,6 +504,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               try {
                 await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
                 console.log(`Processed batch ${batchID} for file ${fileID}`);
+                setProcessedChunks(prev => prev + 1);
               } catch (e: any) {
                 // unforeseen error OR max attempts exceeded. Need to move to errors and reset the table. User should reupload
                 // clear temporarymeasurements table:
@@ -515,9 +516,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                   method: 'POST'
                 });
                 throw e;
-              } finally {
-                // Update processed chunks count
-                setProcessedChunks(prev => prev + 1);
               }
             })
           );

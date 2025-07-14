@@ -228,39 +228,20 @@ end;
 create
     definer = azureroot@`%` procedure bulkingestionprocess(IN vFileID varchar(36), IN vBatchID varchar(36))
 begin
+    declare vCurrentCensusID int;
     set @disable_triggers = 0;
 
     select CensusID
-    into @CURRENT_CENSUS_ID
+    into vCurrentCensusID
     from temporarymeasurements
     where FileID = vFileID
       and BatchID = vBatchID
     limit 1;
 
     drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
-        stemstates, filtered, filter_validity, filter_validity_dup,
+        stemstates, filtered, filter_validity, filter_validity_dup, tmp_tree_stems,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
         tmp_trees, tmp_quads, tmp_species, tmp_existing_stems;
-
-    create temporary table tmp_trees engine = memory as
-    select t.TreeID, t.TreeTag
-    from trees t
-    where t.CensusID < @CURRENT_CENSUS_ID;
-    create index idx_tmp_trees_tag on tmp_trees (TreeTag);
-
-    create temporary table tmp_quads engine = memory as
-    select q.QuadratID, q.QuadratName
-    from quadrats q;
-    create index idx_tmp_quads_name on tmp_quads (QuadratName);
-
-    create temporary table tmp_species engine = memory as
-    select s.SpeciesID, s.SpeciesCode
-    from species s;
-    create index idx_tmp_spec_code on tmp_species (SpeciesCode);
-
-    create temporary table tmp_existing_stems engine = memory as
-    select StemID, TreeID, QuadratID, StemTag from stems where CensusID < @CURRENT_CENSUS_ID;
-    create index idx_tmp_es_tree_stem ON tmp_existing_stems (TreeID, StemTag);
 
     create temporary table initial_dup_filter engine = memory as
     select distinct id,
@@ -282,7 +263,7 @@ begin
     from temporarymeasurements
     where FileID = vFileID
       and BatchID = vBatchID
-      and CensusID = @CURRENT_CENSUS_ID;
+      and CensusID = vCurrentCensusID;
 
     create temporary table filter_validity engine = memory as
     select distinct i.id,
@@ -316,8 +297,8 @@ begin
                             0
                     )                                                          as invalid_count
     from initial_dup_filter i
-             left join tmp_quads tq on tq.QuadratName = i.QuadratName
-             left join tmp_species ts on ts.SpeciesCode = i.SpeciesCode
+             left join quadrats tq on tq.QuadratName = i.QuadratName
+             left join species ts on ts.SpeciesCode = i.SpeciesCode
     where i.TreeTag is not null
       and (tq.QuadratID is not null and
            ts.SpeciesID is not null) -- using OR will pass the row if one condition is satisfied but not the other
@@ -329,15 +310,7 @@ begin
     create temporary table if not exists filtered engine = memory as
     select distinct fv.*
     from filter_validity fv
-    where invalid_count = 0
-      and not exists (select 1
-                      from coremeasurements cm
-                               join tmp_existing_stems s on cm.StemID = s.StemID and fv.StemTag = s.StemTag
-                               join tmp_trees tt on tt.TreeID = s.TreeID and tt.TreeTag = fv.TreeTag
-                      where cm.CensusID = fv.CensusID
-                        and cm.MeasuredDBH = fv.DBH
-                        and cm.MeasuredHOM = fv.HOM
-                        and cm.MeasurementDate = fv.MeasurementDate);
+    where invalid_count = 0;
 
     insert ignore into failedmeasurements (PlotID, CensusID, Tag, StemTag, SpCode, Quadrat, X, Y, DBH, HOM, Date, Codes,
                                            Comments)
@@ -371,9 +344,7 @@ begin
                     fv.Comments
              from (select * from filter_validity) fv
              where fv.invalid_count > 0
-
              union
-
              -- Condition 2: Rows from temporarymeasurements that are missing from filter_validity (e.g., due to failed joins)
              select tm.PlotID,
                     tm.CensusID,
@@ -395,118 +366,152 @@ begin
                                from filter_validity_dup f
                                where f.id = tm.id)) as combined;
 
-
     create temporary table old_trees engine = memory as
     select distinct f.*
     from filtered f
-             join tmp_trees tt on tt.TreeTag = f.TreeTag
-             join tmp_quads tq on tq.QuadratName = f.QuadratName
-             join tmp_existing_stems s on s.TreeID = tt.TreeID and s.QuadratID = tq.QuadratID and s.StemTag = f.StemTag;
+             join trees t on t.TreeTag = f.TreeTag and t.CensusID < f.CensusID
+             join stems s on s.StemTag = f.StemTag and s.CensusID < f.CensusID and t.CensusID = s.CensusID;
 
     create temporary table multi_stems engine = memory as
     select distinct f.*
     from filtered f
-             join tmp_trees tt on tt.TreeTag = f.TreeTag
-             left join tmp_existing_stems s on s.TreeID = tt.TreeID and s.StemTag = f.StemTag
+             join trees t
+                  on t.TreeTag = f.TreeTag and t.CensusID < f.CensusID -- require trees w/ same tag from prev census
+             join stems s
+                  on s.StemTag <> f.StemTag and s.CensusID < f.CensusID and t.CensusID = s.CensusID
              left join old_trees ot on ot.id = f.id
-    where ot.id is null
-      and s.StemID is null;
+    where s.StemID is null
+      and ot.id is null;
 
     create temporary table new_recruits engine = memory as
     select distinct f.*
     from filtered f
-             left join tmp_trees tt on tt.TreeTag = f.TreeTag
-             left join multi_stems ms on ms.id = f.id
              left join old_trees ot on ot.id = f.id
-    where tt.TreeID is null
-      and ms.id is null
+             left join multi_stems ms on ms.id = f.id
+    where ms.id is null
       and ot.id is null;
 
     insert into trees (TreeTag, SpeciesID, CensusID)
-    select distinct binary f.TreeTag, ts.SpeciesID, @CURRENT_CENSUS_ID
-    from (select TreeTag, SpeciesCode, CensusID
-          from old_trees
+    select distinct binary f.TreeTag, ts.SpeciesID, f.CensusID
+    from (select ot.TreeTag as TreeTag, ot.SpeciesCode as SpeciesCode, ot.CensusID as CensusID
+          from old_trees ot
           union all
-          select TreeTag, SpeciesCode, CensusID
-          from multi_stems
+          select ms.TreeTag as TreeTag, ms.SpeciesCode as SpeciesCode, ms.CensusID as CensusID
+          from multi_stems ms
           union all
-          select TreeTag, SpeciesCode, CensusID
-          from new_recruits) as f
-             join tmp_species ts on ts.SpeciesCode = f.SpeciesCode
-    where f.CensusID = @CURRENT_CENSUS_ID
-    on duplicate key update TreeTag = values(TreeTag), SpeciesID = values(SpeciesID);
+          select nr.TreeTag as TreeTag, nr.SpeciesCode as SpeciesCode, nr.CensusID as CensusID
+          from new_recruits nr) as f
+             join species ts on ts.SpeciesCode = f.SpeciesCode
+    where f.CensusID = vCurrentCensusID
+    on duplicate key update TreeTag = values(TreeTag), SpeciesID = values(SpeciesID), CensusID = values(CensusID);
 
-    insert into stems (TreeID, QuadratID, CensusID, StemTag, LocalX, LocalY)
-    select distinct t.TreeID, tq.QuadratID, @CURRENT_CENSUS_ID, f.StemTag, f.LocalX, f.LocalY
-    from (select TreeTag, QuadratName, StemTag, LocalX, LocalY, CensusID, SpeciesCode
-          from old_trees
+    insert into stems (TreeID, QuadratID, CensusID, StemNumber, StemTag, LocalX, LocalY, Moved, StemDescription,
+                       IsActive)
+    select distinct t.TreeID,
+                    tq.QuadratID,
+                    vCurrentCensusID        as CensusID,
+                    -1                      as StemNumber,
+                    coalesce(f.StemTag, '') as StemTag,
+                    coalesce(f.LocalX, -1)  as LocalX,
+                    coalesce(f.LocalY, -1)  as LocalY,
+                    false                   as Moved,
+                    ''                      as StemDescription,
+                    1                       as IsActive
+    from (select ot.TreeTag     as TreeTag,
+                 ot.QuadratName as QuadratName,
+                 ot.StemTag     as StemTag,
+                 ot.LocalX      as LocalX,
+                 ot.LocalY      as LocalY,
+                 ot.CensusID    as CensusID,
+                 ot.SpeciesCode as SpeciesCode
+          from old_trees ot
           union all
-          select TreeTag, QuadratName, StemTag, LocalX, LocalY, CensusID, SpeciesCode
-          from multi_stems
+          select ms.TreeTag     as TreeTag,
+                 ms.QuadratName as QuadratName,
+                 ms.StemTag     as StemTag,
+                 ms.LocalX      as LocalX,
+                 ms.LocalY      as Localy,
+                 ms.CensusID    as CensusID,
+                 ms.SpeciesCode as SpeciesCode
+          from multi_stems ms
           union all
-          select TreeTag, QuadratName, StemTag, LocalX, LocalY, CensusID, SpeciesCode
-          from new_recruits) as f
-             join tmp_quads tq on tq.QuadratName = f.QuadratName
-             join tmp_species ts on ts.SpeciesCode = f.SpeciesCode
+          select nr.TreeTag     as TreeTag,
+                 nr.QuadratName as QuadratName,
+                 nr.StemTag     as StemTag,
+                 nr.LocalX      as LocalX,
+                 nr.LocalY      as LocalY,
+                 nr.CensusID    as CensusID,
+                 nr.SpeciesCode as SpeciesCode
+          from new_recruits nr) as f
+             join quadrats tq on tq.QuadratName = f.QuadratName
+             join species ts on ts.SpeciesCode = f.SpeciesCode
              join trees t
-                  on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID
+                  on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID and t.CensusID = vCurrentCensusID
     on duplicate key update QuadratID = values(QuadratID),
+                            CensusID  = values(CensusID),
                             StemTag   = values(StemTag),
                             LocalX    = values(LocalX),
                             LocalY    = values(LocalY);
+
+    update stems
+    set StemTag         = nullif(StemTag, ' '),
+        LocalX          = nullif(LocalX, -1),
+        LocalY          = nullif(LocalY, -1),
+        StemDescription = nullif(StemDescription, ' ')
+    where CensusID = vCurrentCensusID;
 
     -- handle old recruit insertion first:
     insert into coremeasurements (CensusID, StemID, IsValidated, MeasurementDate, MeasuredDBH, MeasuredHOM, Description,
                                   UserDefinedFields, IsActive)
     select distinct f.CensusID,
                     s.StemID,
-                    null                                  as IsValidated,
-                    f.MeasurementDate,
-                    f.DBH                                 as MeasuredDBH,
-                    f.HOM                                 as MeasuredHOM,
-                    f.Comments                            as Description,
-                    json_object('treestemstate', f.state) as UserDefinedFields,
-                    true                                  as IsActive
-    from (select id,
-                 CensusID,
-                 TreeTag,
-                 StemTag,
-                 QuadratName,
-                 MeasurementDate,
-                 DBH,
-                 HOM,
-                 Comments,
-                 'old tree' as state,
-                 SpeciesCode
-          from old_trees
+                    null                                      as IsValidated,
+                    coalesce(f.MeasurementDate, '1900-01-01') as MeasurementDate,
+                    coalesce(f.DBH, -1)                       as MeasuredDBH,
+                    coalesce(f.HOM, -1)                       as MeasuredHOM,
+                    coalesce(f.Comments, ' ')                 as Description,
+                    json_object('treestemstate', f.state)     as UserDefinedFields,
+                    1                                         as IsActive
+    from (select ot.id              as id,
+                 ot.CensusID        as CensusID,
+                 ot.TreeTag         as TreeTag,
+                 ot.StemTag         as StemTag,
+                 ot.QuadratName     as QuadratName,
+                 ot.MeasurementDate as MeasurementDate,
+                 ot.DBH             as DBH,
+                 ot.HOM             as HOM,
+                 ot.Comments        as Comments,
+                 'old tree'         as state,
+                 ot.SpeciesCode     as SpeciesCode
+          from old_trees ot
           union all
-          select id,
-                 CensusID,
-                 TreeTag,
-                 StemTag,
-                 QuadratName,
-                 MeasurementDate,
-                 DBH,
-                 HOM,
-                 Comments,
-                 'multi stem' as state,
-                 SpeciesCode
-          from multi_stems
+          select ms.id              as id,
+                 ms.CensusID        as CensusID,
+                 ms.TreeTag         as TreeTag,
+                 ms.StemTag         as StemTag,
+                 ms.QuadratName     as QuadratName,
+                 ms.MeasurementDate as MeasurementDate,
+                 ms.DBH             as DBH,
+                 ms.HOM             as HOM,
+                 ms.Comments        as Comments,
+                 'multi stem'       as state,
+                 ms.SpeciesCode     as SpeciesCode
+          from multi_stems ms
           union all
-          select id,
-                 CensusID,
-                 TreeTag,
-                 StemTag,
-                 QuadratName,
-                 MeasurementDate,
-                 DBH,
-                 HOM,
-                 Comments,
-                 'new recruit' as state,
-                 SpeciesCode
-          from new_recruits) as f
-             join tmp_quads tq on tq.QuadratName = f.QuadratName
-             join tmp_species ts on ts.SpeciesCode = f.SpeciesCode
+          select nr.id              as id,
+                 nr.CensusID        as CensusID,
+                 nr.TreeTag         as TreeTag,
+                 nr.StemTag         as StemTag,
+                 nr.QuadratName     as QuadratName,
+                 nr.MeasurementDate as MeasurementDate,
+                 nr.DBH             as DBH,
+                 nr.HOM             as HOM,
+                 nr.Comments        as Comments,
+                 'new recruit'      as state,
+                 nr.SpeciesCode     as SpeciesCode
+          from new_recruits nr) as f
+             join quadrats tq on tq.QuadratName = f.QuadratName
+             join species ts on ts.SpeciesCode = f.SpeciesCode
              join trees t on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID and t.CensusID = f.CensusID
              join stems s on s.StemTag = f.StemTag and s.QuadratID = tq.QuadratID and s.TreeID = t.TreeID and
                              s.CensusID = f.CensusID
@@ -516,17 +521,23 @@ begin
                             MeasuredDBH       = values(MeasuredDBH),
                             MeasuredHOM       = values(MeasuredHOM),
                             Description       = values(Description),
-                            IsActive          = values(IsActive),
                             IsValidated       = values(IsValidated),
                             UserDefinedFields = values(UserDefinedFields);
+
+    update coremeasurements
+    set MeasurementDate = nullif(MeasurementDate, '1900-01-01'),
+        MeasuredDBH     = nullif(MeasuredDBH, -1),
+        MeasuredHOM     = nullif(MeasuredHOM, -1),
+        Description     = nullif(Description, ' ')
+    where CensusID = vCurrentCensusID;
 
     create temporary table tempcodes engine = memory as
     select cm.CoreMeasurementID,
            trim(jt.code) as Code
     from filtered f
-             join tmp_quads tq
+             join quadrats tq
                   on tq.QuadratName = f.QuadratName
-             join tmp_species ts on ts.SpeciesCode = f.SpeciesCode
+             join species ts on ts.SpeciesCode = f.SpeciesCode
              join trees t on t.TreeTag = f.TreeTag and t.SpeciesID = ts.SpeciesID
              join stems s on s.StemTag = f.StemTag and s.TreeID = t.TreeID and s.QuadratID = tq.QuadratID
              join coremeasurements cm
@@ -545,7 +556,7 @@ begin
                             Code              = values(Code);
 
     drop temporary table if exists initial_dup_filter, treestemstates, trees_snapshot, tempcodes, treestates,
-        stemstates, filtered, filter_validity, filter_validity_dup,
+        stemstates, filtered, filter_validity, filter_validity_dup, tmp_tree_stems,
         preexisting_trees, preexisting_stems, preinsert_core, duplicate_ids, old_trees, multi_stems, new_recruits,
         tmp_trees, tmp_quads, tmp_species, tmp_existing_stems;
 

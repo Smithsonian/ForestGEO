@@ -21,7 +21,7 @@ export async function GET(
 
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
-  const delay = 100;
+  let delay = 100;
 
   while (attempt <= maxAttempts) {
     let transactionID: string = '';
@@ -31,26 +31,26 @@ export async function GET(
       transactionID = await connectionManager.beginTransaction();
       await connectionManager.executeQuery(`CALL ${schema}.bulkingestionprocess(?, ?);`, [fileID, batchID]);
       await connectionManager.commitTransaction(transactionID);
-
-      return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });
+      return new NextResponse(JSON.stringify({ attemptsNeeded: attempt }), { status: HTTPResponses.OK });
     } catch (e: any) {
-      if (isDeadlockError(e)) {
-        console.log(`Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
-        try {
-          await connectionManager.rollbackTransaction(transactionID);
-        } catch (rollbackError) {
-          console.error('Rollback error:', rollbackError);
-        }
-        // Wait for an exponentially increasing delay before retrying
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        try {
-          await connectionManager.rollbackTransaction(transactionID);
-        } catch (rollbackError) {
-          console.error('Rollback error:', rollbackError);
-        }
-        return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+      console.log(`Attempt ${attempt}: Error encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
+      try {
+        await connectionManager.rollbackTransaction(transactionID);
+      } catch (rollbackError) {
+        console.error('Rollback error:', rollbackError);
       }
+      // Wait for an exponentially increasing delay before retrying
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+      // if (isDeadlockError(e)) {
+      // } else {
+      //   try {
+      //     await connectionManager.rollbackTransaction(transactionID);
+      //   } catch (rollbackError) {
+      //     console.error('Rollback error:', rollbackError);
+      //   }
+      //   return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
+      // }
     }
   }
 }

@@ -15,8 +15,12 @@
 
 // Import commands.js using ES2015 syntax:
 import './commands';
-
+import process from 'process';
+// Example use:
+// cy.mount(<MyComponent />)
 import { mount } from 'cypress/react';
+
+window.process = process as any;
 
 // Augment the Cypress namespace to include type definitions for
 // your custom command.
@@ -33,5 +37,4 @@ declare global {
 
 Cypress.Commands.add('mount', mount);
 
-// Example use:
-// cy.mount(<MyComponent />)
+export { mount };

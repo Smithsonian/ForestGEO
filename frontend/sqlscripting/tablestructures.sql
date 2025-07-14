@@ -1,11 +1,16 @@
 create table if not exists attributes
 (
-    Code        varchar(10)                                                                                                     not null,
-    Description varchar(255)                                                                                                    null,
-    Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') default 'alive' null,
-    IsActive    tinyint(1)                                                                                      default 1       not null,
-    DeletedAt   datetime                                                                                                        null,
-    primary key (Code, IsActive)
+    Code        varchar(10)                                                                                     not null,
+    Description varchar(255)                                                                                    null,
+    Status      enum ('alive', 'alive-not measured', 'dead', 'stem dead', 'broken below', 'omitted', 'missing') null,
+    IsActive    tinyint(1) default 1                                                                            not null,
+    DeletedAt   datetime                                                                                        null,
+    unique_sig  varchar(500) as (concat_ws(_utf8mb4'#', coalesce(`Code`, _utf8mb4''),
+                                           coalesce(`Description`, _utf8mb4''), coalesce(`Status`, _utf8mb4''),
+                                           coalesce(`IsActive`, _utf8mb4''))) stored,
+    primary key (Code, IsActive),
+    constraint uq_attributes_full
+        unique (unique_sig)
 );
 
 create index idx_attributes_codes
@@ -33,6 +38,7 @@ create table if not exists failedmeasurements
     HOM                 decimal(12, 6) null,
     Date                date           null,
     Codes               varchar(255)   null,
+    Comments            varchar(255)   null,
     FailureReasons      text           null,
     hash_id             varchar(32) as (md5(concat_ws(_utf8mb4'|', `PlotID`, `CensusID`, `Tag`, `StemTag`, `SpCode`,
                                                       `Quadrat`, `X`, `Y`, `DBH`, `HOM`, `Date`, `Codes`))) stored,
@@ -283,8 +289,15 @@ create table if not exists quadrats
     QuadratShape varchar(255)         null,
     IsActive     tinyint(1) default 1 not null,
     DeletedAt    datetime             null,
+    unique_sig   varchar(500) as (concat_ws(_utf8mb4'#', coalesce(`QuadratName`, _utf8mb4''),
+                                            coalesce(`StartX`, _utf8mb4''), coalesce(`StartY`, _utf8mb4''),
+                                            coalesce(`DimensionX`, _utf8mb4''), coalesce(`DimensionY`, _utf8mb4''),
+                                            coalesce(`Area`, _utf8mb4''), coalesce(`QuadratShape`, _utf8mb4''),
+                                            coalesce(`IsActive`, _utf8mb4''))) stored,
     constraint unique_full_quadrat
         unique (PlotID, QuadratName, StartX, StartY, DimensionX, DimensionY, Area, IsActive),
+    constraint uq_quadrats_full
+        unique (unique_sig),
     constraint Quadrats_Plots_FK
         foreign key (PlotID) references plots (PlotID)
             on delete cascade
@@ -410,8 +423,12 @@ create table if not exists personnel
     RoleID      int                  null,
     IsActive    tinyint(1) default 1 not null,
     DeletedAt   datetime             null,
+    unique_sig  varchar(500) as (concat_ws(_utf8mb4'#', coalesce(`FirstName`, _utf8mb4''),
+                                           coalesce(`LastName`, _utf8mb4''), coalesce(`IsActive`, _utf8mb4''))) stored,
     constraint personnel_FirstName_LastName_RoleID__uindex
         unique (FirstName, LastName, IsActive),
+    constraint uq_personnel_full
+        unique (unique_sig),
     constraint personnel_roles_RoleID_fk
         foreign key (RoleID) references roles (RoleID)
             on delete cascade
@@ -425,24 +442,6 @@ create index idx_lastname
 
 create index idx_roleid
     on personnel (RoleID);
-
-create table if not exists quadratpersonnel
-(
-    QuadratPersonnelID int auto_increment
-        primary key,
-    QuadratID          int not null,
-    PersonnelID        int not null,
-    CensusID           int null,
-    constraint fk_QuadratPersonnel_Personnel
-        foreign key (PersonnelID) references personnel (PersonnelID)
-            on delete cascade,
-    constraint fk_QuadratPersonnel_Quadrats
-        foreign key (QuadratID) references quadrats (QuadratID)
-            on delete cascade,
-    constraint quadratpersonnel_census_CensusID_fk
-        foreign key (CensusID) references census (CensusID)
-            on delete cascade
-);
 
 create index idx_roledescription
     on roles (RoleDescription);
@@ -483,9 +482,16 @@ create table if not exists species
     ReferenceID         int                  null,
     IsActive            tinyint(1) default 1 not null,
     DeletedAt           datetime             null,
-    constraint SpeciesCode
-        unique (SpeciesCode, SpeciesName, SubspeciesName, IsActive, IDLevel, SpeciesAuthority, SubspeciesAuthority,
-                FieldFamily, Description),
+    unique_sig          varchar(500) as (concat_ws(_utf8mb4'#', coalesce(`SpeciesCode`, _utf8mb4''),
+                                                   coalesce(`SpeciesName`, _utf8mb4''),
+                                                   coalesce(`SubspeciesName`, _utf8mb4''),
+                                                   coalesce(`IDLevel`, _utf8mb4''),
+                                                   coalesce(`SpeciesAuthority`, _utf8mb4''),
+                                                   coalesce(`SubspeciesAuthority`, _utf8mb4''),
+                                                   coalesce(`FieldFamily`, _utf8mb4''),
+                                                   coalesce(`Description`, _utf8mb4''))) stored,
+    constraint uq_species_sig
+        unique (unique_sig),
     constraint Species_Genus_GenusID_fk
         foreign key (GenusID) references genus (GenusID)
             on delete cascade,
@@ -580,6 +586,7 @@ create table if not exists temporarymeasurements
     HOM             decimal(12, 6)                      null,
     MeasurementDate date                                null,
     Codes           varchar(255)                        null,
+    Comments        varchar(255)                        null,
     UploadedAt      timestamp default CURRENT_TIMESTAMP null
 );
 
@@ -637,8 +644,8 @@ create table if not exists trees
     CensusID  int                  null,
     IsActive  tinyint(1) default 1 not null,
     DeletedAt datetime             null,
-    constraint trees_TreeTag_IsActive_uindex
-        unique (TreeTag, IsActive),
+    constraint ux_trees_treetag_speciesid_censusid
+        unique (TreeTag, SpeciesID, CensusID),
     constraint Trees_Species_SpeciesID_fk
         foreign key (SpeciesID) references species (SpeciesID)
             on delete cascade,
@@ -662,8 +669,10 @@ create table if not exists stems
     StemDescription varchar(255)         null,
     IsActive        tinyint(1) default 1 not null,
     DeletedAt       datetime             null,
-    constraint unique_stem_coordinates
-        unique (StemTag, TreeID, QuadratID, LocalX, LocalY, IsActive),
+    constraint ux_stems_coordinate
+        unique (StemTag, TreeID, QuadratID, LocalX, LocalY, IsActive, CensusID),
+    constraint ux_stems_treeid_stemtag_census
+        unique (TreeID, StemTag, CensusID),
     constraint FK_Stems_Trees
         foreign key (TreeID) references trees (TreeID)
             on delete cascade,

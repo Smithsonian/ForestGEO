@@ -1,4 +1,5 @@
 import { defineConfig } from 'cypress';
+import { DefinePlugin, ProvidePlugin } from 'webpack';
 
 export default defineConfig({
   e2e: {
@@ -13,8 +14,24 @@ export default defineConfig({
   component: {
     devServer: {
       framework: 'next',
-      bundler: 'webpack'
+      bundler: 'webpack',
+      webpackConfig: {
+        resolve: {
+          mainFields: ['main', 'module', 'browser'],
+          alias: { '@mui/material/esm': '@mui/material' },
+          fallback: { process: require.resolve('process/browser') }
+        },
+        plugins: [
+          new ProvidePlugin({
+            process: 'process/browser'
+          }),
+          new DefinePlugin({
+            'process.env.NEXTAUTH_URL': JSON.stringify('http://localhost:3000')
+          })
+        ]
+      }
     },
+    supportFile: 'cypress/support/component.ts',
     specPattern: 'cypress/components/**/*.cy.{js,ts,jsx,tsx}' // Component tests location
   }
 });
