@@ -56,18 +56,11 @@ export async function runQuery(connection: PoolConnection, query: string, params
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
     }
-    // Log query details
-    // console.log(chalk.cyan(`Executing query: ${query}`));
-    // if (params) {
-    //   console.log(chalk.gray(`Query params: ${JSON.stringify(params)}`));
-    // }
     if (query.trim().startsWith('CALL')) {
       const [rows] = await Promise.race([connection.query(query, params), timer]);
-      // console.log(chalk.magenta(`CALL Query completed in ${Date.now() - startTime}ms`));
       return rows;
     } else {
       const [rows, _fields] = await Promise.race([connection.execute(query, params), timer]);
-      // console.log(chalk.magenta(`STANDARD Query completed in ${Date.now() - startTime}ms`));
 
       if (query.trim().startsWith('INSERT') || query.trim().startsWith('UPDATE') || query.trim().startsWith('DELETE')) {
         return rows;
@@ -76,9 +69,6 @@ export async function runQuery(connection: PoolConnection, query: string, params
     }
   } catch (error: any) {
     console.error(chalk.red(`Error executing query: ${query}`));
-    // if (params) {
-    //   console.error(chalk.red(`With params: ${JSON.stringify(params)}`));
-    // }
     console.error(chalk.red('Error message:', error.message));
     throw error;
   }

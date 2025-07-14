@@ -6,9 +6,33 @@ import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager } from '@/lib/connectionlogger';
 
+// at the top of connectionmanager.ts
+class ObservableMap<K, V> extends Map<K, V> {
+  override set(key: K, value: V): this {
+    super.set(key, value);
+    console.log('[transactionConnections] set', key, '→', (value as any).threadId);
+    this.logContents();
+    return this;
+  }
+
+  override delete(key: K): boolean {
+    const deleted = super.delete(key);
+    console.log('[transactionConnections] delete', key);
+    this.logContents();
+    return deleted;
+  }
+
+  private logContents() {
+    console.log(
+      '[transactionConnections] current:',
+      Array.from(this.entries()).map(([id, conn]) => ({ id, threadId: (conn as any).threadId }))
+    );
+  }
+}
+
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
-  private transactionConnections = new Map<string, PoolConnection>(); // Store transaction-specific connections
+  private transactionConnections = new ObservableMap<string, PoolConnection>(); // Store transaction-specific connections
 
   // Private constructor
   private constructor() {
@@ -49,24 +73,29 @@ class ConnectionManager {
     const transactionId = uuidv4();
     let connection: PoolConnection | null = null;
 
-    while (Date.now() - startTime < 15000) {
-      try {
-        connection = await this.acquireConnectionInternal();
-        await connection.beginTransaction();
-        this.transactionConnections.set(transactionId, connection);
-        console.log(chalk.green(`Transaction started: ${transactionId}`));
-        return transactionId;
-      } catch (error: any) {
-        connection?.release();
-        if (!this.isDeadlockError(error)) {
-          console.error(chalk.red('Error starting transaction:', error));
-          throw error;
+    try {
+      while (Date.now() - startTime < 15000) {
+        try {
+          connection = await this.acquireConnectionInternal();
+          await connection.beginTransaction();
+          this.transactionConnections.set(transactionId, connection);
+          console.log(chalk.green(`Transaction started: ${transactionId}`));
+          return transactionId;
+        } catch (error: any) {
+          connection?.release();
+          if (!this.isDeadlockError(error)) {
+            console.error(chalk.red('Error starting transaction:', error));
+            throw error;
+          }
+          console.warn(chalk.yellow(`Error ${error.message} encountered, retrying transaction start...`));
+          await new Promise(resolve => setTimeout(resolve, 200));
         }
-        console.warn(chalk.yellow('Deadlock encountered, retrying transaction start...'));
-        await new Promise(resolve => setTimeout(resolve, 200));
       }
+      throw new Error('Failed to start transaction after 15 seconds due to persistent deadlock issues.');
+    } catch (e) {
+      console.error(chalk.red('Error starting transaction:', e));
+      throw e;
     }
-    throw new Error('Failed to start transaction after 15 seconds due to persistent deadlock issues.');
   }
 
   // Commit a transaction
