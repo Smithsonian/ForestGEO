@@ -18,11 +18,12 @@
     "cleanwin": "del /S /Q node_modules build; npm install",
     "lint": "next lint --fix && prettier --write .",
     "format": "prettier --write .",
-    "cypress:open": "cypress open",
-    "e2e": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
-    "e2e:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
-    "component": "cypress open --component",
-    "component:headless": "cypress run --component"
+    "cy:open": "cypress open",
+    "cy:open-ct": "cypress open-ct",
+    "end": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
+    "end:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
+    "com": "cypress open --component",
+    "com:headless": "cypress run --component"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
@@ -72,7 +73,7 @@
     "next": "^15.3.5",
     "next-auth": "^5.0.0-beta.25",
     "next-router-mock": "^1.0.2",
-    "node": "^23.7.0",
+    "node": "^24.3.0",
     "npm-force-resolutions": "^0.0.10",
     "octokit": "^5.0.3",
     "p-queue": "^8.1.0",
@@ -113,8 +114,10 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.1",
     "eslint-plugin-react": "^7.37.5",
+    "next-transpile-modules": "^10.0.1",
     "prettier": "^3.6.2",
     "prettier-eslint": "^16.4.2",
+    "process": "^0.11.10",
     "start-server-and-test": "^2.0.12",
     "tailwindcss": "^4.1.11",
     "typescript-eslint": "^8.35.1"

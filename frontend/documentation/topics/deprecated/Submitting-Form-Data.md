@@ -5,7 +5,6 @@
   plant, or time period.
   This supporting data makes up the navigation links under the Stem & Plot Details navigation
   menu.
-
   - Stem Codes:
     - Attribute information for a stem
     - Allows you to add characteristics like 'alive,' 'dead,' 'missing,' etc. to a stem.

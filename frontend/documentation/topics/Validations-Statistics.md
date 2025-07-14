@@ -16,7 +16,7 @@ better understanding of what each validation check means, and what its query loo
 The following is a brief summation of the current validations and their default enabling status.
 
 | Name                                                          | Description                                                                                                             | Default State |
-|---------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|---------------|
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------- |
 | ValidateDBHGrowthExceedsMax                                   | For a given stem, flag all DBH measurements that show more than a 65 mm growth from the previous census.                | Enabled       |
 | ValidateDBHShrinkageExceedsMax                                | For a given stem, flag all DBH measurements that show more than a 5% **decrease** from the previous census.             | Enabled       |
 | ValidateFindAllInvalidSpeciesCodes                            | Flag all stems with a species code not already defined in the **species** table.                                        | Enabled       |
@@ -28,9 +28,8 @@ The following is a brief summation of the current validations and their default 
 | ValidateFindTreeStemsInDifferentQuadrats                      | Find any stems on the same tree with differing quadrat designations (all stems on a tree must be in the same quadrat!). | Enabled       |
 | ValidateScreenMeasuredDiameterMinMax                          | Flag any DBH measurements exceeding species-defined minimum or maximum (if they are defined).                           | Enabled       |
 | ValidateScreenStemsWithMeasurementsButDeadAttributes          | Flag any stems that have been assigned a `DEAD`-type attribute, but still have measurements recorded.                   | **Disabled**  |
-| ValidateScreenStemsWithMissingMeasurementsButLiveAttributes   | Flag any stems that have **not** been assigned a `DEAD`-type attribute, but are still **missing** measurements          | **Disabled**  | 
+| ValidateScreenStemsWithMissingMeasurementsButLiveAttributes   | Flag any stems that have **not** been assigned a `DEAD`-type attribute, but are still **missing** measurements          | **Disabled**  |
 
 ### Optional: Validation Queries
 
-To directly view the queries composing the validations, use the dropdown button visible in the preview! 
-
+To directly view the queries composing the validations, use the dropdown button visible in the preview!
