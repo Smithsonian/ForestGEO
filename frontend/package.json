@@ -23,7 +23,10 @@
     "end": "start-server-and-test dev http://localhost:3000 \"cypress open --e2e\"",
     "end:headless": "start-server-and-test start http://localhost:3000 \"cypress run --e2e\"",
     "com": "cypress open --component",
-    "com:headless": "cypress run --component"
+    "com:headless": "cypress run --component",
+    "dep:orphans": "madge --extensions ts,tsx --exclude '^(pages|__tests__|cypress|scripts|sqlscripting|sampledata)' --orphans components lib utils config types",
+    "clean:orphans": "npm run dep:orphans --silent | sed '1d' | xargs -I {} git rm \"{}\"",
+    "dep:cycles": "madge --extensions ts,tsx --circular app components lib utils config types"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
@@ -68,6 +71,7 @@
     "framer-motion": "^12.23.0",
     "idb": "^8.0.3",
     "jsdom": "^26.1.0",
+    "madge": "^8.0.0",
     "moment": "^2.30.1",
     "moment-duration-format": "^2.3.2",
     "mysql2": "^3.14.1",
