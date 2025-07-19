@@ -45,9 +45,6 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const requiredHeadersTrimmed = expectedHeaders.map(item => item.trim());
 
   useEffect(() => {
-    console.log('accepted files: ', acceptedFiles);
-    console.log('current file: ', acceptedFiles[dataViewActive - 1]);
-    console.log('current file headers: ', currentFileHeaders);
     const needsReupload = !(
       acceptedFiles[dataViewActive - 1].useStreaming ||
       (currentFileHeaders.length > 0 && !currentFileHeaders.some(header => header === ''))
@@ -106,8 +103,6 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
     }
 
     setParsedData(updatedParsedData);
-
-    console.log('Updated parsedData:', updatedParsedData); // Debug log
 
     try {
       await handleApproval();

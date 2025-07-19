@@ -22,7 +22,6 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
   const currentSite = useSiteContext();
   const currentQuadrat = useQuadratContext();
   const currentPlot = usePlotContext();
-  console.log('current quadrat: ', currentQuadrat);
   const [quadrat, setQuadrat] = useState<Quadrat>(currentQuadrat);
   const [quadratList, setQuadratList] = useState<Quadrat[] | undefined>([]);
   const quadratDispatch = useQuadratDispatch();

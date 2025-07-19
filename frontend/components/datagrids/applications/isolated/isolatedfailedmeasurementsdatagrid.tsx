@@ -120,7 +120,6 @@ export default function IsolatedFailedMeasurementsDataGrid() {
       updatedRow = { ...updatedRow, failureReasons: reasons };
       if (reasons.length === 0) {
         // no reasons detected, so we can save the row
-        console.log('no new reasons found. moving to save');
         await fetch(`/api/reingestsinglefailure/${currentSite?.schemaName ?? ''}/${updatedRow.failedMeasurementID}`);
       } else {
         // need to updated in-DB row with new reasons now that they've been found!
