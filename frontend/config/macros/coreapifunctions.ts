@@ -43,7 +43,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
     else {
       if (dataType === 'measurementssummary') {
         const mappedOldRow = MapperFactory.getMapper<any, any>('measurementssummary').demapData([oldRow])[0];
-        console.log('demapped old row: ', mappedOldRow);
         const mappedUpdatedRow = MapperFactory.getMapper<any, any>('measurementssummary').demapData([
           {
             ...Object.fromEntries(Object.entries(oldRow).filter(([, val]) => val !== undefined && val !== null)),
