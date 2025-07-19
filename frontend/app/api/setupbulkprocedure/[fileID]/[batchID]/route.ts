@@ -2,10 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 
-function isDeadlockError(error: any) {
-  return error?.code === 'ER_LOCK_DEADLOCK' || error?.errno === 1213;
-}
-
 export async function GET(
   request: NextRequest,
   props: {
@@ -17,7 +13,7 @@ export async function GET(
   if (!schema || !fileID || !batchID) {
     return new NextResponse(JSON.stringify({ error: 'Missing parameters' }), { status: HTTPResponses.INVALID_REQUEST });
   }
-  const maxAttempts = 1000;
+  const maxAttempts = 10;
 
   const connectionManager = ConnectionManager.getInstance();
   let attempt = 0;
@@ -41,7 +37,7 @@ export async function GET(
       }
       // Wait for an exponentially increasing delay before retrying
       await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2;
+      delay = Math.min(delay * 2, 5000); // ceiling at 5 s
       // if (isDeadlockError(e)) {
       // } else {
       //   try {

@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
+    "@azure/storage-queue": "^12.26.0",
     "@base-ui-components/react": "^1.0.0-beta.1",
     "@codemirror/autocomplete": "^6.18.6",
     "@codemirror/lang-sql": "^6.9.0",

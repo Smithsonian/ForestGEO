@@ -53,6 +53,8 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
       performValidations().catch(console.error);
+    } else if (onValidationComplete) {
+      onValidationComplete();
     }
   }, [validationMessages]);
 
