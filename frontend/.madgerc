@@ -1,0 +1,5 @@
+{
+  "extensions": ["ts","tsx"],
+  "exclude": ["^pages","^__tests__","^cypress","^scripts","^sqlscripting","^sampledata"],
+  "include": ["app","components","lib","utils","config","types"]
+}
