@@ -161,7 +161,6 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         const newCensusID = await mapper.startNewCensus(currentSite?.schemaName, currentPlot?.plotID, highestPlotCensusNumber + 1);
         if (!newCensusID) throw new Error('census creation failure');
 
-        console.log('rollover personnel');
         await fetch(`/api/rollover/personnel/${currentSite?.schemaName}/${currentPlot?.plotID}/${selectedStemsCensus?.censusID}/${newCensusID}`, {
           method: 'POST',
           headers: {

@@ -16,7 +16,6 @@ export async function getContainerClient(containerName: string): Promise<Contain
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
   if (!(await containerClient.createIfNotExists())) console.error('container client createifnotexists failure');
   else {
-    console.log(`container client with name ${containerName.toLowerCase()} created and accessed.`);
     return containerClient;
   }
 }
@@ -91,7 +90,6 @@ export async function uploadValidFileAsBuffer(
 
       // If upload is successful, return the response
       if (uploadResponse) {
-        console.log(`Upload successful on attempt ${attempt}: ${file.name}`);
         return uploadResponse;
       }
     } catch (error) {

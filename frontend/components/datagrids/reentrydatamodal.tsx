@@ -134,9 +134,7 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
   const handleFinalConfirm = () => {
     if (selectedRow) {
       const { label, ...remaining } = selectedRow;
-      console.log('selectedRow: ', selectedRow);
       const normalizedData = normalizeRowData(remaining);
-      console.log('normalized row: ', normalizedData);
       handleSave(normalizedData);
     }
   };
@@ -222,11 +220,6 @@ const ReEnterDataModal: React.FC<ReEnterDataModalProps> = ({
     reEnterData ? { ...reEnterData, id: 'original', label: 'First Modification' } : null,
     localData ? { ...localData, id: 'modified', label: 'Second Modification (Re-entry)' } : null
   ].filter(rowItem => rowItem && rowItem.id); // Filter out rows without an ID
-
-  useEffect(() => {
-    console.log('reEnterData:', reEnterData);
-    console.log('localData:', localData);
-  }, [reEnterData, localData]);
 
   return (
     <Modal open onClose={handleClose}>

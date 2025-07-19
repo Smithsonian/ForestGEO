@@ -271,7 +271,6 @@ export default function Sidebar(props: SidebarProps) {
   const handleCensusSelection = async (selectedCensus: OrgCensus) => {
     if (censusDispatch) {
       await censusDispatch({ census: selectedCensus });
-      console.log(`await census dispatch completed for ${selectedCensus}`);
     }
   };
 

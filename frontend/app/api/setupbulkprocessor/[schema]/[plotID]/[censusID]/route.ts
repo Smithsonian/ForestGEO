@@ -22,7 +22,5 @@ export async function GET(
     batchID: row.BatchID
   }));
 
-  console.log('setup bulk processor completed.');
-
   return new NextResponse(JSON.stringify(output), { status: HTTPResponses.OK });
 }

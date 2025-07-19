@@ -134,7 +134,6 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
             method: 'POST'
           });
           const flattened: FileRow[] = [];
-          console.log('error rows!! --> ', errorRows);
           for (const fileName in errorRows) {
             const fileRowSet = errorRows[fileName];
             Object.values(fileRowSet).forEach(row => flattened.push(row));

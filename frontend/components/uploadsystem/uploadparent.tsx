@@ -137,7 +137,6 @@ export default function UploadParent(props: UploadParentProps) {
 
   const handleReplaceFile = async (fileIndex: number, newFile: FileWithPath) => {
     const fileToReplace = acceptedFiles[fileIndex];
-    console.log('filetoreplace: ', fileToReplace);
     setAcceptedFiles(prevFiles => [...prevFiles.slice(0, fileIndex), new FileWithStream(newFile, true, newFile.path), ...prevFiles.slice(fileIndex + 1)]);
 
     // Update headers after replacement

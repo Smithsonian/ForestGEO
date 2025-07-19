@@ -11,7 +11,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
     throw new Error('Process Census: Missing plotID or censusID');
   }
   const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
-  console.log('rowData: ', rowData);
 
   try {
     // prep for triggers:
@@ -24,14 +23,12 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       [spcode]
     );
 
-    console.log('found speciesID: ', speciesID);
     // Fetch quadrat
     const [[{ QuadratID: quadratID }]] = await connectionManager.executeQuery(
       `SELECT q.QuadratID FROM ${schema}.quadrats q 
              WHERE q.QuadratName = ? LIMIT 1`,
       [quadrat]
     );
-    console.log('found quadratID: ', quadratID);
 
     if (tag) {
       const tagSearch: Partial<TreeResult> = {
@@ -55,7 +52,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           LocalY: ly
         };
         const { id: stemID, operation: stemOperation } = await handleUpsert<StemResult>(connectionManager, schema, 'stems', stemSearch, 'StemID');
-        console.log('upsert performed against ', stemSearch, ' with result: ', stemID, ' and operation ', stemOperation);
 
         if (stemOperation === 'inserted') {
           stemStatus = treeOperation === 'inserted' ? 'new recruit' : 'multistem';
@@ -86,7 +82,6 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
           coreMeasurementSearch,
           'CoreMeasurementID'
         );
-        console.log('upsert performed against ', coreMeasurementSearch, ' with result: ', coreMeasurementID);
 
         // Handle CM Attributes Upsert
         if (codes) {

@@ -78,11 +78,9 @@ export async function handleUpsertForSlices<Result>(
 
   // Convert newRow from RDS to Result upfront
   const mappedNewRow = mapper.demapData([newRow as any])[0];
-  console.log('mappedNewRow: ', mappedNewRow);
 
   for (const sliceKey in config.slices) {
     const { range, primaryKey } = config.slices[sliceKey];
-    console.log('range: ', range, ' primaryKey: ', primaryKey);
 
     // Extract fields relevant to the current slice from the already transformed newRow
     const rowData: Partial<Result> = {};
@@ -98,12 +96,9 @@ export async function handleUpsertForSlices<Result>(
 
     // Check if we need to propagate a foreign key from a prior slice
     const prevSlice = getPreviousSlice(sliceKey, config.slices);
-    console.log('prevSlice: ', prevSlice);
     if (prevSlice && insertedIds[prevSlice]) {
       const prevPrimaryKey = config.slices[prevSlice].primaryKey; // Use the primary key from the config
-      console.log('prevPrimaryKey: ', prevPrimaryKey);
       (rowData as any)[prevPrimaryKey] = insertedIds[prevSlice]; // Set the foreign key in the current row
-      console.log('updated rowdata: ', rowData);
     }
 
     if ((mappedNewRow as any)[primaryKey] !== undefined) (rowData as any)[primaryKey] = (mappedNewRow as any)[primaryKey];
@@ -111,7 +106,6 @@ export async function handleUpsertForSlices<Result>(
 
     // Perform the upsert and store the resulting ID
     insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
-    console.log(insertedIds[sliceKey]);
   }
 
   return insertedIds;
@@ -359,10 +353,8 @@ export async function runValidation(
         .replace(/@maxDBH/g, params.maxDBH !== null && params.maxDBH !== undefined ? params.maxDBH.toString() : 'NULL');
 
       // Execute the cursor query to get the rows that need validation
-      console.log('running validation: ', validationProcedureName);
       await connectionManager.executeQuery(reformattedCursorQuery);
       await connectionManager.commitTransaction(transactionID ?? '');
-      console.log('validation executed.');
       return true;
     } catch (e: any) {
       if (isDeadlockError(e)) {

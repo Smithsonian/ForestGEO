@@ -33,7 +33,6 @@ export async function POST(request: NextRequest) {
   const plot: Plot = body.plot;
   const census: OrgCensus = body.census;
   const censusCookie = Number((await getCookie('censusID')) ?? census?.dateRanges[0].censusID ?? -1);
-  console.log('batch trigger. censusid: ', censusCookie);
   const user: string = body.user;
   const fileRowSet: FileRowSet = body.fileRowSet;
   const fileName: string = body.fileName;
@@ -81,7 +80,6 @@ export async function POST(request: NextRequest) {
     }
   } else {
     transactionID = await connectionManager.beginTransaction();
-    console.log('sqlpacketload: transaction started.');
     let rowId = '';
     try {
       if (formType === 'quadrats') {
@@ -141,7 +139,6 @@ export async function POST(request: NextRequest) {
       }
 
       await connectionManager.commitTransaction(transactionID ?? '');
-      console.log('sqlpacketload: transaction committed');
     } catch (error: any) {
       await connectionManager.rollbackTransaction(transactionID ?? '');
       console.log('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');

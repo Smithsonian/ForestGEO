@@ -165,7 +165,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
       }
 
       if (row['__parsed_extra'] !== undefined) {
-        console.log(`found extra: ${JSON.stringify(row)}`);
         errors.push('Extra columns detected. Likely caused by final column using commas instead of semicolons');
         extraData = true;
       }
@@ -281,7 +280,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
             await queue.add(async () => {
               try {
                 await uploadToSql(fileCollectionRowSet, file.name);
-                console.log('chunk upload completed.');
                 setCompletedChunks(prev => prev + 1);
               } catch (error) {
                 console.error('Chunk rollback triggered. Error uploading to SQL:', error);
@@ -290,7 +288,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 await queue.add(async () => {
                   try {
                     await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
-                    console.log('retry worked. decrementing active tasks and moving on.');
                     setCompletedChunks(prev => prev + 1);
                   } catch (e) {
                     console.error('Catastrophic error on retry: ', e);
@@ -306,8 +303,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         },
         complete: async () => {
           await queue.onEmpty();
-          console.log('File parsing and upload complete');
-          console.log('total rows: ', totalRows);
           if (parsingInvalidRows.length > 0) {
             console.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
             setErrorRows(prevErrorRows => {
@@ -500,10 +495,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           // Map each batchID to a queued task.
           const batchTasks = grouped[fileID].map(batchID =>
             queue.add(async () => {
-              console.log(`  BatchID: ${batchID}`);
               try {
                 await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
-                console.log(`Processed batch ${batchID} for file ${fileID}`);
                 setProcessedChunks(prev => prev + 1);
               } catch (e: any) {
                 // unforeseen error OR max attempts exceeded. Need to move to errors and reset the table. User should reupload

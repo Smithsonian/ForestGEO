@@ -872,7 +872,6 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       filterable: false,
       renderCell: (params: GridCellParams) => {
         let validationIcon, treeState;
-        console.log('invalid?? ', params.row.isValidated);
         if (validationErrors[Number(params.row.coreMeasurementID)]) {
           validationIcon = (
             <Tooltip title={`Click to review errors!`} size="md">
