@@ -125,7 +125,6 @@ export default function ViewUploadedFiles(props: Readonly<VUFProps>) {
         setIsLoaded(true);
       }
     } catch (error: any) {
-      console.log(error.message);
       setErrorMessage(error.message); // Set the error message
       setOpenSnackbar(true); // Open the snackbar
     }

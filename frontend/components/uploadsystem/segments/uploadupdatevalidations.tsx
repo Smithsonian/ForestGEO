@@ -18,7 +18,6 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
       `/api/validations/updatepassedvalidations?schema=${schema}&plotID=${currentPlot?.id?.toString()}&censusID=${currentCensus?.dateRanges[0].censusID.toString()}`
     );
     const result = await response.json();
-    console.log('rows validated: ', result.rowsValidated);
     setIsUpdateValidationComplete(true);
   };
 

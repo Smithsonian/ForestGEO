@@ -170,7 +170,6 @@ export const buildFilterModelStub = (filterModel: GridFilterModel, alias?: strin
       if (!field || !operator || !value) return '';
       const aliasedField = `${alias ? `${alias}.` : ''}${capitalizeAndTransformField(field)}`;
       const condition = buildCondition({ operator: operator as Operator, column: aliasedField, value });
-      console.log('generated condition: ', condition);
       return condition;
     })
     .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);

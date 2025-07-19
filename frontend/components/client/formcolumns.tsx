@@ -293,7 +293,6 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
       onBlur={handleCommit}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === 'Tab') {
-          console.log('on key down: enter || tab');
           handleCommit();
         }
       }}

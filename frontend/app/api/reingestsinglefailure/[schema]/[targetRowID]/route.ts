@@ -29,7 +29,6 @@ export async function GET(
   } catch (e) {
     await connectionManager.rollbackTransaction(transactionID);
     // reinsert into table in case removed
-    console.log('re-added to failedmeasurements');
     await connectionManager.executeQuery(`CALL ${schema}.reviewfailed();`);
     throw e;
   }
