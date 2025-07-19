@@ -21,7 +21,7 @@ import {
   TreeRDS,
   TreeResult
 } from '@/config/sqlrdsdefinitions/taxonomies';
-import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult, SitesMapper } from '@/config/sqlrdsdefinitions/zones';
+import { PlotRDS, PlotsResult, QuadratRDS, QuadratResult } from '@/config/sqlrdsdefinitions/zones';
 import {
   AllTaxonomiesViewRDS,
   AllTaxonomiesViewResult,
