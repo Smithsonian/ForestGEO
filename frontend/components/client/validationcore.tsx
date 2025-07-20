@@ -40,6 +40,7 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
     })
       .then(r => r.json())
       .then(data => {
+        if (data.coreValidations.length === 0) onValidationComplete ? onValidationComplete() : undefined;
         setValidationMessages(data.coreValidations);
         setValidationProgress(Object.keys(data.coreValidations).reduce((acc, api) => ({ ...acc, [api]: 0 }), {}));
       })
@@ -53,8 +54,6 @@ export default function ValidationCore({ onValidationComplete }: VCProps) {
   useEffect(() => {
     if (Object.keys(validationMessages).length > 0) {
       performValidations().catch(console.error);
-    } else if (onValidationComplete) {
-      onValidationComplete();
     }
   }, [validationMessages]);
 
