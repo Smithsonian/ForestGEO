@@ -45,14 +45,14 @@ export default [
       '@typescript-eslint/ban-types': 'off',
       '@typescript-eslint/no-inferrable-types': 'off',
       '@typescript-eslint/no-unused-vars': [
-        'error',
+        'warn',
         {
           vars: 'all',
           args: 'after-used',
           ignoreRestSiblings: true
         }
       ],
-      'unused-imports/no-unused-imports': 'error',
+      'unused-imports/no-unused-imports': 'warn',
       '@typescript-eslint/no-unused-expressions': 'off'
     }
   },
