@@ -6,6 +6,7 @@ import reactPlugin from 'eslint-plugin-react';
 import eslintPluginImport from 'eslint-plugin-import';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 import { FlatCompat } from '@eslint/eslintrc';
+import eslintPluginUnusedImports from 'eslint-plugin-unused-imports';
 
 const compat = new FlatCompat({
   // import.meta.dirname is available after Node.js v20.11.0
@@ -31,7 +32,8 @@ export default [
       '@typescript-eslint': tsPlugin,
       prettier: prettierPlugin,
       react: reactPlugin,
-      import: eslintPluginImport
+      import: eslintPluginImport,
+      'unused-imports': eslintPluginUnusedImports
     },
     rules: {
       ...tsPlugin.configs.recommended.rules,
@@ -42,7 +44,15 @@ export default [
       '@typescript-eslint/naming-convention': 'off',
       '@typescript-eslint/ban-types': 'off',
       '@typescript-eslint/no-inferrable-types': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        {
+          vars: 'all',
+          args: 'after-used',
+          ignoreRestSiblings: true
+        }
+      ],
+      'unused-imports/no-unused-imports': 'warn',
       '@typescript-eslint/no-unused-expressions': 'off'
     }
   },
