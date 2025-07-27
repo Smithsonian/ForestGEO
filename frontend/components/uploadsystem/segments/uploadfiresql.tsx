@@ -499,15 +499,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
                 await fetch(`/api/setupbulkprocedure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
                 setProcessedChunks(prev => prev + 1);
               } catch (e: any) {
-                // unforeseen error OR max attempts exceeded. Need to move to errors and reset the table. User should reupload
-                // clear temporarymeasurements table:
-                await fetch(`/api/formatrunquery`, {
-                  body: JSON.stringify({
-                    query: `delete from ${schema}.temporarymeasurements where PlotID = ? and CensusID = ?;`,
-                    params: [currentPlot?.plotID, currentCensus?.dateRanges[0].censusID]
-                  }),
-                  method: 'POST'
-                });
+                // unforeseen error OR max attempts exceeded. Move to failedmeasurements manually and try the next one
+                await fetch(`/api/setupbulkfailure/${encodeURIComponent(fileID)}/${encodeURIComponent(batchID)}?schema=${schema}`);
                 throw e;
               }
             })
@@ -522,20 +515,6 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         await queue.onEmpty();
         // trigger collapser ONCE
         await fetch(`/api/setupbulkcollapser/${currentCensus?.dateRanges[0].censusID}?schema=${schema}`);
-        // Optionally, run a combined query to update census dates.
-        const combinedQuery = `
-          UPDATE ${schema}.census c
-            JOIN (SELECT c1.PlotCensusNumber,
-                         MIN(cm.MeasurementDate) AS FirstMeasurementDate,
-                         MAX(cm.MeasurementDate) AS LastMeasurementDate
-                  FROM ${schema}.coremeasurements cm
-                         JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
-                  WHERE c1.PlotCensusNumber = ${currentCensus?.plotCensusNumber}
-                  GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
-          SET c.StartDate = m.FirstMeasurementDate,
-              c.EndDate   = m.LastMeasurementDate
-          WHERE c.PlotCensusNumber = ${currentCensus?.plotCensusNumber};`;
-        await fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(combinedQuery) });
         setProcessed(true);
       }
 

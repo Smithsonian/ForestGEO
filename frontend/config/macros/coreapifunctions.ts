@@ -206,22 +206,28 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
         const newRowData = MapperFactory.getMapper<any, any>(dataType).demapData([{ ...oldRow, ...newRow }])[0];
         const { [demappedGridID]: gridIDKey, ...remainingProperties } = newRowData;
 
-        let failedTrimmed, _ignored;
-        let plotTrimmed, _ignored2;
-        let specTrimmed, _ignored3;
         let dataToUpdate;
+        const censusID = parseInt((await getCookie('censusID')) ?? '0');
 
         if (dataType === 'failedmeasurements') {
-          ({ Hash_ID: _ignored, ...failedTrimmed } = newRowData);
+          const { Hash_ID, ...failedTrimmed } = newRowData;
           failedTrimmed['FailureReasons'] = '';
           dataToUpdate = failedTrimmed;
         } else if (dataType === 'plots') {
-          ({ NumQuadrats: _ignored2, ...plotTrimmed } = newRowData);
+          const { NumQuadrats, ...plotTrimmed } = newRowData;
           dataToUpdate = plotTrimmed;
-        } else if (['attributes', 'quadrats', 'personnel', 'species'].includes(dataType)) {
-          ({ CensusID: _ignored2, ...specTrimmed } = newRowData);
+        } else if (['attributes', 'quadrats', 'species'].includes(dataType)) {
+          const { CensusID, ...specTrimmed } = newRowData;
           dataToUpdate = specTrimmed;
+        } else if (dataType === 'personnel') {
+          const { CensusActive, ...personnelTrimmed } = newRowData;
+          const query = CensusActive
+            ? `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?);`
+            : `DELETE FROM ${schema}.censusactivepersonnel WHERE CensusID = ? AND PersonnelID = ?`;
+          await connectionManager.executeQuery(query, [censusID, gridIDKey]);
+          dataToUpdate = personnelTrimmed;
         } else dataToUpdate = remainingProperties;
+
         const updateQuery = format(
           `UPDATE ??
            SET ?
@@ -229,7 +235,6 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           [`${schema}.${dataType}`, dataToUpdate, demappedGridID, gridIDKey]
         );
         // set session var in case, connect to original transaction ID
-        const censusID = parseInt((await getCookie('censusList')) ?? '0');
         await connectionManager.executeQuery(`SET @CURRENT_CENSUS_ID = ?`, [censusID]);
         await connectionManager.executeQuery(updateQuery);
 
@@ -312,6 +317,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       if (params.dataType === 'attributes') {
         const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, newRowData]);
         await connectionManager.executeQuery(insertQuery);
+      } else if (params.dataType === 'personnel') {
+        const insertQuery = `INSERT IGNORE INTO ${schema}.censusactivepersonnel (CensusID, PersonnelID) VALUES (?, ?)`;
+        await connectionManager.executeQuery(insertQuery, [censusID ?? 0, newRowData.PersonnelID]);
       } else {
         const { [demappedGridID]: demappedIDValue, ...remaining } = newRowData; // separate out PK
         const insertQuery = format(`INSERT INTO ?? SET ?`, [`${schema}.${params.dataType}`, remaining]);
@@ -321,6 +329,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ data
       // Handle all other cases
       delete newRowData[demappedGridID];
       if (params.dataType === 'plots') delete newRowData.NumQuadrats;
+      if (params.dataType === 'personnel') delete newRowData.CensusActive;
       let insertQuery = '';
       if (params.dataType === 'failedmeasurements') insertQuery = format('INSERT IGNORE INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);
       else insertQuery = format('INSERT INTO ?? SET ?', [`${schema}.${params.dataType}`, newRowData]);

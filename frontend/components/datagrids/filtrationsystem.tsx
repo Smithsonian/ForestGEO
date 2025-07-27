@@ -146,7 +146,7 @@ const createNumericOperator = (label: string, operator: (value: number, filterVa
       return value != null && !isNaN(fieldValue) && operator(fieldValue, Number(filterItem.value));
     };
   },
-  InputComponentProps: { type: 'number' }
+  InputComponentProps: {}
 });
 
 export const customNumericOperators: GridFilterOperator[] = [
