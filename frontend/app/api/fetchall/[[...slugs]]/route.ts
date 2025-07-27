@@ -50,7 +50,17 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
         LEFT JOIN ${schema}.quadrats q ON p.PlotID = q.PlotID and q.IsActive IS TRUE
         GROUP BY p.PlotID`;
       results = await connectionManager.executeQuery(query);
+    } else if (dataType === 'personnel') {
+      const query = `SELECT p.*, EXISTS( 
+        SELECT 1 FROM ${schema}.censusactivepersonnel cap 
+          JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
+          WHERE cap.PersonnelID = p.PersonnelID 
+            AND c.PlotCensusNumber = ? and c.PlotID = ? 
+        ) AS CensusActive 
+      FROM ${schema}.personnel p;`;
+      results = await connectionManager.executeQuery(query, [storedPCN, storedPlotID]);
     } else if (dataType === 'census') {
+      // Optionally, run a combined query to update census dates
       const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {

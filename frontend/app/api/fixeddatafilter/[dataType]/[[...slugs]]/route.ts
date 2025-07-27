@@ -76,7 +76,6 @@ export async function POST(
         case 'species':
         case 'stems':
         case 'alltaxonomiesview':
-        case 'quadratpersonnel':
         case 'roles':
           if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
@@ -90,7 +89,12 @@ export async function POST(
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
 
           paginatedQuery = `
-            SELECT SQL_CALC_FOUND_ROWS p.*
+            SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS( 
+              SELECT 1 FROM ${schema}.censusactivepersonnel cap 
+                JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
+                WHERE cap.PersonnelID = p.PersonnelID 
+                  AND c.PlotCensusNumber = ? and c.PlotID = ? 
+              ) AS CensusActive 
             FROM ${schema}.${params.dataType} p
             ${searchStub || filterStub ? ` WHERE (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
@@ -119,30 +123,6 @@ export async function POST(
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, page * pageSize, pageSize);
           break;
-        case 'personnelrole':
-          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues, 'p');
-          if (filterModel.items) filterStub = buildFilterModelStub(filterModel, 'p');
-
-          paginatedQuery = `
-        SELECT SQL_CALC_FOUND_ROWS 
-            p.PersonnelID,
-            p.CensusID,
-            p.FirstName,
-            p.LastName,
-            r.RoleName,
-            r.RoleDescription
-        FROM 
-            personnel p
-        LEFT JOIN 
-            roles r ON p.RoleID = r.RoleID
-            census c ON p.CensusID = c.CensusID
-        WHERE c.PlotID = ? 
-        AND c.PlotCensusNumber = ? 
-        ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
-          queryParams.push(plotID, plotCensusNumber, page * pageSize, pageSize);
-          break;
-        case 'census':
-          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
 
           paginatedQuery = `

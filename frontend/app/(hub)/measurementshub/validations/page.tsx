@@ -82,7 +82,7 @@ export default function ValidationsPage() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {globalValidations?.map((validation, index) => (
+          {globalValidations?.map(validation => (
             <ValidationRow
               key={validation.validationID}
               validation={validation}

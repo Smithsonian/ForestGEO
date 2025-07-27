@@ -1,26 +1,28 @@
 // personnel datagrid
 'use client';
 import { GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
-import React, { useEffect, useState } from 'react';
-import { Box, Chip, IconButton, Modal, ModalDialog, Typography } from '@mui/joy';
+import React, { useEffect, useRef, useState } from 'react';
+import { Box, Checkbox, Chip, IconButton, Modal, ModalDialog, Typography } from '@mui/joy';
 import UploadParentModal from '@/components/uploadsystemhelpers/uploadparentmodal';
 import { FormType } from '@/config/macros/formdetails';
-import { PersonnelGridColumns } from '@/components/client/datagridcolumns';
+import { formatHeader, PersonnelGridColumns } from '@/components/client/datagridcolumns';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
 import CloseIcon from '@mui/icons-material/Close';
 import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
-import IsolatedDataGridCommons from '@/components/datagrids/isolateddatagridcommons';
+import IsolatedDataGridCommons, { IsolatedDataGridCommonsHandle } from '@/components/datagrids/isolateddatagridcommons';
 import IsolatedRolesDataGrid from '@/components/datagrids/applications/isolated/isolatedrolesdatagrid';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
 
 export default function IsolatedPersonnelDataGrid() {
+  const dataGridRef = useRef<IsolatedDataGridCommonsHandle>(null);
   const currentSite = useSiteContext();
   const initialPersonnelRDSRow: PersonnelRDS = {
     id: 0,
     personnelID: 0,
     firstName: '',
     lastName: '',
-    roleID: 0
+    roleID: 0,
+    censusActive: false
   };
   const [refresh, setRefresh] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -41,7 +43,7 @@ export default function IsolatedPersonnelDataGrid() {
     field: 'roleID',
     headerName: 'Role',
     headerClassName: 'header',
-    headerAlign: 'left',
+    headerAlign: 'center',
     type: 'singleSelect',
     flex: 1,
     align: 'center',
@@ -67,6 +69,43 @@ export default function IsolatedPersonnelDataGrid() {
         </Chip>
       </Box>
     )
+  };
+
+  const isPersonActive: GridColDef = {
+    field: 'censusActive',
+    headerName: 'CensusActive',
+    renderHeader: () => formatHeader('Census', 'Active'),
+    headerAlign: 'center',
+    type: 'boolean',
+    flex: 0.25,
+    align: 'center',
+    editable: false,
+    renderCell: (params: GridRenderCellParams) => {
+      const handleToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const updatedRow = { ...params.row, censusActive: event.target.checked };
+        try {
+          await dataGridRef.current?.updateRow(updatedRow, params.row);
+          dataGridRef.current?.showSnackbar('Census Active status updated!', 'success');
+        } catch (err: any) {
+          dataGridRef.current?.showSnackbar(`Error: ${err.message}`, 'error');
+        } finally {
+          await dataGridRef.current?.fetchPaginatedData();
+        }
+      };
+
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%' }}>
+          <Checkbox
+            checked={!!params.value}
+            onChange={async e => {
+              e.stopPropagation();
+              await handleToggle(e);
+            }}
+            style={{ cursor: 'pointer' }}
+          />
+        </Box>
+      );
+    }
   };
 
   return (
@@ -108,8 +147,9 @@ export default function IsolatedPersonnelDataGrid() {
         </ModalDialog>
       </Modal>
       <IsolatedDataGridCommons
+        ref={dataGridRef}
         gridType="personnel"
-        gridColumns={[...PersonnelGridColumns, roleIDColumn]}
+        gridColumns={[...PersonnelGridColumns, roleIDColumn, isPersonActive]}
         refresh={refresh}
         setRefresh={setRefresh}
         selectionOptions={roles.map(role => ({

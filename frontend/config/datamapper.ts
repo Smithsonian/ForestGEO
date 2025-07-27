@@ -247,11 +247,6 @@ class MapperFactory {
         return new GenericMapper<MeasurementsSummaryRDS, MeasurementsSummaryResult>() as unknown as IDataMapper<RDS, Result>;
       case 'personnel':
         return new GenericMapper<PersonnelRDS, PersonnelResult>() as unknown as IDataMapper<RDS, Result>;
-      case 'personnelrole':
-        return new GenericMapper<
-          Unique<PersonnelRDS, RoleRDS> & Unique<RoleRDS, PersonnelRDS> & Common<PersonnelRDS, RoleRDS>,
-          ResultType<Unique<PersonnelRDS, RoleRDS> & Unique<RoleRDS, PersonnelRDS> & Common<PersonnelRDS, RoleRDS>>
-        >() as unknown as IDataMapper<RDS, Result>;
       case 'roles':
         return new GenericMapper<RoleRDS, RoleResult>() as unknown as IDataMapper<RDS, Result>;
       case 'plots':

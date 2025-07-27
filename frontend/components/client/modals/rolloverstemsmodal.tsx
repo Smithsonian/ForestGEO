@@ -181,8 +181,8 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
 
   const handleRowSelection = <T extends { stemID?: number }>(selectionModel: GridRowSelectionModel, setSelection: Dispatch<SetStateAction<T[]>>) => {
     setSelection(
-      selectionModel
-        .map(id => {
+      (selectionModel as any)
+        .map((id: number) => {
           return previousStems.find(p => p.id === id) as T;
         })
         .filter(Boolean)

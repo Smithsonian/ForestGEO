@@ -32,9 +32,9 @@ export type CapitalizeFirstLetter<T extends string> = T extends `${infer F}${inf
 export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}CqID${infer Suffix}`
   ? `${Prefix}CQID${Suffix}`
   : T extends `${infer Prefix}defaultUOMDBH${infer Suffix}`
-    ? `${infer Prefix}DefaultUOMDBH${infer Suffix}`
+    ? `${Prefix}DefaultUOMDBH${Suffix}`
     : T extends `${infer Prefix}defaultUOMHOM${infer Suffix}`
-      ? `${infer Prefix}DefaultUOMHOM${infer Suffix}`
+      ? `${Prefix}DefaultUOMHOM${Suffix}`
       : T extends `${infer Prefix}dbh${infer Suffix}`
         ? `${Prefix}DBH${Suffix}`
         : T extends `${infer Prefix}Dbh${infer Suffix}`
@@ -64,13 +64,13 @@ export type TransformSpecialCases<T extends string> = T extends `${infer Prefix}
                                 : T extends `${infer Prefix}CsID${infer Suffix}`
                                   ? `${Prefix}CSID${Suffix}`
                                   : T extends `${infer Prefix}sqDimX${infer Suffix}`
-                                    ? `${infer Prefix}SQDimX${infer Suffix}`
+                                    ? `${Prefix}SQDimX${Suffix}`
                                     : T extends `${infer Prefix}SqDimX${infer Suffix}`
-                                      ? `${infer Prefix}SQDimX${infer Suffix}`
+                                      ? `${Prefix}SQDimX${Suffix}`
                                       : T extends `${infer Prefix}sqDimY${infer Suffix}`
-                                        ? `${infer Prefix}SQDimY${infer Suffix}`
+                                        ? `${Prefix}SQDimY${Suffix}`
                                         : T extends `${infer Prefix}SqDimY${infer Suffix}`
-                                          ? `${infer Prefix}SQDimY${infer Suffix}`
+                                          ? `${Prefix}SQDimY${Suffix}`
                                           : T;
 
 // Utility type to omit specific keys
