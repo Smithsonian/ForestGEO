@@ -21,7 +21,6 @@ function getGridID(gridType: string): string {
     case 'census':
       return 'censusID';
     case 'personnel':
-    case 'personnelrole':
       return 'personnelID';
     case 'quadrats':
       return 'quadratID';
@@ -67,26 +66,6 @@ export async function GET(
   const demappedGridID = pkRaw.charAt(0).toUpperCase() + pkRaw.substring(1);
 
   const connectionManager = ConnectionManager.getInstance();
-
-  const storedCensusList: OrgCensus[] = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
-  const storedMax = storedCensusList.filter(c => c !== undefined)?.reduce((prev, curr) => (curr.plotCensusNumber > prev.plotCensusNumber ? curr : prev));
-  const isCensusMax = storedMax?.plotCensusNumber === plotCensusNumber;
-
-  function getVersionID(dataType: string): string {
-    switch (dataType) {
-      case 'attributes':
-        return 'AttributesVersioningID';
-      case 'personnel':
-        return 'PersonnelVersioningID';
-      case 'quadrats':
-        return 'QuadratsVersioningID';
-      case 'species':
-        return 'SpeciesVersioningID';
-      default:
-        return 'breakage';
-    }
-  }
-
   try {
     let paginatedQuery = ``;
     const queryParams: any[] = [];
@@ -124,13 +103,24 @@ export async function GET(
         break;
       case 'attributes':
       case 'species':
-      case 'personnel':
       case 'quadrats':
         paginatedQuery = `
             SELECT SQL_CALC_FOUND_ROWS dt.*
               FROM ${schema}.${params.dataType} dt
             ORDER BY dt.${demappedGridID} ASC LIMIT ?, ?;`;
         queryParams.push(page * pageSize, pageSize);
+        break;
+      case 'personnel':
+        paginatedQuery = `
+            SELECT SQL_CALC_FOUND_ROWS p.*, EXISTS( 
+              SELECT 1 FROM ${schema}.censusactivepersonnel cap 
+                JOIN ${schema}.census c ON cap.CensusID = c.CensusID 
+                WHERE cap.PersonnelID = p.PersonnelID 
+                  AND c.PlotCensusNumber = ? and c.PlotID = ? 
+              ) AS CensusActive 
+            FROM ${schema}.${params.dataType} p
+            ORDER BY p.${demappedGridID} ASC LIMIT ?, ?;`;
+        queryParams.push(plotCensusNumber, plotID, page * pageSize, pageSize);
         break;
       case 'alltaxonomiesview':
         paginatedQuery = `SELECT SQL_CALC_FOUND_ROWS atv.* FROM ${schema}.${params.dataType} atv

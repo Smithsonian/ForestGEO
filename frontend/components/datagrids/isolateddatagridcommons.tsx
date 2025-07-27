@@ -28,7 +28,7 @@ import {
   useGridApiRef
 } from '@mui/x-data-grid';
 import { Alert, AlertProps, Snackbar } from '@mui/material';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { ForwardedRef, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { useOrgCensusContext, usePlotContext, useQuadratContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { useDataValidityContext } from '@/app/contexts/datavalidityprovider';
 import { useSession } from 'next-auth/react';
@@ -50,7 +50,16 @@ import moment from 'moment/moment';
 import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
 
-export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGridCommonProps>) {
+export type IsolatedDataGridCommonsHandle = {
+  updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
+  fetchPaginatedData: () => Promise<void>;
+  showSnackbar: (message: string, severity: 'success' | 'error') => void;
+};
+
+const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
+  props: Readonly<IsolatedDataGridCommonProps>,
+  ref: ForwardedRef<IsolatedDataGridCommonsHandle>
+) {
   const {
     gridColumns,
     gridType,
@@ -724,6 +733,26 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
     }
   };
 
+  useImperativeHandle(ref, () => ({
+    updateRow: async (newRow: GridRowModel, oldRow: GridRowModel) => {
+      return await updateRow(
+        gridType,
+        currentSite?.schemaName,
+        newRow,
+        oldRow,
+        setSnackbar,
+        setIsNewRowAdded,
+        setShouldAddRowAfterFetch,
+        fetchPaginatedData,
+        paginationModel
+      );
+    },
+    fetchPaginatedData: async () => await fetchPaginatedData(paginationModel.page),
+    showSnackbar: (message: string, severity: 'success' | 'error') => {
+      setSnackbar({ children: message, severity });
+    }
+  }));
+
   const processRowUpdate = useCallback(
     async (newRow: GridRowModel, oldRow: GridRowModel) => {
       if (newRow?.isNew && !newRow?.id) {
@@ -1064,4 +1093,6 @@ export default function IsolatedDataGridCommons(props: Readonly<IsolatedDataGrid
       </Box>
     );
   }
-}
+});
+
+export default IsolatedDataGridCommons;
