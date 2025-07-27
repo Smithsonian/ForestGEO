@@ -153,7 +153,6 @@ export function getGridID(gridType: string): string {
     case 'census':
       return 'censusID';
     case 'personnel':
-    case 'personnelrole':
       return 'personnelID';
     case 'quadrats':
       return 'quadratID';

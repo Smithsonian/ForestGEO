@@ -8,6 +8,7 @@ export interface PersonnelRDS {
   firstName?: string;
   lastName?: string;
   roleID?: number;
+  censusActive?: boolean;
 }
 
 export type PersonnelResult = ResultType<PersonnelRDS>;

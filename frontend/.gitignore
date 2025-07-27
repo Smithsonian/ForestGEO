@@ -6,6 +6,7 @@
 .pnp.js
 /.idea/*
 /.idea
+/cypress/screenshots
 
 # testing
 /coverage
