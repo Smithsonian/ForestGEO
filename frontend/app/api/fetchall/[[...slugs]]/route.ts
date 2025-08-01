@@ -61,6 +61,16 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       results = await connectionManager.executeQuery(query, [storedPCN, storedPlotID]);
     } else if (dataType === 'census') {
       // Optionally, run a combined query to update census dates
+      const updateQuery = `UPDATE ${schema}.census c
+            JOIN (SELECT c1.PlotCensusNumber,
+                         MIN(cm.MeasurementDate) AS FirstMeasurementDate,
+                         MAX(cm.MeasurementDate) AS LastMeasurementDate
+                  FROM ${schema}.coremeasurements cm
+                         JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+                  GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
+          SET c.StartDate = m.FirstMeasurementDate,
+              c.EndDate   = m.LastMeasurementDate;`;
+      await connectionManager.executeQuery(updateQuery);
       const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {

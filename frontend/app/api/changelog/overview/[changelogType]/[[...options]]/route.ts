@@ -18,21 +18,18 @@ export async function GET(request: NextRequest, props: { params: Promise<{ chang
     let query = ``;
     switch (params.changelogType) {
       case 'unifiedchangelog':
-        query = `
-        SELECT * FROM ${schema}.unifiedchangelog
-        WHERE 
-          (PlotID = ? OR PlotID IS NULL) AND 
-          (CensusID IN (SELECT CensusID FROM ${schema}.census WHERE PlotID = ? AND PlotCensusNumber = ? AND IsActive IS TRUE) OR CensusID IS NULL)
+        query = `SELECT * FROM ${schema}.unifiedchangelog 
+        WHERE (PlotID = ? OR PlotID IS NULL) AND 
+          (CensusID IN (SELECT CensusID FROM ${schema}.census WHERE PlotID = ? AND PlotCensusNumber = ? AND IsActive IS TRUE) OR CensusID IS NULL) 
         ORDER BY ChangeTimestamp DESC 
         LIMIT 5;`;
         break;
       case 'validationchangelog':
-        query = `SELECT *
-                 FROM ${schema}.${params.changelogType}
+        query = `SELECT * 
+                 FROM ${schema}.${params.changelogType} 
                  ORDER BY RunDateTime DESC LIMIT 5;`;
         break;
     }
-
     const results = await connectionManager.executeQuery(query, [plotID, plotID, pcn]);
     return new NextResponse(results.length > 0 ? JSON.stringify(MapperFactory.getMapper<any, any>(params.changelogType).mapData(results)) : null, {
       status: HTTPResponses.OK

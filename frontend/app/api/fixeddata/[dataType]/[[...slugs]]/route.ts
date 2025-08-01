@@ -3,8 +3,6 @@ import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
-import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
-import { getCookie } from '@/app/actions/cookiemanager';
 
 export { POST, PATCH, DELETE } from '@/config/macros/coreapifunctions';
 

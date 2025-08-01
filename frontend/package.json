@@ -89,6 +89,7 @@
     "react-dom": "^19.1.0",
     "react-dropzone": "^14.3.8",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.1.0",
     "remark-gfm": "^4.0.1",
     "sql-formatter": "^15.6.6",
     "style-loader": "^4.0.0",
