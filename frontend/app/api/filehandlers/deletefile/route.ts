@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function DELETE(request: NextRequest) {
   const containerName = request.nextUrl.searchParams.get('container');
@@ -24,8 +25,8 @@ export async function DELETE(request: NextRequest) {
     return new NextResponse('File deleted successfully', {
       status: HTTPResponses.OK
     });
-  } catch (error) {
-    console.error('Delete file error:', error);
+  } catch (error: any) {
+    ailogger.error('Delete file error:', error, { endpoint: request.nextUrl.toJSON() });
     return new NextResponse((error as Error).message, { status: 500 });
   }
 }

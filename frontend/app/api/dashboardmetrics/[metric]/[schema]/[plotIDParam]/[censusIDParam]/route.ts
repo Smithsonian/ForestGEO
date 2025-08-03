@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function GET(
   request: NextRequest,
@@ -66,7 +67,7 @@ export async function GET(
           includeVersions: false
         };
         for await (const blob of containerClient?.listBlobsFlat(listOptions) ?? []) {
-          if (!blob) console.error('blob is undefined');
+          if (!blob) ailogger.error('blob is undefined');
           blobData.push({
             key: ++i,
             name: blob.name,

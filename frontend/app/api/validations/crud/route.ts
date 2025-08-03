@@ -4,6 +4,7 @@ import { format } from 'mysql2/promise';
 import { HTTPResponses } from '@/config/macros';
 import MapperFactory from '@/config/datamapper';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function GET(request: NextRequest) {
   const connectionManager = ConnectionManager.getInstance();
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
     const results = await connectionManager.executeQuery(query);
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>('sitespecificvalidations').mapData(results)), { status: HTTPResponses.OK });
   } catch (error: any) {
-    console.error('Error:', error);
+    ailogger.error('Error:', error);
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
     await connectionManager.closeConnection();
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({ insertID }, { status: HTTPResponses.OK });
   } catch (error: any) {
-    console.error('Error:', error);
+    ailogger.error('Error:', error);
     await connectionManager.rollbackTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
@@ -62,7 +63,7 @@ export async function PATCH(request: NextRequest) {
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
-    console.error('Error:', error);
+    ailogger.error('Error:', error);
     await connectionManager.rollbackTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {
@@ -83,7 +84,7 @@ export async function DELETE(request: NextRequest) {
     await connectionManager.commitTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.OK });
   } catch (error: any) {
-    console.error('Error:', error);
+    ailogger.error('Error:', error);
     await connectionManager.rollbackTransaction(transactionID ?? '');
     return NextResponse.json({}, { status: HTTPResponses.CONFLICT });
   } finally {

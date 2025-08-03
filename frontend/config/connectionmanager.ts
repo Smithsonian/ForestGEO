@@ -5,25 +5,26 @@ import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
 import { patchConnectionManager } from '@/lib/connectionlogger';
+import ailogger from '@/ailogger';
 
 // at the top of connectionmanager.ts
 class ObservableMap<K, V> extends Map<K, V> {
   override set(key: K, value: V): this {
     super.set(key, value);
-    console.log('[transactionConnections] set', key, '→', (value as any).threadId);
+    ailogger.info(`[transactionConnections] set ${key} → ${(value as any).threadId}`);
     this.logContents();
     return this;
   }
 
   override delete(key: K): boolean {
     const deleted = super.delete(key);
-    console.log('[transactionConnections] delete', key);
+    ailogger.info(`[transactionConnections] delete ${key}`);
     this.logContents();
     return deleted;
   }
 
   private logContents() {
-    console.log(
+    ailogger.info(
       '[transactionConnections] current:',
       Array.from(this.entries()).map(([id, conn]) => ({ id, threadId: (conn as any).threadId }))
     );
@@ -57,8 +58,8 @@ class ConnectionManager {
 
     try {
       return await runQuery(connection, format(query, params));
-    } catch (error) {
-      console.error(chalk.red('Error executing query:', error));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error executing query:', error));
       throw error;
     } finally {
       if (!transactionId) {
@@ -79,21 +80,21 @@ class ConnectionManager {
           connection = await this.acquireConnectionInternal();
           await connection.beginTransaction();
           this.transactionConnections.set(transactionId, connection);
-          console.log(chalk.green(`Transaction started: ${transactionId}`));
+          ailogger.info(chalk.green(`Transaction started: ${transactionId}`));
           return transactionId;
         } catch (error: any) {
           connection?.release();
           if (!this.isDeadlockError(error)) {
-            console.error(chalk.red('Error starting transaction:', error));
+            ailogger.error(chalk.red('Error starting transaction:', error));
             throw error;
           }
-          console.warn(chalk.yellow(`Error ${error.message} encountered, retrying transaction start...`));
+          ailogger.warn(chalk.yellow(`Error ${error.message} encountered, retrying transaction start...`));
           await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
       throw new Error('Failed to start transaction after 15 seconds due to persistent deadlock issues.');
-    } catch (e) {
-      console.error(chalk.red('Error starting transaction:', e));
+    } catch (e: any) {
+      ailogger.error(chalk.red('Error starting transaction:', e));
       throw e;
     }
   }
@@ -103,15 +104,15 @@ class ConnectionManager {
     const connection = this.transactionConnections.get(transactionId);
 
     if (!connection) {
-      console.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
+      ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
       return; // Avoid throwing an error for an already finalized transaction
     }
 
     try {
       await connection.commit();
-      console.log(chalk.green(`Transaction committed: ${transactionId}`));
-    } catch (error) {
-      console.error(chalk.red('Error committing transaction:', error));
+      ailogger.info(chalk.green(`Transaction committed: ${transactionId}`));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error committing transaction:', error));
       throw error;
     } finally {
       connection.release();
@@ -124,15 +125,15 @@ class ConnectionManager {
     const connection = this.transactionConnections.get(transactionId);
 
     if (!connection) {
-      console.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
+      ailogger.warn(`Transaction with ID ${transactionId} does not exist or has already been finalized.`);
       return; // Avoid throwing an error for an already finalized transaction
     }
 
     try {
       await connection.rollback();
-      console.warn(chalk.yellow(`Transaction rolled back: ${transactionId}`));
-    } catch (error) {
-      console.error(chalk.red('Error rolling back transaction:', error));
+      ailogger.warn(chalk.yellow(`Transaction rolled back: ${transactionId}`));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error rolling back transaction:', error));
       throw error;
     } finally {
       connection.release();
@@ -157,8 +158,8 @@ class ConnectionManager {
       await connection.ping(); // Validate connection
       // console.log(chalk.green('Connection validated.'));
       return connection;
-    } catch (error) {
-      console.error(chalk.red('Error acquiring or validating connection:', error));
+    } catch (error: any) {
+      ailogger.error(chalk.red('Error acquiring or validating connection:', error));
       throw error;
     }
   }

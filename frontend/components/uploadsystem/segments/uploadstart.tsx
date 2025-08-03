@@ -12,6 +12,7 @@ import { useOrgCensusContext, usePlotContext, useQuadratContext, useQuadratDispa
 
 import FinalizeSelectionsButton from '../../client/modals/finalizeselectionsbutton';
 import { Quadrat } from '@/config/sqlrdsdefinitions/zones';
+import ailogger from '@/ailogger';
 
 export default function UploadStart(props: Readonly<UploadStartProps>) {
   const { uploadForm, personnelRecording, setPersonnelRecording, setReviewState } = props;
@@ -69,7 +70,7 @@ export default function UploadStart(props: Readonly<UploadStartProps>) {
         .then(() => {
           setQuadratList(quadratListContext?.filter(quadrat => quadrat?.plotID === currentPlot.id) || undefined);
         })
-        .catch(console.error);
+        .catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus]);
 

@@ -10,6 +10,7 @@ import { styled } from '@mui/joy/styles';
 import { CheckCircleOutlined } from '@mui/icons-material';
 import { FormType, TableHeadersByFormType } from '@/config/macros/formdetails';
 import { standardizeGridColumns } from '@/components/client/clientmacros';
+import ailogger from '@/ailogger';
 
 const getClosestAreaUnit = (input: string): string | null => {
   const normalizedInput = input.trim().toLowerCase();
@@ -262,7 +263,7 @@ const EditStatusCell = (params: GridRenderEditCellParams) => {
   const handleCommit = () => {
     const correctedValue = getClosestStatus(value);
 
-    console.log('handle commit: corrected value: ', correctedValue);
+    ailogger.info('handle commit: corrected value: ', correctedValue);
 
     apiRef.current.setEditCellValue({
       id,

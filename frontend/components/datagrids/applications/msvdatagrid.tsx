@@ -16,6 +16,7 @@ import { Alert, AlertProps, AlertTitle, Collapse } from '@mui/material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import FailedMeasurementsModal from '@/components/client/modals/failedmeasurementsmodal';
 import { AssignmentOutlined, CachedOutlined, UploadFileOutlined } from '@mui/icons-material';
+import ailogger from '@/ailogger';
 
 const initialMeasurementsSummaryViewRDSRow: MeasurementsSummaryRDS = {
   id: 0,
@@ -71,7 +72,8 @@ export default function MeasurementsSummaryViewDataGrid() {
   const [shouldAddRowAfterFetch, setShouldAddRowAfterFetch] = useState(false);
 
   useEffect(() => {
-    if (openFSM) fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(console.error);
+    if (openFSM)
+      fetch(`/api/runquery`, { method: 'POST', body: JSON.stringify(`CALL ${currentSite?.schemaName ?? ''}.reviewfailed();`) }).catch(ailogger.error);
   }, [openFSM]);
 
   const addNewRowToGrid = () => {
@@ -107,7 +109,7 @@ export default function MeasurementsSummaryViewDataGrid() {
       setLoading(true, 'Processing data...');
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
-      console.error(e);
+      ailogger.error(e);
     } finally {
       setLoading(false);
       setRefresh(true);

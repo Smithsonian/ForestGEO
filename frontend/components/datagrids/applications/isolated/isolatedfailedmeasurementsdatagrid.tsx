@@ -15,6 +15,7 @@ import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment/moment';
 import { GridApiCommunity } from '@mui/x-data-grid/internals';
 import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
+import ailogger from '@/ailogger';
 
 export default function IsolatedFailedMeasurementsDataGrid() {
   const [refresh, setRefresh] = useState(false);
@@ -31,7 +32,7 @@ export default function IsolatedFailedMeasurementsDataGrid() {
   const apiRef = useGridApiRef();
 
   useEffect(() => {
-    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(console.error);
+    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   const initialFailedMeasurementsRow: FailedMeasurementsRDS = {

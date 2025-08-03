@@ -7,6 +7,7 @@ import { useSession } from 'next-auth/react';
 import { useTheme } from '@mui/joy';
 import dynamic from 'next/dynamic';
 import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import ailogger from '@/ailogger';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
@@ -57,10 +58,10 @@ export default function ValidationsPage() {
       if (response.ok) {
         await updateValidations(prev => (prev ? prev.map(val => (val.validationID === updatedValidation.validationID ? updatedValidation : val)) : []));
       } else {
-        console.error('Failed to update validation');
+        ailogger.error('Failed to update validation');
       }
-    } catch (error) {
-      console.error('Error updating validation:', error);
+    } catch (error: any) {
+      ailogger.error('Error updating validation:', error);
     }
   };
 

@@ -12,6 +12,7 @@ import { PersonnelRDS, RoleRDS } from '@/config/sqlrdsdefinitions/personnel';
 import IsolatedDataGridCommons, { IsolatedDataGridCommonsHandle } from '@/components/datagrids/isolateddatagridcommons';
 import IsolatedRolesDataGrid from '@/components/datagrids/applications/isolated/isolatedrolesdatagrid';
 import MultilineModal from '@/components/datagrids/applications/multiline/multilinemodal';
+import ailogger from '@/ailogger';
 
 export default function IsolatedPersonnelDataGrid() {
   const dataGridRef = useRef<IsolatedDataGridCommonsHandle>(null);
@@ -36,7 +37,7 @@ export default function IsolatedPersonnelDataGrid() {
       setRoles(await response.json());
     }
 
-    fetchRoles().catch(console.error);
+    fetchRoles().catch(ailogger.error);
   }, [refresh]);
 
   const roleIDColumn: GridColDef = {
