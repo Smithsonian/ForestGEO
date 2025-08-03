@@ -1,6 +1,7 @@
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createError, handleUpsert } from '@/config/utils';
 import { SpecialProcessingProps } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 function cleanInputData(data: any) {
   const cleanedData: any = {};

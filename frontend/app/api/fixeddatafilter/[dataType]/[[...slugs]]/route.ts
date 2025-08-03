@@ -6,6 +6,7 @@ import { HTTPResponses } from '@/config/macros';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
 import { POST as SINGLEPOST } from '@/config/macros/coreapifunctions';
 import { ExtendedGridFilterModel } from '@/config/datagridhelpers';
+import ailogger from '@/ailogger';
 
 export { PATCH, DELETE } from '@/config/macros/coreapifunctions';
 
@@ -47,7 +48,7 @@ export async function POST(
         const results = await connectionManager.executeQuery(query, [schema, params.dataType]);
         columns = results.map((row: any) => row.COLUMN_NAME);
       } catch (e: any) {
-        console.error('error: ', e);
+        ailogger.error('error: ', e);
         throw new Error(e);
       }
       let searchStub = '';
@@ -123,6 +124,8 @@ export async function POST(
               ${searchStub || filterStub ? ` AND (${[searchStub, filterStub].filter(Boolean).join(' OR ')})` : ''}`;
           queryParams.push(plotID, page * pageSize, pageSize);
           break;
+        case 'census':
+          if (filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);
           if (filterModel.items) filterStub = buildFilterModelStub(filterModel);
 
           paginatedQuery = `

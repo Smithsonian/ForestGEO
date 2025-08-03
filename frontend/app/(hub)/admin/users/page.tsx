@@ -3,6 +3,7 @@
 import { Box, Button, Checkbox, Input, Option, Select, Stack, Table } from '@mui/joy';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
+import ailogger from '@/ailogger';
 
 type UserWithSite = Omit<AdminUserRDS, 'userSites'> & { userSites: AdminSiteRDS[] };
 
@@ -43,7 +44,7 @@ export default function UserSettingsPage() {
       baseUsers.current = mappedUsers;
     }
 
-    fetchUsers().catch(console.error);
+    fetchUsers().catch(ailogger.error);
   }, []);
 
   function onTextFieldChange(e: ChangeEvent<HTMLInputElement>, uSite: UserWithSite) {

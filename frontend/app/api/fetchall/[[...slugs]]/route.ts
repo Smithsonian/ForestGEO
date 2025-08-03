@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { getCookie } from '@/app/actions/cookiemanager';
+import ailogger from '@/ailogger';
 
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
@@ -61,6 +62,16 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       results = await connectionManager.executeQuery(query, [storedPCN, storedPlotID]);
     } else if (dataType === 'census') {
       // Optionally, run a combined query to update census dates
+      const updateQuery = `UPDATE ${schema}.census c
+            JOIN (SELECT c1.PlotCensusNumber,
+                         MIN(cm.MeasurementDate) AS FirstMeasurementDate,
+                         MAX(cm.MeasurementDate) AS LastMeasurementDate
+                  FROM ${schema}.coremeasurements cm
+                         JOIN ${schema}.census c1 ON cm.CensusID = c1.CensusID
+                  GROUP BY c1.PlotCensusNumber) m ON c.PlotCensusNumber = m.PlotCensusNumber
+          SET c.StartDate = m.FirstMeasurementDate,
+              c.EndDate   = m.LastMeasurementDate;`;
+      await connectionManager.executeQuery(updateQuery);
       const query = `SELECT * FROM ${schema}.census WHERE PlotID = ?`;
       results = await connectionManager.executeQuery(query, [storedPlotID]);
     } else {
@@ -68,8 +79,8 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       results = await connectionManager.executeQuery(query);
     }
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
-  } catch (error) {
-    console.error('Error:', error);
+  } catch (error: any) {
+    ailogger.error('Error:', error);
     throw new Error('Call failed');
   } finally {
     await connectionManager.closeConnection();

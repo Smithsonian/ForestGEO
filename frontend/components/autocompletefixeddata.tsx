@@ -3,6 +3,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import { useEffect, useState } from 'react';
 import { CircularProgress, Popper, TextField } from '@mui/material';
 import { useSiteContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 interface AutocompleteFixedDataProps {
   dataType: string;
@@ -29,7 +30,7 @@ export default function AutocompleteFixedData(props: Readonly<AutocompleteFixedD
         setOptions(data);
       })
       .catch(error => {
-        console.error('Error fetching data:', error);
+        ailogger.error('Error fetching data:', error);
       })
       .finally(() => setLoading(false));
   };

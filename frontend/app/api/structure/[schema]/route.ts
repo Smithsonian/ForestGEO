@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ schema: string }> }) {
   const params = await props.params;
@@ -13,7 +14,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ sche
     const results = await connectionManager.executeQuery(query, [schema]);
     return new Response(JSON.stringify(results), { status: 200 });
   } catch (e: any) {
-    console.error('Error:', e);
+    ailogger.error('Error:', e);
     throw new Error('Call failed: ', e);
   } finally {
     await connectionManager.closeConnection();

@@ -49,6 +49,7 @@ import { applyFilterToColumns } from '@/components/datagrids/filtrationsystem';
 import moment from 'moment/moment';
 import { EditToolbar } from '@/components/client/datagridelements';
 import ResetViewModal from '@/components/client/modals/resetviewmodal';
+import ailogger from '@/ailogger';
 
 export type IsolatedDataGridCommonsHandle = {
   updateRow: (newRow: GridRowModel, oldRow: GridRowModel) => Promise<GridRowModel>;
@@ -123,7 +124,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
 
   useEffect(() => {
     if (currentPlot?.plotID || currentCensus?.plotCensusNumber || !isNewRowAdded) {
-      fetchPaginatedData(paginationModel.page).catch(console.error);
+      fetchPaginatedData(paginationModel.page).catch(ailogger.error);
     }
   }, [currentPlot, currentCensus, paginationModel.page, filterModel]);
 
@@ -191,8 +192,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       link.click();
 
       URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error fetching full data:', error);
+    } catch (error: any) {
+      ailogger.error('Error fetching full data:', error);
       setSnackbar({ children: 'Error fetching full data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -669,8 +670,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       if (isNewRowAdded && pageToFetch === newLastPage) {
         await handleAddNewRow();
       }
-    } catch (error) {
-      console.error('Error fetching data:', error);
+    } catch (error: any) {
+      ailogger.error('Error fetching data:', error);
       setSnackbar({ children: 'Error fetching data', severity: 'error' });
     } finally {
       setLoading(false);
@@ -705,8 +706,8 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
       let responseJSON;
       try {
         responseJSON = await response.json();
-      } catch (e) {
-        console.error(e);
+      } catch (e: any) {
+        ailogger.error(e);
       }
 
       if (!response.ok) {
@@ -830,7 +831,7 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
             mode: newRowModesModel[id]?.mode || updatedModel[id]?.mode || GridRowModes.View
           };
         } else {
-          console.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
+          ailogger.warn(`Row ID ${id} does not exist in rowModesModel. Skipping.`);
         }
       });
       return updatedModel;
@@ -1019,14 +1020,14 @@ const IsolatedDataGridCommons = forwardRef(function IsolatedDataGridCommons(
               await waitForStateUpdates();
               try {
                 return await processRowUpdate(newRow, oldRow);
-              } catch (error) {
-                console.error('Error processing row update:', error);
+              } catch (error: any) {
+                ailogger.error('Error processing row update:', error);
                 setSnackbar({ children: 'Error updating row', severity: 'error' });
                 return Promise.reject(error);
               }
             }}
-            onProcessRowUpdateError={error => {
-              console.error('Row update error:', error);
+            onProcessRowUpdateError={(error: any) => {
+              ailogger.error('Row update error:', error);
               setSnackbar({
                 children: 'Error updating row',
                 severity: 'error'

@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { ReviewStates, UploadUpdateValidationsProps } from '@/config/macros/uploadsystemmacros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 export default function UploadUpdateValidations(props: Readonly<UploadUpdateValidationsProps>) {
   const { setReviewState, schema } = props;
@@ -22,7 +23,7 @@ export default function UploadUpdateValidations(props: Readonly<UploadUpdateVali
   };
 
   useEffect(() => {
-    updateValidations().catch(console.error);
+    updateValidations().catch(ailogger.error);
   }, []);
 
   useEffect(() => {
