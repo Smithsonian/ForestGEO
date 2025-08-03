@@ -42,6 +42,7 @@ jobs:
           echo AZURE_SQL_SCHEMA=${{ secrets.AZURE_SQL_SCHEMA }} >> frontend/.env
           echo AZURE_SQL_CATALOG_SCHEMA=${{ secrets.AZURE_SQL_CATALOG_SCHEMA }} >> frontend/.env
           echo AZURE_STORAGE_CONNECTION_STRING=${{ secrets.AZURE_STORAGE_CONNECTION_STRING }} >> frontend/.env
+          echo APP_INSIGHTS_CONNECTION_STRING=${{ secrets.APP_INSIGHTS_CONNECTION_STRING }} >> frontend/.env
           echo NEXTAUTH_DEBUG=true >> frontend/.env
           echo NODE_ENV=development >> frontend/.env
           echo PORT=3000 >> frontend/.env
