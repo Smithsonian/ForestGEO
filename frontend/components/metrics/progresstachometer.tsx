@@ -78,21 +78,10 @@ export default function ProgressTachometer(props: ProgressTachoType) {
         >
           <PolarAngleAxis name="Quadrat Population" type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
           <RadialBar dataKey="value" background cornerRadius={10} fill="#3f51b5" isAnimationActive={true} animationDuration={500}>
-            <LabelList dataKey="value" position="insideStart" formatter={() => `Populated: ${PopulatedQuadrats}/${TotalQuadrats}`} />
+            <LabelList dataKey="value" position="insideStart" formatter={() => `Populated: ${PopulatedQuadrats}`} />
           </RadialBar>
         </RadialBarChart>
       </ResponsiveContainer>
-      <Box sx={{ mt: 2, textAlign: 'center', alignItems: 'center', width: '100%' }}>
-        <Typography level="title-lg">{`Populated: ${PopulatedPercent}%`}</Typography>
-        <Typography level="body-lg">{`The following quadrat names do not have any recorded data for this census!`}</Typography>
-        <Stack direction={'row'} alignItems={'center'}>
-          {UnpopulatedQuadrats.map(uq => (
-            <Chip key={uq} color={'primary'}>
-              {uq}
-            </Chip>
-          ))}
-        </Stack>
-      </Box>
     </Box>
   );
 }
