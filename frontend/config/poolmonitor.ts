@@ -71,6 +71,10 @@ export class PoolMonitor {
     return this.poolClosed;
   }
 
+  public signalActivity() {
+    this.resetInactivityTimer();
+  }
+
   private async reinitializePool(): Promise<void> {
     if (this.reinitializing) return; // Prevent concurrent reinitialization
     this.reinitializing = true;
@@ -93,7 +97,7 @@ export class PoolMonitor {
   }
 
   private async logAndReturnConnections(): Promise<{ sleeping: number[]; live: number[] }> {
-    const bufferTime = 60;
+    const bufferTime = 300;
     try {
       if (!this.isPoolClosed()) {
         // only log if pool is not closed
