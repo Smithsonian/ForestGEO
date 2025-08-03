@@ -34,6 +34,7 @@ import { UploadedFileData } from '@/config/macros/formdetails';
 import ProgressTachometer from '@/components/metrics/progresstachometer';
 import { FileDownload } from '@mui/icons-material';
 import ListItemContent from '@mui/joy/ListItemContent';
+import ailogger from '@/ailogger';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -74,10 +75,10 @@ export default function DashboardPage() {
           `/api/dashboardmetrics/ProgressTachometer/${currentSite?.schemaName ?? ''}/${currentPlot?.plotID ?? 0}/${currentCensus?.dateRanges[0].censusID ?? 0}?plot=${currentPlot?.plotName ?? ''}`
         )
       ).json();
-      console.log(JSON.stringify({ TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats }));
+      ailogger.info(JSON.stringify({ TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats }));
       setProgressTacho({ TotalQuadrats, PopulatedQuadrats, PopulatedPercent, UnpopulatedQuadrats: UnpopulatedQuadrats.split(';') });
-    } catch (e) {
-      console.log('ProgressTachometer: ', e);
+    } catch (e: any) {
+      ailogger.error('ProgressTachometer: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -90,8 +91,8 @@ export default function DashboardPage() {
         )
       ).json();
       setActiveUsers(CountActiveUsers);
-    } catch (e) {
-      console.log('CountActiveUsers: ', e);
+    } catch (e: any) {
+      ailogger.error('CountActiveUsers: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -104,8 +105,8 @@ export default function DashboardPage() {
         )
       ).json();
       setFilesUploaded(FilesUploaded);
-    } catch (e) {
-      console.log('FilesUploaded: ', e);
+    } catch (e: any) {
+      ailogger.error('FilesUploaded: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -118,8 +119,8 @@ export default function DashboardPage() {
         )
       ).json();
       setCountTrees(CountTrees);
-    } catch (e) {
-      console.log('CountTrees: ', e);
+    } catch (e: any) {
+      ailogger.info('CountTrees: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -132,8 +133,8 @@ export default function DashboardPage() {
         )
       ).json();
       setCountStems(CountStems);
-    } catch (e) {
-      console.log('CountStems: ', e);
+    } catch (e: any) {
+      ailogger.info('CountStems: ', e);
     }
   }, [currentSite, currentPlot, currentCensus]);
 
@@ -159,10 +160,10 @@ export default function DashboardPage() {
 
         setChangelogHistory(paddedResults);
       } catch (e) {
-        console.log('no json response');
+        ailogger.warn('changeloghistory - no json response');
       }
-    } catch (error) {
-      console.error('Failed to load changelog history', error);
+    } catch (error: any) {
+      ailogger.error('Failed to load changelog history', error);
       setChangelogHistory(Array(5).fill({})); // Fallback to an empty padded array in case of an error
     } finally {
       setIsLoading(false);
@@ -171,12 +172,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus) {
-      loadProgressTachometer().catch(console.error);
-      loadCountActiveUsers().catch(console.error);
-      loadFilesUploaded().catch(console.error);
-      loadCountTrees().catch(console.error);
-      loadCountStems().catch(console.error);
-      loadChangelogHistory().catch(console.error);
+      loadProgressTachometer().catch(ailogger.error);
+      loadCountActiveUsers().catch(ailogger.error);
+      loadFilesUploaded().catch(ailogger.error);
+      loadCountTrees().catch(ailogger.error);
+      loadCountStems().catch(ailogger.error);
+      loadChangelogHistory().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus, loadProgressTachometer, loadCountActiveUsers, loadFilesUploaded, loadCountTrees, loadCountStems]);
 

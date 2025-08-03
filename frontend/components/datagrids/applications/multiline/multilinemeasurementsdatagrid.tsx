@@ -13,6 +13,7 @@ import { DatePicker } from '@mui/x-date-pickers';
 import moment from 'moment';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { loadSelectableOptions, selectableAutocomplete } from '@/components/client/clientmacros';
+import ailogger from '@/ailogger';
 
 export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   const { setChangesSubmitted } = props;
@@ -43,7 +44,7 @@ export default function MultilineMeasurementsDataGrid(props: DataGridSignals) {
   });
 
   useEffect(() => {
-    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(console.error);
+    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, [currentSite, currentPlot, currentCensus]);
 
   const gridColumns: GridColDef[] = useMemo(() => {

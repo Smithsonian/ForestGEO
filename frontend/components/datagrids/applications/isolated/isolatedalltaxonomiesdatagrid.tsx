@@ -14,6 +14,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import SpeciesLimitsModal from '@/components/client/modals/specieslimitsmodal';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 export default function IsolatedAllTaxonomiesViewDataGrid() {
   const initialAllTaxonomiesViewRDSRow: AllTaxonomiesViewRDS = {
@@ -52,7 +53,7 @@ export default function IsolatedAllTaxonomiesViewDataGrid() {
       setAllSpeciesLimits(await response.json());
     }
 
-    if (allSpeciesLimits.length === 0 || refresh) fetchLimits().catch(console.error); // get all of them asap
+    if (allSpeciesLimits.length === 0 || refresh) fetchLimits().catch(ailogger.error);
   }, [refresh]);
 
   const handleOpenSpeciesLimitsModal = (speciesRow: SpeciesRDS) => {

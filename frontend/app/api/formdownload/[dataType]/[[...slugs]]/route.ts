@@ -4,6 +4,7 @@ import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { buildFilterModelStub, buildSearchStub } from '@/components/processors/processormacros';
+import ailogger from '@/ailogger';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const params = await props.params;
@@ -34,7 +35,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     const results = await connectionManager.executeQuery(query, [schema, params.dataType === 'measurements' ? 'coremeasurements' : params.dataType]);
     columns = results.map((row: any) => row.COLUMN_NAME);
   } catch (e: any) {
-    console.log('error: ', e);
+    ailogger.error('error: ', e);
     throw new Error(e);
   }
   if (filterModel !== undefined && filterModel.quickFilterValues) searchStub = buildSearchStub(columns, filterModel.quickFilterValues);

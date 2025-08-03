@@ -6,13 +6,14 @@ import CircularProgress from '@mui/joy/CircularProgress';
 import { Warning } from '@mui/icons-material';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import ailogger from '@/ailogger';
 
 export default function Error(props: { error: Error & { digest?: string }; reset: () => void }) {
   const { error, reset } = props;
   const { data: session } = useSession();
   useEffect(() => {
     // Log the error to an error reporting service
-    console.error(error);
+    ailogger.error(error);
   }, [error]);
   const router = useRouter();
   if (error.message === 'access-denied') {

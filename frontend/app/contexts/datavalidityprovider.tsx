@@ -4,6 +4,7 @@ import { UnifiedValidityFlags } from '@/config/macros';
 
 import { useOrgCensusContext, usePlotContext, useSiteContext } from './userselectionprovider';
 import { useLoading } from './loadingprovider';
+import ailogger from '@/ailogger';
 
 const initialValidityState: UnifiedValidityFlags = {
   attributes: false,
@@ -58,8 +59,8 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
             try {
               const response = await fetch(url, { method: 'GET' });
               return { type, isValid: response.ok };
-            } catch (error) {
-              console.error(error);
+            } catch (error: any) {
+              ailogger.error(error);
               return { type, isValid: false };
             }
           })
@@ -84,7 +85,7 @@ export const DataValidityProvider = ({ children }: { children: React.ReactNode }
       await checkDataValidity(typesToRefresh);
       setRefreshNeeded(false); // Reset the refresh flag after rechecking
     } else {
-      console.error('No flags set for rechecking, or missing site/plot/census data');
+      ailogger.error('No flags set for rechecking, or missing site/plot/census data');
     }
   }, [validity, checkDataValidity, refreshNeeded]);
 

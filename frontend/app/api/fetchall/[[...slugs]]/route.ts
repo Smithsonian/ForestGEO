@@ -4,6 +4,7 @@ import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
 import { OrgCensus } from '@/config/sqlrdsdefinitions/timekeeping';
 import { getCookie } from '@/app/actions/cookiemanager';
+import ailogger from '@/ailogger';
 
 // ordering: PCQ
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
@@ -78,8 +79,8 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       results = await connectionManager.executeQuery(query);
     }
     return new NextResponse(JSON.stringify(MapperFactory.getMapper<any, any>(dataType).mapData(results)), { status: HTTPResponses.OK });
-  } catch (error) {
-    console.error('Error:', error);
+  } catch (error: any) {
+    ailogger.error('Error:', error);
     throw new Error('Call failed');
   } finally {
     await connectionManager.closeConnection();

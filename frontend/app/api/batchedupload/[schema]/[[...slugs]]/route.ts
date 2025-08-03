@@ -3,6 +3,7 @@ import { HTTPResponses } from '@/config/macros';
 import { FailedMeasurementsRDS } from '@/config/sqlrdsdefinitions/core';
 import connectionmanager from '@/config/connectionmanager';
 import { format } from 'mysql2/promise';
+import ailogger from '@/ailogger';
 
 export async function POST(request: NextRequest, props: { params: Promise<{ schema: string; slugs?: string[] }> }) {
   const params = await props.params;
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ sche
     await connectionManager.executeQuery(insertQuery);
     return new NextResponse(JSON.stringify({ message: 'Insert to SQL successful' }), { status: HTTPResponses.OK });
   } catch (error: any) {
-    console.error('Database Error:', error);
+    ailogger.error('Database Error:', error);
     return new NextResponse(JSON.stringify({ message: 'Database error', error: error.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   }
 }

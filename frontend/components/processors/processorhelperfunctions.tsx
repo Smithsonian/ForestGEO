@@ -4,6 +4,7 @@ import { handleUpsert } from '@/config/utils';
 import { AllTaxonomiesViewRDS, AllTaxonomiesViewResult } from '@/config/sqlrdsdefinitions/views';
 import ConnectionManager from '@/config/connectionmanager';
 import { fileMappings, InsertUpdateProcessingProps } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 // need to try integrating this into validation system:
 
@@ -43,9 +44,9 @@ export async function insertOrUpdate(props: InsertUpdateProcessingProps): Promis
       try {
         // Execute the query using the provided connection
         await connectionManager.executeQuery(query, values);
-      } catch (error) {
+      } catch (error: any) {
         // Rollback the transaction in case of an error
-        console.error(`INSERT OR UPDATE: error in query execution: ${error}. Returning error breaking row to user... `);
+        ailogger.error(`INSERT OR UPDATE: error in query execution: ${error}. Returning error breaking row to user... `);
         throw error;
       }
     }
@@ -92,7 +93,7 @@ export async function handleUpsertForSlices<Result>(
         rowData[field as keyof Result] = mappedNewRow[field as keyof typeof mappedNewRow];
       }
     });
-    console.log('after fields in slice rowData: ', rowData);
+    ailogger.info('after fields in slice rowData: ', rowData);
 
     // Check if we need to propagate a foreign key from a prior slice
     const prevSlice = getPreviousSlice(sliceKey, config.slices);
@@ -102,7 +103,7 @@ export async function handleUpsertForSlices<Result>(
     }
 
     if ((mappedNewRow as any)[primaryKey] !== undefined) (rowData as any)[primaryKey] = (mappedNewRow as any)[primaryKey];
-    console.log('inserting rowData: ', rowData);
+    ailogger.info('inserting rowData: ', rowData);
 
     // Perform the upsert and store the resulting ID
     insertedIds[sliceKey] = (await handleUpsert<Result>(connectionManager, schema, sliceKey, rowData, primaryKey as keyof Result)).id;
@@ -147,7 +148,7 @@ export async function handleDeleteForSlices<Result>(
     // Ensure that a primary key is present for deletion
     const primaryKeyValue = rowData[primaryKey as keyof Result];
     if (!primaryKeyValue) {
-      console.error(`Primary key ${primaryKey} is missing in rowData for slice: ${sliceKey}`);
+      ailogger.error(`Primary key ${primaryKey} is missing in rowData for slice: ${sliceKey}`);
       throw new Error(`Primary key ${primaryKey} is required for deletion in ${sliceKey}.`);
     }
 
@@ -159,8 +160,8 @@ export async function handleDeleteForSlices<Result>(
       `;
       try {
         await connectionManager.executeQuery(deleteFromRelatedTableQuery, [primaryKeyValue]);
-      } catch (error) {
-        console.error(`Error deleting related rows from trees for SpeciesID ${primaryKeyValue}:`, error);
+      } catch (error: any) {
+        ailogger.error(`Error deleting related rows from trees for SpeciesID ${primaryKeyValue}:`, error);
         throw new Error(`Failed to delete related rows from trees for SpeciesID ${primaryKeyValue}.`);
       }
     }
@@ -174,12 +175,12 @@ export async function handleDeleteForSlices<Result>(
     try {
       // Use runQuery helper for executing the delete query
       await connectionManager.executeQuery(deleteQuery, [primaryKeyValue]);
-    } catch (error) {
-      console.error(`Error during deletion in ${sliceKey}:`, error);
+    } catch (error: any) {
+      ailogger.error(`Error during deletion in ${sliceKey}:`, error);
       throw new Error(`Failed to delete from ${sliceKey}. Please check the logs for details.`);
     }
   }
-  console.log('Deletion completed successfully.');
+  ailogger.info('Deletion completed successfully.');
 }
 
 // Field definitions and configurations
@@ -358,11 +359,11 @@ export async function runValidation(
       return true;
     } catch (e: any) {
       if (isDeadlockError(e)) {
-        console.log(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
+        ailogger.info(`Validation Attempt ${attempt}: Deadlock encountered (error code: ${e.code || e.errno}). Retrying after ${delay}ms...`);
         try {
           await connectionManager.rollbackTransaction(transactionID);
-        } catch (rollbackError) {
-          console.error('Rollback error:', rollbackError);
+        } catch (rollbackError: any) {
+          ailogger.error('Rollback error:', rollbackError);
         }
         // Wait for an exponentially increasing delay before retrying
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -370,8 +371,8 @@ export async function runValidation(
       } else {
         try {
           await connectionManager.rollbackTransaction(transactionID);
-        } catch (rollbackError) {
-          console.error('Rollback error:', rollbackError);
+        } catch (rollbackError: any) {
+          ailogger.error('Rollback error:', rollbackError);
         }
         return false;
       }
@@ -408,7 +409,7 @@ export async function updateValidatedRows(schema: string, params: { p_CensusID?:
   } catch (error: any) {
     // Roll back on error
     await connectionManager.rollbackTransaction(transactionID ?? '');
-    console.error(`Error during updateValidatedRows:`, error.message);
+    ailogger.error(`Error during updateValidatedRows:`, error.message);
     throw new Error(`updateValidatedRows failed for validation: Please check the logs for more details.`);
   } finally {
     // Close the connection

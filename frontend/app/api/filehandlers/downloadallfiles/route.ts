@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function GET(request: NextRequest) {
   const plot = request.nextUrl.searchParams.get('plot');
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
   if (!containerClient) {
     return NextResponse.json({ statusText: 'Container client creation error' }, { status: 400 });
   } else {
-    console.warn(`container client created`);
+    ailogger.warn(`container client created`);
   }
   const listOptions = {
     includeMetadata: true,
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
   let i = 0;
   try {
     for await (const blob of containerClient.listBlobsFlat(listOptions)) {
-      if (!blob) console.error('blob is undefined');
+      if (!blob) ailogger.error('blob is undefined');
       // blobData.push({ key: i.toString(), filename: blob.name, metadata: blob.metadata! });
       blobData.push({
         key: ++i,
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
       { status: HTTPResponses.OK }
     );
   } catch (error: any) {
-    console.error('error in blob listing: ', error);
+    ailogger.error('error in blob listing: ', error, { endpoint: request.nextUrl.toJSON() });
     return NextResponse.json({ message: error.message }, { status: 400 });
   }
 }
