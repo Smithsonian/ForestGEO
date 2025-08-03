@@ -9,6 +9,7 @@ import { handleError } from '@/utils/errorhandler';
 import { FamilyResult, GenusResult, SpeciesResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { getCookie } from '@/app/actions/cookiemanager';
 import { CMAttributesResult } from '@/config/sqlrdsdefinitions/core';
+import ailogger from '@/ailogger';
 
 export async function PATCH(request: NextRequest, props: { params: Promise<{ dataType: string; slugs?: string[] }> }) {
   const { dataType, slugs } = await props.params;
@@ -170,7 +171,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ dat
           // clear existing connections
           await connectionManager.executeQuery(`DELETE FROM ?? WHERE ?? = ?`, [`${schema}.cmattributes`, `CoreMeasurementID`, mappedOldRow.CoreMeasurementID]);
           if (parsedCodes.length === 0) {
-            console.error('No valid attribute codes found:', updatedFields.Attributes);
+            ailogger.error('No valid attribute codes found:', updatedFields.Attributes);
           } else {
             for (const code of parsedCodes) {
               await handleUpsert<CMAttributesResult>(

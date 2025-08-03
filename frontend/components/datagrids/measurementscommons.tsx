@@ -80,6 +80,7 @@ import SkipReEnterDataModal from '@/components/datagrids/skipreentrydatamodal';
 import { debounce, EditToolbar } from '../client/datagridelements';
 import { loadSelectableOptions } from '@/components/client/clientmacros';
 import Avatar from '@mui/joy/Avatar';
+import ailogger from '@/ailogger';
 
 export function EditMeasurements({ params }: { params: GridRenderEditCellParams }) {
   const initialValue = params.value ? Number(params.value).toFixed(2) : '0.00';
@@ -225,7 +226,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   }, [refresh]);
 
   useEffect(() => {
-    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(console.error);
+    loadSelectableOptions(currentSite, currentPlot, currentCensus, setSelectableOpts).catch(ailogger.error);
   }, []);
   // helper functions for usage:
   const handleSortModelChange = (newModel: GridSortModel) => {
@@ -497,7 +498,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       await fetchValidationErrors();
       await new Promise(resolve => setTimeout(resolve, 500));
     } catch (e: any) {
-      console.error(e);
+      ailogger.error(e);
     } finally {
       await new Promise(resolve => setTimeout(resolve, 1000));
       setLoading(false);
@@ -548,7 +549,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (e: any) {
-        console.error(e);
+        ailogger.error(e);
       } finally {
         setLoading(false);
       }
@@ -592,7 +593,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
   const fetchPaginatedData = useCallback(
     debounce(async (pageToFetch: number) => {
       if (!currentSite || !currentPlot || !currentCensus) {
-        console.warn('Missing necessary context for fetchPaginatedData');
+        ailogger.warn('Missing necessary context for fetchPaginatedData');
         return;
       }
 
@@ -628,8 +629,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
         if (isNewRowAdded && pageToFetch === newLastPage) {
           await handleAddNewRow();
         }
-      } catch (error) {
-        console.error('Error fetching data:', error);
+      } catch (error: any) {
+        ailogger.error('Error fetching data:', error);
         setSnackbar({ children: 'Error fetching data', severity: 'error' });
       } finally {
         setLoading(false);
@@ -645,7 +646,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
 
   useEffect(() => {
     if (currentPlot && currentCensus && paginationModel.page >= 0) {
-      runFetchPaginated().catch(console.error);
+      runFetchPaginated().catch(ailogger.error);
     }
   }, [currentPlot, currentCensus, paginationModel, rowCount, sortModel, isNewRowAdded, filterModel]);
 
@@ -856,8 +857,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
           }, {})
         : {};
       setValidationErrors(errorMap);
-    } catch (error) {
-      console.error('Error fetching validation errors:', error);
+    } catch (error: any) {
+      ailogger.error('Error fetching validation errors:', error);
     }
   }, [currentSite?.schemaName]);
 
@@ -1156,7 +1157,7 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
       if (!response.ok) throw new Error('Measurements Summary View Refresh failure');
       await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (e: any) {
-      console.error(e);
+      ailogger.error(e);
     } finally {
       setLoading(false);
     }
@@ -1230,8 +1231,8 @@ export default function MeasurementsCommons(props: Readonly<MeasurementsCommonsP
             onPaginationModelChange={newPaginationModel => {
               setPaginationModel(newPaginationModel);
             }}
-            onProcessRowUpdateError={error => {
-              console.error('Row update error:', error);
+            onProcessRowUpdateError={(error: any) => {
+              ailogger.error('Row update error:', error);
               setSnackbar({
                 children: 'Error updating row',
                 severity: 'error'

@@ -9,6 +9,7 @@ import { Paper, TableBody, TableCell, TableContainer, TableHead, TableRow } from
 import { Done } from '@mui/icons-material';
 import { useLoading } from '@/app/contexts/loadingprovider';
 import dynamic from 'next/dynamic';
+import ailogger from '@/ailogger';
 
 const PostValidationRow = dynamic(() => import('@/components/client/postvalidationrow'), { ssr: false });
 
@@ -42,7 +43,7 @@ export default function PostValidationPage() {
         { method: 'GET' }
       );
     } catch (error: any) {
-      console.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
+      ailogger.error(`Error fetching validation results for query ${postValidation.queryID}:`, error);
       throw new Error(error);
     }
   }
@@ -52,8 +53,8 @@ export default function PostValidationPage() {
       const response = await fetch(`/api/fetchall/postvalidationqueries?schema=${currentSite?.schemaName}`, { method: 'GET' });
       const data = await response.json();
       setPostValidations(data);
-    } catch (error) {
-      console.error('Error loading queries:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading queries:', error);
     }
   }
 
@@ -86,7 +87,7 @@ export default function PostValidationPage() {
   useEffect(() => {
     setLoading(true);
     loadPostValidations()
-      .catch(console.error)
+      .catch(ailogger.error)
       .then(() => setLoading(false));
   }, []);
 
@@ -98,13 +99,13 @@ export default function PostValidationPage() {
         if (data.schema) {
           setSchemaDetails(data.schema);
         }
-      } catch (error) {
-        console.error('Error fetching schema:', error);
+      } catch (error: any) {
+        ailogger.error('Error fetching schema:', error);
       }
     };
 
     if (postValidations.length > 0) {
-      fetchSchema().then(r => console.warn(r));
+      fetchSchema().then((r: any) => ailogger.warn(r));
     }
   }, [postValidations]);
 

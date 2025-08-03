@@ -5,6 +5,7 @@ import { GridFilterItem, GridFilterModel } from '@mui/x-data-grid';
 import { capitalizeAndTransformField } from '@/config/utils';
 import { escape } from 'mysql2';
 import { getPoolMonitorInstance } from '@/config/poolmonitorsingleton';
+import ailogger from '@/ailogger';
 
 export async function getSqlConnection(tries: number): Promise<PoolConnection> {
   let connection: PoolConnection | null = null;
@@ -15,18 +16,14 @@ export async function getSqlConnection(tries: number): Promise<PoolConnection> {
     connection = await getPoolMonitorInstance().getConnection();
     await connection.ping(); // Use ping to check the connection
     return connection; // Resolve the connection when successful
-  } catch (err) {
-    console.error(`Connection attempt ${tries + 1} failed:`, err);
-    if (connection) {
-      try {
-        connection.release();
-      } catch (_) {}
-    }
+  } catch (err: any) {
+    ailogger.error(`Connection attempt ${tries + 1} failed:`, err);
+    connection?.release();
     if (tries === 5) {
-      console.error('!!! Cannot connect !!! Error:', err);
+      ailogger.error('!!! Cannot connect !!! Error:', err);
       throw err;
     } else {
-      console.log('Retrying connection...');
+      ailogger.info('Retrying connection...');
       await new Promise(resolve => setTimeout(resolve, 5000)); // Wait a bit before retrying
       return getSqlConnection(tries + 1); // Retry and return the promise
     }
@@ -39,7 +36,7 @@ export async function getConn() {
     const i = 0;
     conn = await getSqlConnection(i);
   } catch (error: any) {
-    console.error('Error processing files:', error.message);
+    ailogger.error('Error processing files:', error.message);
     throw new Error(error.message);
   }
   if (!conn) {
@@ -68,8 +65,8 @@ export async function runQuery(connection: PoolConnection, query: string, params
       return rows;
     }
   } catch (error: any) {
-    console.error(chalk.red(`Error executing query: ${query}`));
-    console.error(chalk.red('Error message:', error.message));
+    ailogger.error(chalk.red(`Error executing query: ${query}`));
+    ailogger.error(chalk.red('Error message:', error.message));
     throw error;
   }
 }
@@ -169,8 +166,7 @@ export const buildFilterModelStub = (filterModel: GridFilterModel, alias?: strin
       const { field, operator, value } = item;
       if (!field || !operator || !value) return '';
       const aliasedField = `${alias ? `${alias}.` : ''}${capitalizeAndTransformField(field)}`;
-      const condition = buildCondition({ operator: operator as Operator, column: aliasedField, value });
-      return condition;
+      return buildCondition({ operator: operator as Operator, column: aliasedField, value });
     })
     .join(` ${filterModel?.logicOperator?.toUpperCase() || 'AND'} `);
 };

@@ -23,6 +23,7 @@ import { useLockAnimation } from '../contexts/lockanimationcontext';
 import { createAndUpdateCensusList } from '@/config/sqlrdsdefinitions/timekeeping';
 import { AcaciaVersionTypography } from '@/styles/versions/acaciaversion';
 import ReactDOM from 'react-dom';
+import ailogger from '@/ailogger';
 
 const Sidebar = dynamic(() => import('@/components/sidebar'), { ssr: false });
 const Header = dynamic(() => import('@/components/header'), { ssr: false });
@@ -129,8 +130,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
         setPlotListLoaded(true);
       }
-    } catch (error) {
-      console.error('Error loading plot data:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading plot data:', error);
     } finally {
       setLoading(false);
     }
@@ -154,8 +155,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         if (censusListDispatch) await censusListDispatch({ censusList });
         setCensusListLoaded(true);
       }
-    } catch (error) {
-      console.error('Error loading census data:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading census data:', error);
     } finally {
       setLoading(false);
     }
@@ -178,8 +179,8 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         if (quadratListDispatch) await quadratListDispatch({ quadratList: quadratsData });
         setQuadratListLoaded(true);
       }
-    } catch (error) {
-      console.error('Error loading quadrat data:', error);
+    } catch (error: any) {
+      ailogger.error('Error loading quadrat data:', error);
     } finally {
       setLoading(false);
     }
@@ -189,28 +190,28 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Ensure session is ready before attempting to fetch site list
     if (session && !siteListLoaded) {
-      fetchSiteList().catch(console.error);
+      fetchSiteList().catch(ailogger.error);
     }
   }, [session, siteListLoaded, fetchSiteList]);
 
   // Fetch plot data when currentSite is defined and plotList has not been loaded
   useEffect(() => {
     if (currentSite && !plotListLoaded) {
-      loadPlotData().catch(console.error);
+      loadPlotData().catch(ailogger.error);
     }
   }, [currentSite, plotListLoaded, loadPlotData]);
 
   // Fetch census data when currentSite, currentPlot are defined and censusList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && !censusListLoaded) {
-      loadCensusData().catch(console.error);
+      loadCensusData().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, censusListLoaded, loadCensusData]);
 
   // Fetch quadrat data when currentSite, currentPlot, currentCensus are defined and quadratList has not been loaded
   useEffect(() => {
     if (currentSite && currentPlot && currentCensus && !quadratListLoaded) {
-      loadQuadratData().catch(console.error);
+      loadQuadratData().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus, quadratListLoaded, loadQuadratData]);
 
@@ -293,12 +294,12 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         loadPlotData()
           .then(() => loadCensusData())
           .then(() => loadQuadratData())
-          .catch(console.error);
+          .catch(ailogger.error);
       }, 300); // 300ms delay for UI reset
     };
 
     if (hasSiteChanged || hasPlotChanged || hasCensusChanged) {
-      clearLists().catch(console.error);
+      clearLists().catch(ailogger.error);
     }
   }, [currentSite, currentPlot, currentCensus, plotListDispatch, censusListDispatch, quadratListDispatch, loadPlotData, loadCensusData, loadQuadratData]);
 

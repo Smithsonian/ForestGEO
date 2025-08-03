@@ -33,9 +33,8 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           const response = await fetch(coreURL, {
             method: 'GET'
           });
-          // console.log('response: ', response);
           if (!response.ok) {
-            console.log('response not okay');
+            console.error('auth response not okay');
             throw new Error('API call FAILURE!');
           }
 

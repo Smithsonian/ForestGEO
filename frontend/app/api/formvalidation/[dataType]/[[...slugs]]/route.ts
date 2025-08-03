@@ -2,6 +2,7 @@ import { HTTPResponses } from '@/config/macros';
 import { format } from 'mysql2/promise';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 // dataType
 // slugs: schema, columnName, value ONLY
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ dataT
     if (results.length === 0) return new NextResponse(null, { status: 404 });
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (error: any) {
-    console.error(error);
+    ailogger.error(error);
     throw error;
   } finally {
     await connectionManager.closeConnection();

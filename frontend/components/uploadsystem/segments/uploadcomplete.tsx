@@ -12,6 +12,7 @@ import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 import moment from 'moment';
 import { FileRow, FormType } from '@/config/macros/formdetails';
 import { createPostPatchQuery, getGridID } from '@/config/datagridhelpers';
+import ailogger from '@/ailogger';
 
 const ROWS_PER_BATCH = 10;
 
@@ -158,11 +159,11 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
         triggerRefresh();
         await Promise.all([loadCensusData(), loadPlotsData(), loadQuadratsData()]);
         setAllLoadsCompleted(true);
-      } catch (error) {
-        console.error(error);
+      } catch (error: any) {
+        ailogger.error(error);
       }
     };
-    runAsyncTasks().catch(console.error);
+    runAsyncTasks().catch(ailogger.error);
   }, []);
 
   return (

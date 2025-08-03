@@ -5,6 +5,7 @@ import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/conte
 import { DialogContent, DialogTitle, Modal, ModalClose, ModalDialog } from '@mui/joy';
 import ConfirmationDialog from '@/components/client/modals/confirmationdialog';
 import CircularProgress from '@mui/joy/CircularProgress';
+import ailogger from '@/ailogger';
 
 interface VOMProps {
   isValidationOverrideModalOpen: boolean;
@@ -70,8 +71,8 @@ export default function ValidationOverrideModal(props: VOMProps) {
             progress += 20;
           }, 200); // Increment progress every 200ms
         })
-        .catch(error => {
-          console.error('Override operation failed:', error);
+        .catch((error: any) => {
+          ailogger.error('Override operation failed:', error);
           setStartOverride(false);
         });
     }

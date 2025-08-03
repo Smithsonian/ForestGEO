@@ -15,6 +15,7 @@ import { PersonnelRDS } from '@/config/sqlrdsdefinitions/personnel';
 import { AttributesRDS } from '@/config/sqlrdsdefinitions/core';
 import { QuadratRDS } from '@/config/sqlrdsdefinitions/zones';
 import { SpeciesRDS } from '@/config/sqlrdsdefinitions/taxonomies';
+import ailogger from '@/ailogger';
 
 interface RolloverModalProps {
   open: boolean;
@@ -130,8 +131,8 @@ export default function RolloverModal(props: RolloverModalProps) {
         setRelatedData(await rolesResponse.json());
       }
       setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch previous data', error);
+    } catch (error: any) {
+      ailogger.error('Failed to fetch previous data', error);
       setError('Failed to fetch previous data. Please try again.');
       setLoading(false);
     }
@@ -175,7 +176,7 @@ export default function RolloverModal(props: RolloverModalProps) {
 
   useEffect(() => {
     if (open) {
-      validationPrevCensus().catch(console.error);
+      validationPrevCensus().catch(ailogger.error);
     }
   }, [open]);
 
@@ -251,8 +252,8 @@ export default function RolloverModal(props: RolloverModalProps) {
 
       onConfirm(cats.personnel.rollover, cats.quadrats.rollover, cats.attributes.rollover, cats.species.rollover, newCensusID);
       resetState();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      ailogger.error(err);
       setError(`Rollover failed: ${err}`);
       onConfirm(false, false, false, false);
     } finally {

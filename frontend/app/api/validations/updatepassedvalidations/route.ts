@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { updateValidatedRows } from '@/components/processors/processorhelperfunctions';
+import ailogger from '@/ailogger';
 
 export async function GET(request: NextRequest) {
   const schema = request.nextUrl.searchParams.get('schema');
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
       status: HTTPResponses.OK
     });
   } catch (error: any) {
-    console.error('Error in update operation:', error.message);
+    ailogger.error('Error in update operation:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

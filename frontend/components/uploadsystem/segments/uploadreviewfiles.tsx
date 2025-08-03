@@ -11,6 +11,7 @@ import { FileWithPath } from 'react-dropzone';
 import { FileList } from '@/components/uploadsystemhelpers/filelist';
 import CircularProgress from '@mui/joy/CircularProgress';
 import { DropzoneLogic } from '@/components/uploadsystemhelpers/dropzone';
+import ailogger from '@/ailogger';
 
 export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps>) {
   const {
@@ -55,7 +56,7 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
   const handleReUploadFileChange = async (newFiles: FileWithPath[]) => {
     setReuploadInProgress(true);
     const newFile = newFiles[0];
-    console.log('newFile: ', newFile);
+    ailogger.info('newFile: ', newFile);
     if (newFile.name !== currentFileName) {
       alert('Please upload a corrected version of the current file.');
       setIsReuploadDialogOpen(false);
@@ -106,8 +107,8 @@ export default function UploadReviewFiles(props: Readonly<UploadReviewFilesProps
 
     try {
       await handleApproval();
-    } catch (error) {
-      console.error('Error during approval:', error);
+    } catch (error: any) {
+      ailogger.error('Error during approval:', error);
       setUploadError(error);
       setReviewState(ReviewStates.ERRORS);
     }

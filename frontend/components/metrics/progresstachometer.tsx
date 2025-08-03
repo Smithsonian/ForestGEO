@@ -3,6 +3,7 @@
 import { LabelList, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer } from 'recharts';
 import { Box, Chip, Stack, Typography } from '@mui/joy';
 import { useEffect, useRef, useState } from 'react';
+import ailogger from '@/ailogger';
 
 export interface ProgressTachoType {
   TotalQuadrats: number;
@@ -54,7 +55,7 @@ export default function ProgressTachometer(props: ProgressTachoType) {
       await animateTo(0, PopulatedPercent ?? 0, 800); // move to actual
     };
 
-    runAnimation().catch(console.error);
+    runAnimation().catch(ailogger.error);
 
     return () => {
       cancelled = true;

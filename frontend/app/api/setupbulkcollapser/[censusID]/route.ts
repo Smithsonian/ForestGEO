@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function GET(
   request: NextRequest,
@@ -17,9 +18,9 @@ export async function GET(
   let transactionID: string = '';
   try {
     transactionID = await connectionManager.beginTransaction();
-    console.log('triggering collapser!');
+    ailogger.info('triggering collapser!');
     await connectionManager.executeQuery(`CALL ${schema}.bulkingestioncollapser(?);`, [censusID]);
-    console.log('successfully collapsed & de-duped data!');
+    ailogger.info('successfully collapsed & de-duped data!');
     await connectionManager.commitTransaction(transactionID);
     return new NextResponse(JSON.stringify({ responseMessage: 'Processing procedure executed' }), { status: HTTPResponses.OK });
   } catch (e: any) {

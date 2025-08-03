@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ firstName: string; lastName: string }> }) {
   const params = await props.params;
@@ -17,7 +18,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ firs
     }
     return new NextResponse(JSON.stringify(results[0].UserID), { status: HTTPResponses.OK });
   } catch (e: any) {
-    console.error('Error in GET request:', e.message);
+    ailogger.error('Error in GET request:', e.message, { endpoint: _request.nextUrl.toJSON() });
     return new NextResponse(JSON.stringify({ error: e.message }), { status: HTTPResponses.INTERNAL_SERVER_ERROR });
   } finally {
     await connectionManager.closeConnection();

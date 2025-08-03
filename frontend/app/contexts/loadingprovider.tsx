@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useAppInsightsUserSync } from '@/config/applicationinsightsusersync';
 
 const LoadingContext = createContext<{
   isLoading: boolean;
@@ -16,6 +17,7 @@ export function LoadingProvider({ children }: Readonly<{ children: React.ReactNo
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const startTimeRef = useRef<number | null>(null); // Persistent reference for start time
+  useAppInsightsUserSync();
 
   const setLoading = (isLoading: boolean, message = '') => {
     if (isLoading) {

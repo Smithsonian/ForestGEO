@@ -12,6 +12,7 @@ import 'moment-duration-format';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { useSession } from 'next-auth/react';
 import { v4 } from 'uuid';
+import ailogger from '@/ailogger';
 
 const UploadFireSQL: React.FC<UploadFireProps> = ({
   personnelRecording,
@@ -146,7 +147,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
     const parsingInvalidRows: FileRow[] = [];
 
     if (!expectedHeaders || !requiredHeaders) {
-      console.error(`No headers defined for form type: ${uploadForm}`);
+      ailogger.error(`No headers defined for form type: ${uploadForm}`);
       setReviewState(ReviewStates.FILE_MISMATCH_ERROR);
       return;
     }
@@ -216,13 +217,13 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           if (parsedDate.isValid()) {
             return parsedDate.toDate();
           } else {
-            console.error(
+            ailogger.error(
               `Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY, and their variations with '/' or '-'.`
             );
             return value;
           }
         } else {
-          console.error(
+          ailogger.error(
             `Invalid date format for value: ${value}. Accepted formats are YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY, and their variations with '/' or '-'.`
           );
           return value;
@@ -246,7 +247,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           totalRows += results.data.length;
           try {
             if (queue.size >= connectionLimit) {
-              console.log(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
+              ailogger.info(`Queue size ${queue.size} exceeded threshold. Pausing parser.`);
               parser.pause();
               // Wait until the queue is nearly empty before resuming.
               await queue.onEmpty();
@@ -281,22 +282,22 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               try {
                 await uploadToSql(fileCollectionRowSet, file.name);
                 setCompletedChunks(prev => prev + 1);
-              } catch (error) {
-                console.error('Chunk rollback triggered. Error uploading to SQL:', error);
-                console.log('starting retry...');
+              } catch (error: any) {
+                ailogger.error('Chunk rollback triggered. Error uploading to SQL:', error);
+                ailogger.info('starting retry...');
                 // Single retry -- add this chunk back to the queue.
                 await queue.add(async () => {
                   try {
                     await uploadToSql({ [file.name]: fileRowSet } as FileCollectionRowSet, file.name);
                     setCompletedChunks(prev => prev + 1);
-                  } catch (e) {
-                    console.error('Catastrophic error on retry: ', e);
+                  } catch (e: any) {
+                    ailogger.error('Catastrophic error on retry: ', e);
                   }
                 });
               }
             });
-          } catch (err) {
-            console.error('Error processing chunk:', err);
+          } catch (err: any) {
+            ailogger.error('Error processing chunk:', err);
             parser.abort();
             throw err;
           }
@@ -304,7 +305,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         complete: async () => {
           await queue.onEmpty();
           if (parsingInvalidRows.length > 0) {
-            console.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
+            ailogger.warn('Some rows were invalid and not uploaded:', parsingInvalidRows);
             setErrorRows(prevErrorRows => {
               const updatedErrorRows = { ...prevErrorRows };
               if (!updatedErrorRows[file.name]) {
@@ -344,8 +345,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
           }
           resolve();
         },
-        error: err => {
-          console.error('Error parsing file:', err);
+        error: (err: any) => {
+          ailogger.error('Error parsing file:', err);
           reject(err);
         }
       });
@@ -381,12 +382,12 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
               [fileName]: new Set([...(prev[fileName] ?? []), ...failingRows])
             }));
           }
-        } catch (e) {
-          console.error('no failing rows returned. unforeseen error');
+        } catch (e: any) {
+          ailogger.error('no failing rows returned. unforeseen error');
           throw e;
         }
-      } catch (error) {
-        console.error('Network or API error:', error);
+      } catch (error: any) {
+        ailogger.error('Network or API error:', error);
         throw error;
       }
     },
@@ -455,8 +456,8 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         if (isMounted) {
           setUploaded(true);
         }
-      } catch (error) {
-        console.error('Upload error:', error);
+      } catch (error: any) {
+        ailogger.error('Upload error:', error);
         throw error;
       }
     }
@@ -491,7 +492,7 @@ const UploadFireSQL: React.FC<UploadFireProps> = ({
         );
         setTotalBatches(Object.values(grouped).reduce((acc, arr) => acc + arr.length, 0));
         for (const fileID in grouped) {
-          console.log(`Processing FileID: ${fileID}`);
+          ailogger.info(`Processing FileID: ${fileID}`);
           // Map each batchID to a queued task.
           const batchTasks = grouped[fileID].map(batchID =>
             queue.add(async () => {

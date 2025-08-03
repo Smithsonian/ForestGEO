@@ -11,6 +11,7 @@ import { buildBulkUpsertQuery } from '@/config/utils';
 import { AttributesResult } from '@/config/sqlrdsdefinitions/core';
 import { processBulkSpecies } from '@/components/processors/processbulkspecies';
 import { getCookie } from '@/app/actions/cookiemanager';
+import ailogger from '@/ailogger';
 
 export async function POST(request: NextRequest) {
   let body;
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch (error: any) {
-    console.error('Error parsing JSON body:', error);
+    ailogger.error('Error parsing JSON body:', error);
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'Invalid or empty JSON body in the request',
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
       VALUES ${placeholders}`;
       await connectionManager.executeQuery(insertSQL, values);
       await connectionManager.commitTransaction(transactionID);
-      console.log(
+      ailogger.info(
         await connectionManager.executeQuery(`SELECT COUNT(*) FROM ${schema}.temporarymeasurements WHERE FileID = ? AND BatchID = ?`, [fileName, batchID])
       );
       return new NextResponse(
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
       );
     } catch (e: any) {
       await connectionManager.rollbackTransaction(transactionID);
-      console.error(`Error processing file ${fileName}:`, e.message);
+      ailogger.error(`Error processing file ${fileName}:`, e.message);
       return new NextResponse(
         JSON.stringify({
           responseMessage: `Error processing file ${fileName}: ${e.message}`,
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
           try {
             await insertOrUpdate(props);
           } catch (e: any) {
-            console.error(`Error processing row for file ${fileName}:`, e.message);
+            ailogger.error(`Error processing row for file ${fileName}:`, e.message);
             failingRows.add(row); // saving this for future processing
           }
         }
@@ -141,10 +142,10 @@ export async function POST(request: NextRequest) {
       await connectionManager.commitTransaction(transactionID ?? '');
     } catch (error: any) {
       await connectionManager.rollbackTransaction(transactionID ?? '');
-      console.log('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
-      console.log(`Row ${rowId} failed processing:`, error);
+      ailogger.error('CATASTROPHIC ERROR: sqlpacketload: transaction rolled back.');
+      ailogger.error(`Row ${rowId} failed processing:`, error);
       if (error instanceof Error) {
-        console.error(`Error processing row for file ${fileName}:`, error.message);
+        ailogger.error(`Error processing row for file ${fileName}:`, error.message);
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Error processing row in file ${fileName}`,
@@ -154,7 +155,7 @@ export async function POST(request: NextRequest) {
           { status: HTTPResponses.SERVICE_UNAVAILABLE }
         );
       } else {
-        console.error('Unknown error processing row:', error);
+        ailogger.error('Unknown error processing row:', error);
         return new NextResponse(
           JSON.stringify({
             responseMessage: `Unknown processing error at row, in file ${fileName}`,

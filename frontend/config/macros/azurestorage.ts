@@ -1,20 +1,21 @@
 import { BlobServiceClient, BlobUploadCommonResponse, ContainerClient } from '@azure/storage-blob';
+import ailogger from '@/ailogger';
 
 export async function getContainerClient(containerName: string): Promise<ContainerClient | undefined> {
   const storageAccountConnectionString = process.env.AZURE_STORAGE_CONNECTION_STRING!;
   // console.log('Connection String:', storageAccountConnectionString);
   // console.log(`container name: ${containerName.toLowerCase()}`);
   if (!storageAccountConnectionString) {
-    console.error('process envs failed');
+    ailogger.error('process envs failed');
     throw new Error('process envs failed');
   }
   // create client pointing to AZ storage system from connection string from Azure portal
   const blobServiceClient = BlobServiceClient.fromConnectionString(storageAccountConnectionString);
-  if (!blobServiceClient) console.error('blob service client creation failed');
-  else console.error('blob service client created & connected');
+  if (!blobServiceClient) ailogger.error('blob service client creation failed');
+  else ailogger.info('blob service client created & connected');
   // attempt connection to pre-existing container --> additional check to see if container was found
   const containerClient = blobServiceClient.getContainerClient(containerName.toLowerCase());
-  if (!(await containerClient.createIfNotExists())) console.error('container client createifnotexists failure');
+  if (!(await containerClient.createIfNotExists())) ailogger.error('container client createifnotexists failure');
   else {
     return containerClient;
   }
@@ -74,7 +75,7 @@ export async function uploadValidFileAsBuffer(
   };
 
   const newFileName = await generateNewFileName(file.name);
-  console.log(`Uploading blob: ${newFileName}`);
+  ailogger.info(`Uploading blob: ${newFileName}`);
 
   // Prepare metadata
   const metadata = {
@@ -92,13 +93,13 @@ export async function uploadValidFileAsBuffer(
       if (uploadResponse) {
         return uploadResponse;
       }
-    } catch (error) {
+    } catch (error: any) {
       if (attempt < MAX_RETRIES) {
-        console.log(`Upload attempt ${attempt} failed for ${file.name}, retrying in ${RETRY_DELAY_MS}ms...`);
+        ailogger.info(`Upload attempt ${attempt} failed for ${file.name}, retrying in ${RETRY_DELAY_MS}ms...`);
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
       } else {
         // If all attempts fail, rethrow the error
-        console.error(`All upload attempts failed for ${file.name}`);
+        ailogger.error(`All upload attempts failed for ${file.name}`);
         throw error;
       }
     }

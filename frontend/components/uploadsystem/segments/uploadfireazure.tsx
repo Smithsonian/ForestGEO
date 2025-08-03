@@ -7,6 +7,7 @@ import { Box, Button, Typography } from '@mui/material';
 import { Stack } from '@mui/joy';
 import { LinearProgressWithLabel } from '@/components/client/clientmacros';
 import { useOrgCensusContext, usePlotContext } from '@/app/contexts/userselectionprovider';
+import ailogger from '@/ailogger';
 
 const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
   acceptedFiles,
@@ -86,7 +87,7 @@ const UploadFireAzure: React.FC<UploadFireAzureProps> = ({
 
     if (!hasUploaded.current) {
       uploadFiles()
-        .catch(console.error)
+        .catch(ailogger.error)
         .then(() => {
           hasUploaded.current = true;
           setReviewState(ReviewStates.COMPLETE);

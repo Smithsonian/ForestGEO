@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AdminSiteRDS, AdminUserRDS } from '@/config/sqlrdsdefinitions/admin';
 import { Box, Button, Chip, Stack, Tab, TabList, TabPanel, Tabs } from '@mui/joy';
+import ailogger from '@/ailogger';
 
 interface UserSiteRelation {
   userID: number;
@@ -34,7 +35,7 @@ export default function UsersToSitesPage() {
       setSites(siteResponse);
     }
 
-    fetchUserSites().catch(console.error);
+    fetchUserSites().catch(ailogger.error);
   }, []);
 
   const siteIdsByUser = useMemo(

@@ -12,6 +12,7 @@ import { Menu, MenuItem, Skeleton } from '@mui/joy';
 import { signIn, signOut, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { GroupAdd, ManageAccountsRounded, Public, Settings } from '@mui/icons-material';
+import ailogger from '@/ailogger';
 
 export const LoginLogout = () => {
   const { data: session, status } = useSession();
@@ -20,7 +21,7 @@ export const LoginLogout = () => {
 
   const handleRetryLogin = () => {
     signIn('microsoft-entra-id', { redirectTo: '/dashboard' }).catch((error: any) => {
-      console.error('Login error:', error);
+      ailogger.error('Login error:', error);
       signOut({ redirectTo: `/loginfailed?reason=${error.message}` })
         .then(() => localStorage.clear())
         .then(() => sessionStorage.clear());

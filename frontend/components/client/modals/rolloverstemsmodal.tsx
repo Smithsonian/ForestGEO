@@ -24,6 +24,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { StemGridColumns } from '../datagridcolumns';
 import { StemRDS } from '@/config/sqlrdsdefinitions/taxonomies';
 import { createAndUpdateCensusList, OrgCensusRDS, OrgCensusToCensusResultMapper } from '@/config/sqlrdsdefinitions/timekeeping';
+import ailogger from '@/ailogger';
 
 interface RolloverStemsModalProps {
   open: boolean;
@@ -65,8 +66,8 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
       const stemsData = await stemsResponse.json();
       setPreviousStems(stemsData);
       setLoading(false);
-    } catch (error) {
-      console.error('failed to fetch previous data: ', error);
+    } catch (error: any) {
+      ailogger.error('failed to fetch previous data: ', error);
       setLoading(false);
     }
   };
@@ -170,8 +171,8 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
         });
       }
       onConfirm(rolloverStems);
-    } catch (error) {
-      console.error('failed to perform stems rollover: ', error);
+    } catch (error: any) {
+      ailogger.error('failed to perform stems rollover: ', error);
       onConfirm(false);
     } finally {
       setLoading(false);

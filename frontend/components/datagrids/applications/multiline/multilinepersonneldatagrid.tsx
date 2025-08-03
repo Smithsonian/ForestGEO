@@ -12,6 +12,7 @@ import { standardizeGridColumns } from '@/components/client/clientmacros';
 import { GridRenderEditCellParams, useGridApiContext } from '@mui/x-data-grid';
 import { Add } from '@mui/icons-material';
 import levenshtein from 'fast-levenshtein';
+import ailogger from '@/ailogger';
 
 export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
   type ExtendedRoleRDS = RoleRDS & {
@@ -34,7 +35,7 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
       setStoredRoles(await (await fetch(`/api/fetchall/roles?schema=${currentSite?.schemaName}`)).json());
     }
 
-    getRoles().catch(console.error);
+    getRoles().catch(ailogger.error);
   }, []);
 
   const filter = createFilterOptions<ExtendedRoleRDS>();

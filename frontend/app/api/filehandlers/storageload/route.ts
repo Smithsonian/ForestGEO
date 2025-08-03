@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import { getContainerClient, uploadValidFileAsBuffer } from '@/config/macros/azurestorage';
+import ailogger from '@/ailogger';
 
 export async function POST(request: NextRequest) {
   let formData: FormData;
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     containerClient = await getContainerClient(`${plot.toLowerCase()}-${census.toLowerCase()}`);
   } catch (error: any) {
-    console.error('Error getting container client:', error.message);
+    ailogger.error('Error getting container client:', error.message);
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'Error getting container client.',
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!containerClient) {
-    console.error('Container client is undefined.');
+    ailogger.error('Container client is undefined.');
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'Container client is undefined'
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       throw new Error('Failure: Response status not between 200 & 299');
     }
   } catch (error: any) {
-    console.error('File processing error:', error);
+    ailogger.error('File processing error:', error);
     return new NextResponse(
       JSON.stringify({
         responseMessage: 'File Processing error',

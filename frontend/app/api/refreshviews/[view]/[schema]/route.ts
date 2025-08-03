@@ -1,6 +1,7 @@
 import { HTTPResponses } from '@/config/macros';
 import { NextRequest, NextResponse } from 'next/server';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 export async function POST(_request: NextRequest, props: { params: Promise<{ view: string; schema: string }> }) {
   const params = await props.params;
@@ -16,7 +17,7 @@ export async function POST(_request: NextRequest, props: { params: Promise<{ vie
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
     await connectionManager.rollbackTransaction(transactionID ?? '');
-    console.error('Error:', e);
+    ailogger.error('Error:', e);
     throw new Error('Call failed: ', e);
   } finally {
     await connectionManager.closeConnection();

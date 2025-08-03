@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runValidation } from '@/components/processors/processorhelperfunctions';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function POST(request: NextRequest, props: { params: Promise<{ validationType: string }> }) {
   const params = await props.params;
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ vali
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
-    console.error('Error during validation:', error.message);
+    ailogger.error('Error during validation:', error.message);
     return new NextResponse(JSON.stringify({ error: error.message }), {
       status: 500
     });

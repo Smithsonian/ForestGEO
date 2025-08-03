@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HTTPResponses } from '@/config/macros';
 import ConnectionManager from '@/config/connectionmanager';
+import ailogger from '@/ailogger';
 
 // datatype: table name
 // expecting 1) schema 2) plotID 3) plotCensusNumber
@@ -69,7 +70,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ data
     // If all conditions are satisfied
     return new NextResponse(null, { status: HTTPResponses.OK });
   } catch (e: any) {
-    console.error(e);
+    ailogger.error(e);
     return new NextResponse(null, {
       status: HTTPResponses.PRECONDITION_VALIDATION_FAILURE
     });

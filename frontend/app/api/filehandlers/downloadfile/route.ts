@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getContainerClient } from '@/config/macros/azurestorage';
 import { BlobSASPermissions, BlobServiceClient, generateBlobSASQueryParameters, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { HTTPResponses } from '@/config/macros';
+import ailogger from '@/ailogger';
 
 export async function GET(request: NextRequest) {
   const containerName = request.nextUrl.searchParams.get('container');
@@ -43,8 +44,8 @@ export async function GET(request: NextRequest) {
         'Content-Type': 'application/json'
       }
     });
-  } catch (error) {
-    console.error('Download file error:', error);
+  } catch (error: any) {
+    ailogger.error('Download file error:', error);
     return new NextResponse((error as Error).message, { status: 500 });
   }
 }

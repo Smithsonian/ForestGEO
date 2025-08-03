@@ -28,6 +28,7 @@ import SouthIcon from '@mui/icons-material/South';
 import NorthIcon from '@mui/icons-material/North';
 import { useOrgCensusContext, usePlotContext, useSiteContext } from '@/app/contexts/userselectionprovider';
 import { Info } from '@mui/icons-material';
+import ailogger from '@/ailogger';
 
 export default function SpeciesLimitsModal(props: {
   openSpeciesLimitsModal: boolean;
@@ -142,8 +143,8 @@ export default function SpeciesLimitsModal(props: {
       if (response.ok) {
         alert('Species limits saved successfully!');
       }
-    } catch (error) {
-      console.error('Error saving species limits:', error);
+    } catch (error: any) {
+      ailogger.error('Error saving species limits:', error);
     } finally {
       setRefresh(true);
       closeModal();
