@@ -35,6 +35,7 @@ import ProgressTachometer from '@/components/metrics/progresstachometer';
 import { FileDownload } from '@mui/icons-material';
 import ListItemContent from '@mui/joy/ListItemContent';
 import ailogger from '@/ailogger';
+import ProgressPieChart from '@/components/metrics/progresspiechart';
 
 interface ProgressTachoType {
   TotalQuadrats: number;
@@ -66,6 +67,7 @@ export default function DashboardPage() {
   const [countStems, setCountStems] = useState(0);
   const [countTrees, setCountTrees] = useState(0);
   const [filesUploaded, setFilesUploaded] = useState<UploadedFileData[]>([]);
+  const [toggleSwitch, setToggleSwitch] = useState(true);
 
   const loadProgressTachometer = useCallback(async () => {
     if (!currentSite?.schemaName || !currentPlot?.plotName || !currentCensus?.dateRanges[0].censusID) return null;
@@ -202,8 +204,22 @@ export default function DashboardPage() {
         <Card variant="soft" color="primary" invertedColors sx={{ width: '50%' }}>
           <CardContent sx={{ px: 0, width: '100%', height: '100%' }}>
             <Typography level="title-lg">Census Statistics</Typography>
-            <Box sx={{ height: '50%', width: '100%' }}>
-              <ProgressTachometer {...progressTacho} />
+            <Typography level={'title-md'} alignSelf={'center'}>
+              {toggleSwitch ? `Tachometer View` : `Pie Chart View`}
+            </Typography>
+            <Box sx={{ height: '50%', width: '100%' }} onClick={() => setToggleSwitch(!toggleSwitch)}>
+              {toggleSwitch ? <ProgressTachometer {...progressTacho} /> : <ProgressPieChart {...progressTacho} />}
+            </Box>
+            <Box sx={{ mt: 2, textAlign: 'center', alignItems: 'center', width: '100%' }}>
+              <Typography level="title-lg">{`Populated: ${progressTacho.PopulatedQuadrats}%`}</Typography>
+              <Typography level="body-lg">{`The following quadrat names do not have any recorded data for this census!`}</Typography>
+              <Stack direction={'row'} alignItems={'center'} sx={{ overflowX: 'scroll' }}>
+                {progressTacho.UnpopulatedQuadrats.map(uq => (
+                  <Chip key={uq} color={'primary'}>
+                    {uq}
+                  </Chip>
+                ))}
+              </Stack>
             </Box>
             <Divider orientation={'horizontal'} sx={{ my: 1 }} />
             <Stack direction={'row'} spacing={1}>

@@ -1,6 +1,6 @@
 // connectionmanager.ts
 import '@/lib/connectionlogger';
-import { format, PoolConnection } from 'mysql2/promise';
+import { PoolConnection } from 'mysql2/promise';
 import chalk from 'chalk';
 import { getConn, runQuery } from '@/components/processors/processormacros';
 import { v4 as uuidv4 } from 'uuid';
@@ -34,6 +34,8 @@ class ObservableMap<K, V> extends Map<K, V> {
 class ConnectionManager {
   private static instance: ConnectionManager | null = null; // Singleton instance
   private transactionConnections = new ObservableMap<string, PoolConnection>(); // Store transaction-specific connections
+  private transactionMeta = new Map<string, { startedAt: number; timeoutHandle: NodeJS.Timeout | null }>();
+  private readonly DEFAULT_TX_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
   // Private constructor
   private constructor() {
@@ -57,7 +59,7 @@ class ConnectionManager {
     }
 
     try {
-      return await runQuery(connection, format(query, params));
+      return await runQuery(connection, query, params);
     } catch (error: any) {
       ailogger.error(chalk.red('Error executing query:', error));
       throw error;
@@ -161,6 +163,56 @@ class ConnectionManager {
     } catch (error: any) {
       ailogger.error(chalk.red('Error acquiring or validating connection:', error));
       throw error;
+    }
+  }
+
+  public async withTransaction<T>(fn: (transactionId: string) => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
+    const timeoutMs = opts?.timeoutMs ?? this.DEFAULT_TX_TIMEOUT_MS;
+    const transactionId = await this.beginTransaction();
+
+    // set up metadata / timeout
+    const meta = { startedAt: Date.now(), timeoutHandle: null as NodeJS.Timeout | null };
+    this.transactionMeta.set(transactionId, meta);
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      meta.timeoutHandle = setTimeout(() => {
+        reject(new Error(`Transaction ${transactionId} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
+    try {
+      const result = (await Promise.race([fn(transactionId), timeoutPromise])) as T;
+      // success path
+      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+      await this.commitTransaction(transactionId);
+      this.transactionMeta.delete(transactionId);
+      return result;
+    } catch (err) {
+      // on error / timeout
+      if (meta.timeoutHandle) clearTimeout(meta.timeoutHandle);
+      try {
+        await this.rollbackTransaction(transactionId);
+      } catch (rbErr: any) {
+        ailogger.error(`Rollback failed for transaction ${transactionId}:`, rbErr);
+      }
+      this.transactionMeta.delete(transactionId);
+      throw err;
+    }
+  }
+
+  public async cleanupStaleTransactions(maxAgeMs?: number): Promise<void> {
+    const threshold = maxAgeMs ?? this.DEFAULT_TX_TIMEOUT_MS * 2; // e.g., twice default
+    const now = Date.now();
+    for (const [txId, meta] of this.transactionMeta.entries()) {
+      if (now - meta.startedAt > threshold) {
+        ailogger.warn(`Detected stale transaction ${txId} (age ${(now - meta.startedAt) / 1000}s), forcing rollback.`);
+        try {
+          await this.rollbackTransaction(txId);
+        } catch (e: any) {
+          ailogger.error(`Error rolling back stale transaction ${txId}:`, e);
+        }
+        this.transactionMeta.delete(txId);
+      }
     }
   }
 }

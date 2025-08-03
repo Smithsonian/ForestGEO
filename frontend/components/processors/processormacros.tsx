@@ -48,7 +48,6 @@ export async function getConn() {
 export async function runQuery(connection: PoolConnection, query: string, params?: any[]): Promise<any> {
   const timeout = 360000; // 360 seconds
   const timer = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query execution timed out')), timeout));
-  const startTime = Date.now();
   try {
     if (params) {
       params = params.map(param => (param === undefined ? null : param));
@@ -68,6 +67,8 @@ export async function runQuery(connection: PoolConnection, query: string, params
     ailogger.error(chalk.red(`Error executing query: ${query}`));
     ailogger.error(chalk.red('Error message:', error.message));
     throw error;
+  } finally {
+    getPoolMonitorInstance().signalActivity();
   }
 }
 
@@ -124,7 +125,7 @@ export function buildCondition({ operator, column, value }: { operator: Operator
     case 'doesNotEqual':
     case 'isNot':
     case '!=':
-      return `${column} = ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
+      return `${column} <> ${typeof value === 'number' ? value : `'${escapeSql(value as string)}'`}`;
     case 'startsWith':
       return `${column} LIKE '%${escapeSql(value as string)}'`;
     case 'endsWith':
