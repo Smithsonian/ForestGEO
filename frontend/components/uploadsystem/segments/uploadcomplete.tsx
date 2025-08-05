@@ -40,7 +40,9 @@ export default function UploadComplete(props: Readonly<UploadCompleteProps>) {
     if (!currentPlot || !censusDispatch) return;
 
     setProgressText(prev => ({ ...prev, census: 'Loading raw census data...' }));
-    const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite?.schemaName || ''}`);
+    const response = await fetch(
+      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+    );
     const censusRDSLoad = await response.json();
 
     setProgressText(prev => ({ ...prev, census: 'Converting raw census data...' }));

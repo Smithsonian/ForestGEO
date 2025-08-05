@@ -43,7 +43,9 @@ export default function IsolatedQuadratPersonnelDataGrid() {
         }))
       );
 
-      const personnelResponse = await fetch(`/api/fetchall/personnel?schema=${currentSite?.schemaName}`);
+      const personnelResponse = await fetch(
+        `/api/fetchall/personnel/${currentPlot?.plotID}/${currentCensus?.plotCensusNumber}?schema=${currentSite?.schemaName}`
+      );
       const personnelData = await personnelResponse.json();
       if (personnelData.length === 0) throw new Error('personnelData fetchall is empty');
       setPersonnelOptions(
