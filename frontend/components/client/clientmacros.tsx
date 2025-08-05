@@ -63,17 +63,29 @@ export function standardizeGridColumns(cols: GridColDef[]): GridColDef[] {
 
 export async function loadSelectableOptions(currentSite: Site, currentPlot: Plot, currentCensus: OrgCensus, setSelectableOpts: Dispatch<SetStateAction<any>>) {
   const codeOpts = MapperFactory.getMapper<AttributesRDS, AttributesResult>('attributes')
-    .mapData(await (await fetch(`/api/fetchall/attributes?schema=${currentSite?.schemaName ?? ''}`)).json())
+    .mapData(
+      await (
+        await fetch(`/api/fetchall/attributes/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+      ).json()
+    )
     .map(i => i.code)
     .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
     .sort((a, b) => a.localeCompare(b));
   const tagOpts = MapperFactory.getMapper<TreeRDS, TreeResult>('trees')
-    .mapData(await (await fetch(`/api/fetchall/trees?schema=${currentSite?.schemaName ?? ''}`)).json())
+    .mapData(
+      await (
+        await fetch(`/api/fetchall/trees/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+      ).json()
+    )
     .map(i => i.treeTag)
     .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
     .sort((a, b) => a.localeCompare(b));
   const stemOpts = MapperFactory.getMapper<StemRDS, StemResult>('stems')
-    .mapData(await (await fetch(`/api/fetchall/stems?schema=${currentSite?.schemaName ?? ''}`)).json())
+    .mapData(
+      await (
+        await fetch(`/api/fetchall/stems/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+      ).json()
+    )
     .map(i => i.stemTag)
     .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
     .sort((a, b) => a.localeCompare(b));
@@ -87,7 +99,11 @@ export async function loadSelectableOptions(currentSite: Site, currentPlot: Plot
     .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
     .sort((a, b) => a.localeCompare(b));
   const specOpts = MapperFactory.getMapper<SpeciesRDS, SpeciesResult>('species')
-    .mapData(await (await fetch(`/api/fetchall/species?schema=${currentSite?.schemaName ?? ''}`)).json())
+    .mapData(
+      await (
+        await fetch(`/api/fetchall/species/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+      ).json()
+    )
     .map(i => i.speciesCode)
     .filter((code): code is string => code !== null && code !== undefined && code?.trim().length > 0)
     .sort((a, b) => a.localeCompare(b));

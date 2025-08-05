@@ -50,7 +50,10 @@ export default function PostValidationPage() {
 
   async function loadPostValidations() {
     try {
-      const response = await fetch(`/api/fetchall/postvalidationqueries?schema=${currentSite?.schemaName}`, { method: 'GET' });
+      const response = await fetch(
+        `/api/fetchall/postvalidationqueries/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`,
+        { method: 'GET' }
+      );
       const data = await response.json();
       setPostValidations(data);
     } catch (error: any) {
