@@ -107,7 +107,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e: any) {
-      const allsites = await (await fetch(`/api/fetchall/sites?schema=${currentSite?.schemaName ?? ''}`)).json();
+      const allsites = await (
+        await fetch(`/api/fetchall/sites/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName ?? ''}`)
+      ).json();
       if (siteListDispatch) await siteListDispatch({ siteList: allsites });
     } finally {
       setLoading(false);
@@ -124,7 +126,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true, 'Loading plot data...');
       if (currentSite && !plotListLoaded) {
-        const response = await fetch(`/api/fetchall/plots?schema=${currentSite?.schemaName || ''}`);
+        const response = await fetch(
+          `/api/fetchall/plots/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+        );
         const plotsData = await response.json();
         if (!plotsData) throw new Error('Failed to load plots data');
         if (plotListDispatch) await plotListDispatch({ plotList: plotsData });
@@ -148,7 +152,9 @@ export default function HubLayout({ children }: { children: React.ReactNode }) {
     try {
       setLoading(true, 'Loading census data...');
       if (currentSite && currentPlot && !censusListLoaded) {
-        const response = await fetch(`/api/fetchall/census/${currentPlot.plotID}?schema=${currentSite.schemaName}`);
+        const response = await fetch(
+          `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite.schemaName}`
+        );
         const censusRDSLoad = await response.json();
         if (!censusRDSLoad) throw new Error('Failed to load census data');
         const censusList = await createAndUpdateCensusList(censusRDSLoad);

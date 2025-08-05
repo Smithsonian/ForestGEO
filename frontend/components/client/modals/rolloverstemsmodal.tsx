@@ -74,7 +74,9 @@ export default function RolloverStemsModal(props: RolloverStemsModalProps) {
 
   const validatePreviousCensusData = async () => {
     // need to re-fetch the census list --> can't use list context here because it's outdated!
-    const response = await fetch(`/api/fetchall/census/${currentPlot?.plotID}?schema=${currentSite?.schemaName || ''}`);
+    const response = await fetch(
+      `/api/fetchall/census/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName || ''}`
+    );
     const censusRDSLoad = await response.json();
     const censusList = await createAndUpdateCensusList(censusRDSLoad);
     setUpdatedCensusList(censusList);

@@ -33,7 +33,7 @@ export default function IsolatedPersonnelDataGrid() {
 
   useEffect(() => {
     async function fetchRoles() {
-      const response = await fetch(`/api/fetchall/roles?schema=${currentSite?.schemaName}`);
+      const response = await fetch(`/api/fetchall/roles/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`);
       setRoles(await response.json());
     }
 
