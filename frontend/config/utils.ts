@@ -1,5 +1,5 @@
 import ConnectionManager from '@/config/connectionmanager';
-import ailogger from '@/ailogger';
+// import ailogger from '@/ailogger';
 
 export const openSidebar = () => {
   if (typeof document !== 'undefined') {
@@ -275,14 +275,14 @@ export async function handleUpsert<Result>(
         id = searchResult[0][key as keyof Result] as unknown as number;
         return { id, operation: 'updated' };
       } else {
-        ailogger.error(`Record not found after update. Data: ${JSON.stringify(trimmed)}, Query: ${findExistingQuery}, Values: ${values}`);
+        // ailogger.error(`Record not found after update. Data: ${JSON.stringify(trimmed)}, Query: ${findExistingQuery}, Values: ${values}`);
         throw new Error(`Upsert failed: Record in ${tableName} could not be found after update.`);
       }
     }
 
     return { id, operation: 'inserted' };
   } catch (e: any) {
-    ailogger.error(`Error in handleUpsert: ${e.message} | Stack: ${e.stack}`);
+    // ailogger.error(`Error in handleUpsert: ${e.message} | Stack: ${e.stack}`);
     throw createError(e.message, e);
   }
 }
