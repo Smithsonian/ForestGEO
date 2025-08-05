@@ -10,18 +10,19 @@ import ailogger from '@/ailogger';
 export async function GET(request: NextRequest, props: { params: Promise<{ slugs?: string[] }> }) {
   const params = await props.params;
   const schema = request.nextUrl.searchParams.get('schema');
+
   if (!schema || schema === 'undefined') {
     throw new Error('Schema selection was not provided to API endpoint');
   }
 
-  const [dataType] = params.slugs ?? [];
-  if (!dataType) {
-    throw new Error('fetchType was not correctly provided');
+  const [dataType, plotIDParam, pcnParam] = params.slugs ?? [];
+  if (!dataType || !plotIDParam || !pcnParam) {
+    throw new Error('slugs were not correctly provided');
   }
 
   let storedCensusList: OrgCensus[];
-  let storedPlotID: number;
-  let storedPCN: number;
+  let storedPlotID: number = parseInt(plotIDParam);
+  let storedPCN: number = parseInt(pcnParam);
 
   try {
     storedCensusList = JSON.parse((await getCookie('censusList')) ?? JSON.stringify([]));
@@ -30,11 +31,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ slugs
       storedCensusList.find(
         (oc): oc is OrgCensus => oc !== undefined && oc.dateRanges.some(async dr => dr.censusID === parseInt((await getCookie('censusID')) ?? '0'))
       )?.plotCensusNumber ?? 0;
-  } catch (e) {
-    // system either hasn't populated the cookie yet or something else has happened. either way, shouldn't break anything here.
-    storedPlotID = 0;
-    storedPCN = 0;
-  }
+  } catch (e) {}
 
   const connectionManager = ConnectionManager.getInstance();
   try {

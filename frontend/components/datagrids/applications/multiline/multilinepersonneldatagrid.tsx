@@ -32,7 +32,9 @@ export default function MultilinePersonnelDataGrid(props: DataGridSignals) {
 
   useEffect(() => {
     async function getRoles() {
-      setStoredRoles(await (await fetch(`/api/fetchall/roles?schema=${currentSite?.schemaName}`)).json());
+      setStoredRoles(
+        await (await fetch(`/api/fetchall/roles/${currentPlot?.plotID ?? 0}/${currentCensus?.plotCensusNumber ?? 0}?schema=${currentSite?.schemaName}`)).json()
+      );
     }
 
     getRoles().catch(ailogger.error);
