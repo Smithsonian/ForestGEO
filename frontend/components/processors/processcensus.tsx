@@ -3,12 +3,13 @@ import { createError, handleUpsert } from '@/config/utils';
 import { StemResult, TreeResult } from '@/config/sqlrdsdefinitions/taxonomies';
 import { CMAttributesResult, CoreMeasurementsResult } from '@/config/sqlrdsdefinitions/core';
 import { SpecialProcessingProps } from '@/config/macros';
-import ailogger from '@/ailogger';
+
+// import ailogger from '@/ailogger';
 
 export async function processCensus(props: Readonly<SpecialProcessingProps>): Promise<void> {
   const { connectionManager, rowData, schema, plot, census } = props;
   if (!plot || !census) {
-    ailogger.error('Missing required parameters: plotID or censusID');
+    // ailogger.error('Missing required parameters: plotID or censusID');
     throw new Error('Process Census: Missing plotID or censusID');
   }
   const { tag, stemtag, spcode, quadrat, lx, ly, dbh, hom, date, codes } = rowData;
@@ -39,7 +40,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
       };
       // Handle Tree Upsert
       const { id: treeID, operation: treeOperation } = await handleUpsert<TreeResult>(connectionManager, schema, 'trees', tagSearch, 'TreeID');
-      ailogger.info(`upsert performed against ${tagSearch} with result:  ${treeID},  and operation , ${treeOperation}`);
+      // ailogger.info(`upsert performed against ${tagSearch} with result:  ${treeID},  and operation , ${treeOperation}`);
 
       if (stemtag || lx || ly) {
         let stemStatus: 'new recruit' | 'multistem' | 'old tree';
@@ -91,7 +92,7 @@ export async function processCensus(props: Readonly<SpecialProcessingProps>): Pr
             .map(code => code.trim())
             .filter(Boolean);
           if (parsedCodes.length === 0) {
-            ailogger.error(`No valid attribute codes found: ${codes}`);
+            // ailogger.error(`No valid attribute codes found: ${codes}`);
           } else {
             for (const code of parsedCodes) {
               const attributeRows = await connectionManager.executeQuery(

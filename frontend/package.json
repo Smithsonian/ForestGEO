@@ -63,6 +63,7 @@
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.35.1",
     "@typescript-eslint/parser": "^8.35.1",
+    "@typescript/native-preview": "^7.0.0-dev.20250804.1",
     "@uiw/react-codemirror": "^4.24.0",
     "babel-loader": "^10.0.0",
     "chalk": "^5.4.1",
